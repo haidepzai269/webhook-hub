@@ -1,0 +1,33 @@
+{
+  "name": "webhook-hub-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "libs/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:libs": "npm run build --workspace=libs/common --workspace=libs/crypto --workspace=libs/messaging --workspace=libs/database --workspace=libs/providers --if-present",
+    "start:api": "npm run start:dev --workspace=apps/hub-api",
+    "start:worker": "npm run start:dev --workspace=apps/hub-worker",
+    "start:shop": "npm run start:dev --workspace=apps/shop",
+    "start:web": "npm run dev --workspace=apps/web",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "prisma:generate": "npm run prisma:generate --workspace=libs/database",
+    "prisma:migrate": "npm run prisma:migrate --workspace=libs/database",
+    "prisma:seed": "npm run prisma:seed --workspace=libs/database"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.13.0",
+    "jest": "^29.7.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.7.3"
+  }
+}

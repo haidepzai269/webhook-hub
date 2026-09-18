@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2022",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "forceConsistentCasingInFileNames": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "@hub/common": ["libs/common/src"],
+      "@hub/common/*": ["libs/common/src/*"],
+      "@hub/crypto": ["libs/crypto/src"],
+      "@hub/crypto/*": ["libs/crypto/src/*"],
+      "@hub/messaging": ["libs/messaging/src"],
+      "@hub/messaging/*": ["libs/messaging/src/*"],
+      "@hub/database": ["libs/database/src"],
+      "@hub/database/*": ["libs/database/src/*"],
+      "@hub/providers": ["libs/providers/src"],
+      "@hub/providers/*": ["libs/providers/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}
