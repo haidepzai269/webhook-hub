@@ -48,6 +48,23 @@ export class DeliveryConsumer {
         return;
       }
 
+      // 1b. Kiểm tra Outbound Throttle per destination (§5.4b & ADR-016)
+      if (deliveryMsg.rateLimitRps && deliveryMsg.rateLimitRps > 0) {
+        const allowed = await this.circuitBreaker.checkThrottle(destinationId, deliveryMsg.rateLimitRps);
+        if (!allowed) {
+          log.warn(
+            { destinationId, rateLimitRps: deliveryMsg.rateLimitRps },
+            'Outbound Throttle kích hoạt (vượt RPS đích) -> đẩy sang tầng retry ngắn nhất',
+          );
+          channel.sendToQueue('q.delivery.retry.10s', msg.content, {
+            persistent: true,
+            headers: msg.properties.headers,
+          });
+          channel.ack(msg);
+          return;
+        }
+      }
+
       // 2. Nạp Subscription để lấy template
       const subscription = await this.prisma.subscription.findUnique({
         where: { id: deliveryMsg.subscriptionId },

@@ -58,6 +58,7 @@ export interface DeliveryMessage {
   attemptCount: number;
   attemptGeneration: number;
   correlationId: string;
+  rateLimitRps?: number;
 }
 
 export interface OutboxPayload {

@@ -155,6 +155,7 @@ export class NormalizeConsumer {
               attemptCount: 0,
               attemptGeneration: 1,
               correlationId,
+              rateLimitRps: sub.destination.rateLimitRps,
             });
           }
         }

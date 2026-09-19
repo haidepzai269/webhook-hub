@@ -6,10 +6,14 @@ import { CircuitState, logger } from '@hub/common';
 export class CircuitBreakerService {
   private redis: Redis;
 
-  constructor() {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
-    this.redis.connect().catch(() => {});
+  constructor(redisClient?: Redis) {
+    if (redisClient) {
+      this.redis = redisClient;
+    } else {
+      const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+      this.redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
+      this.redis.connect().catch(() => {});
+    }
   }
 
   private getKey(destinationId: string) {
@@ -40,8 +44,18 @@ export class CircuitBreakerService {
       const key = this.getKey(destinationId);
       const failures = await this.redis.incr(`${key}:failures`);
       if (failures >= 5) {
-        logger.warn({ destinationId, failures }, 'Circuit Breaker chuyển sang OPEN (ngừng gửi 60s)');
+        logger.warn({ destinationId, failures }, '🚨 Circuit Breaker chuyển sang OPEN (ngừng gửi 60s)');
         await this.redis.set(`${key}:state`, 'OPEN', 'EX', 60);
+
+        // Tự cảnh báo (§16 & ADR-016): Bắn alert qua Redis pub/sub
+        const alertMessage = {
+          type: 'CIRCUIT_BREAKER_OPEN',
+          destinationId,
+          failures,
+          message: `[CẢNH BÁO] Đích ${destinationId} đã thất bại liên tiếp ${failures} lần. Circuit Breaker chuyển OPEN (ngừng 60s).`,
+          timestamp: new Date().toISOString(),
+        };
+        await this.redis.publish('hub:alerts', JSON.stringify(alertMessage)).catch(() => {});
       }
     } catch {}
   }

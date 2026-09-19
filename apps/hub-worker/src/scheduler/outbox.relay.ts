@@ -72,12 +72,14 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
 
         for (const item of unpulished) {
           const payloadBuffer = Buffer.from(JSON.stringify(item.payload));
-          const routingKey = item.topic === 'event.received' ? ROUTING_KEYS.EVENT_RECEIVED : item.topic;
+          const isReplay = item.topic === 'delivery.replayed';
+          const targetExchange = isReplay ? EXCHANGES.DELIVERY : EXCHANGES.EVENTS;
+          const targetRoutingKey = isReplay ? ROUTING_KEYS.DELIVER : ROUTING_KEYS.EVENT_RECEIVED;
 
           await new Promise<void>((resolve, reject) => {
             this.channel!.publish(
-              EXCHANGES.EVENTS,
-              routingKey,
+              targetExchange,
+              targetRoutingKey,
               payloadBuffer,
               {
                 persistent: true,

@@ -172,18 +172,54 @@ export class ApiController {
       },
     });
 
-    // Thêm outbox để worker gửi lại
+    const masterKey = process.env.MASTER_KEY || DEV_MASTER_KEY;
+    const dest = delivery.subscription.destination;
+    let config = {};
+    try {
+      config = JSON.parse(aesGcmDecrypt(dest.configEncrypted, masterKey));
+    } catch {}
+
+    let signingSecret: string | undefined;
+    if (dest.signingSecretEncrypted) {
+      try {
+        signingSecret = aesGcmDecrypt(dest.signingSecretEncrypted, masterKey);
+      } catch {}
+    }
+
+    const deliveryMsg = {
+      deliveryId: replayed.id,
+      tenantId: delivery.tenantId,
+      eventId: delivery.eventId,
+      subscriptionId: delivery.subscriptionId,
+      destinationId: dest.id,
+      destinationType: dest.type,
+      config,
+      signingSecret,
+      event: {
+        id: delivery.event.id,
+        tenantId: delivery.event.tenantId,
+        type: delivery.event.type,
+        source: delivery.event.source,
+        sourceId: '',
+        subject: delivery.event.subject || undefined,
+        data: delivery.event.data as any,
+        occurredAt: delivery.event.occurredAt.toISOString(),
+        receivedAt: delivery.event.receivedAt.toISOString(),
+        correlationId: delivery.event.correlationId,
+        rawEventId: delivery.event.rawEventId || undefined,
+        origin: delivery.event.origin as any,
+      },
+      attemptCount: 0,
+      attemptGeneration: newGen,
+      correlationId: delivery.event.correlationId,
+      rateLimitRps: dest.rateLimitRps,
+    };
+
+    // Thêm outbox để worker gửi lại (topic: delivery.replayed)
     await this.prisma.outbox.create({
       data: {
         topic: 'delivery.replayed',
-        payload: {
-          deliveryId: replayed.id,
-          eventId: delivery.eventId,
-          subscriptionId: delivery.subscriptionId,
-          destinationId: delivery.subscription.destinationId,
-          tenantId: delivery.tenantId,
-          correlationId: delivery.event.correlationId,
-        } as any,
+        payload: deliveryMsg as any,
       },
     });
 
