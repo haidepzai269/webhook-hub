@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
 import { assertDatabaseLib } from '@hub/database';
+import { corsOptions } from './cors';
 
 function assertMasterKeyConfigured(): void {
   const masterKey = process.env.MASTER_KEY;
@@ -56,11 +57,7 @@ async function bootstrap() {
   });
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
-  app.enableCors({
-    origin: '*',
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    credentials: true,
-  });
+  app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials
 
   const port = process.env.PORT || 4000;
   await app.listen(port);

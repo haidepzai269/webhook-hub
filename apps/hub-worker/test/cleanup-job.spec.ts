@@ -40,7 +40,7 @@ describe('CleanupJob (S1-4)', () => {
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
   });
 
-  it('[AF:#21] giành được khoá (SET NX EX 300) -> xoá theo lô tới khi một lô < 5000, rồi nhả khoá của mình', async () => {
+  it('[AF:#21] MS-P2-6: giành được khoá (SET NX EX ~0,9 chu kỳ) -> xoá theo lô tới khi một lô < 5000, KHÔNG nhả khoá', async () => {
     const prisma: any = {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
       $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0),
@@ -49,10 +49,11 @@ describe('CleanupJob (S1-4)', () => {
     const redis = buildRedis('OK');
     const result = await new CleanupJob(prisma, redis).runOnce();
 
-    expect(redis.set).toHaveBeenCalledWith(CLEANUP_LOCK_KEY, expect.any(String), 'EX', 300, 'NX');
+    // MS-P2-6: lock giữ ~90% chu kỳ (mặc định 1h -> 3240s) và KHÔNG nhả khi xong -> N worker = 1 lượt/chu kỳ
+    expect(redis.set).toHaveBeenCalledWith(CLEANUP_LOCK_KEY, expect.any(String), 'EX', 3240, 'NX');
     expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0 });
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
-    expect(redis.eval).toHaveBeenCalledWith(expect.any(String), 1, CLEANUP_LOCK_KEY, expect.any(String));
+    expect(redis.eval).not.toHaveBeenCalled();
   });
 
   it('retention mặc định (7 ngày) > tổng TTL retry; giá trị nhỏ hơn bị từ chối lúc load', () => {

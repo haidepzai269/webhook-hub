@@ -62,8 +62,6 @@ export interface CleanupResult {
   events: number;
 }
 
-/** Chỉ xoá lock nếu vẫn là của mình (lượt chạy quá 300s thì lock có thể đã thuộc instance khác). */
-const RELEASE_LOCK_LUA = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
 
 @Injectable()
 export class CleanupJob implements OnModuleInit, OnModuleDestroy {
@@ -73,6 +71,7 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
   private readonly instanceId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
   private readonly retentionDays: number;
   private readonly intervalMs: number;
+  private readonly lockTtlSeconds: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -81,6 +80,7 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
     this.retentionDays = resolveRetentionDays();
     const interval = parseInt(process.env.CLEANUP_INTERVAL_MS || '', 10);
     this.intervalMs = Number.isFinite(interval) && interval > 0 ? interval : DEFAULT_INTERVAL_MS;
+    this.lockTtlSeconds = Math.max(CLEANUP_LOCK_TTL_SECONDS, Math.floor((this.intervalMs * 0.9) / 1000));
     if (redisClient) {
       this.redis = redisClient;
     } else {
@@ -115,7 +115,9 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
   async runOnce(): Promise<CleanupResult> {
     let acquired: string | null = null;
     try {
-      acquired = await this.redis.set(CLEANUP_LOCK_KEY, this.instanceId, 'EX', CLEANUP_LOCK_TTL_SECONDS, 'NX');
+      // MS-P2-6 (ADR-093): lock giữ ~90% chu kỳ và KHÔNG nhả khi xong -> N worker = MỘT lượt mỗi chu kỳ (trước: lock
+      // chỉ chặn chạy chồng, N worker = N lượt/giờ). 90% < khoảng cách tối thiểu giữa 2 lượt của cùng instance (jitter ±10%).
+      acquired = await this.redis.set(CLEANUP_LOCK_KEY, this.instanceId, 'EX', this.lockTtlSeconds, 'NX');
     } catch (err: any) {
       // Không có Redis thì không có lock -> bỏ lượt (dọn dẹp chậm một giờ không làm hệ thống sai).
       logger.warn({ err: err.message }, 'Cleanup: không giành được lock (Redis lỗi) -> bỏ qua lượt');
@@ -150,7 +152,7 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
       logger.info({ ...result, retentionDays: this.retentionDays }, 'Cleanup: hoàn tất một lượt');
       return result;
     } finally {
-      await this.redis.eval(RELEASE_LOCK_LUA, 1, CLEANUP_LOCK_KEY, this.instanceId).catch(() => {});
+      // Không nhả lock: TTL tự hết sau ~0,9 chu kỳ (kể cả khi lượt lỗi — không thành bão thử lại).
     }
   }
 

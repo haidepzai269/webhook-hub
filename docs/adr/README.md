@@ -952,3 +952,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** `20261011000000_projects_api_keys` chỉ chèn project `default`. DB cũ có dữ liệu mang tenant_id khác (thử `2222…` ở review) không có dòng `projects`: console không thấy, không tạo được key; bảng nghiệp vụ không có FK tới `projects` nên migrate vẫn "xanh".
 **Chọn:** Migration MỚI `20261011030000_backfill_projects_for_tenants` (không sửa migration cũ): `INSERT … SELECT` tenant_id từ hợp của sources, destinations, subscriptions, events, deliveries, api_keys, audit_logs; slug `tenant-<32 hex>` (duy nhất, khớp `PROJECT_SLUG_RE`), name `Tenant <8 ký tự>`, environment `test`; `ON CONFLICT DO NOTHING` (idempotent). Test L1 tạo tenant mồ côi rồi chạy chính file SQL hai lần.
 **Đánh đổi:** Tenant backfill mặc định môi trường `test` (key mới mang `hk_test_`) — operator đổi tay nếu cần. Vẫn chưa thêm FK `tenant_id → projects` (để AU6, ADR-071).
+
+---
+
+## ADR-093 — Lock cleanup giữ ~0,9 chu kỳ (một lượt mỗi chu kỳ cho N worker); CORS không `*` kèm credentials (MS-P2-6, 2026-10-11)
+
+**Vấn đề:** Lock `cleanup:lock` (EX 300, nhả khi xong) chỉ chặn chạy chồng: N worker = N lượt/giờ (T13.5: worker-1 xoá 3 event, worker-2 chạy 10s sau xoá 0). hub-api trả `Access-Control-Allow-Origin: *` cùng `Allow-Credentials: true` (cấu hình sai; trình duyệt từ chối, và "sửa" bằng phản chiếu origin là mở cho mọi site kèm cookie).
+**Chọn:** Lock TTL = max(300s, 0,9 × `CLEANUP_INTERVAL_MS`), KHÔNG nhả khi xong (kể cả khi lượt lỗi) — 0,9 < khoảng cách tối thiểu giữa hai lượt của cùng instance (jitter ±10%). CORS qua `corsOptions()`: không cấu hình → origin `*`, `credentials:false` (dashboard gửi JWT bằng header Bearer, không cookie); có `WEB_PUBLIC_URL`/`CORS_ORIGINS` → đúng danh sách origin, cho credentials. Biến mới ghi ở `.env.example`.
+**Đánh đổi:** Instance giữ lock chết giữa lượt thì lượt sau chờ hết TTL (≤ 0,9h) — chấp nhận cho job dọn dẹp. Khi AU1 chuyển sang cookie thì phải đặt `WEB_PUBLIC_URL` (ghi để AU1 làm tiếp).
