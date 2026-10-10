@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { HUB_API_URL } from "@/lib/env";
 
 import { emptyToastCursor, type ToastCursor } from "./ui-logic";
-import { getToken } from "./token";
+import { hubFetch } from "./client";
 import type { CircuitChangedNotice, DeliveryAttemptNotice, MetricsTick, TraceIngestedNotice } from "./types";
 
 /** Payload `event.received` (khớp libs/common/src/types.ts EventReceivedNotice). */
@@ -134,16 +134,18 @@ export function useHubRealtime() {
   useEffect(() => {
     refCount++;
     if (!socket) {
-      // auth dạng callback: mỗi lần (re)connect đọc token MỚI NHẤT (đăng nhập lại không cần reload).
-      // Hub từ chối handshake thiếu/sai JWT (connect_error "UNAUTHORIZED") -> badge Socket tắt;
-      // việc đưa về /auth/login do hubFetch xử lý khi API trả 401.
-      // R-5: màn Event Flow đang xem project khác → gửi `projectId` trong handshake; server kiểm bằng CÙNG luật
-      // ProjectScopeGuard rồi cho socket vào room của project đó. Không có → room tenant của JWT như cũ.
+      // SPEC-auth §5.7: mỗi lần (re)connect xin VÉ socket mới (60 giây) qua proxy của web — server kiểm quyền vào
+      // project bằng CÙNG luật console (resolveProjectScope), rồi ký vé. Không vé -> handshake bị từ chối
+      // (connect_error "UNAUTHORIZED") -> badge Socket tắt; hết phiên thì hubFetch tự đưa về /login.
+      // R-5: màn Event Flow đang xem project khác -> xin vé cho project đó; trống -> project đầu tiên của mình (AU1).
       socket = io(HUB_API_URL, {
         transports: ["websocket"],
         auth: (cb) => {
           const projectId = realtimeProjectId();
-          cb(projectId ? { token: getToken(), projectId } : { token: getToken() });
+          const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+          hubFetch<{ ticket: string }>(`/auth/socket-ticket${q}`)
+            .then(({ ticket }) => cb({ ticket }))
+            .catch(() => cb({}));
         },
       });
     }

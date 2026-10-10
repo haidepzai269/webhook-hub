@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaService } from '@hub/database';
-import { RedisService } from './modules/redis/redis.service';
+import { CoreModule } from './modules/core/core.module';
 import { IngestController } from './modules/ingest/ingest.controller';
 import { IngestService, TRACE_NOTIFIER } from './modules/ingest/ingest.service';
 import { HealthController } from './modules/health/health.controller';
@@ -30,15 +29,14 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    // Cấp JwtModule/JwtAuthGuard cho ApiController bên dưới. `/hooks/*` (ingest) và
-    // `/health` KHÔNG được bảo vệ — provider webhook thật và health-check phải public.
+    CoreModule, // AU1: PrismaService + RedisService dùng chung mọi module (global)
+    // SessionGuard (cookie) cho /api/v1/* và /auth/*. `/hooks/*` (ingest) và `/health` KHÔNG bảo vệ —
+    // provider webhook thật và health-check phải public. `/v1/p/*` dùng ApiKeyGuard (Bearer hk_).
     AuthModule,
     FlowModule, // SPEC-event-flow-ui: /api/v1/flow/* chỉ đọc (module riêng, không sửa ApiController)
   ],
   controllers: hubApiControllers(),
   providers: [
-    PrismaService,
-    RedisService,
     IngestService,
     RealtimeGateway,
     ProjectScopeGuard,

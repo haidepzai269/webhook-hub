@@ -5,17 +5,19 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { OnModuleDestroy, Optional } from '@nestjs/common';
+import { Inject, OnModuleDestroy, Optional } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
-import { resolveProjectScope } from '../console/project-scope.guard';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { logger, TraceIngestedNotice } from '@hub/common';
 import Redis from 'ioredis';
-import { JwtPayload } from '../auth/jwt-auth.guard';
 import { TraceNotifier } from '../ingest/ingest.service';
+import { AUTH_CONFIG, AuthConfig } from '../auth/auth-config';
+import { verifySocketTicket } from '../auth/tokens';
 
-const tenantRoom = (tenantId: string) => `tenant:${tenantId}`;
+/** SPEC-auth §5.7 (thay ADR-035): mỗi socket ở ĐÚNG một room project. Tên giữ cho log/metrics đọc được. */
+const ROOM_PREFIX = 'project:';
+const tenantRoom = (tenantId: string) => `${ROOM_PREFIX}${tenantId}`;
 
 /** Kênh Redis (từ hub-worker) -> tên sự kiện Socket.IO. Chặng ở hub-api KHÔNG đi qua đây (in-process). */
 export const REALTIME_CHANNELS: Record<string, string> = {
@@ -41,12 +43,13 @@ export function computeTick(c: TickCounter | undefined, now = new Date()) {
 }
 
 /**
- * Realtime cho dashboard. Mọi kết nối PHẢI mang JWT hợp lệ (`handshake.auth.token`),
- * kiểm ở middleware TRƯỚC khi kết nối được chấp nhận. Mỗi socket vào room của tenant
- * lấy từ payload ĐÃ VERIFY; mọi emit đi vào room, không broadcast toàn server (BB-5).
+ * Realtime cho dashboard (SPEC-auth §5.7). Mọi kết nối PHẢI mang vé socket (`handshake.auth.ticket`) xin từ
+ * `GET /auth/socket-ticket?projectId=` — vé đã qua ĐÚNG luật phạm vi project của console (resolveProjectScope).
+ * Middleware kiểm vé (HS256, aud 'socket', exp 60s, khoá riêng) VÀ session còn sống trước khi chấp nhận kết nối;
+ * socket vào room `project:<tid>`; mọi emit đi vào room, không broadcast toàn server (BB-5).
  */
 @WebSocketGateway({
-  cors: { origin: '*' }, // auth bằng token trong handshake, không dùng cookie -> origin không phải lớp bảo vệ
+  cors: { origin: '*' }, // auth bằng vé trong handshake, không dùng cookie -> origin không phải lớp bảo vệ
 })
 export class RealtimeGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy, TraceNotifier
@@ -62,8 +65,9 @@ export class RealtimeGateway
 
   constructor(
     private readonly jwtService: JwtService,
-    // R-5: kiểm `projectId` của handshake bằng CÙNG luật ProjectScopeGuard. Vắng (test cũ) -> từ chối mọi projectId.
-    @Optional() private readonly prisma?: PrismaService,
+    @Inject(AUTH_CONFIG) private readonly authCfg: AuthConfig,
+    // Vé hợp lệ vẫn phải có session còn sống (logout-all ngắt được cả socket mới). Vắng -> từ chối mọi kết nối.
+    @Optional() private readonly prisma?: Pick<PrismaService, 'identity'>,
   ) {}
 
   afterInit(server: Server) {
@@ -92,8 +96,8 @@ export class RealtimeGateway
       if (!this.server) return;
       const rooms = this.server.sockets.adapter.rooms;
       for (const [room] of rooms) {
-        if (!room.startsWith('tenant:')) continue;
-        const tenantId = room.slice('tenant:'.length);
+        if (!room.startsWith(ROOM_PREFIX)) continue;
+        const tenantId = room.slice(ROOM_PREFIX.length);
         this.server.to(room).emit('metrics.tick', computeTick(this.counters.get(tenantId)));
       }
       this.counters.clear();
@@ -134,31 +138,25 @@ export class RealtimeGateway
     this.server?.to(tenantRoom(tenantId)).emit('trace.ingested', notice);
   }
 
-  /** Middleware handshake: thiếu/sai JWT -> từ chối kết nối (client nhận connect_error "UNAUTHORIZED"). */
+  /** Middleware handshake: thiếu/sai/hết hạn vé, hoặc session đã chết -> từ chối (client nhận connect_error). */
   authenticate(socket: Pick<Socket, 'handshake' | 'data'>, next: (err?: Error) => void) {
-    const token = socket.handshake.auth?.token;
-    if (typeof token !== 'string' || !token) return next(new Error('UNAUTHORIZED'));
-    try {
-      const payload = this.jwtService.verify<JwtPayload>(token);
-      if (!payload?.tenantId) return next(new Error('UNAUTHORIZED'));
-      socket.data.tenantId = payload.tenantId;
-    } catch {
+    const ticket = socket.handshake.auth?.ticket;
+    const claims = typeof ticket === 'string' && ticket ? verifySocketTicket(this.jwtService, this.authCfg, ticket) : null;
+    if (!claims) return next(new Error('UNAUTHORIZED'));
+    if (!this.prisma) {
+      logger.warn('Realtime: gateway không có PrismaService -> không kiểm được session -> từ chối');
       return next(new Error('UNAUTHORIZED'));
     }
-    // R-5: màn Event Flow đang xem project khác -> socket vào room của project đó (cùng luật ProjectScopeGuard:
-    // project phải tồn tại; admin env là operator). Sai/không tồn tại -> từ chối, KHÔNG rơi về tenant JWT.
-    const projectId = socket.handshake.auth?.projectId;
-    if (projectId === undefined || projectId === null || projectId === '') return next();
-    if (!this.prisma) {
-      logger.warn('Realtime: handshake có projectId nhưng gateway không có PrismaService -> từ chối');
-      return next(new Error('PROJECT_NOT_FOUND'));
-    }
-    resolveProjectScope(this.prisma, projectId)
-      .then((scoped) => {
-        if (scoped) socket.data.tenantId = scoped;
+    this.prisma
+      .identity()
+      .findLiveSessionWithUser(claims.sid, new Date())
+      .then((session) => {
+        if (!session || session.userId !== claims.sub) return next(new Error('UNAUTHORIZED'));
+        socket.data.tenantId = claims.tid;
+        socket.data.userId = claims.sub;
         next();
       })
-      .catch(() => next(new Error('PROJECT_NOT_FOUND')));
+      .catch(() => next(new Error('UNAUTHORIZED')));
   }
 
   private counterFor(tenantId: string) {
@@ -176,7 +174,7 @@ export class RealtimeGateway
   }
 
   handleConnection(client: Socket) {
-    // Middleware ở afterInit đã verify JWT; tới đây chắc chắn có tenantId
+    // Middleware ở afterInit đã kiểm vé + session; tới đây chắc chắn có tenantId (= project của vé)
     client.join(tenantRoom(client.data.tenantId));
     logger.debug({ clientId: client.id }, 'Client kết nối tới Realtime Gateway');
   }

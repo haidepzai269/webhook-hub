@@ -1,17 +1,15 @@
 import { createParamDecorator, ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { RequestWithTenant } from './jwt-auth.guard';
+import { RequestWithPrincipal } from '../service-api/principal';
 
 /**
- * Đọc `tenantId` đã được `JwtAuthGuard` gắn vào `request` (verify từ JWT) —
- * thay cho việc controller tự đọc header `x-tenant-id` do client gửi.
- * Chỉ dùng được trên route đã áp `JwtAuthGuard`.
+ * Đọc `tenantId` (= project đang xem) mà guard phạm vi project đã đặt (`ProjectScopeGuard` / `ApiKeyGuard`).
+ * KHÔNG BAO GIỜ đọc từ JWT, body hay header client gửi (SPEC-auth §5.6).
  */
 export const CurrentTenant = createParamDecorator((_data: unknown, ctx: ExecutionContext): string => {
-  const request = ctx.switchToHttp().getRequest<RequestWithTenant>();
+  const request = ctx.switchToHttp().getRequest<RequestWithPrincipal>();
   if (!request.tenantId) {
-    // Không nên xảy ra nếu JwtAuthGuard đã chạy trước — báo lỗi rõ ràng thay vì
-    // âm thầm trả về undefined và để lọt truy vấn không scope (BB-5).
-    throw new UnauthorizedException('Thiếu tenantId — route chưa được bảo vệ bởi JwtAuthGuard');
+    // Báo lỗi rõ thay vì để lọt truy vấn không scope (BB-5).
+    throw new UnauthorizedException('Thiếu tenantId — route chưa đi qua guard phạm vi project');
   }
   return request.tenantId;
 });

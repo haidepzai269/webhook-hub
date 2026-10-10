@@ -343,7 +343,7 @@ CREATE INDEX ON hub.deliveries (tenant_id, status, next_attempt_at);
 --   UNIQUE(tenant_id, source_id, idempotency_key)
 ```
 
-**Guard bắt buộc:** mọi truy vấn đi qua một `TenantScopedRepository` nhận `tenant_id` từ JWT (hoặc từ `source.tenant_id` ở luồng ingest). **Không repository nào được phép query không scope.** Một helper, ~40 dòng, viết Ngày 1.
+**Guard bắt buộc:** mọi truy vấn đi qua một `TenantScopedRepository` nhận `tenant_id` từ guard phạm vi project (membership, SPEC-auth §5.6) (hoặc từ `source.tenant_id` ở luồng ingest). **Không repository nào được phép query không scope.** Một helper, ~40 dòng, viết Ngày 1.
 
 Hiện tại chạy **một tenant** (một admin). Cột luôn mang cùng một giá trị. Đó không phải lãng phí — đó là **đường kẻ có sẵn**:
 
@@ -528,7 +528,14 @@ Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong m�
 ### 7.4. Hệ thống
 
 - Secret nguồn/đích **AES-256-GCM** trước khi vào DB; master key trong biến môi trường, **không commit**.
-- Dashboard: JWT, **một admin user** (đã cắt refresh token rotation — xem §9).
+- Dashboard (SPEC-auth, ADR-056/057/103): **đăng ký + đăng nhập** người dùng thật (`hub.users`), thành viên project
+  theo role (`project_members`), operator kế thừa admin env cũ (`OPERATOR_EMAIL`). Access JWT 15 phút trong cookie
+  `__Host-hub_at` (HttpOnly, Secure, SameSite=Lax), refresh token **xoay vòng** trong cookie `__Host-hub_rt` — Postgres
+  chỉ giữ sha256, dùng lại sau > 5 giây thì thu hồi cả family. CSRF double-submit **ký theo session**. Mỗi request
+  console kiểm session còn sống bằng MỘT truy vấn khoá chính (thu hồi có hiệu lực ngay, không Redis). Mật khẩu bcrypt
+  cost 12, sai email/sai mật khẩu cùng body, rate limit theo IP + email (Redis là đường tắt, mất Redis thì đếm trong bộ
+  nhớ). Socket.IO dùng **vé** 60 giây (khoá riêng) xin qua `/auth/socket-ticket?projectId=`. Web proxy `/api/*`,
+  `/auth/*` để cookie là first-party.
 - Mask trong log: token, số tài khoản, chữ ký.
 
 ---
@@ -580,7 +587,6 @@ Cắt để vừa 14 ngày. Ghi vào báo cáo ở mục "hướng phát triển
 |---|---|
 | `filter: {"data.amount": {"$gte": 1000}}` | Đây là viết lại query language của MongoDB. Khớp theo `event_types` là đủ. |
 | `{{data.amount \| vnd}}` pipe filter | = viết template engine. Dùng `String.replace` với `{{path}}` thuần, ~20 dòng. |
-| JWT refresh token rotation | 1 admin, 1 token. |
 | VNPAY · Gmail/Pub-Sub · Google Sheets · JSONata | Đã ở mục "mở rộng". Không chạm. |
 | Website bán hàng đầy đủ | BB-1 + trần 300 dòng của Shop. |
 
@@ -811,7 +817,7 @@ FIFO đòi **single-flight theo partition key**: trong mỗi key chỉ được 
 | **Project** = biên cô lập | `hub.projects`; cột `tenant_id` ở mọi bảng GIỮ TÊN, nghĩa là `project_id` | Không project nào đọc/ghi được dữ liệu project khác, kể cả biết UUID (repo + khoá ngoại ghép subscription→đích) |
 | **Service** = một API key | `hub.api_keys` (sha256, `key_prefix` 12 ký tự), scope `publish:events` · `read:events` · `manage:endpoints` · `manage:sources`, `readTypes` | Key thô trả **một lần** lúc tạo; revoke chỉ ngắt đúng service đó |
 | **Connection string** | `hubs://<key>@<host>/<project>` (`hub://` cho http local) | `HUB_PUBLIC_URL`; SDK parse |
-| Console (operator) | `/api/v1/projects`, `/api/v1/projects/:id/keys`; `?projectId=` đọc ở **một** guard `ProjectScopeGuard` | JWT admin như cũ |
+| Console (người dùng) | `/api/v1/projects`, `/api/v1/projects/:id/keys`; `?projectId=` đọc ở **một** guard `ProjectScopeGuard` (luật `resolveProjectScope`: tồn tại + là thành viên, hoặc operator — HTTP và vé socket dùng chung) | Cookie phiên (`SessionGuard`, §7.4) |
 | API cho service | `/v1/p/:project/{me, events (POST/GET), endpoints, endpoints/:id/verify, subscriptions, sources, sources/:id/inspect}` | `ApiKeyGuard` + `@RequireScope`; lỗi đầu vào 422 có tên trường |
 
 ```

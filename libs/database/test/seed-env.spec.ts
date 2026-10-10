@@ -73,3 +73,13 @@ describe('MS-R6: seed không in key đầy đủ ra log', () => {
   });
 });
 
+
+describe('operatorFromEnv (AU1, SPEC-auth §5.1)', () => {
+  const { operatorFromEnv } = jest.requireActual('../src/seed-env');
+  const hash = '$2b$10$KOw7dYmHfpMPOZiM0LK0aerYvyW.jRTeinGVXLWXp.9.NXVQzWom.';
+  it('đủ env -> email chuẩn hoá + hash; `$$` của compose được đổi về `$`; thiếu -> null; hash bậy -> ném', () => {
+    expect(operatorFromEnv({ OPERATOR_EMAIL: ' Admin@Hub.Local ', OPERATOR_PASSWORD_HASH: hash.replace(/\$/g, '$$$$') })).toEqual({ email: 'admin@hub.local', passwordHash: hash });
+    expect(operatorFromEnv({ OPERATOR_EMAIL: 'a@b.vn' })).toBeNull();
+    expect(() => operatorFromEnv({ OPERATOR_EMAIL: 'a@b.vn', OPERATOR_PASSWORD_HASH: 'plaintext' })).toThrow(/bcrypt/);
+  });
+});

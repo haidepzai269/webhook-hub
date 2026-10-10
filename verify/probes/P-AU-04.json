@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-04",
+  "claim": "5 lần sai cho một email thì khoá email đó (cả email không tồn tại)",
+  "file": "apps/hub-api/src/modules/auth/rate-limit.ts",
+  "find": "return { allowed: count < limit,",
+  "replace": "return { allowed: true,",
+  "expectRed": [
+    "[AU:UA12]"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/auth-unit.spec.ts"
+}

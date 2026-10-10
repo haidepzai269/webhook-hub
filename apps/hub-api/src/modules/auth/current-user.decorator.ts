@@ -1,15 +1,14 @@
 import { createParamDecorator, ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { RequestWithTenant } from './jwt-auth.guard';
+import { RequestWithPrincipal } from '../service-api/principal';
 
 /**
- * `actor` cho audit log (S2-3): `sub` của JWT ĐÃ VERIFY (JwtAuthGuard gắn `request.user`).
- * Không bao giờ lấy từ body/header client gửi. Chỉ dùng trên route có JwtAuthGuard.
+ * `actor` cho audit log: id của user ĐÃ xác thực (SessionGuard gắn `request.principal`). DINH-CHINH-AUTH §4 #5:
+ * từ AU1 actor = user.id (không còn chuỗi `admin`). Không bao giờ lấy từ body/header client gửi.
  */
 export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionContext): string => {
-  const request = ctx.switchToHttp().getRequest<RequestWithTenant>();
-  const sub = request.user?.sub;
-  if (typeof sub !== 'string' || !sub) {
-    throw new UnauthorizedException('Thiếu danh tính người dùng — route chưa được bảo vệ bởi JwtAuthGuard');
+  const p = ctx.switchToHttp().getRequest<RequestWithPrincipal>().principal;
+  if (!p || p.kind !== 'user' || !p.id) {
+    throw new UnauthorizedException('Thiếu danh tính người dùng — route chưa được bảo vệ bởi SessionGuard');
   }
-  return sub;
+  return p.id;
 });

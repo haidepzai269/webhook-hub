@@ -19,7 +19,7 @@ import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, Outbo
 import { Prisma } from '@prisma/client';
 import { ulid } from 'ulidx';
 import { randomUUID } from 'crypto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
@@ -77,7 +77,7 @@ function assertUuid(id: string, what: string) {
 }
 
 /**
- * Toàn bộ `/api/v1/*` (dashboard) BẮT BUỘC JWT (JwtAuthGuard) — tenantId LUÔN lấy
+ * Toàn bộ `/api/v1/*` (dashboard) BẮT BUỘC JWT (SessionGuard) — tenantId LUÔN lấy
  * từ token đã verify (`@CurrentTenant()`), KHÔNG BAO GIỜ từ header client tự gửi
  * như `x-tenant-id` trước đây. Mọi truy vấn 5 bảng nghiệp vụ (source, destination,
  * subscription, event, delivery) đi qua `TenantScopedRepository` (BB-5) — không gọi
@@ -86,7 +86,7 @@ function assertUuid(id: string, what: string) {
  */
 @Controller('api/v1')
 // S2 (X2): `?projectId=` đọc ở MỘT chỗ — ProjectScopeGuard chạy sau JWT, đổi request.tenantId.
-@UseGuards(JwtAuthGuard, ProjectScopeGuard)
+@UseGuards(SessionGuard, ProjectScopeGuard)
 @UseInterceptors(RedactSecretsInterceptor)
 export class ApiController {
   constructor(private readonly prisma: PrismaService) {}

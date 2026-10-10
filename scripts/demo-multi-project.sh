@@ -4,14 +4,16 @@
 #   bash scripts/demo-multi-project.sh            # tự tạo key cho cafe/bookstore qua console admin
 #   KA=hk_test_… KB=hk_live_… bash scripts/…      # hoặc dùng key có sẵn
 #
-# Seed không bao giờ in key ra log (MS-R6). Mặc định chạy trên hubv (API 14000, sink 14100, admin VERIFY_ONLY_admin_password). Stack dev:
-#   API=http://localhost:4000 SINK= ADMIN_PASSWORD=<mật khẩu admin> PG_CONTAINER=webhook-hub-postgres …
+# Seed không bao giờ in key ra log (MS-R6). Mặc định chạy trên hubv (API 14000, sink 14100, operator@verify.local /
+# VERIFY_ONLY_admin_password). Stack dev:
+#   API=http://localhost:4000 SINK= OPERATOR_EMAIL=admin@hub.local OPERATOR_PASSWORD=<mật khẩu> PG_CONTAINER=webhook-hub-postgres …
 # Không bắn gì vào Telegram/Discord (chỉ source của cafe/bookstore; subscription của chúng trỏ endpoint mock).
 set -u
 export MSYS_NO_PATHCONV=1
 API=${API:-http://localhost:14000}
 SINK=${SINK-http://localhost:14100}
-ADMIN_PASSWORD=${ADMIN_PASSWORD:-VERIFY_ONLY_admin_password}
+OPERATOR_EMAIL=${OPERATOR_EMAIL:-operator@verify.local}
+OPERATOR_PASSWORD=${OPERATOR_PASSWORD:-VERIFY_ONLY_admin_password}
 PG_CONTAINER=${PG_CONTAINER:-$(docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify ps -q postgres 2>/dev/null)}
 SEPAY_KEY=${SEPAY_KEY:-demo_sepay_cafe_key_local_only}
 PAYOS_KEY=${PAYOS_KEY:-demo_payos_bookstore_checksum_local_only}
@@ -26,11 +28,16 @@ sepay() { # sepay <id> <amount> <content>
   curl -s -o /dev/null -w '%{http_code}' -X POST "$API/hooks/sepay/src_sepay_cafe" -H "$CT" -H "Authorization: Apikey $SEPAY_KEY" \
     --data-binary "{\"id\":$1,\"gateway\":\"MBBank\",\"transactionDate\":\"2026-10-10 10:00:00\",\"accountNumber\":\"0123456789\",\"code\":null,\"content\":\"$3\",\"transferType\":\"in\",\"transferAmount\":$2,\"accumulated\":0,\"referenceCode\":\"SP$1\",\"description\":\"$3\"}"
 }
-JWT=$(curl -s "$API/auth/login" -H "$CT" -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" | jget .accessToken)
-H="Authorization: Bearer $JWT"
+# AU1 (SPEC-auth §5.3/§5.4): đăng nhập bằng cookie (không còn Bearer trong body). Ghép Cookie từ Set-Cookie và gửi
+# x-csrf-token = cookie hub_csrf cho POST/DELETE. Không dùng cookie jar của curl: tiền tố __Host- + Secure trên http.
+LOGIN_HDRS=$(curl -s -D - -o /dev/null "$API/auth/login" -H "$CT" -d "{\"email\":\"$OPERATOR_EMAIL\",\"password\":\"$OPERATOR_PASSWORD\"}" | tr -d '\r')
+COOKIE=$(printf '%s\n' "$LOGIN_HDRS" | grep -i '^set-cookie:' | sed -E 's/^[Ss]et-[Cc]ookie: ([^;]+);.*/\1/' | paste -sd ';' -)
+CSRF=$(printf '%s\n' "$COOKIE" | tr ';' '\n' | sed -n 's/^ *hub_csrf=//p')
+[ -n "$CSRF" ] || { echo "Đăng nhập operator thất bại ($OPERATOR_EMAIL) — kiểm OPERATOR_EMAIL/OPERATOR_PASSWORD"; exit 1; }
+AUTH=(-H "Cookie: $COOKIE" -H "x-csrf-token: $CSRF")
 newkey() { # newkey <slug> -> key đủ 4 scope (đi kèm source api)
-  local P; P=$(curl -s "$API/api/v1/projects" -H "$H" | jget ".find(p=>p.slug===\"$1\").id")
-  curl -s -X POST "$API/api/v1/projects/$P/keys" -H "$H" -H "$CT"     -d "{\"serviceName\":\"$1-demo-$RUN\",\"scopes\":[\"publish:events\",\"read:events\",\"manage:endpoints\",\"manage:sources\"]}" | jget .key
+  local P; P=$(curl -s "$API/api/v1/projects" "${AUTH[@]}" | jget ".find(p=>p.slug===\"$1\").id")
+  curl -s -X POST "$API/api/v1/projects/$P/keys" "${AUTH[@]}" -H "$CT"     -d "{\"serviceName\":\"$1-demo-$RUN\",\"scopes\":[\"publish:events\",\"read:events\",\"manage:endpoints\",\"manage:sources\"]}" | jget .key
 }
 KA=${KA:-$(newkey cafe)}; KB=${KB:-$(newkey bookstore)}
 EP_CAFE=$(curl -s "$API/v1/p/cafe/endpoints" -H "Authorization: Bearer $KA" | jget '.find(e=>e.name==="cafe-endpoint").id')
@@ -61,10 +68,10 @@ else
 fi
 
 step "4. revoke MỘT key: chỉ đúng service đó bị ngắt"
-PA=$(curl -s "$API/api/v1/projects" -H "$H" | jget '.find(p=>p.slug==="cafe").id')
-R=$(curl -s -X POST "$API/api/v1/projects/$PA/keys" -H "$H" -H "$CT" -d "{\"serviceName\":\"cafe-tam-$RUN\",\"scopes\":[\"read:events\"]}")
+PA=$(curl -s "$API/api/v1/projects" "${AUTH[@]}" | jget '.find(p=>p.slug==="cafe").id')
+R=$(curl -s -X POST "$API/api/v1/projects/$PA/keys" "${AUTH[@]}" -H "$CT" -d "{\"serviceName\":\"cafe-tam-$RUN\",\"scopes\":[\"read:events\"]}")
 KT=$(echo "$R" | jget .key); KT_ID=$(echo "$R" | jget .id)
-curl -s -o /dev/null -w "revoke -> %{http_code}\n" -X DELETE "$API/api/v1/projects/$PA/keys/$KT_ID" -H "$H"
+curl -s -o /dev/null -w "revoke -> %{http_code}\n" -X DELETE "$API/api/v1/projects/$PA/keys/$KT_ID" "${AUTH[@]}"
 curl -s -o /dev/null -w "key vừa revoke gọi /me -> %{http_code}\n" "$API/v1/p/cafe/me" -H "Authorization: Bearer $KT"
 curl -s -o /dev/null -w "key cafe-be vẫn chạy -> %{http_code}\n" "$API/v1/p/cafe/me" -H "Authorization: Bearer $KA"
 curl -s -o /dev/null -w "key bookstore vẫn chạy -> %{http_code}\n" "$API/v1/p/bookstore/me" -H "Authorization: Bearer $KB"

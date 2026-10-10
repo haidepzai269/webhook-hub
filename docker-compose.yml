@@ -131,12 +131,18 @@ services:
       # .env.example/git history. Phải lấy từ .env / shell env — hub-api sẽ
       # process.exit(1) lúc bootstrap nếu thiếu hoặc < 32 ký tự.
       - JWT_SECRET=${JWT_SECRET}
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      # KHÔNG đặt default cho hash bcrypt ở đây: dấu `$` trong hash bị docker-compose
-      # hiểu nhầm thành biến ($2b, $10, $nzHQ...) dù đã escape `$$` (đã kiểm chứng bằng
-      # `docker compose config` — hash bị mangle). Luôn lấy từ `.env`/shell env, giống
-      # PAYOS_API_KEY... bên dưới. Đặt ADMIN_PASSWORD_HASH trong `.env` trước khi chạy.
-      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+      # AU1 (SPEC-auth §7, ADR-103): operator (kế thừa admin env cũ) — seed tạo user từ hai biến này.
+      # KHÔNG đặt default cho hash bcrypt: dấu `$` bị compose nội suy (đã kiểm bằng `docker compose config`).
+      # Escape `$$` trong `.env`. Không đặt -> seed bỏ qua operator, không ai đăng nhập được console.
+      - OPERATOR_EMAIL=${OPERATOR_EMAIL:-}
+      - OPERATOR_PASSWORD_HASH=${OPERATOR_PASSWORD_HASH:-}
+      # Mỗi secret ≥ 32 ký tự, KHÁC nhau, khác JWT_SECRET — thiếu thì hub-api process.exit(1). Không default.
+      - CSRF_SECRET=${CSRF_SECRET}
+      - SOCKET_TICKET_SECRET=${SOCKET_TICKET_SECRET}
+      - OAUTH_COOKIE_SECRET=${OAUTH_COOKIE_SECRET}
+      # Web (CORS có credentials, link trong mail, OAuth callback). Local: web docker ở :3000.
+      - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
+      - TRUST_PROXY=${TRUST_PROXY:-0}
       - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
       - NODE_ENV=development
       # S2 (SPEC §4.3A): host trong connection string `hub://<key>@<host>/<project>` trả về khi tạo key
@@ -261,6 +267,9 @@ services:
       # NEXT_PUBLIC_* được nhúng vào bundle LÚC BUILD. Chỉ dùng cho LOCAL (ADR-027) —
       # deployed build trên Vercel, không đi qua file này.
       args:
+        # AU1 (SPEC-auth §9): web proxy /api/* và /auth/* sang hub-api (cookie first-party). Next tính rewrites LÚC
+        # BUILD -> URL nội bộ phải có ở build arg (tên service trong mạng compose).
+        HUB_API_INTERNAL_URL: ${HUB_API_INTERNAL_URL:-http://hub-api:4000}
         NEXT_PUBLIC_DEMO_SIMULATE: ${DEMO_SIMULATE:-true}
         # KHÔNG dùng SEPAY_API_KEY thật: giá trị này nằm công khai trong JS của trình duyệt
         NEXT_PUBLIC_DEMO_SEPAY_APIKEY: ${DEMO_SEPAY_APIKEY:-demo_sepay_simulate_key_local_only}

@@ -50,3 +50,21 @@ export function keyCreatedLogLine(name: string, key: string, publicUrl: string, 
     `<key> = giá trị ${envVar} nếu đã đặt, không thì tạo key mới: POST /api/v1/projects/:projectId/keys`
   );
 }
+
+/**
+ * SPEC-auth §5.1/§7 (AU1): operator (kế thừa admin env cũ) từ `OPERATOR_EMAIL` + `OPERATOR_PASSWORD_HASH`.
+ * Thiếu một trong hai -> `null` (seed bỏ qua, in cảnh báo). Hash `$$` (escape của docker-compose khi tiến trình
+ * không đi qua compose) chuẩn hoá về `$`. Hash không giống bcrypt -> ném lỗi (thà dừng seed còn hơn tạo operator
+ * không đăng nhập được).
+ */
+export function operatorFromEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>): { email: string; passwordHash: string } | null {
+  const email = (env.OPERATOR_EMAIL ?? '').trim().toLowerCase();
+  const raw = (env.OPERATOR_PASSWORD_HASH ?? '').trim();
+  if (!email || !raw) return null;
+  const passwordHash = raw.replace(/\$\$/g, '$');
+  if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(passwordHash)) {
+    throw new Error('OPERATOR_PASSWORD_HASH không phải hash bcrypt hợp lệ (nhớ escape $ thành $$ trong .env của compose)');
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('OPERATOR_EMAIL không phải email hợp lệ');
+  return { email, passwordHash };
+}

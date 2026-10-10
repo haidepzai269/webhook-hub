@@ -1032,3 +1032,24 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** Regex của ADR-100 chỉ bắt `class X extends TenantScopedRepository` — `import { TenantScopedRepository as Base }` rồi `extends Base` lọt.
 **Chọn:** `repoSubclassCheck` (per file): gom tên gốc + bí danh từ `import { TenantScopedRepository as X }` và `const|let|var X = TenantScopedRepository`, rồi bắt `class … extends <tên bất kỳ trong tập>`. Test gate thêm hai dạng bí danh (đỏ) và dùng bí danh để `new` (không phải lớp con, không bắt).
 **Đánh đổi:** Vẫn là grep, không phải AST: bí danh qua re-export ở file khác (`export { TenantScopedRepository as X }` rồi import X) chưa bắt — chấp nhận ở quy mô repo; AU6 bật RLS là lưới cuối.
+
+## ADR-103 — AU1: đăng ký/đăng nhập bằng cookie, refresh xoay vòng ở Postgres, vé socket và kiểm membership ngay từ AU1 (2026-10-11)
+
+**Vấn đề:** SPEC-auth §8 đặt vé socket và membership ở AU3, nhưng AU1 đổi đăng nhập sang cookie HttpOnly (web hết token để handshake) và mở đăng ký công khai (ai đăng ký cũng sẽ đọc được project `default` nếu console còn coi mọi người là operator). Trang web `/auth/login` trùng đường proxy `/auth/*` mà spec yêu cầu. Top 1.000 mật khẩu phổ biến không có mục nào dài ≥ 10 ký tự, trong khi tối thiểu là 10, nên luật "nằm trong danh sách" không bao giờ bắn. Bcryptjs v3 không cho `spyOn` (UA4).
+**Chọn:**
+- Bảng danh tính qua `IdentityRepository` duy nhất (migration `20261011100000_auth_identity`, sinh bằng `prisma migrate diff`). Gate BB-5 cấm `prisma.user/projectMember/authSession/emailToken/authAudit.` ngoài `libs/database/src`.
+- `SessionGuard` thay `JwtAuthGuard`: verify HS256 + iss + aud, MỘT truy vấn khoá chính kiểm session còn sống, CSRF ký theo sid cho method thay đổi dữ liệu.
+- Refresh trong MỘT transaction `FOR UPDATE`; nhánh lỗi trả về (không ném) để việc thu hồi family vẫn COMMIT.
+- Logout và xoá thiết bị thu hồi cả family, không chỉ dòng hiện tại.
+- Làm sớm trong AU1:
+  - `resolveProjectScope` kiểm tồn tại + membership (operator vào mọi project). Đây là luật chung cho HTTP, vé socket và `/api/v1/projects/*`. Thiếu `?projectId=` thì tạm lấy project đầu tiên; AU3 bỏ nhánh này.
+  - `/api/v1/projects` liệt kê theo membership; người tạo project thành owner.
+  - Vé socket `/auth/socket-ticket`; room `project:<id>`.
+- Web: trang chuyển sang `/login`, `/register` (route group `(auth)`); `next.config` rewrites `/api/*`, `/auth/*` → `HUB_API_INTERNAL_URL` (build arg); `client.ts` dùng URL tương đối, `credentials:'include'`, CSRF, refresh single-flight; xoá `token.ts`.
+- `CoreModule` `@Global` cấp MỘT PrismaService/RedisService cho mọi module.
+- Danh sách mật khẩu = top 1.000 ∪ 51 mục dài ≥ 10 của SecLists 10k (nhúng TS, không đọc `.txt` lúc chạy). bcrypt gọi qua `bcryptImpl` để test spy được.
+- Operator seed từ `OPERATOR_EMAIL`/`OPERATOR_PASSWORD_HASH`; đã có thì KHÔNG ghi đè mật khẩu.
+- Rate limit: một `EVAL` (INCR+EXPIRE của ingest, trả thêm TTL cho `Retry-After`), Redis lỗi thì dùng bộ đếm trong bộ nhớ; không tính vào R1.
+- helmet (CORP cross-origin để playground gọi `/hooks/*`) + cookie-parser, ghim phiên bản.
+
+**Đánh đổi:** AU1 lấn sang AU3 (vé socket, membership tối thiểu) để mỗi commit đều chạy được và không mở IDOR; scope theo role, `?projectId=` bắt buộc, `operator.access` vẫn là AU3. Đăng ký trùng email trả 201 cùng hình dạng nhưng không đặt cookie (mail "có người thử" là AU2), nên người cố ý dò vẫn thấy bước kế tiếp hỏng. Rate limit theo IP sau proxy Vercel có thể chỉ thấy IP egress của Vercel; giới hạn theo email vẫn đúng. Cookie `__Host-` Secure trên http chỉ chạy ở localhost (Chrome/Firefox); Safari cần kiểm ở TA14.

@@ -8,7 +8,9 @@
       "codePrefix": "#",
       "storyOnLine": "^\\|\\s*\\d+\\s*\\|[^|]*\\|\\s*(S\\d-\\d+)\\s*\\|",
       "notDoneIfLineMatches": "⏭",
-      "done": { "all": true },
+      "done": {
+        "all": true
+      },
       "note": "SPEC-1..3 đã xong + review (b7f22aa). Dòng ⏭ = hoãn sang đa service / cần tài khoản Admin."
     },
     {
@@ -16,21 +18,27 @@
       "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/SPEC-1-khong-mat-khong-lo.md",
       "pattern": "^## (S\\d-\\d+) ·",
       "requireTest": false,
-      "done": { "all": true }
+      "done": {
+        "all": true
+      }
     },
     {
       "ns": "AF",
       "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/SPEC-2-nhin-thay-duoc.md",
       "pattern": "^## (S\\d-\\d+) ·",
       "requireTest": false,
-      "done": { "all": true }
+      "done": {
+        "all": true
+      }
     },
     {
       "ns": "AF",
       "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/SPEC-3-dung-chuan.md",
       "pattern": "^## (S\\d-\\d+) ·",
       "requireTest": false,
-      "done": { "all": true }
+      "done": {
+        "all": true
+      }
     },
     {
       "ns": "MS",
@@ -79,14 +87,35 @@
       "ns": "DX",
       "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-dev-experience.md",
       "pattern": "^\\|\\s*((?:UX|TX)\\d+)\\s*\\|",
-      "done": { "checklist": "\\[x\\] (DX\\d+b?)" }
+      "done": {
+        "checklist": "\\[x\\] (DX\\d+b?)"
+      }
     },
     {
       "ns": "AU",
       "file": "_bmad-output/planning-artifacts/auth/SPEC-auth.md",
-      "pattern": "^\\|\\s*((?:UA|TA)\\d+)\\s*\\|",
-      "done": { "checklist": "\\[x\\] (AU\\d+)" },
-      "note": "Chưa có bảng mã -> story (spec không ghi). AU1 phải thêm done.groups trước khi đánh [x]."
+      "pattern": "^\\|\\s*(UA\\d+)\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (AU\\d+)"
+      },
+      "note": "UA: story ở cột cuối bảng §10.1 (storyOnLine). TA: khai báo dạng **TAn — …** ở §10.2, story theo bảng \"Mã TA → story\".",
+      "storyOnLine": "\\|\\s*(AU\\d)\\s*\\|\\s*$"
+    },
+    {
+      "ns": "AU",
+      "file": "_bmad-output/planning-artifacts/auth/SPEC-auth.md",
+      "pattern": "^- \\*\\*(TA\\d+) — ",
+      "done": {
+        "checklist": "\\[x\\] (AU\\d+)",
+        "groups": {
+          "AU1": "TA1,TA3-TA7",
+          "AU2": "TA2,TA10",
+          "AU3": "TA8,TA14,TA15",
+          "AU4": "TA9",
+          "AU5": "TA11",
+          "AU6": "TA12,TA13"
+        }
+      }
     },
     {
       "ns": "VF",
@@ -106,11 +135,22 @@
     }
   ],
   "inline": [
-    { "ns": "BB", "codes": "1-5", "requireTest": false, "note": "Bất biến BB-1..BB-5 (CLAUDE.md, §8.2). verify:bb (VF6) bắt buộc." }
+    {
+      "ns": "BB",
+      "codes": "1-5",
+      "requireTest": false,
+      "note": "Bất biến BB-1..BB-5 (CLAUDE.md, §8.2). verify:bb (VF6) bắt buộc."
+    }
   ],
   "doneOverrides": [
-    { "codes": "MS:U34-U45", "reason": "Lõi S14 đã làm dưới tên AF:S3-2 (ADR-059, DINH-CHINH-2026-10-10 §00)" },
-    { "codes": "MS:U50", "reason": "Lõi S14 đã làm dưới tên AF:S3-2 (ADR-059, DINH-CHINH-2026-10-10 §00)" }
+    {
+      "codes": "MS:U34-U45",
+      "reason": "Lõi S14 đã làm dưới tên AF:S3-2 (ADR-059, DINH-CHINH-2026-10-10 §00)"
+    },
+    {
+      "codes": "MS:U50",
+      "reason": "Lõi S14 đã làm dưới tên AF:S3-2 (ADR-059, DINH-CHINH-2026-10-10 §00)"
+    }
   ],
   "acceptedOrphans": {
     "AF:#1": "Kiểm bằng ls libs/*/dist + đổi tên export rồi khởi động container (docker) — chờ VF4/VF5 nhập vào runner L2",

@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { TenantScopedRepository } from './tenant-scoped.repository';
+import { IdentityRepository } from './identity.repository';
 
 /**
  * PrismaService — COMPOSITION, không `extends PrismaClient` (BB-5).
@@ -153,6 +154,14 @@ export class PrismaService {
    */
   public findApiKeyByHash(keyHash: string) {
     return this.client.apiKey.findUnique({ where: { keyHash }, include: { project: true } });
+  }
+
+  /**
+   * SPEC-auth §5.1: bảng danh tính (users, project_members, auth_sessions, email_tokens, auth_audit) chỉ qua
+   * `IdentityRepository`. Truyền `tx` để chạy trong transaction của người gọi.
+   */
+  public identity(client: PrismaClient | Prisma.TransactionClient = this.client): IdentityRepository {
+    return new IdentityRepository(client);
   }
 
   /**

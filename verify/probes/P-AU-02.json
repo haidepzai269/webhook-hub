@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-02",
+  "claim": "Method thay đổi dữ liệu thiếu/sai CSRF phải 403",
+  "file": "apps/hub-api/src/modules/auth/session.guard.ts",
+  "find": "if (!ok) throw authError(HttpStatus.FORBIDDEN, 'csrf_failed');",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA11]"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/auth-unit.spec.ts"
+}

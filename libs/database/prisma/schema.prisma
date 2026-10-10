@@ -1,8 +1,8 @@
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  directUrl  = env("DIRECT_URL")
-  schemas    = ["hub", "shop"]
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas   = ["hub", "shop"]
 }
 
 generator client {
@@ -94,6 +94,7 @@ model Project {
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   apiKeys ApiKey[]
+  members ProjectMember[]
 
   @@map("projects")
   @@schema("hub")
@@ -121,17 +122,125 @@ model ApiKey {
   @@schema("hub")
 }
 
+// ===================== Danh tính người dùng (SPEC-auth §5.1, AU1) =====================
+// Bảng danh tính được tra TRƯỚC khi biết tenant -> KHÔNG đi qua TenantScopedRepository; chỉ qua
+// `IdentityRepository` (libs/database/src/identity.repository.ts). Không bật RLS (AU6).
+
+enum MemberRole {
+  owner
+  developer
+  viewer
+
+  @@schema("hub")
+}
+
+enum TokenPurpose {
+  verify_email
+  reset_password
+  invite
+
+  @@schema("hub")
+}
+
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  email             String    @unique @db.VarChar(254) // luôn trim + lowercase
+  name              String    @db.VarChar(100)
+  passwordHash      String?   @map("password_hash") // null = chỉ đăng nhập GitHub
+  emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  githubId          String?   @unique @map("github_id") @db.VarChar(32) // id số của GitHub, không dùng login
+  isOperator        Boolean   @default(false) @map("is_operator")
+  passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  memberships ProjectMember[]
+  sessions    AuthSession[]
+
+  @@map("users")
+  @@schema("hub")
+}
+
+model ProjectMember {
+  tenantId  String     @map("tenant_id") @db.Uuid // = project id
+  userId    String     @map("user_id") @db.Uuid
+  role      MemberRole
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userId])
+  @@index([userId])
+  @@map("project_members")
+  @@schema("hub")
+}
+
+model AuthSession {
+  id                String    @id @default(uuid()) @db.Uuid // = claim `sid` của access token
+  userId            String    @map("user_id") @db.Uuid
+  familyId          String    @map("family_id") @db.Uuid // mọi token sinh từ một lần đăng nhập
+  tokenHash         String    @unique @map("token_hash") @db.Char(64) // sha256(refresh token)
+  replacedById      String?   @map("replaced_by_id") @db.Uuid
+  rotatedAt         DateTime? @map("rotated_at") @db.Timestamptz(6)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason      String?   @map("revoke_reason") @db.VarChar(32) // logout|logout_all|password_changed|password_reset|reuse_detected|removed
+  idleExpiresAt     DateTime  @map("idle_expires_at") @db.Timestamptz(6)
+  absoluteExpiresAt DateTime  @map("absolute_expires_at") @db.Timestamptz(6)
+  userAgent         String?   @map("user_agent") @db.VarChar(255)
+  ip                String?   @db.VarChar(45)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("auth_sessions")
+  @@schema("hub")
+}
+
+model EmailToken {
+  id        String       @id @default(uuid()) @db.Uuid
+  purpose   TokenPurpose
+  email     String       @db.VarChar(254)
+  userId    String?      @map("user_id") @db.Uuid
+  tenantId  String?      @map("tenant_id") @db.Uuid // chỉ cho invite
+  role      MemberRole? // chỉ cho invite
+  invitedBy String?      @map("invited_by") @db.Uuid
+  tokenHash String       @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime     @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime?    @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([email, purpose])
+  @@map("email_tokens")
+  @@schema("hub")
+}
+
+/// Sự kiện cấp user, không thuộc project nào (SPEC-auth §6.2). Không bao giờ chứa mật khẩu/token.
+model AuthAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(64)
+  ip        String?  @db.VarChar(45)
+  meta      Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("auth_audit")
+  @@schema("hub")
+}
+
 model Source {
-  id         String       @id @default(uuid()) @db.Uuid
+  id                 String       @id @default(uuid()) @db.Uuid
   // tenant_id = project_id (ADR-038/041). Giữ tên cột để không đổi 40 file.
-  tenantId   String       @map("tenant_id") @db.Uuid
-  provider   ProviderEnum
-  name       String       @db.VarChar(255)
-  sourceKey  String       @unique @map("source_key") @db.VarChar(64)
-  isActive   Boolean      @default(true) @map("is_active")
+  tenantId           String       @map("tenant_id") @db.Uuid
+  provider           ProviderEnum
+  name               String       @db.VarChar(255)
+  sourceKey          String       @unique @map("source_key") @db.VarChar(64)
+  isActive           Boolean      @default(true) @map("is_active")
   /// S8: chỉ dùng khi provider=generic (scheme, header, idempotency, eventType, mapping?)
-  verificationConfig Json? @map("verification_config")
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  verificationConfig Json?        @map("verification_config")
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
   secrets   SourceSecret[]
   rawEvents RawEvent[]
@@ -168,7 +277,7 @@ model RawEvent {
   origin          EventOrigin @default(webhook)
   receivedAt      DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)
 
-  source Source  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   event  Event?
 
   @@unique([sourceId, idempotencyKey])
@@ -203,7 +312,7 @@ model Event {
   /// S7 (ADR-077): lúc INSERT (clock_timestamp) — cửa sổ lắng của polling lọc theo cột này, không theo received_at.
   createdAt      DateTime    @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(6)
 
-  rawEvent   RawEvent?    @relation(fields: [rawEventId], references: [id], onDelete: SetNull)
+  rawEvent   RawEvent?  @relation(fields: [rawEventId], references: [id], onDelete: SetNull)
   deliveries Delivery[]
 
   @@index([tenantId, receivedAt(sort: Desc)])
@@ -216,23 +325,23 @@ model Event {
 }
 
 model Destination {
-  id                    String          @id @default(uuid()) @db.Uuid
+  id                     String               @id @default(uuid()) @db.Uuid
   // tenant_id = project_id (ADR-038/041). Giữ tên cột để không đổi 40 file.
-  tenantId              String          @map("tenant_id") @db.Uuid
-  name                  String          @db.VarChar(255)
-  type                  DestinationType
-  configEncrypted       String          @map("config_encrypted") @db.Text
-  signingSecretEncrypted String?        @map("signing_secret_encrypted") @db.Text
-  rateLimitRps          Int             @default(0) @map("rate_limit_rps")
-  circuitState          CircuitState    @default(CLOSED) @map("circuit_state")
-  alertOnOpen           Boolean         @default(false) @map("alert_on_open")
+  tenantId               String               @map("tenant_id") @db.Uuid
+  name                   String               @db.VarChar(255)
+  type                   DestinationType
+  configEncrypted        String               @map("config_encrypted") @db.Text
+  signingSecretEncrypted String?              @map("signing_secret_encrypted") @db.Text
+  rateLimitRps           Int                  @default(0) @map("rate_limit_rps")
+  circuitState           CircuitState         @default(CLOSED) @map("circuit_state")
+  alertOnOpen            Boolean              @default(false) @map("alert_on_open")
   /// S6 (ADR-040): default VERIFIED cho dữ liệu cũ + telegram/discord; endpoint tạo qua API service bắt đầu PENDING.
-  verification          EndpointVerification @default(VERIFIED)
-  verifiedAt            DateTime?       @map("verified_at") @db.Timestamptz(6)
-  verificationError     String?         @map("verification_error") @db.VarChar(64)
+  verification           EndpointVerification @default(VERIFIED)
+  verifiedAt             DateTime?            @map("verified_at") @db.Timestamptz(6)
+  verificationError      String?              @map("verification_error") @db.VarChar(64)
   /// R-1/R-2 (ADR-094): API key tạo endpoint qua /v1/p — chỉ key này quản endpoint ở /v1/p. NULL = đích của operator.
-  createdByKeyId        String?         @map("created_by_key_id") @db.Uuid
-  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdByKeyId         String?              @map("created_by_key_id") @db.Uuid
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
 
   subscriptions Subscription[]
 

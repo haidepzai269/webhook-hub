@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Body,
+  Req,
   UnprocessableEntityException,
   UseGuards,
 } from '@nestjs/common';
@@ -23,9 +24,13 @@ import {
   isApiScope,
   isValidEventPattern,
 } from '@hub/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { createApiKeyWithSource } from './api-key-create';
+import { resolveProjectScope } from './project-scope.guard';
+import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
+
+const me = (req: RequestWithPrincipal) => req.principal as UserPrincipal;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,17 +75,23 @@ export function parseCreateKey(body: any): CreateKeyInput {
  * -> đi qua `forTenant(projectId)` (BB-5). Key thô chỉ xuất hiện ĐÚNG MỘT LẦN ở response tạo.
  */
 @Controller('api/v1/projects')
-@UseGuards(JwtAuthGuard)
+@UseGuards(SessionGuard)
 export class ProjectsController {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** AU1: chỉ project mình là thành viên (kèm role); operator thấy mọi project (ADR-056, role = owner). */
   @Get()
-  async list() {
-    return this.prisma.listProjects();
+  async list(@Req() req: RequestWithPrincipal) {
+    const p = me(req);
+    const mine = await this.prisma.identity().listMemberships(p.id);
+    if (!p.isOperator) return mine.map((m) => ({ id: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role }));
+    const roles = new Map(mine.map((m) => [m.projectId, m.role]));
+    return (await this.prisma.listProjects()).map((x) => ({ ...x, role: roles.get(x.id) ?? 'owner' }));
   }
 
+  /** Người tạo thành owner (membership) trong CÙNG transaction. */
   @Post()
-  async create(@CurrentUser() actor: string, @Body() body: any) {
+  async create(@Req() req: RequestWithPrincipal, @CurrentUser() actor: string, @Body() body: any) {
     const slug = typeof body?.slug === 'string' ? body.slug.trim() : '';
     if (!PROJECT_SLUG_RE.test(slug)) invalid('slug', 'slug khớp ^[a-z0-9][a-z0-9-]{2,62}$ (vd "cafe")');
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
@@ -90,7 +101,8 @@ export class ProjectsController {
     const id = randomUUID();
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const project = await tx.project.create({ data: { id, slug, name, environment } });
+        const project = await this.prisma.identity(tx).createProject({ id, slug, name, environment });
+        await this.prisma.identity(tx).ensureMembership(me(req).id, id, 'owner');
         await new TenantScopedRepository(tx, id).createAuditLog({
           action: 'project.created',
           entityType: 'project',
@@ -107,14 +119,14 @@ export class ProjectsController {
   }
 
   @Get(':projectId/keys')
-  async listKeys(@Param('projectId') projectId: string) {
-    await this.requireProject(projectId);
+  async listKeys(@Req() req: RequestWithPrincipal, @Param('projectId') projectId: string) {
+    await this.requireProject(req, projectId);
     return this.prisma.forTenant(projectId).findApiKeys();
   }
 
   @Post(':projectId/keys')
-  async createKey(@CurrentUser() actor: string, @Param('projectId') projectId: string, @Body() body: any) {
-    const project = await this.requireProject(projectId);
+  async createKey(@Req() req: RequestWithPrincipal, @CurrentUser() actor: string, @Param('projectId') projectId: string, @Body() body: any) {
+    const project = await this.requireProject(req, projectId);
     const input = parseCreateKey(body);
     const key = generateApiKey(project.environment);
     const created = await createApiKeyWithSource(this.prisma, project.id, {
@@ -133,8 +145,8 @@ export class ProjectsController {
   /** Revoke idempotent (lần hai vẫn 204). Key không thuộc project -> 404. Audit chỉ khi thật sự đổi. */
   @Delete(':projectId/keys/:keyId')
   @HttpCode(204)
-  async revokeKey(@CurrentUser() actor: string, @Param('projectId') projectId: string, @Param('keyId') keyId: string) {
-    await this.requireProject(projectId);
+  async revokeKey(@Req() req: RequestWithPrincipal, @CurrentUser() actor: string, @Param('projectId') projectId: string, @Param('keyId') keyId: string) {
+    await this.requireProject(req, projectId);
     if (!UUID_RE.test(keyId)) throw new NotFoundException({ error: 'not_found', message: 'API key không tồn tại' });
     await this.prisma.$transaction(async (tx) => {
       const repo = new TenantScopedRepository(tx, projectId);
@@ -152,8 +164,11 @@ export class ProjectsController {
     });
   }
 
-  private async requireProject(projectId: string) {
-    const project = UUID_RE.test(projectId) ? await this.prisma.findProjectById(projectId) : null;
+  /** CÙNG luật với `?projectId=` (resolveProjectScope): không tồn tại / không phải thành viên -> cùng 404. */
+  private async requireProject(req: RequestWithPrincipal, projectId: string) {
+    if (!UUID_RE.test(projectId)) throw new NotFoundException({ error: 'not_found', message: 'Project không tồn tại' });
+    await resolveProjectScope(this.prisma, projectId, me(req));
+    const project = await this.prisma.findProjectById(projectId);
     if (!project) throw new NotFoundException({ error: 'not_found', message: 'Project không tồn tại' });
     return project;
   }

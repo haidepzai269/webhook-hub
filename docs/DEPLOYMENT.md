@@ -282,7 +282,9 @@ Endpoint đó **phải có token nội bộ** — nếu không thì ai cũng g�
 Vercel **không chạy được WebSocket server** — nhưng không cần: server nằm ở `hub-api` trên Render, Vercel chỉ host **client**.
 
 - Client ép `transports: ['websocket']` — tránh rắc rối handshake polling khi không có sticky session.
-- JWT đặt trong `auth` của handshake, xác thực ở `handleConnection`.
+- Socket.IO KHÔNG đi qua rewrites của Vercel (khác site) → không dùng cookie: client xin **vé** 60 giây qua
+  `/auth/socket-ticket?projectId=` (qua proxy, có cookie), đặt vào `auth: {ticket}` của handshake; hub-api kiểm vé +
+  session còn sống trước khi chấp nhận kết nối (SPEC-auth §5.7).
 - **CORS trên `hub-api`**: allowlist **đúng** domain production + regex cho preview URL của riêng bạn. **Đừng để `*.vercel.app` trống** — đó là cho phép mọi project Vercel của mọi người.
 
 ---
@@ -309,7 +311,17 @@ AMQP_URL=                # CloudAMQP amqps://
 
 # --- Bảo mật ---
 ENCRYPTION_MASTER_KEY=   # AES-256-GCM, 32 byte base64 — KHÔNG commit
-JWT_SECRET=
+# Đăng nhập console (SPEC-auth §7, ADR-103) — bốn secret, mỗi cái ≥ 32 ký tự và KHÁC nhau; hub-api thoát nếu sai
+JWT_SECRET=              # access token 15 phút (cookie __Host-hub_at)
+CSRF_SECRET=             # ký token CSRF gắn với session
+SOCKET_TICKET_SECRET=    # vé Socket.IO 60 giây
+OAUTH_COOKIE_SECRET=     # cookie state/PKCE của GitHub OAuth (AU5)
+OPERATOR_EMAIL=          # operator = root của hub (seed). Deployed không tự seed: chạy `docker-entrypoint.sh seed` một lần
+OPERATOR_PASSWORD_HASH=  # bcrypt cost 12. Render: dán hash nguyên `$` (không phải `$$` — chỉ compose nội suy)
+WEB_PUBLIC_URL=          # https://<web>.vercel.app — CORS có credentials, link trong mail, OAuth callback
+TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For. Lưu ý: request console đi qua
+                         # proxy của Vercel (rewrites) nên IP thấy được có thể là IP egress của Vercel — giới hạn theo
+                         # EMAIL (5 lần sai/15 phút) vẫn đúng; giới hạn theo IP chỉ là lớp phụ
 INTERNAL_TOKEN=          # cho /api/internal/reconcile
 
 # --- Provider (nạp vào source_secrets, không đọc trực tiếp trong adapter) ---
@@ -339,7 +351,9 @@ SEED_TELEGRAM_ACTIVE=    # seed tạo subscription Telegram `payment.*` BẬT ha
                          # TELEGRAM_BOT_TOKEN thật + TELEGRAM_CHAT_ID (hành vi cũ). Compose local mặc định false.
 
 # --- web (Vercel) — build-time, Next inline vào bundle → KHÔNG đặt secret ở đây ---
-NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — REST + Socket.IO của dashboard
+NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — Socket.IO (vé) + URL /hooks hiển thị cho người dùng
+HUB_API_INTERNAL_URL=      # https://hub-api.onrender.com — đích proxy /api/* và /auth/* (Next tính lúc BUILD). REST của
+                           # dashboard đi QUA proxy này để cookie phiên là cookie first-party của domain web
 NEXT_PUBLIC_SHOP_API_URL=  # URL shop — storefront gọi
 NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
 NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel

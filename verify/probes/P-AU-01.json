@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-01",
+  "claim": "Refresh token cũ dùng lại sau 5 giây phải thu hồi CẢ family (dấu hiệu bị đánh cắp)",
+  "file": "apps/hub-api/src/modules/auth/auth.service.ts",
+  "find": "await idn.revokeFamily(row.familyId, 'reuse_detected', now);",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA8]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/auth-session-db.spec.ts"
+}

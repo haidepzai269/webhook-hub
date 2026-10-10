@@ -6,7 +6,7 @@
 export const VERIFY_ONLY_PREFIX = 'VERIFY_ONLY_';
 const SENSITIVE = /(SECRET|KEY|TOKEN|PASSWORD|CLIENT_ID)/;
 /** Không phải secret: hash bcrypt của mật khẩu VERIFY_ONLY_ và tên đăng nhập. */
-const NOT_SECRET = new Set(['ADMIN_PASSWORD_HASH', 'ADMIN_USERNAME']);
+const NOT_SECRET = new Set(['ADMIN_PASSWORD_HASH', 'ADMIN_USERNAME', 'OPERATOR_PASSWORD_HASH', 'OPERATOR_EMAIL']);
 /** Phải trống: có giá trị là có thể nhắn tin thật. */
 const MUST_BE_EMPTY = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'DISCORD_WEBHOOK_URL'];
 

@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-06",
+  "claim": "Email không tồn tại vẫn chạy bcrypt.compare (cùng thời gian, chống dò email)",
+  "file": "apps/hub-api/src/modules/auth/password-hasher.ts",
+  "find": "const ok = await bcryptImpl.compare(password, real ? normalizeBcryptHash(hash) : DUMMY_HASH);",
+  "replace": "const ok = real ? await bcryptImpl.compare(password, normalizeBcryptHash(hash)) : false;",
+  "expectRed": [
+    "[AU:UA4]"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/auth-unit.spec.ts"
+}

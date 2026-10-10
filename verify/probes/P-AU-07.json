@@ -1,0 +1,13 @@
+{
+  "id": "P-AU-07",
+  "claim": "Không phải thành viên project thì cùng 404 như project không tồn tại (membership ở resolveProjectScope)",
+  "file": "apps/hub-api/src/modules/console/project-scope.guard.ts",
+  "find": "if (!project || (!role && !principal.isOperator))",
+  "replace": "if (!project)",
+  "expectRed": [
+    "tạo key: key hk_",
+    "CÙNG 404"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/console-projects-db.spec.ts"
+}

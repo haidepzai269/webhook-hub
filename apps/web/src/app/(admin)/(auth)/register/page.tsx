@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function RegisterPage() {
   return (
-    <AuthShell title="ĐĂNG KÝ" footerText="Đã có tài khoản?" footerLinkLabel="Đăng nhập" footerHref="/auth/login">
+    <AuthShell title="ĐĂNG KÝ" footerText="Đã có tài khoản?" footerLinkLabel="Đăng nhập" footerHref="/login">
       <RegisterForm />
     </AuthShell>
   );

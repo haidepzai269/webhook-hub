@@ -23,7 +23,7 @@ Seed tự chạy khi hub-api khởi động (`RUN_SEED=true`), idempotent theo s
 # hubv (mặc định) — script tự tạo key cho cafe/bookstore qua console admin
 bash scripts/demo-multi-project.sh
 # stack local
-API=http://localhost:4000 SINK= ADMIN_PASSWORD=<mật khẩu> PG_CONTAINER=webhook-hub-postgres \
+API=http://localhost:4000 SINK= OPERATOR_EMAIL=admin@hub.local OPERATOR_PASSWORD=<mật khẩu> PG_CONTAINER=webhook-hub-postgres \
   bash scripts/demo-multi-project.sh
 ```
 

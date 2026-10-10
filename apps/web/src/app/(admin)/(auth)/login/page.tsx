@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <AuthShell title="ĐĂNG NHẬP" footerText="Chưa có tài khoản?" footerLinkLabel="Đăng ký" footerHref="/auth/register">
+    <AuthShell title="ĐĂNG NHẬP" footerText="Chưa có tài khoản?" footerLinkLabel="Đăng ký" footerHref="/register">
       <Suspense>
         <LoginForm />
       </Suspense>

@@ -25,9 +25,10 @@ COPY . .
 RUN npm run prisma:generate
 
 # Chỉ service `web` truyền giá trị (docker-compose build.args); các service khác để rỗng
+ARG HUB_API_INTERNAL_URL=""
 ARG NEXT_PUBLIC_DEMO_SIMULATE=""
 ARG NEXT_PUBLIC_DEMO_SEPAY_APIKEY=""
-ENV NEXT_PUBLIC_DEMO_SIMULATE=$NEXT_PUBLIC_DEMO_SIMULATE     NEXT_PUBLIC_DEMO_SEPAY_APIKEY=$NEXT_PUBLIC_DEMO_SEPAY_APIKEY
+ENV HUB_API_INTERNAL_URL=$HUB_API_INTERNAL_URL NEXT_PUBLIC_DEMO_SIMULATE=$NEXT_PUBLIC_DEMO_SIMULATE     NEXT_PUBLIC_DEMO_SEPAY_APIKEY=$NEXT_PUBLIC_DEMO_SEPAY_APIKEY
 # S1-6 (ADR-047): lớp chặn thứ hai sau .dockerignore — không bao giờ build/nạp dist cũ (BB09 P0-1).
 RUN rm -rf libs/*/dist apps/*/dist
 RUN npm run build

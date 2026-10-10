@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query, UseGuards, UseInterceptors } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { FlowProjectScopeGuard, FlowScope } from './flow-scope';
 import { RedactSecretsInterceptor } from '../api/redact-secrets.interceptor';
 import { ExecutionQuery, FlowService } from './flow.service';
@@ -11,7 +11,7 @@ import { ExecutionQuery, FlowService } from './flow.service';
  */
 @Controller('api/v1/flow')
 // X2: JWT trước, rồi ProjectScopeGuard (qua FlowProjectScopeGuard) đọc `?projectId=` — không controller nào tự đọc.
-@UseGuards(JwtAuthGuard, FlowProjectScopeGuard)
+@UseGuards(SessionGuard, FlowProjectScopeGuard)
 @UseInterceptors(RedactSecretsInterceptor)
 export class FlowController {
   constructor(private readonly flow: FlowService) {}

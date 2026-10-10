@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { LOG_REDACT_OPTIONS, scrubSecrets } from './auth/redact';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -6,20 +7,13 @@ export const logger = pino({
     level: (label) => ({ level: label }),
   },
   timestamp: pino.stdTimeFunctions.isoTime,
-  // ADR-051: lưới an toàn — hiện không log nào in headers, nhưng nếu sau này có ai log `headers`/`req`
-  // thì key SePay (Authorization: Apikey ...) và cookie vẫn không ra log.
-  redact: {
-    paths: [
-      'headers.authorization',
-      'headers.cookie',
-      'headers["x-api-key"]',
-      'headers["proxy-authorization"]',
-      'req.headers.authorization',
-      'req.headers.cookie',
-      'req.headers["x-api-key"]',
-      'req.headers["proxy-authorization"]',
-    ],
-    censor: '***',
+  // ADR-051 + SPEC-auth UA22: lưới an toàn — header nhạy cảm, khoá `password`/`token`… bị che theo TÊN KHOÁ;
+  // chuỗi thông điệp được quét thêm (`hk_live_…`, cookie phiên, Bearer) vì bí mật có thể nằm giữa câu.
+  redact: LOG_REDACT_OPTIONS,
+  hooks: {
+    logMethod(args, method) {
+      return method.apply(this, args.map((a) => (typeof a === 'string' ? scrubSecrets(a) : a)) as Parameters<typeof method>);
+    },
   },
 });
 

@@ -53,7 +53,7 @@ function grepLines(re: RegExp, opts: { skipComments?: boolean; transform?: (ln: 
 }
 
 /** Bảng nghiệp vụ / bảng có lối thoát có tên — mọi truy vấn ngoài libs/database/src phải đi qua repo (BB-5). */
-const MODELS = ['source', 'sourceSecret', 'rawEvent', 'event', 'destination', 'subscription', 'delivery', 'deliveryAttempt', 'outbox', 'processedMessage', 'auditLog'];
+const MODELS = ['source', 'sourceSecret', 'rawEvent', 'event', 'destination', 'subscription', 'delivery', 'deliveryAttempt', 'outbox', 'processedMessage', 'auditLog', 'user', 'projectMember', 'authSession', 'emailToken', 'authAudit'];
 
 const ONLY = '\\.on' + 'ly\\(';
 const SKIPS = ['it', 'test', 'describe'].map((k) => `\\b${k}\\.sk` + 'ip\\(').join('|');

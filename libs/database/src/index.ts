@@ -1,6 +1,7 @@
 export * from './prisma.service';
 export * from './tenant-scoped.repository';
 export * from './constants';
+export * from './identity.repository';
 
 import { getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';

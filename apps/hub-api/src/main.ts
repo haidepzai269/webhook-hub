@@ -3,6 +3,10 @@ import { AppModule } from './app.module';
 import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
 import { assertDatabaseLib } from '@hub/database';
 import { corsOptions } from './cors';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { authSecretProblems } from './modules/auth/auth-config';
 
 function assertMasterKeyConfigured(): void {
   const masterKey = process.env.MASTER_KEY;
@@ -15,19 +19,13 @@ function assertMasterKeyConfigured(): void {
   }
 }
 
-// Cùng pattern với assertMasterKeyConfigured() ở trên. JWT_SECRET ký JWT admin cho
-// toàn bộ /api/v1/* (JwtAuthGuard) — trước đây AuthModule có fallback hardcode
-// ('dev-jwt-insecure-fallback-do-not-use-in-prod') ngay trong source đã commit lên
-// git. Quên set JWT_SECRET khi deploy thật -> ai cũng đọc được secret công khai
-// trên GitHub, tự ký JWT admin hợp lệ, bypass toàn bộ JwtAuthGuard. Chặn ở đây,
-// trước app.listen(), để không có request thật nào lọt qua với secret rỗng/đoán được.
-function assertJwtSecretConfigured(): void {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret || jwtSecret.length < 32) {
-    logger.error(
-      'FATAL: JWT_SECRET thiếu hoặc quá ngắn (yêu cầu tối thiểu 32 ký tự) — không thể khởi động. ' +
-        'Không được dùng giá trị mẫu trong .env.example khi deploy thật.',
-    );
+// SPEC-auth §7: JWT_SECRET (access token), CSRF_SECRET, SOCKET_TICKET_SECRET, OAUTH_COOKIE_SECRET — mỗi cái ≥ 32
+// ký tự và KHÁC nhau. Thiếu -> process.exit(1) trước app.listen(): không request nào chạy với secret rỗng/đoán được
+// (trước đây từng có fallback hardcode trong source công khai).
+function assertAuthSecretsConfigured(): void {
+  const problems = authSecretProblems(process.env);
+  if (problems.length > 0) {
+    logger.error({ problems }, 'FATAL: bí mật đăng nhập chưa cấu hình đúng — không thể khởi động.');
     process.exit(1);
   }
 }
@@ -49,12 +47,19 @@ async function bootstrap() {
   // Chặn khởi động sớm nếu MASTER_KEY chưa được cấu hình đúng — tránh mã hoá
   // secret khách hàng bằng key mặc định công khai trên GitHub (xem libs/database/src/constants.ts).
   assertMasterKeyConfigured();
-  assertJwtSecretConfigured();
+  assertAuthSecretsConfigured();
 
   // BẮT BUỘC: rawBody: true để giữ nguyên byte buffer phục vụ xác thực chữ ký HMAC
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
+
+  // SPEC-auth §5.5: X-Forwarded-For CHỈ được tin khi đứng sau proxy thật (Render, Vercel) — TRUST_PROXY=1.
+  if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+  // SPEC-auth §5.4: header bảo mật. API chỉ trả JSON; CORP cross-origin để playground của web (khác origin)
+  // vẫn gọi /hooks/* được.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+  app.use(cookieParser());
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
   app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials

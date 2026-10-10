@@ -9,14 +9,12 @@ import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { HUB_API_URL } from "@/lib/env";
-import { getToken, setToken } from "@/lib/hub/token";
 
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
 
 const formSchema = z.object({
-  username: z.string().trim().min(1, { message: "Nhập tên đăng nhập." }),
+  email: z.string().trim().min(1, { message: "Nhập email." }).email({ message: "Email không hợp lệ." }),
   password: z.string().min(1, { message: "Nhập mật khẩu." }),
 });
 
@@ -28,12 +26,15 @@ export function LoginForm() {
   const [serverError, setServerError] = useState<string | null>(null);
   const form = useForm<LoginValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { username: "", password: "" },
+    defaultValues: { email: "", password: "" },
   });
 
-  // Đã có token (vào thẳng /auth/login) → về dashboard; token sai thì 401 đầu tiên sẽ đưa lại đây.
+  // Đã đăng nhập (cookie còn sống) → về dashboard. Không đọc token: cookie phiên là HttpOnly (SPEC-auth §4).
   useEffect(() => {
-    if (getToken() && !params.get("expired")) router.replace("/dashboard/flow");
+    if (params.get("expired")) return;
+    fetch("/auth/me", { credentials: "include" })
+      .then((r) => r.ok && router.replace("/dashboard/flow"))
+      .catch(() => undefined);
   }, [params, router]);
 
   useEffect(() => {
@@ -43,21 +44,22 @@ export function LoginForm() {
   const onSubmit = async (values: LoginValues) => {
     setServerError(null);
     try {
-      const res = await fetch(`${HUB_API_URL}/auth/login`, {
+      // Qua proxy của web (cookie first-party). Token KHÔNG nằm trong body — server đặt cookie HttpOnly.
+      const res = await fetch("/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),
       });
-      const data = (await res.json().catch(() => ({}))) as { accessToken?: string; message?: string };
+      const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+      if (res.status === 429) {
+        setServerError(`Thử quá nhiều lần. Đợi ${res.headers.get("Retry-After") ?? "vài"} giây rồi thử lại.`);
+        return;
+      }
       if (!res.ok) {
         setServerError(data.message ?? `Đăng nhập thất bại (HTTP ${res.status}).`);
         return;
       }
-      if (!data.accessToken) {
-        setServerError("Phản hồi đăng nhập không hợp lệ (thiếu accessToken).");
-        return;
-      }
-      setToken(data.accessToken);
       router.replace("/dashboard/flow");
     } catch (e) {
       setServerError(`Không kết nối được hub-api: ${e instanceof Error ? e.message : String(e)}`);
@@ -68,14 +70,15 @@ export function LoginForm() {
     <form noValidate onSubmit={form.handleSubmit(onSubmit)}>
       <Controller
         control={form.control}
-        name="username"
+        name="email"
         render={({ field, fieldState }) => (
           <AuthField
             {...field}
-            id="login-username"
-            label="TÊN ĐĂNG NHẬP"
-            placeholder="admin"
-            autoComplete="username"
+            id="login-email"
+            label="EMAIL"
+            type="email"
+            placeholder="ban@vi-du.com"
+            autoComplete="email"
             autoFocus
             error={fieldState.error?.message}
           />

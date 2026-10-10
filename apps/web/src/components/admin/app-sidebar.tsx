@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
-import { clearToken } from "@/lib/hub/token";
+import { logout as serverLogout } from "@/lib/hub/client";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { sidebarItems } from "./sidebar-items";
@@ -41,11 +41,10 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   // "/dashboard" chỉ active đúng trang đó; các mục con active theo prefix.
   const isActive = (url: string) => (url === "/dashboard" ? path === url : path.startsWith(url));
 
-  // Tải lại toàn trang tới /auth/login: cache query + socket mất sạch theo, và không còn query nào
-  // đang mount để bắn request 401 → tránh toast "phiên hết hạn" sau một lần đăng xuất chủ động.
+  // Thu hồi phiên ở server (SPEC-auth §5.3) rồi tải lại toàn trang tới /login: cache query + socket mất sạch theo,
+  // và không còn query nào đang mount để bắn request 401 → tránh toast "phiên hết hạn" sau khi chủ động đăng xuất.
   const logout = () => {
-    clearToken();
-    window.location.replace("/auth/login");
+    void serverLogout().finally(() => window.location.replace("/login"));
   };
 
   return (

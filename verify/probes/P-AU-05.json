@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-05",
+  "claim": "Session đã thu hồi thì access token còn hạn cũng 401 (thu hồi có hiệu lực ngay)",
+  "file": "libs/database/src/identity.repository.ts",
+  "find": "where: { id: sessionId, revokedAt: null, idleExpiresAt",
+  "replace": "where: { id: sessionId, idleExpiresAt",
+  "expectRed": [
+    "[AU:UA10]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/auth-session-db.spec.ts"
+}

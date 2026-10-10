@@ -6,7 +6,8 @@ import { randomUUID } from 'crypto';
 import { API_KEY_RE, apiKeyPrefix, generateApiKey, hashApiKey } from '@hub/common';
 import { DEFAULT_TENANT_ID, getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';
-import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, keyCreatedLogLine, seedTelegramActive } from './seed-env';
+import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, keyCreatedLogLine, operatorFromEnv, seedTelegramActive } from './seed-env';
+import { IdentityRepository } from './identity.repository';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -103,6 +104,23 @@ export async function ensureDefaultProject() {
     update: {},
     create: { id: DEFAULT_TENANT_ID, slug: 'default', name: 'Default', environment: 'test' },
   });
+}
+
+/**
+ * SPEC-auth §5.1 (AU1): operator từ env, đã xác minh email, là owner của project default. Idempotent: đã có thì
+ * KHÔNG ghi đè mật khẩu (operator có thể đã đổi qua API). Không đặt env -> bỏ qua (không có ai đăng nhập console).
+ */
+export async function ensureOperator(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  const op = operatorFromEnv(env);
+  if (!op) {
+    console.warn('OPERATOR_EMAIL / OPERATOR_PASSWORD_HASH chưa đặt -> không seed operator (console chưa ai đăng nhập được).');
+    return null;
+  }
+  const idn = new IdentityRepository(prisma);
+  const user = await idn.ensureOperator({ email: op.email, name: 'Operator', passwordHash: op.passwordHash });
+  await idn.ensureMembership(user.id, DEFAULT_TENANT_ID, 'owner');
+  console.log(`Operator: ${op.email[0]}***${op.email.slice(op.email.indexOf('@'))} (owner của project default)`);
+  return user.id;
 }
 
 /**
@@ -208,6 +226,7 @@ async function seed() {
   // S1 (ADR-038): project mặc định (= DEFAULT_TENANT_ID) TRƯỚC mọi bảng khác. Upsert: chạy lại vô hại
   // (migration 20261011000000 cũng chèn dòng này cho DB cũ).
   await ensureDefaultProject();
+  await ensureOperator();
   await ensureShopKey();
   await seedDefaultWorld();
   // MS-P2-2 (ADR-088): demo SAU thế giới default — và "đã seed" của default xét theo dữ liệu CỦA default, không toàn DB.
