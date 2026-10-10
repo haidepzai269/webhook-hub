@@ -936,3 +936,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** Redis chết thì kết quả vẫn đúng (BB-2) nhưng MỖI request ingest mất 8,6–18,3s: `RedisService` chỉ đặt `maxRetriesPerRequest: 1`, lệnh nằm trong offline queue chờ reconnect. GitHub/Stripe cắt ở ~10s → coi là lỗi → bão retry. Worker (circuit breaker, publish realtime, cleanup lock) có cùng cấu hình.
 **Chọn:** `fastFailRedisOptions()` (`libs/common/src/redis-options.ts`): `enableOfflineQueue:false` (chưa kết nối → lệnh lỗi ngay), `commandTimeout` = `REDIS_COMMAND_TIMEOUT_MS` (50–5000, mặc định 300), `connectTimeout` 2000, `maxRetriesPerRequest:0`, reconnect nền. Dùng cho `RedisService` (hub-api), circuit breaker, publisher realtime của normalize/delivery, cleanup. Giữ nguyên client SUBSCRIBE của Socket.IO (cần xếp hàng `subscribe`, không nằm trên đường request). Đo trên hubv với `stop redis`: `/v1/p/cafe/events` 17–44ms (202 rồi 200 duplicate), `/hooks/sepay` 21–22ms; DB đúng 1 raw + 1 event mỗi khoá; bật lại Redis → bình thường ngay.
 **Đánh đổi:** Redis chậm thật (>300ms) bị coi như chết cho lệnh đó (fail-open: rate limit mở, đường tắt idem bỏ qua — Postgres vẫn chặn trùng). Lúc khởi động trước khi Redis sẵn sàng, vài lệnh đầu fail-open.
+
+---
+
+## ADR-091 — SSRF chuyển sang ALLOWLIST "global unicast" (thay danh sách chặn) (MS-P2-4, 2026-10-11)
+
+**Vấn đề:** Danh sách chặn (ADR-083) vẫn lọt 192.0.0/24, 198.18/15, multicast 224/4, 255.255.255.255, NAT64 local-use `64:ff9b:1::/48`, 6to4 `2002::/16` (vd `2002:7f00:1::` nhúng 127.0.0.1), `::ffff:0:a.b.c.d`; ở development `[64:ff9b::a9fe:a9fe]` (link-local trong NAT64) đi qua. Blocklist thì luôn thiếu dải mới.
+**Chọn:** IPv4: chặn mọi dải đặc biệt IANA (0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24, 192.88.99/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, 224/4, 240/4) — còn lại là global unicast. IPv6: CHỈ cho `2000::/3`, trừ `2001::/23`, `2001:db8::/32`, `2002::/16`; `::ffff:a.b.c.d` kiểm như IPv4; mọi thứ khác (gồm NAT64 cả hai dải, `::ffff:0:a.b.c.d`, ULA, link-local, multicast) bị chặn. `isLinkLocalIp` (chạy cả ở development) mở IPv4 nhúng trong ánh xạ / NAT64 / 6to4. Không thêm thư viện (`ipaddr.js`): 30 dòng viết tay, có test từng dạng.
+**Đánh đổi:** Dải IPv6 global mới ngoài `2000::/3` (nếu IANA cấp) sẽ bị chặn tới khi sửa — chấp nhận, an toàn hơn lọt.

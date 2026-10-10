@@ -6,16 +6,24 @@ import * as https from 'https';
 
 const lookupAsync = promisify(dns.lookup);
 
+/**
+ * MS-P2-4 (ADR-091): ALLOWLIST — chỉ IPv4 "global unicast" đi ra được. Mọi dải đặc biệt của IANA bị chặn:
+ * 0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24, 192.88.99/24, 192.168/16,
+ * 198.18/15, 198.51.100/24, 203.0.113/24, 224/4 (multicast), 240/4 (dành riêng, gồm 255.255.255.255).
+ */
+const V4_BLOCKED: [number, number][] = [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
+  ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
+  ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
+].map(([ip, bits]) => [v4ToInt(ip as string), bits as number]);
+
+function v4ToInt(ip: string): number {
+  return ip.split('.').reduce((n, o) => (n * 256 + Number(o)) >>> 0, 0);
+}
+
 function isPrivateIpv4(ip: string): boolean {
-  const parts = ip.split('.').map(Number);
-  if (parts[0] === 0) return true; // 0.0.0.0/8
-  if (parts[0] === 10) return true; // 10.0.0.0/8
-  if (parts[0] === 127) return true; // 127.0.0.0/8
-  if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
-  if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
-  if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true; // 100.64.0.0/10 (CGNAT)
-  return false;
+  const n = v4ToInt(ip);
+  return V4_BLOCKED.some(([net, bits]) => (n >>> (32 - bits)) === (net >>> (32 - bits)));
 }
 
 /** IPv6 -> 8 hextet số (mở `::`, đổi đuôi a.b.c.d nhúng thành 2 hextet). Sai định dạng -> null. */
@@ -38,10 +46,22 @@ export function expandIpv6(ip: string): number[] | null {
   return all.map((h) => parseInt(h, 16));
 }
 
+const hx = (h: number[], i: number) => `${h[i] >> 8}.${h[i] & 255}.${h[i + 1] >> 8}.${h[i + 1] & 255}`;
+
+/** IPv4 nhúng trong IPv6: ánh xạ `::ffff:a.b.c.d`, NAT64 `64:ff9b::/96`, 6to4 `2002:AABB:CCDD::/48`. */
+function embeddedV4(h: number[]): string | null {
+  const zeros5 = h.slice(0, 5).every((x) => x === 0);
+  if (zeros5 && h[5] === 0xffff) return hx(h, 6);
+  if (h[0] === 0x64 && h[1] === 0xff9b && h.slice(2, 6).every((x) => x === 0)) return hx(h, 6);
+  if (h[0] === 0x2002) return hx(h, 1);
+  return null;
+}
+
 /**
- * Dải KHÔNG được gọi ra (ARCHITECTURE §7.3). MS-R1 (ADR-083): IPv6 được MỞ RA 8 hextet trước khi kiểm —
- * `::ffff:a.b.c.d` / `::ffff:7f00:1` (ánh xạ IPv4), `::a.b.c.d` (tương thích, cũ) -> kiểm như IPv4;
- * chặn `::`, `::1`, `64:ff9b::/96` (NAT64 — nhúng IPv4 bất kỳ), `fc00::/7`, `fe80::/10`. Không phân tích được -> chặn.
+ * Dải KHÔNG được gọi ra (ARCHITECTURE §7.3). MS-P2-4 (ADR-091) — ALLOWLIST: IPv6 chỉ cho `2000::/3` (global unicast)
+ * TRỪ `2001::/23` (Teredo, ORCHID…), `2001:db8::/32` (tài liệu) và `2002::/16` (6to4 — nhúng IPv4 bất kỳ); `::ffff:a.b.c.d`
+ * kiểm như IPv4. Mọi thứ khác (::, ::1, NAT64 64:ff9b::/96 và 64:ff9b:1::/48, ::ffff:0:a.b.c.d, fc00::/7, fe80::/10,
+ * ff00::/8, 100::/64…) bị chặn. Không phân tích được -> chặn.
  */
 export function isPrivateIp(ip: string): boolean {
   const raw = ip.replace(/^\[|\]$/g, '');
@@ -49,16 +69,9 @@ export function isPrivateIp(ip: string): boolean {
   if (!net.isIPv6(raw)) return true;
   const h = expandIpv6(raw);
   if (!h) return true;
-  const zeros5 = h.slice(0, 5).every((x) => x === 0);
-  const toV4 = (a: number, b: number) => `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`;
-  if (zeros5 && h[5] === 0xffff) return isPrivateIpv4(toV4(h[6], h[7])); // ::ffff:0:0/96
-  if (zeros5 && h[5] === 0) {
-    if (h[6] === 0 && h[7] <= 1) return true; // :: và ::1
-    return true; // ::a.b.c.d (IPv4-compatible, đã bỏ) -> không bao giờ là đích hợp lệ
-  }
-  if (h[0] === 0x64 && h[1] === 0xff9b && h.slice(2, 6).every((x) => x === 0)) return true; // 64:ff9b::/96
-  if ((h[0] & 0xfe00) === 0xfc00) return true; // fc00::/7
-  if ((h[0] & 0xffc0) === 0xfe80) return true; // fe80::/10
+  if (h.slice(0, 5).every((x) => x === 0) && h[5] === 0xffff) return isPrivateIpv4(hx(h, 6));
+  if ((h[0] & 0xe000) !== 0x2000) return true; // ngoài 2000::/3
+  if ((h[0] === 0x2001 && (h[1] < 0x0200 || h[1] === 0x0db8)) || h[0] === 0x2002) return true; // 2001::/23, 2001:db8::/32, 2002::/16
   return false;
 }
 
@@ -72,9 +85,8 @@ export function isLinkLocalIp(ip: string): boolean {
   const h = !v4 && net.isIPv6(raw) ? expandIpv6(raw) : null;
   if (h) {
     if ((h[0] & 0xffc0) === 0xfe80) return true;
-    if (h.slice(0, 5).every((x) => x === 0) && (h[5] === 0xffff || h[5] === 0)) {
-      v4 = `${h[6] >> 8}.${h[6] & 255}.${h[7] >> 8}.${h[7] & 255}`;
-    }
+    // MS-P2-4: cả link-local giấu trong ánh xạ / NAT64 / 6to4 (development vẫn cho dải private thường).
+    v4 = embeddedV4(h) ?? (h.slice(0, 6).every((x) => x === 0) ? hx(h, 6) : null);
   }
   if (!v4) return false;
   const [a, b] = v4.split('.').map(Number);

@@ -1,4 +1,4 @@
-import { isPrivateIp, validateAndPinUrl } from '../src/ssrf';
+import { isLinkLocalIp, isPrivateIp, validateAndPinUrl } from '../src/ssrf';
 
 /**
  * MS-R1 (review pha 1, ADR-083): IPv6 ánh xạ/nhúng IPv4 và địa chỉ đặc biệt phải bị chặn ở production. Trước đây
@@ -32,6 +32,22 @@ describe('SSRF Guard — IPv6 (MS-R1)', () => {
     await expect(validateAndPinUrl('http://[2606:4700:4700::1111]/')).resolves.toMatchObject({ pinnedIp: '2606:4700:4700::1111' });
     expect(isPrivateIp('::ffff:8.8.8.8')).toBe(false);
     expect(isPrivateIp('::ffff:808:808')).toBe(false);
-    expect(isPrivateIp('2001:db8::1')).toBe(false);
+    expect(isPrivateIp('2a00:1450:4001:80b::200e')).toBe(false);
+    expect(isPrivateIp('8.8.8.8')).toBe(false);
+  });
+
+  it.each([
+    '192.0.0.8', '192.0.2.1', '198.18.0.1', '198.19.255.255', '198.51.100.7', '203.0.113.9', '224.0.0.1', '239.255.255.250',
+    '240.0.0.1', '255.255.255.255', '192.88.99.1',
+    '64:ff9b:1::a00:1', '2002:7f00:1::', '2002:a9fe:a9fe::1', '2001:db8::1', '2001::1', 'ff02::1', '::ffff:0:7f00:1', '100::1',
+  ])('MS-P2-4: %s không phải global unicast -> chặn (allowlist)', (ip) => {
+    expect(isPrivateIp(ip)).toBe(true);
+  });
+
+  it('MS-P2-4: development vẫn chặn link-local giấu trong NAT64 / 6to4', () => {
+    expect(isLinkLocalIp('64:ff9b::a9fe:a9fe')).toBe(true);
+    expect(isLinkLocalIp('2002:a9fe:a9fe::')).toBe(true);
+    expect(isLinkLocalIp('64:ff9b::808:808')).toBe(false);
   });
 });
+
