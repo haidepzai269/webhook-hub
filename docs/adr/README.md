@@ -984,3 +984,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** ADR-088 đếm MỌI source của project default. `ensureShopKey()` chạy trước; nếu key `shop` (hoặc key nào khác của default) có `publish:events` thì sinh source `api_*` trong default → seed default bị bỏ qua, quay lại đúng lỗi MS-P2-2.
 **Chọn:** `SEED_DEFAULT_SOURCE_KEYS = ['src_github_main','src_payos_main','src_sepay_main']`; seed default chạy khi default chưa có source nào trong danh sách này. L1 `seed-fresh-db` thêm một source `api_preexisting` vào default trước khi seed và kiểm thế giới default vẫn đủ.
 **Đánh đổi:** Operator xoá/đổi sourceKey một source seed thì lần seed sau tạo lại các source seed còn thiếu? Không — chỉ chạy khi KHÔNG có source nào trong danh sách (giữ idempotent kiểu "cả cụm"), tránh nhân đôi đích/subscription.
+
+---
+
+## ADR-097 — Shop tự lành đăng ký với hub: thử lại vô hạn (backoff 10s → 60s) + `ensure` ngay khi webhook tới lúc chưa ghim (R2-1, review vòng 2, 2026-10-11)
+
+**Vấn đề:** Shop thử `ensure` 6 lần × 10s rồi bỏ cuộc; từ R-8 (ADR-094) chưa ghim thì trả 503 → hub chết lúc Shop khởi động > ~50s (Render free cold start 30–60s+) là Shop từ chối mọi khoản tiền vĩnh viễn tới khi có người restart.
+**Chọn:** `apps/shop/src/hub-registration.ts` (`HubRegistration`): `start()` thử lại KHÔNG giới hạn, backoff 10s/20s/40s/60s (trần 60s); `ensureNow()` single-flight. `/hub-webhook` (sau verify chữ ký và challenge) thấy chưa ghim → gọi `ensureNow()` ngay (hub đang gửi webhook nghĩa là hub đã sống), vẫn chưa ghim mới 503 (hub retry). Tái hiện hubv: dừng hub-api, restart Shop, 91s sau bật hub-api → khoản SePay tiếp theo làm đơn PAID sau ~6s, không restart Shop.
+**Đánh đổi:** Hub chết lâu thì Shop gọi hub mỗi 60s mãi (rẻ). Webhook đầu tiên sau khi hub sống chờ thêm một `ensure` (gồm challenge) — vài trăm ms.

@@ -7,6 +7,7 @@ import { createHubClient, challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
 import { applyPayment, EXPIRE_AFTER_MS, readPayment } from './payment';
+import { HubRegistration } from './hub-registration';
 
 const expressFactory = typeof express === 'function' ? express : (express as any).default || require('express');
 const app = expressFactory();
@@ -21,8 +22,6 @@ if (!SIGNING_SECRET) {
 // Shop là SERVICE dùng hub: connection string chứa API key `shop` (manage:endpoints, read:events).
 const hub = process.env.HUB_URL ? createHubClient(process.env.HUB_URL) : null;
 const PAYMENT_SOURCE_KEYS = (process.env.SHOP_PAYMENT_SOURCE_KEYS || 'src_payos_main,src_sepay_main').split(',').map((k) => k.trim()).filter(Boolean);
-/** sourceId của subscription đã ghim (từ ensure) — bằng chứng tiền đến từ ĐÚNG source của operator. */
-let trustedSourceIds: string[] = [];
 const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
 
@@ -128,8 +127,11 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
   // 4.3. Chỉ nhận kiểu chuẩn `payment.received` (VND); mã đơn DH\d+ trong data.memo rồi data.reference
   // R-1 (ADR-094): chỉ tin sourceId của subscription đã ghim. Chưa ghim xong (ensure chưa thành công) -> 503 để hub
   // retry sau, không xử lý tiền khi chưa biết nguồn nào tin được (R-8).
-  if (hub && trustedSourceIds.length === 0) return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
-  const p = readPayment(req.body, undefined, hub ? trustedSourceIds : undefined);
+  // R2-1: chưa ghim -> thử đăng ký NGAY (hub đang gửi webhook tức là hub đã sống), vẫn chưa được mới 503.
+  if (hub && registration.trustedSourceIds.length === 0 && !(await registration.ensureNow())) {
+    return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
+  }
+  const p = readPayment(req.body, undefined, hub ? registration.trustedSourceIds : undefined);
   if ('skip' in p || !eventId) {
     if ('skip' in p && p.skip === 'UNMATCHED') logger.warn({ eventId }, '[Shop] Không tìm thấy mã đơn DHxxx trong memo/reference');
     return res.status(200).json({ success: true, status: 'skip' in p ? p.skip : 'IGNORED' });
@@ -204,22 +206,17 @@ if (RECONCILE_INTERVAL_MS > 0) {
   setInterval(() => expireStaleOrders().catch((e) => logger.error({ err: e?.message }, '[Shop] Reconcile lỗi')), RECONCILE_INTERVAL_MS);
 }
 
-// S11 (§4.12): Shop TỰ đăng ký endpoint + subscription `payment.received` bằng SDK (seed không tạo nữa). Idempotent;
-// lỗi -> thử lại sau 10s, tối đa 6 lần. Shop vẫn phục vụ trong lúc chờ.
-async function registerWithHub(attempt = 1): Promise<void> {
-  if (!hub) return logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
-  try {
-    // MS-P2-1: chỉ nhận tiền từ ĐÚNG các source của operator (không phải mọi source tên "sepay"); tắt sub cũ không ghim.
-    const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys: PAYMENT_SOURCE_KEYS, exclusive: true });
-    trustedSourceIds = r.subscription.sourceIds ?? [];
-    logger.info({ endpointId: r.endpoint.id, created: r.created, hub, trustedSourceIds }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
-  } catch (e: any) {
-    logger.warn({ err: e?.message, code: e?.code, attempt }, '[Shop] Đăng ký endpoint với hub lỗi');
-    if (attempt < 6) setTimeout(() => void registerWithHub(attempt + 1), 10_000);
-  }
-}
+// S11 (§4.12): Shop TỰ đăng ký endpoint + subscription `payment.received` bằng SDK (seed không tạo nữa). Idempotent.
+// MS-P2-1: chỉ nhận tiền từ ĐÚNG các source của operator; tắt sub cũ không ghim. R2-1 (ADR-097): thử lại VÔ HẠN, backoff
+// 10s -> 60s (hub cold start), Shop vẫn phục vụ trong lúc chờ.
+const registration = new HubRegistration(async () => {
+  const r = await hub!.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys: PAYMENT_SOURCE_KEYS, exclusive: true });
+  logger.info({ endpointId: r.endpoint.id, created: r.created, hub, trustedSourceIds: r.subscription.sourceIds }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
+  return r.subscription.sourceIds ?? [];
+}, logger);
 
 app.listen(PORT, () => {
   logger.info(`🛒 Demo Shop API đang chạy trên cổng ${PORT} (trần ~300 dòng)`);
-  void registerWithHub();
+  if (hub) registration.start();
+  else logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
 });
