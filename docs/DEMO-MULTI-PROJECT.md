@@ -35,7 +35,7 @@ Script không bắn gì vào Telegram hay Discord: chỉ dùng source của `caf
 |---|---|---|---|
 | 1 | SePay mock bắn vào source của `cafe` | event `payment.received` thuộc `cafe`; endpoint `cafe` nhận 1 request, `bookstore` nhận **0** | Cô lập dữ liệu theo project (BB-5) |
 | 2 | Key `bookstore` gọi `GET /v1/p/cafe/events` và `/v1/p/khongtontai/events` | cả hai **404** `{"error":"not_found"}`, body giống hệt | Không lộ project nào tồn tại (ADR-073) |
-| 3 | Tắt endpoint `cafe`, bắn 3 giao dịch, rồi `GET /v1/p/cafe/events?status=failed&endpointId=…` | đúng 3 sự kiện bị lỡ | Polling (A) là lưới an toàn khi push hỏng (ADR-077) |
+| 3 | Key demo tự tạo endpoint + subscription của nó (poll `endpointId` chỉ nhận endpoint của chính key, ADR-094), tắt endpoint, bắn 3 giao dịch, rồi `GET /v1/p/cafe/events?status=failed&endpointId=…` | đúng 3 sự kiện bị lỡ | Polling (A) là lưới an toàn khi push hỏng (ADR-077) |
 | 4 | Tạo key tạm cho `cafe` rồi revoke | key tạm 401; `cafe-be` và `bookstore-be` vẫn 200 | Revoke chỉ ngắt đúng một service |
 | 5 | Thêm "AB Bank" bằng GenericAdapter; gửi sai tên header rồi sửa | lắng nghe: `missing_header`, chờ `x-signature`, thấy `x-sig` → sau khi sửa: `ok` | Thêm nguồn không cần code; chẩn đoán không lộ chữ ký (ADR-079/080) |
 | 6 | PayOS (bookstore), SePay (cafe), AB Bank có mapping (cafe), cùng 50.000đ | 3 dòng `payment.received`, cột khoá `data` **giống hệt nhau**, `normalized = t` | Vào nhiều kiểu, ra một kiểu (ADR-053) |

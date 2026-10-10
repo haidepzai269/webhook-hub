@@ -37,10 +37,9 @@ CSRF=$(printf '%s\n' "$COOKIE" | tr ';' '\n' | sed -n 's/^ *hub_csrf=//p')
 AUTH=(-H "Cookie: $COOKIE" -H "x-csrf-token: $CSRF")
 newkey() { # newkey <slug> -> key đủ 4 scope (đi kèm source api)
   local P; P=$(curl -s "$API/api/v1/projects" "${AUTH[@]}" | jget ".find(p=>p.slug===\"$1\").id")
-  curl -s -X POST "$API/api/v1/projects/$P/keys" "${AUTH[@]}" -H "$CT"     -d "{\"serviceName\":\"$1-demo-$RUN\",\"scopes\":[\"publish:events\",\"read:events\",\"manage:endpoints\",\"manage:sources\"]}" | jget .key
+  curl -s -X POST "$API/api/v1/projects/$P/keys" "${AUTH[@]}" -H "$CT" -d "{\"serviceName\":\"$1-demo-$RUN\",\"scopes\":[\"publish:events\",\"read:events\",\"manage:endpoints\",\"manage:sources\"]}" | jget .key
 }
 KA=${KA:-$(newkey cafe)}; KB=${KB:-$(newkey bookstore)}
-EP_CAFE=$(curl -s "$API/v1/p/cafe/endpoints" -H "Authorization: Bearer $KA" | jget '.find(e=>e.name==="cafe-endpoint").id')
 
 step "1. SePay vào source của cafe: cafe sáng lên, bookstore im lặng"
 [ -n "$SINK" ] && curl -s -X DELETE "$SINK/_requests" >/dev/null
@@ -57,12 +56,19 @@ curl -s -w ' → HTTP %{http_code}\n' "$API/v1/p/khongtontai/events?after=0" -H 
 
 step "3. endpoint của cafe chết -> lấy lại sự kiện bị lỡ bằng poll status=failed"
 if [ -n "$SINK" ]; then
+  # R-11 (review AU): poll status=failed&endpointId= chỉ nhận endpoint do CHÍNH key gọi tạo (ADR-094), mà KA mới tạo mỗi
+  # lần chạy -> KA tự tạo endpoint + subscription của mình (sink đang sống để qua challenge), rồi mới tắt sink.
+  EP_CAFE=$(curl -s -X POST "$API/v1/p/cafe/endpoints" -H "Authorization: Bearer $KA" -H "$CT" -d "{\"name\":\"cafe-demo-$RUN\",\"url\":\"http://sink:4100/cafe\"}" | jget .id)
+  SUB_CAFE=$(curl -s -X POST "$API/v1/p/cafe/subscriptions" -H "Authorization: Bearer $KA" -H "$CT" -d "{\"name\":\"cafe-demo-$RUN\",\"endpointId\":\"$EP_CAFE\",\"eventTypes\":[\"payment.received\"],\"sourceKeys\":[\"src_sepay_cafe\"]}" | jget .id)
+  echo "endpoint của key demo: $EP_CAFE · subscription: $SUB_CAFE"
   docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify stop sink >/dev/null 2>&1
   for i in 1 2 3; do sepay 3$i$RUN 1000$i "MISS $i" >/dev/null; done
   sleep 8
   curl -s "$API/v1/p/cafe/events?after=0&status=failed&endpointId=$EP_CAFE&limit=100" -H "Authorization: Bearer $KA" \
     | jexpr '"bị lỡ: "+o.events.length+" sự kiện ["+o.events.map(e=>e.data.amount).join(", ")+"]"'
   docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify start sink >/dev/null 2>&1
+  # Tắt subscription demo để lần chạy sau không cộng dồn delivery.
+  curl -s -o /dev/null -w "tắt subscription demo -> %{http_code}\n" -X PATCH "$API/v1/p/cafe/subscriptions/$SUB_CAFE" -H "Authorization: Bearer $KA" -H "$CT" -d '{"isActive":false}'
 else
   echo "(bỏ qua trên stack dev: cần tắt được endpoint)"
 fi
