@@ -16,6 +16,7 @@ import { ServiceApiController } from './modules/service-api/service-api.controll
 import { ServiceResourcesController } from './modules/service-api/service-resources.controller';
 import { ApiKeyGuard } from './modules/service-api/api-key.guard';
 import { EndpointVerifier } from './modules/service-api/endpoint-verifier';
+import { FlowModule } from './modules/flow/flow.module';
 
 /**
  * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
@@ -32,6 +33,7 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
     // Cấp JwtModule/JwtAuthGuard cho ApiController bên dưới. `/hooks/*` (ingest) và
     // `/health` KHÔNG được bảo vệ — provider webhook thật và health-check phải public.
     AuthModule,
+    FlowModule, // SPEC-event-flow-ui: /api/v1/flow/* chỉ đọc (module riêng, không sửa ApiController)
   ],
   controllers: hubApiControllers(),
   providers: [
