@@ -22,6 +22,7 @@ import type {
   TimeseriesBucket,
   TimeseriesRange,
 } from "./types";
+import { withProject } from "./flow-project";
 import { keysAfterAudited } from "./ui-logic";
 
 // Event Flow (SPEC-event-flow-ui): query ở file riêng để giảm xung đột merge, vẫn xuất qua queries.ts.
@@ -96,12 +97,23 @@ export function useDlq() {
   return useQuery({ queryKey: hubKeys.dlq, queryFn: () => hubFetch<Delivery[]>("/api/v1/dlq") });
 }
 
-export function useSources() {
-  return useQuery({ queryKey: hubKeys.sources, queryFn: () => hubFetch<Source[]>("/api/v1/sources") });
+/**
+ * `projectId` (tuỳ chọn, R-4): gửi `?projectId=` — server đọc ở ProjectScopeGuard (X2). Không truyền = project
+ * của JWT (default), như mọi trang cấu hình hiện có. Key vẫn bắt đầu bằng "sources"/"destinations" nên
+ * invalidate theo prefix sau mutation vẫn đúng.
+ */
+export function useSources(projectId: string | null = null) {
+  return useQuery({
+    queryKey: [...hubKeys.sources, projectId],
+    queryFn: () => hubFetch<Source[]>(withProject("/api/v1/sources", projectId)),
+  });
 }
 
-export function useDestinations() {
-  return useQuery({ queryKey: hubKeys.destinations, queryFn: () => hubFetch<Destination[]>("/api/v1/destinations") });
+export function useDestinations(projectId: string | null = null) {
+  return useQuery({
+    queryKey: [...hubKeys.destinations, projectId],
+    queryFn: () => hubFetch<Destination[]>(withProject("/api/v1/destinations", projectId)),
+  });
 }
 
 export function useSubscriptions() {
