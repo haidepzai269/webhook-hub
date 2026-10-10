@@ -2,6 +2,14 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { logger } from '@hub/common';
 
+/**
+ * INCR + EXPIRE (chỉ ở lần đầu của cửa sổ) trong MỘT lệnh EVAL (S3-5): Upstash tính EVAL là 1 lệnh;
+ * và không bao giờ để lại khoá không TTL nếu tiến trình chết giữa INCR và EXPIRE.
+ */
+export const LUA_RATE_LIMIT = `local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n`;
+
 @Injectable()
 export class RedisService implements OnModuleDestroy {
   public readonly client: Redis;
@@ -43,15 +51,13 @@ export class RedisService implements OnModuleDestroy {
   }
 
   /**
-   * Rate limit bằng Redis token bucket / sliding window
-   * Fail-open nếu Redis chết (theo ARCHITECTURE.md §3.1)
+   * Rate limit cửa sổ CỐ ĐỊNH `windowSeconds` (không phải token bucket): đếm request trong cửa sổ,
+   * vượt `limit` thì chặn. Lệch tối đa 2× ở mép cửa sổ — chấp nhận được cho mục đích chống spam.
+   * MỘT lệnh Redis (EVAL). Fail-open nếu Redis chết (ARCHITECTURE.md §3.1, BB-2: Redis được phép sai).
    */
   async checkRateLimit(key: string, limit: number, windowSeconds = 60): Promise<boolean> {
     try {
-      const current = await this.client.incr(key);
-      if (current === 1) {
-        await this.client.expire(key, windowSeconds);
-      }
+      const current = Number(await this.client.eval(LUA_RATE_LIMIT, 1, key, windowSeconds));
       return current <= limit;
     } catch (error) {
       logger.warn({ err: error }, 'Redis rate-limit fail-open: Cho phép request qua do Redis không phản hồi');

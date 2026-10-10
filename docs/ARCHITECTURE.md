@@ -535,7 +535,7 @@ event.received · event.normalized · delivery.updated
 order.updated  · metrics.tick (5s) · circuit.changed
 ```
 
-> ⚠️ `metrics.tick` là **5 giây** và đếm **trong bộ nhớ** `hub-api`, **không** chạm Redis mỗi tick. Ở 2 giây và mỗi tick một lệnh Redis, hệ thống tiêu ~43.000 lệnh Upstash/ngày **chỉ để đứng yên**. Xem `DEPLOYMENT.md` §5.2 — ngân sách ≤ 4 lệnh Redis/sự kiện.
+> ⚠️ `metrics.tick` là **5 giây** và đếm **trong bộ nhớ** `hub-api`, **không** chạm Redis mỗi tick. Ở 2 giây và mỗi tick một lệnh Redis, hệ thống tiêu ~43.000 lệnh Upstash/ngày **chỉ để đứng yên**. Xem `DEPLOYMENT.md` §5.2 — ngân sách ≤ 4 lệnh Redis cố định/sự kiện + ≤ 2/delivery (ADR-062).
 
 Kênh realtime đi qua interface **`RealtimeNotifier`** (ADR-021), mặc định `RedisNotifier`, dự phòng `RabbitFanoutNotifier`.
 

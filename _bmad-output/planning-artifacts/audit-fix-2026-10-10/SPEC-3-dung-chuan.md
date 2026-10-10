@@ -249,3 +249,8 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
   - Nhãn outcome thêm `NOT_FOUND`/`TOO_LARGE`/`INVALID` cho request không tới được bước verify; `provider` lạ gom về `unknown`.
   - Phát hiện khi đo: ở bậc 100 RPS outbox lag lên ~21s (relay 50 dòng/500ms, một transaction, publish tuần tự có confirm) — chưa tối ưu trong đợt này.
   - Image Prometheus/Grafana ghim đúng phiên bản đang chạy local (đã `docker tag` từ `:latest`, không pull lại).
+- **S3-5 (2026-10-10):**
+  - Test đặt ở `apps/hub-api/test/redis-budget.spec.ts` nhưng chạy cả class của hub-worker (import tương đối) — một chỗ đếm cả đường.
+  - Chỉ cần sửa rate limit ingest (INCR+EXPIRE → 1 EVAL); circuit MGET/0 lệnh khi `failures=0`, throttle 1 EVAL, realtime gộp đã có từ đợt 9/10 (S2-1, S2-2, ADR-054).
+  - Quota Upstash ghi theo số kiểm 10/10 (500K lệnh/tháng), không phải "10k/ngày" như SPEC-3: ≈ 2.700 sự kiện/ngày (1 đích), ≈ 2.000 (2 đích).
+  - Đích có `rateLimitRps` tốn thêm 1 EVAL/delivery (3 thay vì 2) — vượt "≤ 2/delivery" của R1 khi bật throttle; ghi trong DEPLOYMENT §5.2, không đổi.

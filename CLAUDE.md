@@ -56,7 +56,7 @@ NestJS monorepo (`apps/hub-api` · `apps/hub-worker` · `apps/shop` · `apps/web
 Ràng buộc deployed phải nhớ khi code:
 - `SHUTDOWN_TIMEOUT_MS=25000` — **25s, không phải 30s** (Render SIGKILL sau ~30s)
 - `metrics.tick` **5s**, đếm trong bộ nhớ, **không** chạm Redis mỗi tick (quota Upstash)
-- Ngân sách **≤ 4 lệnh Redis / sự kiện**
+- Ngân sách Redis **≤ 4 lệnh cố định / sự kiện (ingest + normalize) + ≤ 2 lệnh / delivery** (R1, ADR-062) — đếm bằng `apps/hub-api/test/redis-budget.spec.ts`; thêm lệnh vào đường nóng là test đỏ
 - Prisma cần **hai** connection string: `DATABASE_URL` (pooled) + `DIRECT_URL` (migrate)
 - Nghe biến `PORT` của Render, không hardcode
 - **Một AMQP connection / tiến trình, nhiều channel** (giới hạn connection CloudAMQP)

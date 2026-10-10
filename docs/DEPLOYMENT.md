@@ -163,9 +163,22 @@ Dùng endpoint **`rediss://`** (giao thức Redis over TLS), **không dùng REST
 new Redis(process.env.REDIS_URL, { enableAutoPipelining: true, maxRetriesPerRequest: 3 })
 ```
 
-### 5.2. ⚠️ Ngân sách lệnh: mục tiêu **≤ 4 lệnh / sự kiện**
+### 5.2. ⚠️ Ngân sách lệnh: **≤ 4 lệnh cố định / sự kiện + ≤ 2 lệnh / delivery** (R1, ADR-062)
 
-Free tier tính theo **số lệnh**. Thiết kế hiện tại tiêu 5–8 lệnh/sự kiện, **cộng thêm phần tệ nhất**:
+**Số thật (đếm bằng test `apps/hub-api/test/redis-budget.spec.ts`, S3-5, 10/10):**
+
+| Chặng | Lệnh | Số |
+|---|---|---|
+| ingest | `EVAL` rate limit (INCR+EXPIRE trong Lua) · `GET` idem · `SET NX` idem (sau COMMIT) | 3 |
+| normalize | `PUBLISH hub:realtime:events` (một lần cho mỗi raw event) | 1 |
+| mỗi delivery | `MGET` circuit · `PUBLISH hub:realtime:deliveries` (thành công khi `failures=0`: 0 lệnh circuit) | 2 |
+| **Tổng** | 1 đích = **6**, 2 đích = **8** | |
+
+Ngoài đường nóng: đích có `rateLimitRps` thêm 1 `EVAL`/delivery; delivery lỗi thêm `EVAL` INCR circuit; gửi trùng (GET idem trúng) chỉ 2 lệnh. Cố ý **giữ** `GET` idem trước transaction (không làm R2): request trùng trả lời từ Redis, khỏi mở transaction và chịu P2002 + rollback.
+
+**Quota Upstash free (kiểm 10/10/2026 trên upstash.com/pricing/redis): 500.000 lệnh/tháng** (≈ 16.600/ngày) → ≈ **2.700 sự kiện/ngày** với 1 đích (÷6), ≈ 2.000 với 2 đích (÷8) — chưa trừ lệnh nền (pub/sub adapter, health). Đủ cho demo; tải thật phải lên pay-as-you-go.
+
+*Lịch sử (trước S3-5):* thiết kế cũ tiêu 5–8 lệnh/sự kiện, **cộng thêm phần tệ nhất**:
 
 > `metrics.tick` mỗi **2 giây** = **~43.000 lệnh/ngày chỉ để hệ thống đứng yên không làm gì.**
 
@@ -176,7 +189,7 @@ Free tier tính theo **số lệnh**. Thiết kế hiện tại tiêu 5–8 lệ
 | `metrics.tick` → **5 giây**, đếm **trong bộ nhớ** `hub-api` | Không chạm Redis mỗi tick. Chỉ đọc Redis khi cần số liệu tổng hợp liên-instance |
 | Gộp lệnh | `enableAutoPipelining: true` |
 | Cache cấu hình source/destination | TTL 60s trong bộ nhớ tiến trình **trước** khi hỏi Redis |
-| Đếm và ghi lại | Viết một test đếm số lệnh Redis cho **một** webhook. Đưa số đó vào báo cáo |
+| Đếm và ghi lại | ✅ `redis-budget.spec.ts` (Proxy đếm lệnh trên mọi client ioredis của api + worker) |
 
 ### 5.3. Pub/Sub — thiết kế phòng hờ (ADR-021)
 
