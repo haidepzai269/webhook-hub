@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-21",
+  "claim": "Không tự liên kết GitHub vào tài khoản có email CHƯA xác minh (chặn chiếm tài khoản)",
+  "file": "apps/hub-api/src/modules/auth/github-oauth.service.ts",
+  "find": "if (!byEmail.emailVerifiedAt) return { redirect: this.web('/login?error=email_exists_unverified') };",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA24]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/github-oauth-db.spec.ts"
+}

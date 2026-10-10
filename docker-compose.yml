@@ -148,6 +148,10 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - MAIL_FROM=${MAIL_FROM:-}
       - MAIL_CAPTURE_DIR=${MAIL_CAPTURE_DIR:-}
+      # AU5 (SPEC-auth §5.10): GitHub OAuth App — KHÁC GITHUB_WEBHOOK_SECRET. Callback: ${WEB_PUBLIC_URL}/auth/github/callback
+      - GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID:-}
+      - GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET:-}
+      - GITHUB_OAUTH_BASE_URL=${GITHUB_OAUTH_BASE_URL:-}
       - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
       - NODE_ENV=development
       # S2 (SPEC §4.3A): host trong connection string `hub://<key>@<host>/<project>` trả về khi tạo key

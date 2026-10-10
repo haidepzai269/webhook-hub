@@ -54,8 +54,25 @@ export class IdentityRepository {
     return this.db.user.findUnique({ where: { id } });
   }
 
-  createUser(data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt?: Date | null; isOperator?: boolean }) {
+  createUser(data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt?: Date | null; isOperator?: boolean; githubId?: string | null }) {
     return this.db.user.create({ data });
+  }
+
+  // ---------------------------------------------------------------- GitHub (SPEC-auth §5.10, AU5) — githubId = id SỐ, không login
+
+  findUserByGithubId(githubId: string) {
+    return this.db.user.findUnique({ where: { githubId } });
+  }
+
+  /** Chỉ liên kết khi user CHƯA có githubId (không đè liên kết cũ). 1 = đã liên kết. */
+  async linkGithub(userId: string, githubId: string): Promise<number> {
+    const r = await this.db.user.updateMany({ where: { id: userId, githubId: null }, data: { githubId } });
+    return r.count;
+  }
+
+  async unlinkGithub(userId: string): Promise<number> {
+    const r = await this.db.user.updateMany({ where: { id: userId, githubId: { not: null } }, data: { githubId: null } });
+    return r.count;
   }
 
   /**

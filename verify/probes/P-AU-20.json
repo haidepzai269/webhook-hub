@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-20",
+  "claim": "state OAuth phải khớp cookie ký (chống CSRF đăng nhập)",
+  "file": "apps/hub-api/src/modules/auth/github-oauth.service.ts",
+  "find": "if (!sealed || !state || !safeEqual(state, sealed.state)) {",
+  "replace": "if (false) {",
+  "expectRed": [
+    "[AU:UA23]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/github-oauth-db.spec.ts"
+}

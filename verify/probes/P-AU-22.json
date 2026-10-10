@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-22",
+  "claim": "Liên kết GitHub để lại audit github.linked + mail báo chủ tài khoản",
+  "file": "apps/hub-api/src/modules/auth/github-oauth.service.ts",
+  "find": "await idn.recordAuthAudit({ userId: byEmail.id, action: 'github.linked', ip: ctx.ip, meta: { githubId: profile.id } });",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA25]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/github-oauth-db.spec.ts"
+}

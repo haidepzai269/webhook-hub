@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T19:30:38.610Z, commit eb2ac37).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T19:36:38.112Z, commit 3c426e3).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 213 mã khai báo · 133 mã có test · 0 mồ côi · 11 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 213 mã khai báo · 136 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -57,6 +57,7 @@ Tổng: 213 mã khai báo · 133 mã có test · 0 mồ côi · 11 mồ côi có
 | `AU:TA8` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:233 | chưa chạy |
 | `AU:TA9` | SPEC-auth.md · AU4 | L2* | verify/scenarios/auth-e2e.ts:291 | chưa chạy |
 | `AU:TA10` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:212 | chưa chạy |
+| `AU:TA11` | SPEC-auth.md · AU5 | — | — | mồ côi có lý do: Thủ công, cần GitHub OAuth App thật (DINH-CHINH-AUTH §4 #9: TA11 để sau); fake-github là VF4. Logic phủ bằng github-oauth-db.spec (UA23-UA25, PKCE, operator, unlink) với fetch giả |
 | `AU:TA14` | SPEC-auth.md · AU3 | — | — | mồ côi có lý do: Trình duyệt thật (Chrome + Firefox ở http://localhost:3000): F5 vẫn đăng nhập, document.cookie không thấy __Host-hub_at/rt — phiên TEST làm tay (SPEC-auth §10.2); phía server đã có TA1/TA5/TA6 tự động |
 | `AU:TA15` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:278 | chưa chạy |
 | `AU:UA1` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:40 | ✅ pass |
@@ -81,6 +82,9 @@ Tổng: 213 mã khai báo · 133 mã có test · 0 mồ côi · 11 mồ côi có
 | `AU:UA20` | SPEC-auth.md · AU3 | L0 | apps/hub-api/test/auth-scope.spec.ts:87 | ✅ pass |
 | `AU:UA21` | SPEC-auth.md · AU3 | L0 | apps/hub-api/test/auth-scope.spec.ts:75 | ✅ pass |
 | `AU:UA22` | SPEC-auth.md · AU1 | L0 | libs/common/test/auth-common.spec.ts:73 | ✅ pass |
+| `AU:UA23` | SPEC-auth.md · AU5 | L1 | apps/hub-api/test/github-oauth-db.spec.ts:92 | ✅ pass |
+| `AU:UA24` | SPEC-auth.md · AU5 | L1 | apps/hub-api/test/github-oauth-db.spec.ts:142 | ✅ pass |
+| `AU:UA25` | SPEC-auth.md · AU5 | L1 | apps/hub-api/test/github-oauth-db.spec.ts:151 | ✅ pass |
 | `AU:UA26` | SPEC-auth.md · AU4 | L1 | apps/hub-api/test/members-db.spec.ts:71 | ✅ pass |
 | `AU:UA27` | SPEC-auth.md · AU4 | L1 | apps/hub-api/test/members-db.spec.ts:81 | ✅ pass |
 | `AU:UA28` | SPEC-auth.md · AU3 | L1 | apps/hub-api/test/console-projects-db.spec.ts:81 | ✅ pass |
@@ -153,6 +157,6 @@ Tổng: 213 mã khai báo · 133 mã có test · 0 mồ côi · 11 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (103 file, 592 khai báo it/test)
+## File test (104 file, 602 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

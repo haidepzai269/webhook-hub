@@ -1,30 +1,18 @@
 "use client";
 
-import { toast } from "sonner";
-
 import styles from "./auth.module.css";
 
-const PROVIDERS = [
-  { key: "G", name: "Google" },
-  { key: "F", name: "Facebook" },
-  { key: "X", name: "X" },
-] as const;
-
-// hub-api chỉ có đăng nhập bằng tài khoản admin; nút giữ lại cho đúng bố cục mẫu.
+/**
+ * AU5 (SPEC-auth §5.10, §9): đăng nhập bằng GitHub. Điều hướng TOÀN TRANG tới `/auth/github` (qua proxy của web):
+ * hub-api đặt cookie state/PKCE rồi chuyển sang GitHub; GitHub gọi lại `/auth/github/callback` (cũng qua proxy) nên
+ * mọi cookie là first-party của domain web. Google/Facebook/X: ngoài phạm vi (spec §1) — đã bỏ nút giả.
+ */
 export function SocialLogin() {
   return (
     <div className={styles.socialLogin}>
-      {PROVIDERS.map(({ key, name }) => (
-        <button
-          key={key}
-          type="button"
-          className={styles.socialBtn}
-          aria-label={`Đăng nhập bằng ${name}`}
-          onClick={() => toast.info(`Đăng nhập bằng ${name} chưa được hỗ trợ.`)}
-        >
-          {key}
-        </button>
-      ))}
+      <a className={styles.socialBtn} href="/auth/github" aria-label="Đăng nhập bằng GitHub" title="Đăng nhập bằng GitHub">
+        GH
+      </a>
     </div>
   );
 }

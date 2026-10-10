@@ -18,5 +18,10 @@ export function testOnlyConfigProblems(env: Record<string, string | undefined>):
   if ((env.MAIL_DRIVER ?? '').trim().toLowerCase() === 'capture') {
     problems.push('MAIL_DRIVER=capture chỉ dành cho stack kiểm chứng');
   }
+  // SPEC-verification §4.2 / AU5: fake-github chỉ ở stack kiểm chứng; production phải là GitHub thật.
+  const gh = (env.GITHUB_OAUTH_BASE_URL ?? '').trim().replace(/\/$/, '');
+  if (gh && gh !== 'https://github.com') {
+    problems.push('GITHUB_OAUTH_BASE_URL phải là https://github.com ở production (fake-github chỉ dành cho kiểm chứng)');
+  }
   return problems;
 }

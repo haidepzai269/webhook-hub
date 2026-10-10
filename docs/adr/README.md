@@ -1097,3 +1097,24 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Driver capture ghi file tạm rồi `rename` (TA9 từng đọc phải JSON ghi dở).
 
 **Đánh đổi:** Bị xoá khỏi project không thu hồi phiên (spec §5.3); request kế tiếp vào project đó là 404. Không có trang web `/invite` và trang Thành viên (phiên UI); API đã đủ.
+
+## ADR-107 — AU5: GitHub OAuth (state + PKCE trong cookie ký HMAC), ghép tài khoản chỉ khi email đã xác minh, fake-github bị chặn ở production (2026-10-11)
+
+**Vấn đề:** Đăng nhập GitHub mở hai đường chiếm tài khoản: kẻ tấn công đăng ký trước email của nạn nhân (chưa xác minh) rồi chờ nạn nhân đăng nhập GitHub; hoặc CSRF đăng nhập (đẩy code của kẻ tấn công vào trình duyệt nạn nhân). Test không gọi được GitHub thật; fake-github là VF4.
+**Chọn:**
+- `GithubOAuthService`. `GET /auth/github` sinh state 32 byte + PKCE verifier 32 byte, lưu trong cookie `__Host-hub_oauth` (HttpOnly, Secure, Lax, 10 phút, ký HMAC bằng `OAUTH_COOKIE_SECRET`), scope chỉ `read:user user:email`, `code_challenge_method=S256`.
+- Callback:
+  - cookie bị xoá ngay;
+  - state so bằng `timingSafeEqual`; sai / cookie bị sửa / thiếu → 400 `oauth_state_mismatch`, không gọi GitHub;
+  - đổi code kèm `code_verifier`; lấy email primary + verified, không có thì `/login?error=github_email_unverified`.
+- Ghép tài khoản:
+  - theo `githubId` (id SỐ) → đăng nhập;
+  - email trùng user đã xác minh → liên kết (chỉ khi chưa có githubId) + `auth_audit github.linked` + mail báo;
+  - email trùng user CHƯA xác minh → không liên kết (`/login?error=email_exists_unverified`);
+  - operator → từ chối;
+  - người mới → user đã xác minh, không mật khẩu, project đầu tiên, về `/onboarding`.
+- Không lưu access token của GitHub. `POST /auth/github/unlink` khi chưa có mật khẩu → 409 `last_login_method`.
+- `GITHUB_OAUTH_BASE_URL` cho fake-github; production khác `https://github.com` thì app thoát (`testOnlyConfigProblems`). Test dùng fetch giả (DINH-CHINH-AUTH §4 #9).
+- Web: nút GH ở trang đăng nhập điều hướng toàn trang tới `/auth/github` (qua proxy); bỏ ba nút Google/Facebook/X giả.
+
+**Đánh đổi:** TA11 (GitHub thật) là mồ côi có lý do — cần Admin tạo OAuth App. `/onboarding` trên web chưa có (phiên UI), nên người mới đăng nhập GitHub tạm thấy 404 cho tới khi có trang. Chưa đặt client id/secret thì `/auth/github` trả 503 `github_oauth_disabled`.

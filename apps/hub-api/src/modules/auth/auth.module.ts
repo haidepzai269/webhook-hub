@@ -5,6 +5,9 @@ import { AuthService } from './auth.service';
 import { SessionGuard } from './session.guard';
 import { SocketTicketService } from './socket-ticket.service';
 import { MembersService } from './members.service';
+import { GITHUB_OAUTH, GithubOAuthService, loadGithubConfig } from './github-oauth.service';
+import { PrismaService } from '@hub/database';
+import { MAIL_SENDER as MAIL } from '@hub/common';
 import { AUTH_CONFIG, loadAuthConfig } from './auth-config';
 import { AuthRateLimiter } from './rate-limit';
 import { RedisService } from '../redis/redis.service';
@@ -26,6 +29,13 @@ import { createMailSender, MAIL_SENDER } from '@hub/common';
     SessionGuard,
     SocketTicketService,
     MembersService,
+    // AU5 (§5.10): GitHub OAuth App (khác secret webhook GitHub). Chưa đặt client id/secret -> /auth/github trả 503.
+    { provide: GITHUB_OAUTH, useFactory: () => loadGithubConfig() },
+    {
+      provide: GithubOAuthService,
+      inject: [AuthService, PrismaService, AUTH_CONFIG, GITHUB_OAUTH, MAIL],
+      useFactory: (auth: AuthService, prisma: PrismaService, cfg: any, gh: any, mail: any) => new GithubOAuthService(auth, prisma, cfg, gh, mail),
+    },
   ],
   exports: [JwtModule, AUTH_CONFIG, SessionGuard, AuthService, MembersService],
 })

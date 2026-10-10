@@ -619,7 +619,7 @@ csrf() { grep hub_csrf $J | awk '{print $7}'; }
 
 ## 12. Checklist phiên DEV
 
-- [x] AU1 · [x] AU2 · [x] AU3 · [x] AU4 · [ ] AU5 · [ ] AU6
+- [x] AU1 · [x] AU2 · [x] AU3 · [x] AU4 · [x] AU5 · [ ] AU6
 - [ ] ADR cho mọi chỗ spec không nói (số tiếp theo còn trống)
 - [ ] `.env.example`, `docs/DEPLOYMENT.md`, `docker-compose.yml`, ARCHITECTURE §7.4 và §9 đã cập nhật
 - [ ] §8.1 DoD xanh hết

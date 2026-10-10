@@ -105,9 +105,9 @@ export class AuthService {
     return { body: await this.body(created.userId), session };
   }
 
-  /** User + project đầu tiên + membership owner + audit trong MỘT transaction; trùng slug -> thêm hậu tố, thử lại. */
-  private async createUserWithFirstProject(
-    data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt: Date | null },
+  /** User + project đầu tiên + membership owner + audit trong MỘT transaction; trùng slug -> thêm hậu tố, thử lại. Dùng chung với GitHub OAuth. */
+  async createUserWithFirstProject(
+    data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt: Date | null; githubId?: string | null },
     ctx: ReqCtx,
   ): Promise<{ userId: string; projectId: string }> {
     for (let attempt = 0; attempt < 3; attempt++) {
