@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-16",
+  "claim": "Không bao giờ hạ quyền owner cuối cùng (project mồ côi)",
+  "file": "apps/hub-api/src/modules/auth/members.service.ts",
+  "find": "if (current === 'owner' && role !== 'owner' && owners.length <= 1) {",
+  "replace": "if (false) {",
+  "expectRed": [
+    "[AU:UA18]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/members-db.spec.ts"
+}

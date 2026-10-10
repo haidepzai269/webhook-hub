@@ -7,6 +7,7 @@ import { REQUIRE_SCOPE_KEY, NO_PROJECT_SCOPE_KEY } from '../src/modules/service-
 import { ApiController } from '../src/modules/api/api.controller';
 import { ProjectsController } from '../src/modules/console/projects.controller';
 import { FlowController } from '../src/modules/flow/flow.controller';
+import { MembersController } from '../src/modules/console/members.controller';
 
 /** SPEC-auth §2.2, §5.6, §6.1 (AU3): role = bó scope; mọi route /api/v1/* khai scope; thứ tự 401 → 404 → 403. */
 const P = '391110c1-3a81-480a-93ab-e11de0be107a';
@@ -84,9 +85,9 @@ describe('ProjectScopeGuard — membership + scope', () => {
 });
 
 describe('[AU:UA20] quét metadata: MỌI route /api/v1/* khai @RequireScope (hoặc @NoProjectScope có lý do)', () => {
-  it('ApiController, ProjectsController, FlowController', () => {
+  it('ApiController, ProjectsController, FlowController, MembersController', () => {
     const missing: string[] = [];
-    for (const C of [ApiController, ProjectsController, FlowController] as any[]) {
+    for (const C of [ApiController, ProjectsController, FlowController, MembersController] as any[]) {
       const base = Reflect.getMetadata(PATH_METADATA, C);
       for (const name of Object.getOwnPropertyNames(C.prototype)) {
         const fn = C.prototype[name];

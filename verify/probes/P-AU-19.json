@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-19",
+  "claim": "API key không bao giờ được scope của người (manage:keys…) — chặn leo thang",
+  "file": "apps/hub-api/src/modules/console/projects.controller.ts",
+  "find": "  if (notGrantable.length > 0) {",
+  "replace": "  if (false) {",
+  "expectRed": [
+    "[AU:UA19]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/members-db.spec.ts"
+}

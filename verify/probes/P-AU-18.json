@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-18",
+  "claim": "Nhận lời mời bằng link trong mail = chứng minh sở hữu email -> emailVerifiedAt",
+  "file": "apps/hub-api/src/modules/auth/members.service.ts",
+  "find": "      await t.setEmailVerified(me.id, now);",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA27]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/members-db.spec.ts"
+}

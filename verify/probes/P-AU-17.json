@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-17",
+  "claim": "Không cướp được lời mời của email khác",
+  "file": "apps/hub-api/src/modules/auth/members.service.ts",
+  "find": "if (normalizeEmail(me.email) !== normalizeEmail(peek.email)) {",
+  "replace": "if (false) {",
+  "expectRed": [
+    "[AU:UA26]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/members-db.spec.ts"
+}

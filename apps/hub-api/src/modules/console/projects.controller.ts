@@ -24,6 +24,7 @@ import {
   generateApiKey,
   hashApiKey,
   isApiScope,
+  isScope,
   isValidEventPattern,
 } from '@hub/common';
 import { SessionGuard } from '../auth/session.guard';
@@ -59,6 +60,16 @@ export function parseCreateKey(body: any): CreateKeyInput {
   if (!serviceName || serviceName.length > 128) invalid('serviceName', 'serviceName là chuỗi 1–128 ký tự');
   if (!Array.isArray(body?.scopes) || body.scopes.length === 0) {
     invalid('scopes', `Key phải có ít nhất một scope (${API_SCOPES.join(', ')})`);
+  }
+  // SPEC-auth §2.2 / UA19: scope của NGƯỜI (manage:keys, manage:members, manage:project, read:project,
+  // replay:deliveries) không bao giờ cấp cho máy — máy không tự đúc key / tự thêm người (chặn leo thang đặc quyền).
+  const notGrantable = body.scopes.filter((s: unknown) => isScope(s) && !isApiScope(s));
+  if (notGrantable.length > 0) {
+    throw new UnprocessableEntityException({
+      error: 'scope_not_grantable',
+      field: 'scopes',
+      message: `Scope chỉ dành cho người, không cấp cho API key: ${notGrantable.join(', ')}`,
+    });
   }
   const bad = body.scopes.filter((s: unknown) => !isApiScope(s));
   if (bad.length > 0) invalid('scopes', `Scope không hợp lệ: ${bad.slice(0, 5).map((s: unknown) => JSON.stringify(s)).join(', ')}`);

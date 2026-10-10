@@ -20,6 +20,7 @@ import { Request, Response } from 'express';
 import { AuthService, ReqCtx } from './auth.service';
 import { SessionGuard } from './session.guard';
 import { SocketTicketService } from './socket-ticket.service';
+import { MembersService } from './members.service';
 import { clearSessionCookies, CSRF_COOKIE, CSRF_HEADER, readCookie, readHeader, REFRESH_COOKIE, setSessionCookies } from './cookies';
 import { TooManyAttempts } from './auth-errors';
 import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
@@ -52,7 +53,16 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly tickets: SocketTicketService,
+    private readonly members: MembersService,
   ) {}
+
+  /** AU4 (§5.11): nhận lời mời — email đăng nhập phải trùng email được mời (403 invite_email_mismatch). */
+  @Post('invitations/accept')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionGuard)
+  acceptInvitation(@Req() req: RequestWithPrincipal, @Body() body: any) {
+    return this.members.acceptInvitation(user(req), body ?? {}, reqCtx(req));
+  }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)

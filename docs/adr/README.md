@@ -1082,3 +1082,18 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Sửa bug AU1 (bắt bởi TA8): gateway khai `prisma?: Pick<PrismaService,…>` nên Nest không inject được (metadata là `Object`) và mọi socket thật bị từ chối. Đã có test DI hồi quy.
 
 **Đánh đổi:** Operator ghi một dòng audit cho MỖI request vào project người khác (nhiều dòng nếu xem lâu), chấp nhận vì operator ngày thường không dùng. Ẩn nút theo role trên web chưa làm (phiên UI). TA14 (trình duyệt thật) là mồ côi có lý do — phiên TEST làm tay.
+
+## ADR-106 — AU4: lời mời qua email, thành viên, khoá owner bằng FOR UPDATE, API key không bao giờ có scope của người (2026-10-11)
+
+**Vấn đề:** Hai owner cùng hạ quyền nhau đồng thời có thể để project không còn owner. Bấm link mời bằng tài khoản khác không được làm mất lời mời. Viewer phải tự rời được project dù không có `manage:members`. Spec chỉ nói `manage:keys` trả 422, chưa phân biệt với scope gõ sai.
+**Chọn:**
+- `MembersService` (AuthModule) + `MembersController` `/api/v1/projects/:projectId/{members,invitations}` qua `ProjectScopeGuard`; `POST /auth/invitations/accept`.
+- Mời: cần email đã xác minh; mời/gán role owner chỉ owner (operator không là thành viên = owner); đã là thành viên → 409 `already_member`; mời lại cùng email vào cùng project thì vô hiệu lời mời cũ của project đó; token 7 ngày, mail gửi sau COMMIT.
+- Accept: peek token (không đốt) để so email; khác email → 403 `invite_email_mismatch`, token còn nguyên. Đúng email thì đốt token + membership + đặt `emailVerifiedAt` trong một transaction.
+- Đổi role / xoá: khoá MỌI dòng owner của project (`SELECT … FOR UPDATE`) rồi mới kiểm `last_owner`.
+- `DELETE …/members/:userId` khai scope `read:project`: tự rời thì mọi thành viên đều được; xoá người khác kiểm `manage:members` trong service.
+- Audit `member.invited/joined/role_changed/removed`, `invitation.revoked`.
+- Tạo API key xin scope của người (`manage:keys/members/project`, `read:project`, `replay:deliveries`) → 422 `scope_not_grantable`; scope không tồn tại → 422 `validation_failed`.
+- Driver capture ghi file tạm rồi `rename` (TA9 từng đọc phải JSON ghi dở).
+
+**Đánh đổi:** Bị xoá khỏi project không thu hồi phiên (spec §5.3); request kế tiếp vào project đó là 404. Không có trang web `/invite` và trang Thành viên (phiên UI); API đã đủ.

@@ -107,6 +107,68 @@ export class IdentityRepository {
     return m?.role ?? null;
   }
 
+  // ---------------------------------------------------------------- thành viên + lời mời (SPEC-auth §5.11, AU4)
+
+  /** Danh sách thành viên kèm email/tên — KHÔNG bao giờ trả hash mật khẩu hay githubId. */
+  async listMembers(projectId: string) {
+    const rows = await this.db.projectMember.findMany({
+      where: { tenantId: projectId },
+      include: { user: { select: { id: true, email: true, name: true, emailVerifiedAt: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((r) => ({ userId: r.user.id, email: r.user.email, name: r.user.name, emailVerified: !!r.user.emailVerifiedAt, role: r.role, createdAt: r.createdAt }));
+  }
+
+  /**
+   * CHỈ gọi trong transaction: khoá MỌI dòng owner của project (`FOR UPDATE`) để hai thao tác đồng thời (hai owner
+   * cùng hạ quyền nhau) không cùng thấy "còn owner khác" rồi để project mồ côi.
+   */
+  async lockOwners(projectId: string): Promise<string[]> {
+    const rows = await this.db.$queryRaw<{ userId: string }[]>`
+      SELECT user_id AS "userId" FROM "hub"."project_members"
+      WHERE tenant_id = ${projectId}::uuid AND role = 'owner'::"hub"."MemberRole" FOR UPDATE`;
+    return rows.map((r) => r.userId);
+  }
+
+  async updateMemberRole(projectId: string, userId: string, role: MemberRole): Promise<number> {
+    const r = await this.db.projectMember.updateMany({ where: { tenantId: projectId, userId }, data: { role } });
+    return r.count;
+  }
+
+  async removeMember(projectId: string, userId: string): Promise<number> {
+    const r = await this.db.projectMember.deleteMany({ where: { tenantId: projectId, userId } });
+    return r.count;
+  }
+
+  /** Lời mời còn chờ (chưa dùng, chưa hết hạn) của MỘT project. Không trả token/hash. */
+  listPendingInvites(projectId: string, at: Date) {
+    return this.db.emailToken.findMany({
+      where: { tenantId: projectId, purpose: 'invite', usedAt: null, expiresAt: { gt: at } },
+      select: { id: true, email: true, role: true, invitedBy: true, expiresAt: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Mời lại cùng email vào CÙNG project: lời mời cũ chưa dùng bị vô hiệu (không đụng lời mời project khác). */
+  async invalidateProjectInvites(projectId: string, email: string, at: Date): Promise<number> {
+    const r = await this.db.emailToken.updateMany({ where: { tenantId: projectId, email, purpose: 'invite', usedAt: null }, data: { usedAt: at } });
+    return r.count;
+  }
+
+  /** Thu hồi một lời mời CỦA project này (0 = không có / của project khác / đã dùng -> 404). */
+  async revokeInvite(projectId: string, inviteId: string, at: Date): Promise<number> {
+    const r = await this.db.emailToken.updateMany({ where: { id: inviteId, tenantId: projectId, purpose: 'invite', usedAt: null }, data: { usedAt: at } });
+    return r.count;
+  }
+
+  /** Lời mời còn hiệu lực theo hash token — KHÔNG đốt (để kiểm email trước khi tiêu token, UA26). */
+  peekInvite(tokenHash: string, at: Date) {
+    return this.db.emailToken.findFirst({
+      where: { tokenHash, purpose: 'invite', usedAt: null, expiresAt: { gt: at } },
+      select: { id: true, email: true, tenantId: true, role: true },
+    });
+  }
+
   // ---------------------------------------------------------------- sessions (SPEC-auth §5.3)
 
   createSession(data: {

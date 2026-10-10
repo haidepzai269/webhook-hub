@@ -5,6 +5,7 @@
  * chặn lẫn nhau (giới hạn theo IP chung một máy). Không đụng stack dev.
  *
  * AU1: TA1 (phần đăng ký → key → event), TA3, TA4, TA5, TA6, TA7. AU3: TA8, TA15 (+ phần email_not_verified của TA2).
+ * AU4: TA9.
  * AU2: TA2, TA10 — mail đọc từ file JSON của
  * MAIL_DRIVER=capture (verify/.mail, mount vào hub-api của hubv), KHÔNG grep log (SPEC-verification §4.2).
  */
@@ -30,8 +31,13 @@ async function mailLink(to: string, re: RegExp): Promise<string> {
   for (let i = 0; i < 40; i++) {
     const files = fs.existsSync(MAIL_DIR) ? fs.readdirSync(MAIL_DIR).filter((f) => f.endsWith('.json')).sort().reverse() : [];
     for (const f of files) {
-      const m = JSON.parse(fs.readFileSync(path.join(MAIL_DIR, f), 'utf8'));
-      const hit = m.to === to ? re.exec(m.text) : null;
+      let m: { to?: string; text?: string };
+      try {
+        m = JSON.parse(fs.readFileSync(path.join(MAIL_DIR, f), 'utf8'));
+      } catch {
+        continue; // file đang ghi dở (driver cũ) — vòng sau đọc lại
+      }
+      const hit = m.to === to ? re.exec(m.text ?? '') : null;
       if (hit) return hit[0];
     }
     await sleep(250);
@@ -280,6 +286,33 @@ async function main() {
     expect(ev.status === 200, `operator xem events project A → ${ev.status} ${ev.text}`);
     const audit = await A.s.get(`/api/v1/audit-logs?projectId=${pa.projectId}`);
     expect(audit.status === 200 && audit.text.includes('operator.access'), `audit của A không có operator.access: ${audit.text.slice(0, 300)}`);
+  });
+
+  await run.scenario('[AU:TA9] role: A mời B viewer (link trong thư) → B accept; B xem events 200, tạo đích 403 missing_scope, mời người 403; A nâng B developer → B tạo đích 201; A rời khi là owner duy nhất → 409 last_owner', async () => {
+    await flushRateLimits();
+    const A = await registered('ta9a');
+    const B = await registered('ta9b');
+    const pa = A.body.memberships[0];
+    // A phải xác minh email mới mời được người (§5.6)
+    const vlink = await mailLink(A.email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
+    expect((await new HttpSession(API).post('/auth/verify-email', { token: tokenOf(vlink) })).status === 200, 'A verify');
+    const inv = await A.s.post(`/api/v1/projects/${pa.projectId}/invitations`, { email: B.email, role: 'viewer' });
+    expect(inv.status === 201, `invite → ${inv.status} ${inv.text}`);
+    const ilink = await mailLink(B.email, /https?:\/\/\S+\/invite\?token=[A-Za-z0-9_-]+/);
+    const acc = await B.s.post('/auth/invitations/accept', { token: tokenOf(ilink) });
+    expect(acc.status === 200 && acc.body?.membership?.role === 'viewer', `accept → ${acc.status} ${acc.text}`);
+    expect((await B.s.get(`/api/v1/events?projectId=${pa.projectId}`)).status === 200, 'B (viewer) xem events');
+    const dest = { name: `ta9-${RUN}`, type: 'webhook', config: { url: 'http://sink:4100/ta9' } };
+    const d1 = await B.s.post(`/api/v1/destinations?projectId=${pa.projectId}`, dest);
+    expect(d1.status === 403 && d1.body?.error === 'missing_scope' && d1.body?.required === 'manage:endpoints', `viewer tạo đích → ${d1.status} ${d1.text}`);
+    const i2 = await B.s.post(`/api/v1/projects/${pa.projectId}/invitations`, { email: `x-${RUN}@e2e.test`, role: 'viewer' });
+    expect(i2.status === 403, `viewer mời người → ${i2.status} ${i2.text}`);
+    const up = await A.s.req('PATCH', `/api/v1/projects/${pa.projectId}/members/${B.body.user.id}`, { body: { role: 'developer' } });
+    expect(up.status === 204, `nâng role → ${up.status} ${up.text}`);
+    const d2 = await B.s.post(`/api/v1/destinations?projectId=${pa.projectId}`, dest);
+    expect(d2.status === 201, `developer tạo đích → ${d2.status} ${d2.text}`);
+    const leave = await A.s.req('DELETE', `/api/v1/projects/${pa.projectId}/members/${A.body.user.id}`);
+    expect(leave.status === 409 && leave.body?.error === 'last_owner', `owner duy nhất rời → ${leave.status} ${leave.text}`);
   });
 
   await redis.quit();

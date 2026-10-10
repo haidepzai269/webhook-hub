@@ -39,7 +39,9 @@ export function createMailSender(env: Record<string, string | undefined> = proce
       async send(m) {
         await fs.promises.mkdir(dir, { recursive: true });
         const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.json`);
-        await fs.promises.writeFile(file, JSON.stringify({ ...m, at: new Date().toISOString() }, null, 2));
+        // Ghi NGUYÊN TỬ (file tạm + rename): runner e2e đọc thư mục song song không bao giờ thấy JSON ghi dở.
+        await fs.promises.writeFile(`${file}.tmp`, JSON.stringify({ ...m, at: new Date().toISOString() }, null, 2));
+        await fs.promises.rename(`${file}.tmp`, file);
       },
     };
   }

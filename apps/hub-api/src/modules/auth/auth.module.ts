@@ -4,6 +4,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SessionGuard } from './session.guard';
 import { SocketTicketService } from './socket-ticket.service';
+import { MembersService } from './members.service';
 import { AUTH_CONFIG, loadAuthConfig } from './auth-config';
 import { AuthRateLimiter } from './rate-limit';
 import { RedisService } from '../redis/redis.service';
@@ -24,7 +25,8 @@ import { createMailSender, MAIL_SENDER } from '@hub/common';
     AuthService,
     SessionGuard,
     SocketTicketService,
+    MembersService,
   ],
-  exports: [JwtModule, AUTH_CONFIG, SessionGuard, AuthService],
+  exports: [JwtModule, AUTH_CONFIG, SessionGuard, AuthService, MembersService],
 })
 export class AuthModule {}
