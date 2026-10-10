@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
+import { bodyHashKey } from '@hub/crypto';
 
 /**
  * `stripe.webhooks.constructEvent()` chỉ tính HMAC-SHA256 cục bộ trên rawBody +
@@ -38,7 +39,14 @@ export class StripeAdapter implements ProviderAdapter {
     // Stripe Event.id (evt_...) ổn định giữa các lần Stripe gửi lại — chính là
     // idempotency key khuyến nghị bởi tài liệu Stripe.
     const eventId = req.body?.id;
-    return eventId ? `stripe:${eventId}` : `stripe:no-id:${req.headers['stripe-signature']}`;
+    // Dự phòng = hash body (S3-1). KHÔNG dùng header chữ ký: nó chứa timestamp, lần gửi lại khác.
+    return eventId ? `stripe:${eventId}` : `stripe:no-id:${bodyHashKey(req.rawBody)}`;
+  }
+
+  extractSignature(req: RawWebhookRequest): string | null {
+    const v = req.headers['stripe-signature'];
+    const s = Array.isArray(v) ? v[0] : v;
+    return s ? String(s) : null;
   }
 
   normalize(

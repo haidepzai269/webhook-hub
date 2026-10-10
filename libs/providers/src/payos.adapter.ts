@@ -2,48 +2,58 @@ import { PayOS } from '@payos/node';
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
 import { ulid } from 'ulidx';
+import { bodyHashKey, timingSafeCompare } from '@hub/crypto';
+
+/**
+ * Chỉ dùng phần `crypto` của SDK (tính chữ ký cục bộ, không gọi API). Constructor đòi
+ * clientId/apiKey non-empty nên điền giá trị giả; checksumKey truyền theo từng lần gọi.
+ */
+const payosCrypto = new PayOS({
+  clientId: 'placeholder_signature_only',
+  apiKey: 'placeholder_signature_only',
+  checksumKey: 'placeholder_signature_only',
+}).crypto;
 
 export class PayosAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'payos';
 
   /**
-   * Dùng SDK chính chủ PayOS (`@payos/node`) thay vì tự sort+nối key=value&...
-   * bằng tay: cách PayOS ký (canonicalize data trước khi HMAC) không đơn giản
-   * như HMAC-trên-raw-bytes của GitHub/Stripe — dễ sai với key null/số/thứ tự
-   * sort — nên để chính PayOS xử lý phần canonicalization thay vì tự đoán lại.
+   * S3-1: chữ ký TÍNH bằng SDK chính chủ (`crypto.createSignatureFromObj` — sort key, bỏ null,
+   * nối `k=v&...` rồi HMAC-SHA256), nhưng phép SO SÁNH là của ta (`timingSafeCompare` ->
+   * `crypto.timingSafeEqual`). Không dùng `payos.webhooks.verify()` vì SDK so bằng `!==`
+   * (`webhook.js:53`) — rò thời gian (CLAUDE.md: mọi so sánh chữ ký dùng timingSafeEqual).
    */
   async verify(req: RawWebhookRequest, secrets: string[]): Promise<boolean> {
     const body = req.body;
-    if (!body || !body.data || !body.signature) {
+    if (!body || typeof body.data !== 'object' || body.data === null || typeof body.signature !== 'string') {
       return false;
     }
 
+    let matched = false;
     for (const checksumKey of secrets) {
+      let expected: string | null = null;
       try {
-        // Constructor `PayOS` đòi `clientId`/`apiKey` non-empty dù `webhooks.verify()`
-        // KHÔNG bao giờ gọi API (chỉ tính HMAC cục bộ bằng checksumKey) — 2 giá trị
-        // dưới đây không bao giờ dùng thật, chỉ để thoả điều kiện constructor.
-        const payos = new PayOS({
-          clientId: 'placeholder_webhook_verify_only',
-          apiKey: 'placeholder_webhook_verify_only',
-          checksumKey,
-        });
-        await payos.webhooks.verify(body);
-        return true;
+        expected = await payosCrypto.createSignatureFromObj(body.data, checksumKey);
       } catch {
-        // Sai checksumKey (thử secret kế tiếp, hỗ trợ xoay secret) hoặc chữ ký
-        // không hợp lệ (WebhookError) -> coi như không khớp.
-        continue;
+        expected = null;
       }
+      // Không `return` sớm: thử đủ mọi secret (xoay secret) với cùng một kiểu so sánh.
+      if (expected && timingSafeCompare(expected, body.signature)) matched = true;
     }
-    return false;
+    return matched;
   }
 
   extractIdempotencyKey(req: RawWebhookRequest): string {
     const data = req.body?.data || {};
     const orderCode = data.orderCode || 'unknown';
-    const reference = data.reference || data.paymentLinkId || ulid();
+    // Dự phòng = hash body (S3-1): PayOS gửi lại thì body y hệt -> khoá y hệt. Không bao giờ ngẫu nhiên.
+    const reference = data.reference || data.paymentLinkId || bodyHashKey(req.rawBody);
     return `payos:${orderCode}:${reference}`;
+  }
+
+  extractSignature(req: RawWebhookRequest): string | null {
+    const sig = req.body?.signature;
+    return typeof sig === 'string' && sig ? sig : null;
   }
 
   normalize(

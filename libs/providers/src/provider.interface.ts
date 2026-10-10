@@ -16,6 +16,14 @@ export interface ProviderAdapter {
   extractIdempotencyKey(req: RawWebhookRequest): string;
 
   /**
+   * Chữ ký (hoặc bằng chứng xác thực) để lưu vào `raw_events.signature_header` (S3-1).
+   * Mỗi adapter tự biết chữ ký của mình nằm ở đâu — lõi ingest không đoán header.
+   * Nếu bằng chứng là một bí mật dùng chung (API key) thì PHẢI che, không trả key thật.
+   * Không có -> null.
+   */
+  extractSignature(req: RawWebhookRequest): string | null;
+
+  /**
    * Chuyển đổi payload gốc thành mảng sự kiện chuẩn hóa (NormalizedEvent).
    */
   normalize(

@@ -1,35 +1,47 @@
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
-import { timingSafeCompare } from '@hub/crypto';
+import { bodyHashKey, timingSafeCompare } from '@hub/crypto';
+
+function headerValue(req: RawWebhookRequest, name: string): string | undefined {
+  const v = req.headers[name] ?? req.headers[name.charAt(0).toUpperCase() + name.slice(1)];
+  return Array.isArray(v) ? v[0] : v;
+}
 import { ulid } from 'ulidx';
 
 export class SepayAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'sepay';
 
+  /**
+   * SePay KHÔNG ký nội dung; đây là API key dùng chung, gửi trong header
+   * `Authorization: Apikey <key>` (S3-1). Bắt buộc đúng dạng: chữ `Apikey` không phân biệt
+   * hoa thường, nhưng thiếu tiền tố -> false. So key bằng `timingSafeCompare`.
+   */
   async verify(req: RawWebhookRequest, secrets: string[]): Promise<boolean> {
-    const authHeader = (req.headers['authorization'] || req.headers['Authorization']) as string;
-    if (!authHeader) {
-      return false;
-    }
+    const authHeader = headerValue(req, 'authorization');
+    if (!authHeader) return false;
 
-    // Format: "Apikey <KEY>" hoặc "apikey <KEY>"
-    const parts = authHeader.split(' ');
-    let providedKey = authHeader;
-    if (parts.length === 2 && parts[0].toLowerCase() === 'apikey') {
-      providedKey = parts[1];
-    }
+    const m = /^apikey[ ]+(\S+)\s*$/i.exec(authHeader);
+    if (!m) return false;
+    const providedKey = m[1];
 
+    let matched = false;
     for (const secret of secrets) {
-      if (timingSafeCompare(secret, providedKey)) {
-        return true;
-      }
+      if (timingSafeCompare(secret, providedKey)) matched = true;
     }
-    return false;
+    return matched;
   }
 
   extractIdempotencyKey(req: RawWebhookRequest): string {
-    const id = req.body?.id || req.body?.referenceCode || ulid();
+    // Dự phòng = hash body (S3-1): không bao giờ ngẫu nhiên, SePay gửi lại vẫn ra cùng khoá.
+    const id = req.body?.id || req.body?.referenceCode || bodyHashKey(req.rawBody);
     return `sepay:${id}`;
+  }
+
+  /** Bằng chứng là API key dùng chung -> chỉ lưu scheme, KHÔNG BAO GIỜ lưu key (ADR-051). */
+  extractSignature(req: RawWebhookRequest): string | null {
+    const authHeader = headerValue(req, 'authorization');
+    if (!authHeader) return null;
+    return /^apikey /i.test(authHeader) ? 'Apikey ***' : '***';
   }
 
   normalize(

@@ -1,3 +1,5 @@
+> ⚠️ **10/10 tối:** SPEC-3 được gộp vào đợt hub-multi-service. Xem `../hub-multi-service/DINH-CHINH-2026-10-10.md` §4 — **S3-2 bị thay bằng S14** (một đầu ra duy nhất); S3-3 gộp vào S5.
+
 # SPEC-3 — Đúng chuẩn
 
 > Đợt 3/3. Cần SPEC-1 và SPEC-2 đã xong.
@@ -222,3 +224,10 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
 ## Lệch khi làm
 
 *(phiên dev ghi vào đây)*
+
+- **S3-1 (2026-10-10):**
+  - ADR ghi là **ADR-058** (không phải 057): phiên song song đã ghi ADR-057 (xác thực) trong lúc làm.
+  - `signature_header` lưu chuỗi trần (`sha256=…`, `Apikey ***`), không còn `JSON.stringify` như trước; dòng cũ giữ nguyên định dạng cũ (không migrate — cột chỉ để điều tra).
+  - Khoá dự phòng hash body áp cho cả GitHub (thay `ulid()`) và Stripe (thay `stripe-signature` — header có timestamp nên lần gửi lại khác khoá).
+  - SePay `extractSignature` trả `***` (không phải `Apikey ***`) khi header không có tiền tố, để không bao giờ lưu key.
+  - Bỏ hàm `signatureHeaderFor` (`redact-headers.ts`) vì lõi không còn đoán header.

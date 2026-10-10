@@ -40,8 +40,3 @@ export function redactHeaders<T extends Record<string, unknown>>(headers: T): T 
   }
   return out as T;
 }
-
-/** Giá trị cột `signature_header` — PHẢI gọi trên headers ĐÃ che. */
-export function signatureHeaderFor(redacted: Record<string, unknown>): string {
-  return JSON.stringify(redacted['x-hub-signature-256'] || redacted['authorization'] || '');
-}

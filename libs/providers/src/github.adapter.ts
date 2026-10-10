@@ -2,6 +2,7 @@ import { verifyWithFallback } from '@octokit/webhooks-methods';
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
 import { ulid } from 'ulidx';
+import { bodyHashKey } from '@hub/crypto';
 
 export class GithubAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'github';
@@ -41,7 +42,14 @@ export class GithubAdapter implements ProviderAdapter {
     if (commitId) {
       return `github:${commitId}`;
     }
-    return `github:${ulid()}`;
+    // S3-1: không bao giờ ngẫu nhiên — GitHub gửi lại thì body y hệt -> cùng khoá.
+    return `github:${bodyHashKey(req.rawBody)}`;
+  }
+
+  extractSignature(req: RawWebhookRequest): string | null {
+    const v = req.headers['x-hub-signature-256'] || req.headers['X-Hub-Signature-256'];
+    const s = Array.isArray(v) ? v[0] : v;
+    return s ? String(s) : null;
   }
 
   normalize(

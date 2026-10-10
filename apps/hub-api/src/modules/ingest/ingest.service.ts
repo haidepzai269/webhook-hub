@@ -14,7 +14,7 @@ import {
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
-import { redactHeaders, signatureHeaderFor } from './redact-headers';
+import { redactHeaders } from './redact-headers';
 
 /**
  * S2-2 (ADR-049): chặng ①–④ (nhận, verify, COMMIT, ACK) chạy trong hub-api -> phát `trace.ingested`
@@ -103,7 +103,7 @@ export class IngestService {
     }
     trace.tenantId = source.tenantId;
 
-    // 2b. Rate limit token bucket theo source
+    // 2b. Rate limit theo source (cửa sổ cố định 60s, INCR+EXPIRE)
     const rateLimitKey = `rate:source:${source.id}`;
     const allowed = await this.redis.checkRateLimit(rateLimitKey, 100, 60); // 100 req/phút
     if (!allowed) {
@@ -128,6 +128,9 @@ export class IngestService {
     // ADR-051: verify đã xong -> từ đây chỉ lưu bản headers ĐÃ che (Authorization/Cookie/X-API-Key...).
     // `req.headers` gốc vẫn còn cho adapter (extractIdempotencyKey/buildAck); bodyRaw giữ nguyên bytes.
     const storedHeaders = redactHeaders(req.headers as Record<string, unknown>);
+    // S3-1: adapter tự biết chữ ký của mình ở đâu (header GitHub/Stripe, body PayOS, SePay đã che).
+    // Lõi không đoán header -> thêm provider không phải sửa dòng này.
+    const signatureHeader = adapter.extractSignature(req);
     if (!isSignatureValid) {
       log.warn('Chữ ký webhook không hợp lệ! Lưu raw_event với status REJECTED');
       // Lưu MẪU request lỗi để điều tra (§7.1) — có giới hạn (S1-4): tối đa 4KB body và
@@ -145,7 +148,7 @@ export class IngestService {
               body: sample.body as any,
               bodyRaw: new Uint8Array(sample.bodyRaw),
               contentType: req.contentType,
-              signatureHeader: signatureHeaderFor(storedHeaders),
+              signatureHeader,
               signatureValid: false,
               status: 'REJECTED',
               origin: 'webhook',
@@ -190,7 +193,7 @@ export class IngestService {
             body: typeof req.body === 'object' && req.body !== null ? req.body : {},
             bodyRaw: new Uint8Array(req.rawBody),
             contentType: req.contentType,
-            signatureHeader: signatureHeaderFor(storedHeaders),
+            signatureHeader,
             signatureValid: true,
             status: 'ACCEPTED',
             origin: 'webhook',

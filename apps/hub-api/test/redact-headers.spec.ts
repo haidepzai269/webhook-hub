@@ -1,4 +1,4 @@
-import { redactHeaders, redactHeaderValue, signatureHeaderFor, SENSITIVE_HEADERS } from '../src/modules/ingest/redact-headers';
+import { redactHeaders, redactHeaderValue, SENSITIVE_HEADERS } from '../src/modules/ingest/redact-headers';
 
 /** Review SPEC-1 #1: API key SePay không được nằm rõ trong raw_events.headers / signature_header. */
 describe('redactHeaders', () => {
@@ -38,12 +38,5 @@ describe('redactHeaders', () => {
 
   it('danh sách header nhạy cảm đúng 4 tên', () => {
     expect([...SENSITIVE_HEADERS].sort()).toEqual(['authorization', 'cookie', 'proxy-authorization', 'x-api-key']);
-  });
-
-  it('signatureHeaderFor: GitHub giữ chữ ký HMAC; SePay chỉ còn scheme', () => {
-    expect(signatureHeaderFor(redactHeaders({ 'x-hub-signature-256': 'sha256=ab' }))).toBe('"sha256=ab"');
-    const s = signatureHeaderFor(redactHeaders({ authorization: 'Apikey SECRET' }));
-    expect(s).toBe('"Apikey ***"');
-    expect(signatureHeaderFor({})).toBe('""');
   });
 });

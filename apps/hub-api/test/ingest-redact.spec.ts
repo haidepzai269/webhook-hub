@@ -56,7 +56,8 @@ describe('IngestService — che header nhạy cảm trước khi lưu', () => {
     expect(data.headers.authorization).toBe('Apikey ***');
     expect(data.headers.cookie).toBe('***');
     expect(data.headers['content-type']).toBe('application/json');
-    expect(data.signatureHeader).toBe('"Apikey ***"');
+    // S3-1: signature_header do adapter.extractSignature() trả (SePay: chỉ scheme, đã che).
+    expect(data.signatureHeader).toBe('Apikey ***');
     expect(JSON.stringify(data.headers) + data.signatureHeader).not.toContain(KEY);
     expect(Buffer.from(data.bodyRaw).equals(Buffer.from(body))).toBe(true);
     // Request gốc không bị đột biến
@@ -70,6 +71,7 @@ describe('IngestService — che header nhạy cảm trước khi lưu', () => {
     const data = prisma.rawEvent.create.mock.calls[0][0].data;
     expect(data.status).toBe('REJECTED');
     expect(data.headers.authorization).toBe('Apikey ***');
+    expect(data.signatureHeader).toBe('Apikey ***');
     expect(JSON.stringify(data)).not.toContain('WRONG_KEY_ALSO_SECRETISH');
     expect(JSON.stringify(data)).not.toContain('COOKIE_SECRET');
   });
