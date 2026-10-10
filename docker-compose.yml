@@ -117,8 +117,12 @@ services:
       - INGEST_RATE_LIMIT_PER_MIN=${INGEST_RATE_LIMIT_PER_MIN:-100}
       # Deployed: đặt để chặn /metrics bằng Bearer token; local để trống
       - METRICS_TOKEN=${METRICS_TOKEN:-}
-      - DATABASE_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub
+      # AU6 (SPEC-auth §5.12, ADR-108): runtime = role hub_app (KHÔNG superuser, KHÔNG BYPASSRLS) -> RLS có hiệu lực.
+      # DIRECT_URL = owner, chỉ cho migrate + seed + ensure-app-role. hub-api thoát nếu DATABASE_URL là role đặc quyền.
+      - DATABASE_URL=postgresql://hub_app:${HUB_APP_DB_PASSWORD:-hub_app_local_only_password}@postgres:5432/webhook_hub?schema=hub
       - DIRECT_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub
+      # Mật khẩu role hub_app — entrypoint (ensure-app-role) tạo/đặt bằng owner trước migrate. CHỈ local.
+      - HUB_APP_DB_PASSWORD=${HUB_APP_DB_PASSWORD:-hub_app_local_only_password}
       - REDIS_URL=redis://redis:6379
       - RABBITMQ_URL=amqp://hub_admin:hub_secret@rabbitmq:5672
       # Không đặt default cho MASTER_KEY ở đây: giá trị mẫu từng bị lộ công khai
@@ -213,7 +217,9 @@ services:
       # outbox relay) để một transaction đang chờ connection không bị timeout giả trong
       # lúc outbox relay vẫn đang hợp lệ xử lý batch. hub-api KHÔNG chạy outbox relay
       # nên không cần đổi (không có rủi ro tương tự).
-      - DATABASE_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub&connection_limit=10&pool_timeout=20
+      # AU6: runtime = hub_app (RLS có hiệu lực). Role do hub-api (ensure-app-role) tạo; chưa có thì worker thoát và
+      # restart policy dựng lại sau vài giây.
+      - DATABASE_URL=postgresql://hub_app:${HUB_APP_DB_PASSWORD:-hub_app_local_only_password}@postgres:5432/webhook_hub?schema=hub&connection_limit=10&pool_timeout=20
       - DIRECT_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub
       - REDIS_URL=redis://redis:6379
       - RABBITMQ_URL=amqp://hub_admin:hub_secret@rabbitmq:5672

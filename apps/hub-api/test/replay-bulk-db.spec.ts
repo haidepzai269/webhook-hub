@@ -9,7 +9,7 @@ import { describeDb, newTestPrisma } from '../../../libs/database/test/support/t
  */
 
 describeDb('replay-bulk (Postgres, S2-3)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
   const svc = new PrismaService();
   const controller = new ApiController(svc);
   const tenant = randomUUID();

@@ -7,7 +7,9 @@ import { describeDb, newTestPrisma } from './support/test-db';
  */
 
 describeDb('TenantScopedRepository DLQ (Postgres)', () => {
-  const prisma = newTestPrisma();
+  const prisma = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const tenantA = randomUUID();
   const tenantB = randomUUID();
   const runId = randomUUID().slice(0, 8);
@@ -51,10 +53,11 @@ describeDb('TenantScopedRepository DLQ (Postgres)', () => {
     await prisma.subscription.deleteMany({ where: { tenantId: tenantA } });
     await prisma.destination.deleteMany({ where: { tenantId: tenantA } });
     await prisma.$disconnect();
+    await appDb.$disconnect();
   });
 
   it('bản DEAD đã bị replay biến khỏi DLQ, bản mới nhất thì có', async () => {
-    const repo = new TenantScopedRepository(prisma, tenantA);
+    const repo = new TenantScopedRepository(appDb, tenantA);
     const ids = (await repo.findDeadDeliveries(50)).map((d) => d.id).sort();
     expect(ids).toEqual([gen2Id, otherDeadId].sort());
     expect(ids).not.toContain(gen1Id);
@@ -62,14 +65,14 @@ describeDb('TenantScopedRepository DLQ (Postgres)', () => {
   });
 
   it('hasNewerGeneration: gen1 đã bị thay thế, gen2 thì chưa', async () => {
-    const repo = new TenantScopedRepository(prisma, tenantA);
+    const repo = new TenantScopedRepository(appDb, tenantA);
     const [g1, g2] = await Promise.all([repo.findDeliveryById(gen1Id), repo.findDeliveryById(gen2Id)]);
     await expect(repo.hasNewerGeneration(g1!)).resolves.toBe(true);
     await expect(repo.hasNewerGeneration(g2!)).resolves.toBe(false);
   });
 
   it('tenant khác không thấy DLQ của A', async () => {
-    const repo = new TenantScopedRepository(prisma, tenantB);
+    const repo = new TenantScopedRepository(appDb, tenantB);
     await expect(repo.findDeadDeliveries(50)).resolves.toEqual([]);
     await expect(repo.countDeadDeliveries()).resolves.toBe(0);
   });

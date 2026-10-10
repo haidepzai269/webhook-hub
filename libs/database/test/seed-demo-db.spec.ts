@@ -5,7 +5,7 @@ import { describeDb, newTestPrisma } from './support/test-db';
 
 /** S12 (X5, ADR-082) trên Postgres THẬT: seed demo cafe/bookstore idempotent, đúng một bộ tài nguyên mỗi project. */
 describeDb('seedDemoProjects (S12)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
   const env = { ...process.env, DEMO_ENDPOINT_BASE_URL: 'http://sink:4100', SEED_DEMO_PROJECTS: 'true' };
 
   afterAll(async () => {

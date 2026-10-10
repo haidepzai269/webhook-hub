@@ -50,16 +50,22 @@ export function compose(args: string[], opts: SpawnSyncOptions = {}): number {
   return r.status ?? 1;
 }
 
-export function composeOutput(args: string[]): { status: number; stdout: string; stderr: string } {
-  const r = spawnSync('docker', [...composeBaseArgs(), ...args], { cwd: ROOT, env: childEnv(), encoding: 'utf8' });
-  if (r.error) throw r.error;
-  return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+/** `timeoutMs`: hết giờ thì giết tiến trình, trả status -1 (kịch bản "lẽ ra phải thoát" đỏ thay vì treo). */
+export function composeOutput(args: string[], timeoutMs?: number): { status: number; stdout: string; stderr: string } {
+  const r = spawnSync('docker', [...composeBaseArgs(), ...args], { cwd: ROOT, env: childEnv(), encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL' });
+  if (r.error && (r.error as NodeJS.ErrnoException).code !== 'ETIMEDOUT') throw r.error;
+  return { status: r.error ? -1 : (r.status ?? 1), stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
-/** Chuỗi kết nối từ host vào hubv (dùng cho verify:db). Không phải secret: role mặc định của image postgres local. */
+/**
+ * Chuỗi kết nối từ host vào hubv (dùng cho verify:db).
+ * AU6 (SPEC-verification §4.3): `DATABASE_URL` = role `hub_app` (code ĐANG ĐƯỢC TEST, RLS có hiệu lực);
+ * `DIRECT_URL` / owner = `hub_user` CHỈ để dựng/dọn fixture (VERIFY_DB_OWNER_URL). Mật khẩu hub_app lấy từ .env.verify.
+ */
 export function hostUrls() {
+  const appPw = encodeURIComponent(loadVerifyEnv().HUB_APP_DB_PASSWORD ?? '');
   return {
-    DATABASE_URL: `postgresql://hub_user:hub_password@localhost:${PORTS.postgres}/webhook_hub?schema=hub`,
+    DATABASE_URL: `postgresql://hub_app:${appPw}@localhost:${PORTS.postgres}/webhook_hub?schema=hub`,
     DIRECT_URL: `postgresql://hub_user:hub_password@localhost:${PORTS.postgres}/webhook_hub?schema=hub`,
     REDIS_URL: `redis://localhost:${PORTS.redis}`,
     RABBITMQ_URL: `amqp://hub_admin:hub_secret@localhost:${PORTS.amqp}`,

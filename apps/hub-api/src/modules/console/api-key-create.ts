@@ -16,7 +16,7 @@ export interface ApiKeyCreateData {
  * secret) và gắn `api_keys.source_id` — sự kiện service tự phát đi đúng đường raw_events + outbox như webhook.
  */
 export async function createApiKeyWithSource(prisma: PrismaService, projectId: string, d: ApiKeyCreateData) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.tenantTx(projectId, async (tx) => {
     const repo = new TenantScopedRepository(tx, projectId);
     const id = randomUUID();
     let sourceId: string | undefined;

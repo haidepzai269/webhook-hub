@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-24",
+  "claim": "systemTx là lối DUY NHẤT nhìn xuyên project — thiếu app.rls_system thì đếm xuyên project ra 0",
+  "file": "libs/database/src/prisma.service.ts",
+  "find": "      await tx.$executeRaw`SELECT set_config('app.rls_system', 'on', true)`;\n      logger.debug",
+  "replace": "      logger.debug",
+  "expectRed": [
+    "[BB:5] (phần b)"
+  ],
+  "layer": "L1",
+  "testFile": "libs/database/test/rls-db.spec.ts"
+}

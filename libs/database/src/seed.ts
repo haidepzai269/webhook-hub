@@ -8,12 +8,16 @@ import { DEFAULT_TENANT_ID, getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';
 import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, keyCreatedLogLine, operatorFromEnv, seedTelegramActive } from './seed-env';
 import { IdentityRepository } from './identity.repository';
+import { withSystemRlsUrl } from './prisma.service';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config();
 
-const prisma = new PrismaClient();
+// AU6 (ADR-108): seed chạy bằng OWNER (DIRECT_URL) và phiên HỆ THỐNG (withSystemRlsUrl) — trên Neon owner KHÔNG phải
+// superuser nên FORCE RLS chặn cả owner. Runtime (DATABASE_URL = hub_app) không bao giờ dùng URL này.
+const seedUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
+const prisma = new PrismaClient(seedUrl ? { datasources: { db: { url: withSystemRlsUrl(seedUrl) } } } : undefined);
 
 /** Test L1 gọi seed trực tiếp — đóng kết nối của client seed khi xong. */
 export function disconnectSeedClient(): Promise<void> {

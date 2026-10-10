@@ -48,6 +48,9 @@ describe('[MS:U45] U45 NormalizeConsumer kiểm catalog', () => {
       }),
       processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
       rawEvent: rawEventMutations,
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const channel = { ack: jest.fn(), nack: jest.fn(), sendToQueue: jest.fn(), publish: jest.fn() } as any;

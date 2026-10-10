@@ -9,7 +9,7 @@ import { describeDb, newTestPrisma } from '../../../libs/database/test/support/t
  * cô lập tenant (tenant khác → 404 / không thấy), không lộ bí mật trong response.
  */
 describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
   const svc = new PrismaService();
   const flow = new FlowService(svc);
   const controller = new FlowController(flow);

@@ -8,6 +8,60 @@ import { PrismaClient, Destination, Delivery, Prisma, CircuitState } from '@pris
  */
 type PrismaClientOrTx = PrismaClient | Prisma.TransactionClient;
 
+/** Phương thức đồng bộ — KHÔNG bọc transaction (trả về ngay). Mọi phương thức khác của repo là async. */
+const SYNC_METHODS = new Set(['constructor', 'extend']);
+
+/** Transaction nào đã đặt `app.project_id` cho tenant nào (đặt lại nếu cùng tx đổi tenant — vô hại, set_config ghi đè). */
+const txTenant = new WeakMap<object, string>();
+
+function isRootClient(c: PrismaClientOrTx): c is PrismaClient {
+  return typeof (c as { $transaction?: unknown }).$transaction === 'function';
+}
+
+/** Đặt app.project_id (LOCAL). Client không có `$executeRaw` chỉ là test double (Prisma thật luôn có) -> bỏ qua. */
+async function setProject(c: PrismaClientOrTx, tenantId: string): Promise<void> {
+  if (typeof (c as { $executeRaw?: unknown }).$executeRaw !== 'function') return;
+  await c.$executeRaw`SELECT set_config('app.project_id', ${tenantId}, true)`;
+}
+
+/**
+ * AU6 (SPEC-auth §5.12.5, ADR-108): MỌI phương thức của repo chạy với `app.project_id = tenantId` đặt LOCAL —
+ * RLS của Postgres là lớp thứ ba, bắt được cả khi một câu SQL trong repo quên `tenant_id` (BB-5).
+ * - client gốc: mỗi lời gọi phương thức = MỘT transaction tương tác `set_config` + thân phương thức; lời gọi lồng
+ *   bên trong (`this.x()`) chạy trên CÙNG transaction (bản sao repo có `prisma = tx`, không qua proxy);
+ * - trong `tx` có sẵn: đặt một lần cho tx đó trước truy vấn đầu tiên của repo (không lồng transaction).
+ * Áp cho cả lớp con (FlowScopedRepository) vì proxy bọc theo prototype của chính đối tượng.
+ */
+function scopeToTenant<T extends TenantScopedRepository>(repo: T): T {
+  return new Proxy(repo, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function' || typeof prop !== 'string' || SYNC_METHODS.has(prop) || Object.prototype.hasOwnProperty.call(Object.prototype, prop)) {
+        return value;
+      }
+      const client = (target as unknown as { prisma: PrismaClientOrTx }).prisma;
+      const tenantId = target.tenantId;
+      if (isRootClient(client)) {
+        return (...args: unknown[]) =>
+          client.$transaction(async (tx) => {
+            await setProject(tx, tenantId);
+            txTenant.set(tx, tenantId);
+            const inner = Object.create(Object.getPrototypeOf(target), Object.getOwnPropertyDescriptors(target));
+            Object.defineProperty(inner, 'prisma', { value: tx });
+            return (value as (...a: unknown[]) => unknown).apply(inner, args);
+          });
+      }
+      return async (...args: unknown[]) => {
+        if (txTenant.get(client) !== tenantId) {
+          await setProject(client, tenantId);
+          txTenant.set(client, tenantId);
+        }
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+}
+
 export class TenantScopedRepository {
   constructor(
     // protected (không public): chỉ lớp con — vẫn bị ràng buộc tenantId ở constructor — dùng được (R-9).
@@ -17,6 +71,8 @@ export class TenantScopedRepository {
     if (!tenantId) {
       throw new Error('TenantScopedRepository: tenantId là bắt buộc (BB-5 vi phạm)');
     }
+    // AU6: trả về proxy — mọi phương thức chạy với app.project_id đã đặt (RLS).
+    return scopeToTenant(this);
   }
 
   /**

@@ -9,7 +9,9 @@ import { describeDb, newTestPrisma } from './support/test-db';
  * project khác (kể cả khi code quên kiểm), `events.seq` tăng dần, project default có sẵn, api_keys không lộ hash.
  */
 describeDb('S1 schema đa service (Postgres)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const prismaSvc = PrismaService.getInstance();
   const tA = randomUUID();
   const tB = randomUUID();
@@ -32,10 +34,11 @@ describeDb('S1 schema đa service (Postgres)', () => {
     await raw.event.deleteMany({ where: { tenantId: { in: [tA, tB] } } });
     await raw.project.deleteMany({ where: { id: { in: [tA, tB] } } }); // cascade api_keys
     await raw.$disconnect();
+    await appDb.$disconnect();
     await prismaSvc.$disconnect();
   });
 
-  it('[BB:5] khoá ngoại ghép: subscription của project A trỏ đích project B -> DB từ chối (P2003)', async () => {
+  it('[BB:5] (phần c) khoá ngoại ghép: subscription của project A trỏ đích project B -> DB từ chối (P2003)', async () => {
     await expect(
       raw.subscription.create({ data: { tenantId: tA, destinationId: destB, name: 'lach', eventTypes: ['order.*'] } }),
     ).rejects.toMatchObject({ code: 'P2003' });
@@ -68,13 +71,13 @@ describeDb('S1 schema đa service (Postgres)', () => {
 
   it('api_keys: findApiKeyByHash kèm project; findApiKeys KHÔNG trả keyHash; repo project khác không thấy', async () => {
     const hash = randomUUID().replace(/-/g, '').padEnd(64, '0');
-    await new TenantScopedRepository(raw, tB).createApiKey({ serviceName: 'svc', keyPrefix: 'hk_live_abcd', keyHash: hash, scopes: ['read:events'] });
+    await new TenantScopedRepository(appDb, tB).createApiKey({ serviceName: 'svc', keyPrefix: 'hk_live_abcd', keyHash: hash, scopes: ['read:events'] });
     const found = await prismaSvc.findApiKeyByHash(hash);
     expect(found?.project.slug).toBe(`s1b-${run}`);
-    const list = await new TenantScopedRepository(raw, tB).findApiKeys();
+    const list = await new TenantScopedRepository(appDb, tB).findApiKeys();
     expect(list).toHaveLength(1);
     expect(list[0]).not.toHaveProperty('keyHash');
-    expect(await new TenantScopedRepository(raw, tA).findApiKeys()).toEqual([]);
+    expect(await new TenantScopedRepository(appDb, tA).findApiKeys()).toEqual([]);
   });
 
   it('MS-R6: api_keys.scopes NOT NULL (dữ liệu tay NULL làm key.scopes.includes ném 500) — DB từ chối, mặc định mảng rỗng', async () => {

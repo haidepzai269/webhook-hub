@@ -10,7 +10,7 @@ import { describeDb, newTestPrisma } from '../../../libs/database/test/support/t
  */
 
 describeDb('DELETE subscription/destination giữ lịch sử gửi (Postgres, ADR-054)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
   const svc = new PrismaService();
   const controller = new ApiController(svc);
   const tenant = randomUUID();

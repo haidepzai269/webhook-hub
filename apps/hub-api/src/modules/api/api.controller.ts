@@ -517,7 +517,7 @@ export class ApiController {
     // COMMIT, hoặc không có gì — không bao giờ có delivery PENDING mà worker không biết tới.
     // Outbox không mang tenant_id (hạ tầng xuyên-tenant) nên dùng `tx.outbox` trực tiếp là đúng thiết kế.
     try {
-      await this.prisma.$transaction(async (tx) => {
+      await this.prisma.tenantTx(tenantId, async (tx) => {
         await this.prisma.forTenant(tenantId, tx).createDelivery({
           id: replayedId,
           eventId: delivery.eventId,
@@ -605,7 +605,8 @@ export class ApiController {
     // Review SPEC-2 #9: entityId là id THẬT của lô (UUID, trả về cho client); danh sách id ở metadata.
     const batchId = randomUUID();
     try {
-      await this.prisma.$transaction(
+      await this.prisma.tenantTx(
+        tenantId,
         async (tx) => {
           const repo = this.prisma.forTenant(tenantId, tx);
           await repo.createDeliveries(
@@ -674,7 +675,7 @@ export class ApiController {
 
   /** Mọi hành động có audit: hành động + audit_logs trong CÙNG một transaction. */
   private withAudit<T>(tenantId: string, fn: (repo: TenantScopedRepository) => Promise<T>): Promise<T> {
-    return this.prisma.$transaction((tx) => fn(this.prisma.forTenant(tenantId, tx)));
+    return this.prisma.tenantTx(tenantId, (tx) => fn(this.prisma.forTenant(tenantId, tx)));
   }
 
   /**
@@ -722,7 +723,7 @@ export class ApiController {
     const { items } = await this.prisma.forTenant(tenantId).findOrphanRawEvents({ limit: RENORMALIZE_LIMIT, ids });
     if (items.length === 0) return { queued: 0, rawEventIds: [] };
 
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.tenantTx(tenantId, async (tx) => {
       // Payload giống hệt chặng ingest -> normalize xử lý như lần đầu. processed_messages không chặn
       // vì lần lỗi trước đã rollback cả transaction (nên mới mồ côi).
       for (const r of items) {

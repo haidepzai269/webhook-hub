@@ -67,7 +67,9 @@ describe('TenantScopedRepository.getTimeseries (unit)', () => {
  */
 
 describeDb('TenantScopedRepository.getTimeseries (Postgres)', () => {
-  const prisma = newTestPrisma();
+  const prisma = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const tenantA = randomUUID();
   const tenantB = randomUUID();
   const runId = randomUUID().slice(0, 8);
@@ -121,13 +123,14 @@ describeDb('TenantScopedRepository.getTimeseries (Postgres)', () => {
     await prisma.subscription.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
     await prisma.destination.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
     await prisma.$disconnect();
+    await appDb.$disconnect();
   }, 60_000);
 
   const sum = (rows: { events: number; succeeded: number; dead: number }[], k: 'events' | 'succeeded' | 'dead') =>
     rows.reduce((acc, r) => acc + r[k], 0);
 
   it('tenant A chỉ thấy dữ liệu của A', async () => {
-    const rows = await new TenantScopedRepository(prisma, tenantA).getTimeseries('24h');
+    const rows = await new TenantScopedRepository(appDb, tenantA).getTimeseries('24h');
     expect(rows).toHaveLength(24);
     expect(sum(rows, 'events')).toBe(3);
     expect(sum(rows, 'succeeded')).toBe(1);
@@ -135,14 +138,14 @@ describeDb('TenantScopedRepository.getTimeseries (Postgres)', () => {
   });
 
   it('tenant B không thấy delivery nào của A, và đủ 10k event của mình', async () => {
-    const rows = await new TenantScopedRepository(prisma, tenantB).getTimeseries('24h');
+    const rows = await new TenantScopedRepository(appDb, tenantB).getTimeseries('24h');
     expect(sum(rows, 'events')).toBe(PERF_EVENTS);
     expect(sum(rows, 'succeeded')).toBe(0);
     expect(sum(rows, 'dead')).toBe(0);
   });
 
   it('7d → 7 bucket ngày', async () => {
-    const rows = await new TenantScopedRepository(prisma, tenantA).getTimeseries('7d');
+    const rows = await new TenantScopedRepository(appDb, tenantA).getTimeseries('7d');
     expect(rows).toHaveLength(7);
     expect(sum(rows, 'events')).toBe(3);
   });
@@ -159,7 +162,7 @@ describeDb('TenantScopedRepository.getTimeseries (Postgres)', () => {
   });
 
   it('< 200ms với 10k event (DoD A-3)', async () => {
-    const repo = new TenantScopedRepository(prisma, tenantB);
+    const repo = new TenantScopedRepository(appDb, tenantB);
     await repo.getTimeseries('24h'); // warm-up (kết nối, plan cache)
     const t0 = performance.now();
     await repo.getTimeseries('24h');

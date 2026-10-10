@@ -102,6 +102,9 @@ async function runIngest() {
       id: 'src-sepay', tenantId: TENANT, isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
     }),
     rawEvent: { create: jest.fn() },
+    // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+    tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+    systemTx(_r: any, fn: any) { return this.$transaction(fn); },
     $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
   const raw = JSON.stringify(sepayBody);
@@ -125,6 +128,9 @@ async function runNormalize(destinations: number) {
   const prisma: any = {
     forTenant: () => ({ findRawEventById: async () => ({ id: RAW, headers: {}, body: JSON.parse(raw), bodyRaw: Buffer.from(raw), contentType: 'application/json' }) }),
     processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
+    // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+    tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+    systemTx(_r: any, fn: any) { return this.$transaction(fn); },
     $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
   const channel: any = { ack: jest.fn(), nack: jest.fn(), sendToQueue: jest.fn() };
@@ -158,6 +164,9 @@ async function runDelivery(i: number, rateLimitRps = 0) {
   const prisma: any = {
     forTenant: () => repo,
     processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
+    // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+    tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+    systemTx(_r: any, fn: any) { return this.$transaction(fn); },
     $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
   const consumer = new DeliveryConsumer(prisma, new CircuitBreakerService(prisma));
@@ -230,6 +239,9 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
         id: 'src-sepay', tenantId: TENANT, isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
       }),
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(),
     };
     const res = await new IngestService(prisma, new RedisService()).ingestWebhook({
@@ -244,6 +256,9 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
     const prisma: any = {
       forTenant: () => ({ findSourceById: jest.fn().mockResolvedValue({ id: 'src-api', tenantId: TENANT, provider: 'api', isActive: true, secrets: [] }) }),
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const body = { type: 'order.created', data: { total: 1 }, idempotencyKey: 'ord-budget' };

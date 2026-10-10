@@ -81,6 +81,9 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
       forTenant: jest.fn().mockReturnValue({ findRawEventById }),
       processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
       rawEvent: { findUnique: jest.fn(() => { throw new Error('BB-5: không được gọi prisma.rawEvent trực tiếp'); }) },
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     return { prisma, tx, outboxRows, findRawEventById };

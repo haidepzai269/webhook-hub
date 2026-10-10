@@ -31,6 +31,9 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
     };
     const prisma: any = {
       forTenant: jest.fn((t: string, client?: any) => (client ? { ...repo, createAuditLog: (d: any) => client.auditLog.create({ data: { ...d, tenantId: t } }) } : repo)),
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
 

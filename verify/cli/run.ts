@@ -111,9 +111,10 @@ async function runLayer(layer: Layer): Promise<{ summary: Summary; ms: number }>
   Object.assign(env, {
     RUN_DB_TESTS: '1',
     DATABASE_URL: dbUrl,
-    DIRECT_URL: dbUrl,
+    // AU6: owner chỉ cho fixture (newTestPrisma('owner')) + migrate; code đang test chạy bằng DATABASE_URL (hub_app).
+    DIRECT_URL: process.env.VERIFY_DB_OWNER_URL || hv.DIRECT_URL,
     REDIS_URL: redisUrl,
-    VERIFY_DB_OWNER_URL: process.env.VERIFY_DB_OWNER_URL || dbUrl,
+    VERIFY_DB_OWNER_URL: process.env.VERIFY_DB_OWNER_URL || hv.DIRECT_URL,
     // S12 (ADR-082): dữ liệu mã hoá mà L1 ghi vào DB hubv phải đọc được bởi hub-api hubv (và ngược lại) -> cùng
     // MASTER_KEY của .env.verify. Không đặt thì seed.ts (dotenv) lấy MASTER_KEY của .env DEV -> lệch khoá.
     MASTER_KEY: process.env.VERIFY_MASTER_KEY || loadVerifyEnv().MASTER_KEY,

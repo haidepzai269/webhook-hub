@@ -24,7 +24,7 @@ describe('CleanupJob (S1-4)', () => {
   });
 
   it('không giành được khoá -> không chạy câu DELETE nào', async () => {
-    const prisma: any = { $executeRaw: jest.fn() };
+    const prisma: any = { systemTx(_r: any, fn: any) { return fn(this); }, $executeRaw: jest.fn() };
     const job = new CleanupJob(prisma, buildRedis(null));
     const result = await job.runOnce();
     expect(result.skipped).toBe(true);
@@ -32,7 +32,7 @@ describe('CleanupJob (S1-4)', () => {
   });
 
   it('Redis lỗi khi giành khoá -> bỏ lượt, không DELETE', async () => {
-    const prisma: any = { $executeRaw: jest.fn() };
+    const prisma: any = { systemTx(_r: any, fn: any) { return fn(this); }, $executeRaw: jest.fn() };
     const redis = buildRedis(null);
     redis.set.mockRejectedValue(new Error('ECONNREFUSED'));
     const result = await new CleanupJob(prisma, redis).runOnce();
@@ -43,6 +43,7 @@ describe('CleanupJob (S1-4)', () => {
   it('[AF:#21] MS-P2-6: giành được khoá (SET NX EX ~0,9 chu kỳ) -> xoá theo lô tới khi một lô < 5000, KHÔNG nhả khoá', async () => {
     const prisma: any = {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
+      systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
       $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0),
       deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
@@ -73,6 +74,7 @@ describe('CleanupJob (S1-4)', () => {
   it('[MS:T13] (phần a) S7 retention: xoá events quá N ngày theo lô qua escape hatch có tên (cascade delivery/attempt), KHÔNG đụng raw ACCEPTED', async () => {
     process.env.EVENT_RETENTION_DAYS = '9';
     const prisma: any = {
+      systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
       $executeRaw: jest.fn().mockResolvedValue(0),
       deleteExpiredEventsBatch: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(7),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
@@ -88,6 +90,7 @@ describe('CleanupJob (S1-4)', () => {
     const sessions = jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(4);
     const tokens = jest.fn().mockResolvedValueOnce(2);
     const prisma: any = {
+      systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
       $executeRaw: jest.fn().mockResolvedValue(0),
       deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
       identity: () => ({ deleteExpiredSessionsBatch: sessions, deleteExpiredEmailTokensBatch: tokens }),

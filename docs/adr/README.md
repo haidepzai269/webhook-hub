@@ -1118,3 +1118,31 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Web: nút GH ở trang đăng nhập điều hướng toàn trang tới `/auth/github` (qua proxy); bỏ ba nút Google/Facebook/X giả.
 
 **Đánh đổi:** TA11 (GitHub thật) là mồ côi có lý do — cần Admin tạo OAuth App. `/onboarding` trên web chưa có (phiên UI), nên người mới đăng nhập GitHub tạm thấy 404 cho tới khi có trang. Chưa đặt client id/secret thì `/auth/github` trả 503 `github_oauth_disabled`.
+
+## ADR-108 — AU6: RLS bắt buộc — runtime `hub_app`, repo tự đặt `app.project_id`, `systemTx` là lối xuyên project duy nhất, p95 ingest +7,6% (2026-10-11)
+
+**Vấn đề:** BB-5 trước đây chỉ có hai lớp (guard + `TenantScopedRepository`); một câu SQL quên `tenant_id` là lộ dữ liệu. Postgres local chạy bằng superuser nên RLS sẽ bị bỏ qua hoàn toàn. Ba bảng con (`source_secrets`, `raw_events`, `delivery_attempts`) không có cột `tenant_id`. Trên Neon, owner không phải superuser nên FORCE RLS chặn cả seed. Lần đo đầu sau RLS ra p95 ingest +16,7%, vượt trần 15% của spec §5.12.7.
+**Chọn:**
+- Migration `20261011110000_rls_hub_app` (chạy bằng owner):
+  - bảo đảm role `hub_app` (NOLOGIN nếu chưa có), GRANT trên schema `hub` + default privileges, thu quyền với `_prisma_migrations`;
+  - ENABLE + FORCE RLS + policy `tenant_isolation` (`tenant_id = app.project_id` HOẶC `app.rls_system = on`; không set gì thì 0 dòng) cho 6 bảng có `tenant_id`;
+  - 3 bảng con dùng policy `EXISTS` trên bảng cha (bảng cha cũng RLS), nên không thêm cột, không backfill;
+  - bảng danh tính, `outbox`, `processed_messages` KHÔNG bật (spec §5.1, §5.12.3).
+- Đăng nhập/mật khẩu của `hub_app` không bao giờ nằm trong migration: local có `ensure-app-role` (entrypoint, owner, `HUB_APP_DB_PASSWORD`, chỉ ký tự an toàn); Neon tạo role trong console (DEPLOYMENT).
+- hub-api/hub-worker chạy bằng `hub_app`; `assertAppRoleNotPrivileged` thoát nếu runtime là superuser/BYPASSRLS (chỉ bỏ qua khi `RLS_ALLOW_PRIVILEGED=1` và `NODE_ENV=test`).
+- `TenantScopedRepository` (chọn proxy thay Prisma extension):
+  - constructor trả proxy: client gốc → mỗi lời gọi phương thức là MỘT transaction tương tác `set_config('app.project_id', …, true)` + thân phương thức, lời gọi lồng chạy trên cùng tx;
+  - trong tx có sẵn → đặt một lần cho tx đó;
+  - phủ cả lớp con.
+- `PrismaService.tenantTx(tenantId, fn)` cho chỗ ghi thẳng `tx.rawEvent`/`tx.deliveryAttempt`.
+- `PrismaService.systemTx(reason, fn)` là lối DUY NHẤT đặt `app.rls_system` (tra source lúc ingest, cleanup, sweeper); chỉ `prisma.service.ts` chứa chuỗi này (gate + UA30).
+- Tra source lúc ingest (đường NÓNG) dùng batch transaction thay transaction tương tác, đưa p95 từ +16,7% về +7,6%.
+- Seed dùng `DIRECT_URL` + `options=-c app.rls_system=on`.
+- Test L1 chạy code bằng `hub_app`, fixture bằng owner (SPEC-verification §4.3); TA12 assert tiền đề `hub_app/false/false` trước.
+
+**Đánh đổi:**
+- Mỗi lời gọi repo trên client gốc thành một transaction (thêm BEGIN/set_config/COMMIT). Đường ingest đo được: p95 25,46 → 27,39ms (+7,6%; trước 2 lần, sau 3 lần, k6 10→50→100 RPS, hubv local). Đường worker chậm hơn nhưng không nằm trên p95 ingest.
+- Ai đặt được `options=-c app.rls_system=on` trong chuỗi kết nối thì bỏ qua RLS. Đó là cấu hình (như cầm mật khẩu owner), không phải code; code thì chỉ một chỗ được đặt (đã ghi ở ADR-057).
+- Test giả không có `$executeRaw` bị bỏ qua `set_config` (Prisma thật luôn có).
+- Migration dữ liệu chạy bằng owner trên Neon về sau phải tự `SET LOCAL app.rls_system = 'on'`.
+- Probe P-BB5-01 của spec ghi `expectRed` nhưng claim là "RLS vẫn chặn"; đã chạy dưới dạng probe SỐNG SÓT (test phải còn xanh), probe đỏ tương ứng là P-BB5-02.

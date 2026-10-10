@@ -8,7 +8,9 @@ import { describeDb, newTestPrisma } from './support/test-db';
  * raw_events ACCEPTED CÒN NGUYÊN (ADR-045), và raw cũ hơn N ngày không bị báo "orphan" giả.
  */
 describeDb('Retention events (S7)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const svc = new PrismaService();
   const tenant = randomUUID();
   const run = randomUUID().slice(0, 8);
@@ -31,6 +33,7 @@ describeDb('Retention events (S7)', () => {
     await raw.destination.deleteMany({ where: { tenantId: tenant } });
     await raw.source.deleteMany({ where: { tenantId: tenant } });
     await raw.$disconnect();
+    await appDb.$disconnect();
     await svc.$disconnect();
   });
 
@@ -59,7 +62,7 @@ describeDb('Retention events (S7)', () => {
     expect(await raw.event.findUnique({ where: { id: fresh.event.id } })).not.toBeNull();
     expect(await raw.rawEvent.findUnique({ where: { id: old.raw.id } })).toMatchObject({ status: 'ACCEPTED' });
 
-    const orphans = await new TenantScopedRepository(raw, tenant).findOrphanRawEvents({ limit: 100, maxAgeSeconds: 9 * DAY });
+    const orphans = await new TenantScopedRepository(appDb, tenant).findOrphanRawEvents({ limit: 100, maxAgeSeconds: 9 * DAY });
     expect(orphans.items.map((o) => o.id)).not.toContain(old.raw.id);
   });
 });

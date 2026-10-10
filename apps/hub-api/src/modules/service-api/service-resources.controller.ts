@@ -493,7 +493,7 @@ export class ServiceResourcesController {
   }
 
   private withAudit<T>(tenantId: string, fn: (repo: TenantScopedRepository) => Promise<T>): Promise<T> {
-    return this.prisma.$transaction((tx) => fn(this.prisma.forTenant(tenantId, tx)));
+    return this.prisma.tenantTx(tenantId, (tx) => fn(this.prisma.forTenant(tenantId, tx)));
   }
 }
 

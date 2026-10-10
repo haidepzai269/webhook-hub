@@ -128,7 +128,8 @@ export class IngestService {
 
     let rawEventRecord;
     try {
-      rawEventRecord = await this.prisma.$transaction(async (tx) => {
+      // AU6: RLS — raw_events/outbox ghi trong transaction đã đặt app.project_id của source (tenant đã biết từ bước 2).
+      rawEventRecord = await this.prisma.tenantTx(source.tenantId, async (tx) => {
         const rawEvent = await tx.rawEvent.create({
           data: {
             sourceId: source.id,
@@ -284,7 +285,7 @@ export class IngestService {
       log.warn('Chữ ký webhook không hợp lệ! Lưu raw_event với status REJECTED');
       // Lưu MẪU request lỗi để điều tra (§7.1) — có giới hạn (S1-4): tối đa 4KB body và
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
-      await this.storeRejected(source.id, req, storedHeaders, signatureHeader, false, correlationId, log);
+      await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
       trace.outcome = 'REJECTED';
       return { status: 401, body: { error: 'Chữ ký webhook không hợp lệ (Unauthorized)' } };
     }
@@ -298,7 +299,7 @@ export class IngestService {
       // S8: lỗi CHUNG — chữ ký đúng nhưng không có khoá chống trùng. KHÔNG fallback ulid (gửi lại = 2 sự kiện).
       // Lưu REJECTED (signature_valid = true) để chế độ lắng nghe chẩn đoán được; trả 422.
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
-      await this.storeRejected(source.id, req, storedHeaders, signatureHeader, true, correlationId, log);
+      await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log);
       trace.outcome = 'REJECTED';
       return { status: 422, body: { error: 'missing_idempotency_key' } };
     }
@@ -312,7 +313,7 @@ export class IngestService {
 
   /** Mẫu request bị từ chối (§7.1, S1-4): ≤4KB body, ≤20 bản ghi/phút/source; vượt trần chỉ log. */
   private async storeRejected(
-    sourceId: string,
+    source: { id: string; tenantId: string },
     req: RawWebhookRequest,
     storedHeaders: Record<string, unknown>,
     signatureHeader: string | null,
@@ -320,13 +321,15 @@ export class IngestService {
     correlationId: string,
     log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void },
   ): Promise<void> {
+    const sourceId = source.id;
     if (!this.rejectedLimiter.tryAcquire(sourceId)) {
       log.warn({ sourceId }, 'Vượt trần 20 bản ghi REJECTED/phút cho source này -> không lưu raw_event, chỉ log');
       return;
     }
     const sample = sampleRejectedBody(req.rawBody, req.body);
     try {
-      await this.prisma.rawEvent.create({
+      // AU6: raw_events có RLS (theo source) -> ghi trong transaction của đúng project.
+      await this.prisma.tenantTx(source.tenantId, (tx) => tx.rawEvent.create({
         data: {
           sourceId,
           idempotencyKey: `rejected_${correlationId}`,
@@ -339,7 +342,7 @@ export class IngestService {
           status: 'REJECTED',
           origin: 'webhook',
         },
-      });
+      }));
     } catch (err) {
       log.error({ err }, 'Lỗi khi lưu rejected raw_event');
     }

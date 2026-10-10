@@ -15,7 +15,7 @@ const MIGRATION = join(
 );
 
 describeDb('Migration che header raw_events (Postgres)', () => {
-  const prisma = newTestPrisma();
+  const prisma = newTestPrisma('owner');
   const tenant = randomUUID();
   const runId = randomUUID().slice(0, 8);
   let sourceId = '';

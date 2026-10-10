@@ -107,11 +107,6 @@ export const GATES: Gate[] = [
     check: grepLines(new RegExp(`prisma\\.(${MODELS.join('|')})\\.`), { skipComments: true }),
     exceptions: [
       {
-        file: 'apps/hub-api/src/modules/ingest/ingest.service.ts',
-        match: 'prisma\\.rawEvent\\.create',
-        reason: 'Lưu MẪU request ký sai (REJECTED, S1-4). `raw_events` không có cột tenant_id; `PrismaService.rawEvent` là lối thoát có tên, ghi trong prisma.service.ts. Đường ACCEPTED dùng `tx.rawEvent` trong transaction.',
-      },
-      {
         file: 'apps/hub-worker/src/consumers/delivery.consumer.ts',
         match: 'prisma\\.processedMessage\\.',
         reason: '`processed_messages` là bảng hạ tầng (khoá consumer + AMQP message id), không mang dữ liệu tenant; lối thoát có tên `PrismaService.processedMessage`.',

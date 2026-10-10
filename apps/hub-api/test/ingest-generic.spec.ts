@@ -17,6 +17,9 @@ describe('IngestService + GenericAdapter (S8)', () => {
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue(source),
       rawEvent: { create: jest.fn().mockResolvedValue({}) },
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const redis: any = { checkRateLimit: jest.fn().mockResolvedValue(true), getIdempotencyKey: jest.fn().mockResolvedValue(null), setIdempotencyKey: jest.fn() };
@@ -35,19 +38,23 @@ describe('IngestService + GenericAdapter (S8)', () => {
     expect(tx.rawEvent.create.mock.calls[0][0].data).toMatchObject({ idempotencyKey: 'generic:TX1', status: 'ACCEPTED', signatureHeader: sig(b) });
   });
 
-  it('[MS:T9] (phần d) ký đúng nhưng thiếu transactionId -> 422 missing_idempotency_key, lưu REJECTED signature_valid=true, KHÔNG transaction', async () => {
-    const { svc, prisma } = build(HMAC);
+  it('[MS:T9] (phần d) ký đúng nhưng thiếu transactionId -> 422 missing_idempotency_key, lưu REJECTED signature_valid=true, KHÔNG outbox (không sinh sự kiện)', async () => {
+    // AU6 (SPEC-auth §5.12): raw_events có RLS -> mẫu REJECTED ghi trong tenantTx của đúng project (trước đây ghi
+    // ngoài transaction). Điều cần giữ: KHÔNG có outbox / sự kiện nào cho request bị từ chối.
+    const { svc, prisma, tx } = build(HMAC);
     const b = '{"soTien":1}';
     expect(await svc.ingestWebhook(req(b, { 'x-signature': sig(b) }))).toEqual({ status: 422, body: { error: 'missing_idempotency_key' } });
-    expect(prisma.rawEvent.create.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED', signatureValid: true });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.rawEvent.create.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED', signatureValid: true });
+    expect(tx.outbox.create).not.toHaveBeenCalled();
+    expect(prisma.rawEvent.create).not.toHaveBeenCalled(); // không còn ghi raw_events ngoài transaction có project
   });
 
   it('S8: sai chữ ký -> 401, REJECTED signature_valid=false; source generic thiếu config -> 401 (không nhận bừa)', async () => {
-    const { svc, prisma } = build(HMAC);
+    const { svc, tx } = build(HMAC);
     const b = '{"transactionId":"TX1"}';
     expect((await svc.ingestWebhook(req(b, { 'x-signature': sig('khác') }))).status).toBe(401);
-    expect(prisma.rawEvent.create.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED', signatureValid: false });
+    expect(tx.rawEvent.create.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED', signatureValid: false });
+    expect(tx.outbox.create).not.toHaveBeenCalled();
     expect((await build(null).svc.ingestWebhook(req(b, { 'x-signature': sig(b) }))).status).toBe(401);
   });
 

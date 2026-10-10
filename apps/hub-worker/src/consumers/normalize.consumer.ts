@@ -140,7 +140,8 @@ export class NormalizeConsumer {
       // 4. Event + delivery + outbox `delivery.requested` + processed_messages trong MỘT transaction (S1-2).
       // Không còn publish thẳng sau COMMIT: hoặc tất cả cùng COMMIT, hoặc không có gì — relay lo phần gửi.
       const routed: EventReceivedNotice['deliveries'] = [];
-      await this.prisma.$transaction(async (tx) => {
+      // AU6: RLS — mọi bảng nghiệp vụ trong transaction này thuộc tenantId của message.
+      await this.prisma.tenantTx(tenantId, async (tx) => {
         routed.length = 0; // phòng khi callback bị gọi lại
         const repoTx = new TenantScopedRepository(tx, tenantId);
 

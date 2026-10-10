@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
-import { assertDatabaseLib } from '@hub/database';
+import { assertAppRoleNotPrivileged, assertDatabaseLib, PrismaService } from '@hub/database';
 import { corsOptions } from './cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -53,6 +53,9 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
+
+  // AU6 (SPEC-auth §5.12.2): runtime KHÔNG được là superuser / BYPASSRLS (RLS sẽ bị bỏ qua) -> thoát.
+  await assertAppRoleNotPrivileged(PrismaService.getInstance());
 
   // SPEC-auth §5.5: X-Forwarded-For CHỈ được tin khi đứng sau proxy thật (Render, Vercel) — TRUST_PROXY=1.
   if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);

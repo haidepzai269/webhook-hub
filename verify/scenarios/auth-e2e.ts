@@ -5,11 +5,12 @@
  * chặn lẫn nhau (giới hạn theo IP chung một máy). Không đụng stack dev.
  *
  * AU1: TA1 (phần đăng ký → key → event), TA3, TA4, TA5, TA6, TA7. AU3: TA8, TA15 (+ phần email_not_verified của TA2).
- * AU4: TA9.
+ * AU4: TA9. AU6: TA13 (TA12 là test jest libs/database/test/rls-db.spec.ts).
  * AU2: TA2, TA10 — mail đọc từ file JSON của
  * MAIL_DRIVER=capture (verify/.mail, mount vào hub-api của hubv), KHÔNG grep log (SPEC-verification §4.2).
  */
 import { randomUUID } from 'crypto';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import Redis from 'ioredis';
@@ -313,6 +314,19 @@ async function main() {
     expect(d2.status === 201, `developer tạo đích → ${d2.status} ${d2.text}`);
     const leave = await A.s.req('DELETE', `/api/v1/projects/${pa.projectId}/members/${A.body.user.id}`);
     expect(leave.status === 409 && leave.body?.error === 'last_owner', `owner duy nhất rời → ${leave.status} ${leave.text}`);
+  });
+
+  await run.scenario('[AU:TA13] khởi động hub-api với DATABASE_URL là superuser -> THOÁT với thông báo rõ (RLS không được thành trang trí)', async () => {
+    const superUrl = 'postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub';
+    const name = `hubv-ta13-${RUN}`;
+    const r = composeOutput(['run', '--rm', '--no-deps', '--name', name, '-e', `DATABASE_URL=${superUrl}`, '-e', 'RUN_SEED=false', '-e', 'HUB_APP_DB_PASSWORD=', 'hub-api'], 120_000);
+    // Hết giờ: dọn container do CHÍNH kịch bản này đặt tên (không phải container của stack).
+    if (r.status === -1) spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+    const out = `${r.stdout}
+${r.stderr}`;
+    expect(r.status !== 0, `hub-api vẫn chạy (exit ${r.status}) với role superuser`);
+    expect(/superuser\/BYPASSRLS/.test(out), `không thấy thông báo rõ trong log: ${out.slice(-600)}`);
+    console.log(`  TA13: exit ${r.status}, log có "superuser/BYPASSRLS"`);
   });
 
   await redis.quit();

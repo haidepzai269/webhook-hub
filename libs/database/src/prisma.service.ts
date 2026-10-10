@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { TenantScopedRepository } from './tenant-scoped.repository';
+import { logger } from '@hub/common';
 import { IdentityRepository } from './identity.repository';
 
 /**
@@ -98,17 +99,23 @@ export class PrismaService {
    * `sourceKey` TRƯỚC khi biết tenant là ai — chính bước này tìm ra tenant, nên
    * không thể đi qua `TenantScopedRepository`. KHÔNG dùng hàm này ở nơi khác.
    */
-  public findSourceBySourceKeyForIngest(sourceKey: string) {
-    return this.client.source.findUnique({
-      where: { sourceKey },
-      include: {
-        secrets: {
-          where: {
-            OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
+  public async findSourceBySourceKeyForIngest(sourceKey: string) {
+    // AU6: chưa biết tenant (chính bước này tìm ra tenant) -> đường hệ thống. Đường NÓNG của ingest: dùng batch
+    // transaction (set_config + SELECT gửi một lượt) thay vì transaction tương tác — p95 ingest (ADR-108).
+    const [, source] = await this.client.$transaction([
+      this.client.$executeRaw`SELECT set_config('app.rls_system', 'on', true)`,
+      this.client.source.findUnique({
+        where: { sourceKey },
+        include: {
+          secrets: {
+            where: {
+              OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
+    return source;
   }
 
   /**
@@ -117,11 +124,11 @@ export class PrismaService {
    * `deliveries` -> `delivery_attempts`. KHÔNG đụng `raw_events` (ACCEPTED giữ vô hạn, ADR-045). Chỉ CleanupJob gọi.
    */
   public deleteExpiredEventsBatch(olderThanSeconds: number, limit: number): Promise<number> {
-    return this.client.$executeRaw`
+    return this.systemTx('cleanup: retention events', (tx) => tx.$executeRaw`
       DELETE FROM "hub"."events" WHERE id IN (
         SELECT id FROM "hub"."events"
         WHERE received_at < now() - make_interval(secs => ${olderThanSeconds}::double precision)
-        LIMIT ${limit})`;
+        LIMIT ${limit})`);
   }
 
   // ================== Project + API key (S1, ADR-038) ==================
@@ -164,6 +171,34 @@ export class PrismaService {
     return new IdentityRepository(client);
   }
 
+  // ================== RLS (SPEC-auth §5.12, AU6) ==================
+
+  /**
+   * ĐƯỜNG HỆ THỐNG DUY NHẤT nhìn xuyên project: transaction đặt `app.rls_system = on` (LOCAL — chỉ sống trong
+   * transaction, an toàn với pgbouncer của Neon). Dùng cho bước CHƯA biết tenant (tra source lúc ingest) hoặc việc
+   * xuyên tenant có chủ đích (cleanup, sweeper). Ngay khi đọc ra tenant, phần còn lại phải chuyển sang
+   * `forTenant`/`tenantTx`. Chỉ FILE NÀY được chứa chuỗi `app.rls_system` (gate rls-system + UA30).
+   */
+  public systemTx<T>(reason: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return this.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.rls_system', 'on', true)`;
+      logger.debug({ reason }, 'RLS systemTx');
+      return fn(tx);
+    });
+  }
+
+  /**
+   * Transaction đã đặt `app.project_id` NGAY ĐẦU — cho chỗ ghi thẳng bảng có RLS qua `tx` (vd `tx.rawEvent.create`,
+   * `tx.deliveryAttempt.create`) trước/cùng với repo. Repo dựng trong `tx` này cũng tự đặt (cùng giá trị, vô hại).
+   */
+  public tenantTx<T>(tenantId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>, options?: { timeout?: number; maxWait?: number }): Promise<T> {
+    if (!tenantId) throw new Error('tenantTx: tenantId là bắt buộc (BB-5)');
+    return this.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.project_id', ${tenantId}, true)`;
+      return fn(tx);
+    }, options);
+  }
+
   /**
    * Tạo repository được bảo vệ theo Tenant (BB-5). `client` mặc định là
    * PrismaClient gốc, nhưng có thể truyền `tx` (Prisma.TransactionClient) khi
@@ -178,3 +213,39 @@ export class PrismaService {
 }
 
 export const prisma = PrismaService.getInstance();
+
+/**
+ * SPEC-auth §5.12.2: runtime (hub-api, hub-worker) KHÔNG được chạy bằng superuser hay role BYPASSRLS — chúng luôn
+ * bỏ qua RLS (kể cả FORCE) và mọi policy chỉ là trang trí. Gặp -> `process.exit(1)` với thông báo rõ.
+ * Ngoại lệ DUY NHẤT: `RLS_ALLOW_PRIVILEGED=1` khi `NODE_ENV=test`.
+ */
+export async function assertAppRoleNotPrivileged(
+  db: { $queryRaw<T = unknown>(query: TemplateStringsArray | Prisma.Sql, ...values: any[]): Promise<T> },
+  env: Record<string, string | undefined> = process.env,
+  exit: (code: number) => void = (c) => process.exit(c),
+): Promise<void> {
+  const [row] = await db.$queryRaw<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean }[]>`
+    SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`;
+  if (!row || (!row.rolsuper && !row.rolbypassrls)) return;
+  if (env.RLS_ALLOW_PRIVILEGED === '1' && env.NODE_ENV === 'test') {
+    logger.warn({ role: row.current_user }, 'RLS_ALLOW_PRIVILEGED=1 (chỉ test): chạy bằng role đặc quyền, RLS bị bỏ qua');
+    return;
+  }
+  logger.error(
+    { role: row.current_user, rolsuper: row.rolsuper, rolbypassrls: row.rolbypassrls },
+    'FATAL: DATABASE_URL đang dùng role superuser/BYPASSRLS — RLS sẽ bị bỏ qua hoàn toàn. Đổi DATABASE_URL sang role hub_app ' +
+      '(không superuser, không BYPASSRLS; xem docs/DEPLOYMENT.md). DIRECT_URL (owner) chỉ dành cho migrate/seed.',
+  );
+  exit(1);
+}
+
+/**
+ * Seed / công cụ vận hành chạy bằng OWNER trên Neon (owner KHÔNG phải superuser -> FORCE RLS chặn cả owner): mở phiên
+ * với `app.rls_system=on` qua tham số khởi động `options=-c …`. CHỈ dùng với DIRECT_URL (pgbouncer không nhận options).
+ */
+export function withSystemRlsUrl(url: string): string {
+  const u = new URL(url);
+  const existing = u.searchParams.get('options');
+  u.searchParams.set('options', `${existing ? existing + ' ' : ''}-c app.rls_system=on`);
+  return u.toString();
+}

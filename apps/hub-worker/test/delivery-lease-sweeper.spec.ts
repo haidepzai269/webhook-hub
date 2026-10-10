@@ -11,7 +11,9 @@ import { describeDb, newTestPrisma } from '../../../libs/database/test/support/t
  */
 
 describeDb('Lease + sweeper (Postgres, S1-2)', () => {
-  const prisma = newTestPrisma();
+  const prisma = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const tenant = randomUUID();
   const runId = randomUUID().slice(0, 8);
   let subId = '';
@@ -79,6 +81,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     await prisma.subscription.deleteMany({ where: { tenantId: tenant } });
     await prisma.destination.deleteMany({ where: { tenantId: tenant } });
     await prisma.$disconnect();
+    await appDb.$disconnect();
   });
 
   it('[AF:#19] S1-3: findOrphanRawEvents — raw ACCEPTED > 2 phút chưa có event thì là mồ côi; tenant khác không thấy', async () => {
@@ -96,19 +99,19 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
         });
     const orphan = await mkRaw(`o1-${runId}`, 5);
     const fresh = await mkRaw(`o2-${runId}`, 0);
-    const repo = new TenantScopedRepository(prisma, tenant);
+    const repo = new TenantScopedRepository(appDb, tenant);
     const res = await repo.findOrphanRawEvents({ limit: 100 });
     expect(res.items.map((r) => r.id)).toEqual([orphan]);
     expect(res.total).toBe(1);
     expect((await repo.findOrphanRawEvents({ limit: 100, ids: [fresh] })).items).toHaveLength(0);
-    expect((await new TenantScopedRepository(prisma, randomUUID()).findOrphanRawEvents({ limit: 100 })).total).toBe(0);
+    expect((await new TenantScopedRepository(appDb, randomUUID()).findOrphanRawEvents({ limit: 100 })).total).toBe(0);
     await prisma.source.delete({ where: { id: src.id } });
   });
 
   it('claimForSend: lần 1 = 1, lần 2 cùng tham số = 0; tenant khác = 0', async () => {
     const id = await mkDelivery(1, 0);
-    const repo = new TenantScopedRepository(prisma, tenant);
-    expect(await new TenantScopedRepository(prisma, randomUUID()).claimForSend(id, 1, 0)).toBe(0);
+    const repo = new TenantScopedRepository(appDb, tenant);
+    expect(await new TenantScopedRepository(appDb, randomUUID()).claimForSend(id, 1, 0)).toBe(0);
     expect(await repo.claimForSend(id, 1, 0)).toBe(1);
     expect(await repo.claimForSend(id, 1, 0)).toBe(0);
     // attemptCount lệch (message cũ của tầng trước) cũng không nhận được
@@ -117,7 +120,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
 
   it('claimForSend nhận lại DELIVERING đã treo quá lease 60s', async () => {
     const id = await mkDelivery(2, 2, 'DELIVERING');
-    expect(await new TenantScopedRepository(prisma, tenant).claimForSend(id, 2, 0)).toBe(1);
+    expect(await new TenantScopedRepository(appDb, tenant).claimForSend(id, 2, 0)).toBe(1);
   });
 
   it('[AF:#17] sweeper: PENDING 11 phút không attempt -> có outbox; có outbox chưa publish -> không ghi thêm; PENDING mới -> không', async () => {
@@ -188,7 +191,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
 
   it('lease chặn gửi trùng khi message gốc VẪN còn trong queue: bản sweeper và bản gốc cùng attemptCount -> chỉ một claim được', async () => {
     const id = await mkDelivery(13, 30, 'RETRYING', { attemptCount: 2, nextAttemptMinutesFromNow: -6 });
-    const repo = new TenantScopedRepository(prisma, tenant);
+    const repo = new TenantScopedRepository(appDb, tenant);
     // bản do sweeper ghi (attemptCount=2) tới trước
     expect(await repo.claimForSend(id, 13, 2)).toBe(1);
     // bản gốc (cũng attemptCount=2) tới trong lúc đang gửi -> thua lease
@@ -203,7 +206,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
 
   it('sweeper PENDING: delivery bị circuit hoãn (next_attempt_at mới ghi) KHÔNG bị quét dù đã > 10 phút không attempt', async () => {
     const deferred = await mkDelivery(14, 15, 'PENDING', { nextAttemptMinutesFromNow: 1 });
-    const repo = new TenantScopedRepository(prisma, tenant);
+    const repo = new TenantScopedRepository(appDb, tenant);
     expect(await repo.deferDelivery(deferred, new Date(Date.now() + 60_000))).toBe(1);
     await prisma.$executeRaw(buildSweepSql(10 * 60_000, 10_000, 5 * 60_000));
     expect(await outboxFor(deferred)).toBe(0);
@@ -213,8 +216,8 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     const dest = await prisma.destination.create({
       data: { tenantId: tenant, name: `circuit-${runId}`, type: 'webhook', configEncrypted: 'x' },
     });
-    const repo = new TenantScopedRepository(prisma, tenant);
-    expect(await new TenantScopedRepository(prisma, randomUUID()).updateDestinationCircuitState(dest.id, 'OPEN')).toBe(0);
+    const repo = new TenantScopedRepository(appDb, tenant);
+    expect(await new TenantScopedRepository(appDb, randomUUID()).updateDestinationCircuitState(dest.id, 'OPEN')).toBe(0);
     expect(await repo.updateDestinationCircuitState(dest.id, 'OPEN')).toBe(1);
     expect(await repo.updateDestinationCircuitState(dest.id, 'OPEN')).toBe(0);
     expect(await repo.updateDestinationCircuitState(dest.id, 'HALF_OPEN')).toBe(1);

@@ -75,9 +75,12 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      # AU6 (SPEC-verification §4.3): migrate/fixture bằng OWNER; code đang test bằng hub_app (RLS có hiệu lực).
       DATABASE_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
       DIRECT_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
-      VERIFY_DATABASE_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
+      HUB_APP_DB_PASSWORD: ci_only_hub_app_password
+      VERIFY_DATABASE_URL: postgresql://hub_app:ci_only_hub_app_password@localhost:5432/webhook_hub?schema=hub
+      VERIFY_DB_OWNER_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
       VERIFY_REDIS_URL: redis://localhost:6379
       VERIFY_JEST_WORKERS: '2'
     steps:
@@ -88,10 +91,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run prisma:generate
-      - name: Migration thật (không db push — ADR-047)
+      - name: Role runtime hub_app (không superuser, không BYPASSRLS) — AU6
+        run: npm run ensure-app-role --workspace=libs/database
+      - name: Migration thật (không db push — ADR-047) — cấp quyền hub_app + bật RLS
         run: npx prisma migrate deploy --schema=libs/database/prisma/schema.prisma
-      # AU6 thêm bước tạo role `hub_app` (không superuser, không BYPASSRLS) và đặt DATABASE_URL/VERIFY_DATABASE_URL
-      # sang role đó, VERIFY_DB_OWNER_URL giữ owner (SPEC-verification §4.3). Trước AU6 chưa có role này.
       - name: L1 db (skip > 0 = đỏ)
         run: npm run verify:db
       - name: Lưu kết quả

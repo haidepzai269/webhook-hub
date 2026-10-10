@@ -293,7 +293,8 @@ export class DeliveryConsumer {
 
       // Ghi delivery_attempts + update delivery.status + processed_messages CÙNG một transaction (§5.2 chốt 5).
       const persistAttempt = (statusData: Prisma.DeliveryUncheckedUpdateInput) =>
-        this.prisma.$transaction(async (tx) => {
+        // AU6: delivery_attempts có RLS (theo delivery) -> transaction đặt app.project_id NGAY ĐẦU.
+        this.prisma.tenantTx(tenantId, async (tx) => {
           await tx.deliveryAttempt.create({ data: attemptData });
           const repoTx = new TenantScopedRepository(tx, tenantId);
           await repoTx.updateDeliveryStatus(deliveryId, statusData);

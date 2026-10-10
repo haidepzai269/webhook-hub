@@ -49,14 +49,14 @@ describe('TenantScopedRepository — scope tenant ở quan hệ (S1-5, S1-1)', (
   });
 
   it('R2-4: assignPollSeq bỏ qua transaction ghi khi không còn dòng poll_seq IS NULL (một SELECT rẻ trên index một phần)', async () => {
-    const client: any = {
-      $queryRaw: jest.fn().mockResolvedValue([{ pending: false }]),
-      $executeRaw: jest.fn(),
-      $transaction: jest.fn(),
-    };
+    // AU6 (ADR-108): mọi lời gọi repo trên client gốc chạy trong MỘT transaction có set_config(app.project_id) cho
+    // RLS — nên "không mở transaction" không còn đúng. Ý của R2-4 vẫn giữ: KHÔNG lock, KHÔNG UPDATE khi không có dòng chờ.
+    const tx: any = { $queryRaw: jest.fn().mockResolvedValue([{ pending: false }]), $executeRaw: jest.fn() };
+    const client: any = { $transaction: jest.fn(async (fn: any) => fn(tx)) };
     expect(await new TenantScopedRepository(client, T).assignPollSeq()).toBe(0);
-    expect(client.$transaction).not.toHaveBeenCalled();
-    expect(client.$executeRaw).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1); // chỉ SELECT "còn dòng chờ không" — không pg_advisory_xact_lock
+    const executed = tx.$executeRaw.mock.calls.map((c: any[]) => (c[0].strings ?? c[0]).join('?'));
+    expect(executed).toEqual([expect.stringContaining('set_config')]); // không UPDATE events
   });
 });
 

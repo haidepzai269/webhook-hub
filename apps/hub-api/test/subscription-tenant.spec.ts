@@ -35,6 +35,9 @@ describe('POST /api/v1/subscriptions — đích phải cùng tenant (S1-5)', () 
     client.auditLog = { create: jest.fn(async ({ data }: any) => data) };
     const prisma: any = {
       forTenant: (tenantId: string, c?: any) => new TenantScopedRepository(c ?? client, tenantId),
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: async (fn: any) => fn(client),
     };
     return { controller: new ApiController(prisma), client, created };

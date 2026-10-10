@@ -8,7 +8,9 @@ import { describeDb, newTestPrisma } from './support/test-db';
  */
 
 describeDb('findActiveSubscriptionsForEventType — wildcard (Postgres, S3-3)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const tenant = randomUUID();
   const run = randomUUID().slice(0, 8);
   const ids: Record<string, string> = {};
@@ -32,10 +34,11 @@ describeDb('findActiveSubscriptionsForEventType — wildcard (Postgres, S3-3)', 
     await raw.subscription.deleteMany({ where: { tenantId: tenant } });
     await raw.destination.deleteMany({ where: { tenantId: tenant } });
     await raw.$disconnect();
+    await appDb.$disconnect();
   });
 
   const names = async (type: string) => {
-    const rows = await new TenantScopedRepository(raw, tenant).findActiveSubscriptionsForEventType(type);
+    const rows = await new TenantScopedRepository(appDb, tenant).findActiveSubscriptionsForEventType(type);
     return Object.entries(ids)
       .filter(([, id]) => rows.some((r) => r.id === id))
       .map(([n]) => n)
@@ -56,12 +59,13 @@ describeDb('findActiveSubscriptionsForEventType — wildcard (Postgres, S3-3)', 
 
   it('payment.received -> exact + wild + all; tenant khác -> rỗng', async () => {
     expect(await names('payment.received')).toEqual(['all', 'exact', 'wild']);
-    expect(await new TenantScopedRepository(raw, randomUUID()).findActiveSubscriptionsForEventType('payment.received')).toEqual([]);
+    expect(await new TenantScopedRepository(appDb, randomUUID()).findActiveSubscriptionsForEventType('payment.received')).toEqual([]);
   });
 });
 
 describeDb('findActiveSubscriptionsForEvent — lọc sourceIds (Postgres, S5)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
+  const appDb = newTestPrisma('app'); // AU6: repo (code đang test) bằng hub_app
   const tenant = randomUUID();
   const run = randomUUID().slice(0, 8);
   const S1 = randomUUID();
@@ -80,10 +84,11 @@ describeDb('findActiveSubscriptionsForEvent — lọc sourceIds (Postgres, S5)',
     await raw.subscription.deleteMany({ where: { tenantId: tenant } });
     await raw.destination.deleteMany({ where: { tenantId: tenant } });
     await raw.$disconnect();
+    await appDb.$disconnect();
   });
 
   const names = async (sourceId: string | null) => {
-    const rows = await new TenantScopedRepository(raw, tenant).findActiveSubscriptionsForEvent('payment.received', sourceId);
+    const rows = await new TenantScopedRepository(appDb, tenant).findActiveSubscriptionsForEvent('payment.received', sourceId);
     return Object.entries(ids).filter(([, id]) => rows.some((r) => r.id === id)).map(([n]) => n).sort();
   };
 

@@ -8,7 +8,9 @@ import { longPoll } from '../src/modules/service-api/polling';
  * lọc `types` (wildcard) ∩ `readTypes`, `status=failed` theo generation MỚI NHẤT, long-poll.
  */
 describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
-  const raw = newTestPrisma();
+  const raw = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
   const tenant = randomUUID();
   const run = randomUUID().slice(0, 8);
   const ago = (s: number) => new Date(Date.now() - s * 1000);
@@ -26,7 +28,7 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
         createdAt,
       },
     });
-  const repo = () => new TenantScopedRepository(raw, tenant);
+  const repo = () => new TenantScopedRepository(appDb, tenant);
 
   afterAll(async () => {
     await raw.delivery.deleteMany({ where: { tenantId: tenant } });
@@ -34,6 +36,7 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     await raw.subscription.deleteMany({ where: { tenantId: tenant } });
     await raw.destination.deleteMany({ where: { tenantId: tenant } });
     await raw.$disconnect();
+    await appDb.$disconnect();
   });
 
   it('[MS:U24] R-3 (ADR-095): event vừa COMMIT được trả NGAY (không còn trễ 2s); chưa commit thì không (xem polling-commit-order-db)', async () => {

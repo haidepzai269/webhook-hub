@@ -28,6 +28,9 @@ describe('IngestService — che header nhạy cảm trước khi lưu', () => {
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue(source),
       rawEvent: { create: jest.fn().mockResolvedValue({}) },
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const redis: any = {
@@ -65,10 +68,11 @@ describe('IngestService — che header nhạy cảm trước khi lưu', () => {
   });
 
   it('REJECTED: key sai cũng bị che trong headers và signature_header', async () => {
-    const { svc, prisma } = build();
+    // AU6 (SPEC-auth §5.12): REJECTED ghi qua tenantTx (raw_events có RLS) -> đọc ở mock tx.
+    const { svc, tx } = build();
     const res = await svc.ingestWebhook(req('Apikey WRONG_KEY_ALSO_SECRETISH'));
     expect(res.status).toBe(401);
-    const data = prisma.rawEvent.create.mock.calls[0][0].data;
+    const data = tx.rawEvent.create.mock.calls[0][0].data;
     expect(data.status).toBe('REJECTED');
     expect(data.headers.authorization).toBe('Apikey ***');
     expect(data.signatureHeader).toBe('Apikey ***');

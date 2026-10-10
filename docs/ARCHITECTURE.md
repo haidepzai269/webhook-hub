@@ -536,6 +536,9 @@ Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong m�
   cost 12, sai email/sai mật khẩu cùng body, rate limit theo IP + email (Redis là đường tắt, mất Redis thì đếm trong bộ
   nhớ). Socket.IO dùng **vé** 60 giây (khoá riêng) xin qua `/auth/socket-ticket?projectId=`. Web proxy `/api/*`,
   `/auth/*` để cookie là first-party.
+- **RLS bắt buộc** (AU6, ADR-108): runtime chạy bằng role `hub_app` (không superuser, không BYPASSRLS — app thoát nếu sai).
+  Mọi bảng nghiệp vụ bật `FORCE ROW LEVEL SECURITY`; repo tự đặt `app.project_id` cho mỗi truy vấn; lối xuyên project
+  DUY NHẤT là `PrismaService.systemTx`. Ba lớp cô lập: guard (membership) → repository (`tenant_id`) → Postgres (RLS).
 - Mask trong log: token, số tài khoản, chữ ký.
 
 ---

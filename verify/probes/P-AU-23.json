@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-23",
+  "claim": "Runtime là superuser/BYPASSRLS thì app PHẢI thoát",
+  "file": "libs/database/src/prisma.service.ts",
+  "find": "  exit(1);\n}",
+  "replace": "}",
+  "expectRed": [
+    "[AU:UA31]"
+  ],
+  "layer": "L0",
+  "testFile": "libs/database/test/rls-guard.spec.ts"
+}

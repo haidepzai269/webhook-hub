@@ -167,8 +167,9 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** AU6: dọn xuyên project có chủ đích -> đường hệ thống có tên (RLS). */
   private deleteInBatches(sql: Prisma.Sql): Promise<number> {
-    return this.loopBatches(() => this.prisma.$executeRaw(sql));
+    return this.loopBatches(() => this.prisma.systemTx('cleanup: dọn theo lô', (tx) => tx.$executeRaw(sql)));
   }
 
   private async loopBatches(once: () => Promise<number>): Promise<number> {

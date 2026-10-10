@@ -26,6 +26,9 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     const rootRepo = { findDeadDeliveryRefs: jest.fn().mockResolvedValue(refs) };
     const prisma: any = {
       forTenant: jest.fn((tenantId: string, client?: any) => (client ? new TenantScopedRepository(client, tenantId) : rootRepo)),
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => {
         const staged = { deliveries: [] as any[], outbox: [] as any[], audit: [] as any[] };
         const tx = {

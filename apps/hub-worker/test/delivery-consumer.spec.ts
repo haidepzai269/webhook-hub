@@ -69,6 +69,9 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
           return processed.has(key) ? { ...where.consumer_messageId } : null;
         }),
       },
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
 

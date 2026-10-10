@@ -114,7 +114,8 @@ export class DeliverySweeper implements OnModuleInit, OnModuleDestroy {
 
   /** Một lượt quét. Trả số delivery đã được ghi lại outbox. */
   async sweepOnce(): Promise<number> {
-    const count = await this.prisma.$executeRaw(buildSweepSql(this.sweepAfterMs, SWEEP_BATCH, this.retryGraceMs));
+    // AU6: quét delivery kẹt XUYÊN project -> đường hệ thống có tên (RLS).
+    const count = await this.prisma.systemTx('sweeper: delivery kẹt', (tx) => tx.$executeRaw(buildSweepSql(this.sweepAfterMs, SWEEP_BATCH, this.retryGraceMs)));
     if (count > 0) {
       logger.warn({ count, sweepAfterMs: this.sweepAfterMs, retryGraceMs: this.retryGraceMs }, 'Sweeper: ghi lại outbox delivery.requested cho delivery bị kẹt');
     }

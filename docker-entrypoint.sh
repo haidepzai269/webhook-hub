@@ -18,11 +18,19 @@ elif [ "$SERVICE" = "hub-api" ]; then
   # S1-6 (ADR-047): migrations có phiên bản, KHÔNG BAO GIỜ `db push` (cờ chấp nhận mất dữ liệu) — lệnh đó
   # từng xoá dữ liệu khi image nạp nhầm bản build cũ (BB09 P0-1). migrate deploy chỉ chạy migration
   # chưa áp dụng, không tự sinh thay đổi phá dữ liệu. Neon: dùng DIRECT_URL (directUrl trong schema).
+  # AU6 (SPEC-auth §5.12, ADR-108) — CHỈ local/compose: role runtime `hub_app` (không superuser, không BYPASSRLS)
+  # đăng nhập được bằng HUB_APP_DB_PASSWORD. Chạy bằng OWNER (DIRECT_URL) TRƯỚC migrate. Deployed (Neon) không đặt
+  # biến này: role tạo trong console (docs/DEPLOYMENT.md). Lỗi -> dừng (app sẽ không đăng nhập DB được).
+  if [ -n "$HUB_APP_DB_PASSWORD" ]; then
+    echo "==> [hub-api] Bảo đảm role runtime hub_app (ensure-app-role)..."
+    npm run ensure-app-role --workspace=libs/database || exit 1
+  fi
   echo "==> [hub-api] Applying database migrations (prisma migrate deploy)..."
   npx prisma migrate deploy --schema=libs/database/prisma/schema.prisma
   # Seed chạy khi RUN_SEED=true (docker-compose local mặc định true — review #7, ADR-066). Seed idempotent:
   # DB đã có source thì bỏ qua NGAY, không tạo thêm, không ghi đè, không xoá (BB-2). Deployed (Render) không
   # đặt RUN_SEED -> không chạy; gọi riêng: docker-entrypoint.sh seed
+  # AU6: seed tự dùng DIRECT_URL (owner) + app.rls_system (libs/database/src/seed.ts) — DATABASE_URL là hub_app.
   if [ "$RUN_SEED" = "true" ]; then
     echo "==> [hub-api] RUN_SEED=true, chạy seed (idempotent, chỉ tạo dữ liệu nếu DB đang rỗng)..."
     npm run prisma:seed || true

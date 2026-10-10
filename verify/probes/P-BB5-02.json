@@ -1,0 +1,12 @@
+{
+  "id": "P-BB5-02",
+  "claim": "Repo bỏ set_config(app.project_id) -> mọi đọc qua repo (đã RLS) ra 0 dòng (SPEC-verification §6.3)",
+  "file": "libs/database/src/tenant-scoped.repository.ts",
+  "find": "  await c.$executeRaw`SELECT set_config('app.project_id', ${tenantId}, true)`;",
+  "replace": "",
+  "expectRed": [
+    "[BB:5] (phần b)"
+  ],
+  "layer": "L1",
+  "testFile": "libs/database/test/rls-db.spec.ts"
+}

@@ -2,7 +2,7 @@ import { startMetricsServer } from './metrics';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
 import { setupRabbitMQTopology, QUEUES } from '@hub/messaging';
-import { assertDatabaseLib } from '@hub/database';
+import { assertAppRoleNotPrivileged, assertDatabaseLib, PrismaService } from '@hub/database';
 import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
@@ -63,6 +63,9 @@ async function bootstrap() {
     logger.error({ problems: testOnly }, 'FATAL: cấu hình chỉ dành cho kiểm chứng đang chạy ở production — không khởi động.');
     process.exit(1);
   }
+
+  // AU6 (SPEC-auth §5.12.2): runtime KHÔNG được là superuser / BYPASSRLS (RLS sẽ bị bỏ qua) -> thoát.
+  await assertAppRoleNotPrivileged(PrismaService.getInstance());
 
   const app = await NestFactory.createApplicationContext(WorkerModule);
   // S3-4: /metrics trên WORKER_METRICS_PORT (mặc định 9101, 0 = tắt) — chỉ mạng nội bộ.

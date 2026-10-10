@@ -21,6 +21,9 @@ describe('hub-api metrics (S3-4)', () => {
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue(sourceFound ? source : null),
       rawEvent: { create: jest.fn() },
+      // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      systemTx(_r: any, fn: any) { return this.$transaction(fn); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const redis: any = { checkRateLimit: jest.fn().mockResolvedValue(true), getIdempotencyKey: jest.fn().mockResolvedValue(null), setIdempotencyKey: jest.fn() };

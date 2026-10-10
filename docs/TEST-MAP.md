@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T19:36:38.112Z, commit 3c426e3).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T20:35:21.505Z, commit 020396f).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 213 mã khai báo · 136 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 213 mã khai báo · 140 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -19,47 +19,49 @@ Tổng: 213 mã khai báo · 136 mã có test · 0 mồ côi · 12 mồ côi có
 | `AF:#9` | REVIEW-CHECKLIST.md · S3-2 | L0 | libs/providers/test/canonical-same-shape.spec.ts:9 | ✅ pass |
 | `AF:#10` | REVIEW-CHECKLIST.md · S3-2 | L0 | libs/providers/test/canonical-payos.spec.ts:37 | ✅ pass |
 | `AF:#11` | REVIEW-CHECKLIST.md · S3-2 | L0 | libs/providers/test/canonical-sepay.spec.ts:18 | ✅ pass |
-| `AF:#12` | REVIEW-CHECKLIST.md · S3-3 | L1 | libs/database/test/subscription-match-db.spec.ts:45 | ✅ pass |
+| `AF:#12` | REVIEW-CHECKLIST.md · S3-3 | L1 | libs/database/test/subscription-match-db.spec.ts:48 | ✅ pass |
 | `AF:#13` | REVIEW-CHECKLIST.md · S3-3 | — | — | mồ côi có lý do: Kiểm bằng grep seed.ts — không phải test jest |
 | `AF:#14` | REVIEW-CHECKLIST.md · S1-7 | L0 | apps/hub-worker/test/telegram-sender.spec.ts:11 | ✅ pass |
-| `AF:#15` | REVIEW-CHECKLIST.md · S1-1 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:125 | ✅ pass |
-| `AF:#16` | REVIEW-CHECKLIST.md · S1-2 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:112 | ✅ pass |
-| `AF:#17` | REVIEW-CHECKLIST.md · S1-2 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:123 | ✅ pass |
-| `AF:#18` | REVIEW-CHECKLIST.md · S1-3 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:173 | ✅ pass |
-| `AF:#19` | REVIEW-CHECKLIST.md · S1-3 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:84 | ✅ pass |
+| `AF:#15` | REVIEW-CHECKLIST.md · S1-1 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:128 | ✅ pass |
+| `AF:#16` | REVIEW-CHECKLIST.md · S1-2 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:115 | ✅ pass |
+| `AF:#17` | REVIEW-CHECKLIST.md · S1-2 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:126 | ✅ pass |
+| `AF:#18` | REVIEW-CHECKLIST.md · S1-3 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:176 | ✅ pass |
+| `AF:#19` | REVIEW-CHECKLIST.md · S1-3 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:87 | ✅ pass |
 | `AF:#20` | REVIEW-CHECKLIST.md · S1-4 | — | — | mồ côi có lý do: docker compose restart rabbitmq — kịch bản chaos, chờ VF5 (L3) |
 | `AF:#21` | REVIEW-CHECKLIST.md · S1-4 | L0 | apps/hub-worker/test/cleanup-job.spec.ts:43 | ✅ pass |
-| `AF:#22` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:165 | ✅ pass |
+| `AF:#22` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:168 | ✅ pass |
 | `AF:#23` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:175 | ✅ pass |
 | `AF:#24` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:151 | ✅ pass |
-| `AF:#25` | REVIEW-CHECKLIST.md · S2-1 | L0 | apps/hub-worker/test/delivery-consumer.spec.ts:140 | ✅ pass |
+| `AF:#25` | REVIEW-CHECKLIST.md · S2-1 | L0 | apps/hub-worker/test/delivery-consumer.spec.ts:143 | ✅ pass |
 | `AF:#26` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:240 | ✅ pass |
 | `AF:#27` | REVIEW-CHECKLIST.md · S3-6 | — | — | mồ côi có lý do: Kiểm tài liệu ARCHITECTURE (fixed window, không jitter) — không phải test |
-| `AF:#28` | REVIEW-CHECKLIST.md · S2-3 | L0 | apps/hub-api/test/replay-bulk.spec.ts:71 | ✅ pass |
+| `AF:#28` | REVIEW-CHECKLIST.md · S2-3 | L0 | apps/hub-api/test/replay-bulk.spec.ts:74 | ✅ pass |
 | `AF:#29` | REVIEW-CHECKLIST.md · S2-3 | L1 | apps/hub-api/test/replay-bulk-db.spec.ts:58 | ✅ pass |
-| `AF:#30` | REVIEW-CHECKLIST.md · S2-2 | L0 | apps/hub-api/test/ingest-trace.spec.ts:60 | ✅ pass |
+| `AF:#30` | REVIEW-CHECKLIST.md · S2-2 | L0 | apps/hub-api/test/ingest-trace.spec.ts:63 | ✅ pass |
 | `AF:#31` | REVIEW-CHECKLIST.md · S2-2 | L0 | apps/hub-api/test/realtime-auth.spec.ts:49 | ✅ pass |
 | `AF:#32` | REVIEW-CHECKLIST.md · S2-5 | — | — | mồ côi có lý do: Badge dashboard đổi đỏ live (GIF) — kiểm tay trên trình duyệt |
-| `AF:#34` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-api/test/subscription-tenant.spec.ts:43 | ✅ pass |
+| `AF:#34` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-api/test/subscription-tenant.spec.ts:46 | ✅ pass |
 | `AF:#35` | REVIEW-CHECKLIST.md · S1-5 | — | — | mồ côi có lý do: psql -U shop_user … → permission denied (docker) — chờ VF4 nhập vào runner L2 |
 | `AF:#37` | REVIEW-CHECKLIST.md · S2-4 | L0 | libs/providers/test/payos-sign.spec.ts:44 | ✅ pass |
-| `AF:#38` | REVIEW-CHECKLIST.md · S3-4 | L0 | apps/hub-api/test/metrics.spec.ts:63 | ✅ pass |
+| `AF:#38` | REVIEW-CHECKLIST.md · S3-4 | L0 | apps/hub-api/test/metrics.spec.ts:66 | ✅ pass |
 | `AF:#39` | REVIEW-CHECKLIST.md · S1-8 | — | — | mồ côi có lý do: bash scripts/e2e-smoke.sh — VF4 thay bằng runner L2 TS có tag |
-| `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:213 | ✅ pass |
+| `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:222 | ✅ pass |
 | `AF:#41` | REVIEW-CHECKLIST.md · S3-6 | — | — | mồ côi có lý do: PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test |
-| `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:74 | chưa chạy |
-| `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:191 | chưa chạy |
-| `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:103 | chưa chạy |
-| `AU:TA4` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:134 | chưa chạy |
-| `AU:TA5` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:150 | chưa chạy |
-| `AU:TA6` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:169 | chưa chạy |
-| `AU:TA7` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:182 | chưa chạy |
-| `AU:TA8` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:233 | chưa chạy |
-| `AU:TA9` | SPEC-auth.md · AU4 | L2* | verify/scenarios/auth-e2e.ts:291 | chưa chạy |
-| `AU:TA10` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:212 | chưa chạy |
+| `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:75 | chưa chạy |
+| `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:192 | chưa chạy |
+| `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:104 | chưa chạy |
+| `AU:TA4` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:135 | chưa chạy |
+| `AU:TA5` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:151 | chưa chạy |
+| `AU:TA6` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:170 | chưa chạy |
+| `AU:TA7` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:183 | chưa chạy |
+| `AU:TA8` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:234 | chưa chạy |
+| `AU:TA9` | SPEC-auth.md · AU4 | L2* | verify/scenarios/auth-e2e.ts:292 | chưa chạy |
+| `AU:TA10` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:213 | chưa chạy |
 | `AU:TA11` | SPEC-auth.md · AU5 | — | — | mồ côi có lý do: Thủ công, cần GitHub OAuth App thật (DINH-CHINH-AUTH §4 #9: TA11 để sau); fake-github là VF4. Logic phủ bằng github-oauth-db.spec (UA23-UA25, PKCE, operator, unlink) với fetch giả |
+| `AU:TA12` | SPEC-auth.md · AU6 | L1 | libs/database/test/rls-db.spec.ts:42 | ✅ pass |
+| `AU:TA13` | SPEC-auth.md · AU6 | L2* | verify/scenarios/auth-e2e.ts:319 | chưa chạy |
 | `AU:TA14` | SPEC-auth.md · AU3 | — | — | mồ côi có lý do: Trình duyệt thật (Chrome + Firefox ở http://localhost:3000): F5 vẫn đăng nhập, document.cookie không thấy __Host-hub_at/rt — phiên TEST làm tay (SPEC-auth §10.2); phía server đã có TA1/TA5/TA6 tự động |
-| `AU:TA15` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:278 | chưa chạy |
+| `AU:TA15` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:279 | chưa chạy |
 | `AU:UA1` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:40 | ✅ pass |
 | `AU:UA2` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:163 | ✅ pass |
 | `AU:UA3` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:168 | ✅ pass |
@@ -89,13 +91,15 @@ Tổng: 213 mã khai báo · 136 mã có test · 0 mồ côi · 12 mồ côi có
 | `AU:UA27` | SPEC-auth.md · AU4 | L1 | apps/hub-api/test/members-db.spec.ts:81 | ✅ pass |
 | `AU:UA28` | SPEC-auth.md · AU3 | L1 | apps/hub-api/test/console-projects-db.spec.ts:81 | ✅ pass |
 | `AU:UA29` | SPEC-auth.md · AU3 | L0 | apps/hub-api/test/realtime-project.spec.ts:62 | ✅ pass |
-| `BB:5` | spec-sources.json | L1 | libs/database/test/project-schema-db.spec.ts:38 | ✅ pass |
-| `MS:T2` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/service-resources.spec.ts:164 | ✅ pass |
-| `MS:T4` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-api/test/endpoint-verifier.spec.ts:44<br>apps/hub-api/test/endpoint-verifier.spec.ts:53<br>apps/hub-api/test/service-resources.spec.ts:137<br>apps/hub-api/test/service-resources.spec.ts:154<br>libs/crypto/test/ssrf-metadata.spec.ts:11 | ✅ pass |
-| `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:104<br>apps/hub-api/test/service-resources.spec.ts:111<br>apps/hub-api/test/service-resources.spec.ts:129 | ✅ pass |
-| `MS:T9` | SPEC-hub-multi-service.md · S8 | L0 | apps/hub-api/test/ingest-generic.spec.ts:31<br>apps/hub-api/test/ingest-generic.spec.ts:38<br>apps/hub-api/test/service-sources.spec.ts:45<br>apps/hub-api/test/service-sources.spec.ts:59<br>apps/hub-api/test/service-sources.spec.ts:99 | ✅ pass |
+| `AU:UA30` | SPEC-auth.md · AU6 | L0 | libs/database/test/rls-guard.spec.ts:20 | ✅ pass |
+| `AU:UA31` | SPEC-auth.md · AU6 | L0 | libs/database/test/rls-guard.spec.ts:36 | ✅ pass |
+| `BB:5` | spec-sources.json | L1 | libs/database/test/project-schema-db.spec.ts:41<br>libs/database/test/rls-db.spec.ts:42<br>libs/database/test/rls-db.spec.ts:72 | ✅ pass |
+| `MS:T2` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/service-resources.spec.ts:167 | ✅ pass |
+| `MS:T4` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-api/test/endpoint-verifier.spec.ts:44<br>apps/hub-api/test/endpoint-verifier.spec.ts:53<br>apps/hub-api/test/service-resources.spec.ts:140<br>apps/hub-api/test/service-resources.spec.ts:157<br>libs/crypto/test/ssrf-metadata.spec.ts:11 | ✅ pass |
+| `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:107<br>apps/hub-api/test/service-resources.spec.ts:114<br>apps/hub-api/test/service-resources.spec.ts:132 | ✅ pass |
+| `MS:T9` | SPEC-hub-multi-service.md · S8 | L0 | apps/hub-api/test/ingest-generic.spec.ts:34<br>apps/hub-api/test/ingest-generic.spec.ts:41<br>apps/hub-api/test/service-sources.spec.ts:48<br>apps/hub-api/test/service-sources.spec.ts:62<br>apps/hub-api/test/service-sources.spec.ts:102 | ✅ pass |
 | `MS:T10` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-timeout.spec.ts:29 | ✅ pass |
-| `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:73<br>libs/database/test/retention-db.spec.ts:49 | ✅ pass |
+| `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:74<br>libs/database/test/retention-db.spec.ts:52 | ✅ pass |
 | `MS:T14` | SPEC-hub-multi-service.md · S12 | L1 | libs/database/test/seed-demo-db.spec.ts:16 | ✅ pass |
 | `MS:U1` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:16 | ✅ pass |
 | `MS:U2` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:20 | ✅ pass |
@@ -114,19 +118,19 @@ Tổng: 213 mã khai báo · 136 mã có test · 0 mồ côi · 12 mồ côi có
 | `MS:U15` | SPEC-hub-multi-service.md · S9 | L0 | libs/providers/test/generic.adapter.spec.ts:163 | ✅ pass |
 | `MS:U16` | SPEC-hub-multi-service.md · S4 | L0 | libs/providers/test/api.adapter.spec.ts:8 | ✅ pass |
 | `MS:U17` | SPEC-hub-multi-service.md · S5 | L0 | libs/common/test/event-pattern.spec.ts:11 | ✅ pass |
-| `MS:U18` | SPEC-hub-multi-service.md · S5 | L0,L1 | apps/hub-worker/test/normalize-consumer.spec.ts:134<br>libs/database/test/repository-scope.spec.ts:28<br>libs/database/test/subscription-match-db.spec.ts:90 | ✅ pass |
-| `MS:U19` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:118<br>libs/common/test/event-pattern.spec.ts:24 | ✅ pass |
+| `MS:U18` | SPEC-hub-multi-service.md · S5 | L0,L1 | apps/hub-worker/test/normalize-consumer.spec.ts:137<br>libs/database/test/repository-scope.spec.ts:28<br>libs/database/test/subscription-match-db.spec.ts:95 | ✅ pass |
+| `MS:U19` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:121<br>libs/common/test/event-pattern.spec.ts:24 | ✅ pass |
 | `MS:U20` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:59 | ✅ pass |
 | `MS:U21` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:68 | ✅ pass |
 | `MS:U22` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:77 | ✅ pass |
 | `MS:U23` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:87 | ✅ pass |
-| `MS:U24` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:39 | ✅ pass |
-| `MS:U25` | SPEC-hub-multi-service.md · S7 | L1,L0 | apps/hub-api/test/polling-db.spec.ts:45<br>apps/hub-api/test/polling-params.spec.ts:26 | ✅ pass |
-| `MS:U26` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:99 | ✅ pass |
-| `MS:U27` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:112 | ✅ pass |
-| `MS:U28` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-consumer.spec.ts:414 | ✅ pass |
-| `MS:U29` | SPEC-hub-multi-service.md · S0 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:112 | ✅ pass |
-| `MS:U30` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:142 | ✅ pass |
+| `MS:U24` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:42 | ✅ pass |
+| `MS:U25` | SPEC-hub-multi-service.md · S7 | L1,L0 | apps/hub-api/test/polling-db.spec.ts:48<br>apps/hub-api/test/polling-params.spec.ts:26 | ✅ pass |
+| `MS:U26` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:102 | ✅ pass |
+| `MS:U27` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:115 | ✅ pass |
+| `MS:U28` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-consumer.spec.ts:417 | ✅ pass |
+| `MS:U29` | SPEC-hub-multi-service.md · S0 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:115 | ✅ pass |
+| `MS:U30` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:145 | ✅ pass |
 | `MS:U31` | SPEC-hub-multi-service.md · S11 | L0 | libs/hub-sdk/test/sdk.spec.ts:23 | ✅ pass |
 | `MS:U32` | SPEC-hub-multi-service.md · S11 | L0 | libs/hub-sdk/test/sdk.spec.ts:30 | ✅ pass |
 | `MS:U33` | SPEC-hub-multi-service.md · S11 | L0 | libs/hub-sdk/test/sdk.spec.ts:48 | ✅ pass |
@@ -157,6 +161,6 @@ Tổng: 213 mã khai báo · 136 mã có test · 0 mồ côi · 12 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (104 file, 602 khai báo it/test)
+## File test (106 file, 607 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

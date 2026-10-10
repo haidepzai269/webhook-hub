@@ -8,8 +8,10 @@ import { describeDb, newTestPrisma } from '../../../libs/database/test/support/t
  * Sau khi A COMMIT, poll tiếp từ cursor PHẢI thấy A. Trước: cursor theo `seq` (cấp lúc INSERT) -> A mất vĩnh viễn.
  */
 describeDb('Polling — cursor theo thứ tự COMMIT (R-3)', () => {
-  const raw = newTestPrisma();
-  const holder = newTestPrisma();
+  const raw = newTestPrisma('owner');
+  // AU6 (SPEC-verification §4.3): fixture bằng owner; repo (code đang test) bằng hub_app -> RLS có hiệu lực.
+  const appDb = newTestPrisma('app');
+  const holder = newTestPrisma('owner');
   const tenant = randomUUID();
   const run = randomUUID().slice(0, 8);
   const old = new Date(Date.now() - 60_000); // created_at cũ: cửa sổ lắng thời gian (nếu còn) không cứu được
@@ -17,11 +19,12 @@ describeDb('Polling — cursor theo thứ tự COMMIT (R-3)', () => {
     id: `co_${run}_${name}`, tenantId: tenant, idempotencyKey: `co:${run}:${name}`, correlationId: randomUUID(),
     type: 'order.created', source: 'api', data: { name }, createdAt: old, receivedAt: old,
   });
-  const repo = () => new TenantScopedRepository(raw, tenant);
+  const repo = () => new TenantScopedRepository(appDb, tenant);
 
   afterAll(async () => {
     await raw.event.deleteMany({ where: { tenantId: tenant } });
     await raw.$disconnect();
+    await appDb.$disconnect();
     await holder.$disconnect();
   });
 

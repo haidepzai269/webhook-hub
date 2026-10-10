@@ -304,8 +304,15 @@ Bật **public status page** → chụp vào báo cáo. Mười phút cấu hìn
 
 ```bash
 # --- Hạ tầng ---
-DATABASE_URL=            # Neon pooled (-pooler, ?pgbouncer=true&connection_limit=1)
-DIRECT_URL=              # Neon direct — chỉ cho prisma migrate
+DATABASE_URL=            # Neon pooled (-pooler, ?pgbouncer=true&connection_limit=1) — ĐĂNG NHẬP BẰNG ROLE hub_app (AU6)
+DIRECT_URL=              # Neon direct, role OWNER — chỉ cho prisma migrate + seed
+                         # AU6 (RLS, ADR-108) — tạo role hub_app MỘT lần trên Neon (Console → Roles → New role
+                         # "hub_app", hoặc SQL Editor bằng owner):
+                         #   CREATE ROLE hub_app LOGIN PASSWORD '<mật khẩu mạnh>' NOSUPERUSER NOBYPASSRLS;
+                         #   GRANT CONNECT ON DATABASE neondb TO hub_app;
+                         # rồi chạy `prisma migrate deploy` (DIRECT_URL): migration cấp quyền schema hub + bật RLS.
+                         # hub-api/hub-worker THOÁT nếu DATABASE_URL là role superuser/BYPASSRLS (vd neondb_owner).
+                         # Seed trên deployed: `docker-entrypoint.sh seed` với DIRECT_URL (seed tự mở phiên hệ thống).
 REDIS_URL=               # Upstash rediss://
 AMQP_URL=                # CloudAMQP amqps://
 

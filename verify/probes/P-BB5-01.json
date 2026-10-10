@@ -1,0 +1,14 @@
+{
+  "id": "P-BB5-01",
+  "claim": "Quên lọc tenant trong repository thì RLS vẫn chặn (lớp 3 bắt lỗi lớp 2)",
+  "file": "libs/database/src/tenant-scoped.repository.ts",
+  "find": "      where: { ...where, tenantId: this.tenantId },\n      take,\n      skip: cursor ? 1 : 0,",
+  "replace": "      where: { ...where },\n      take,\n      skip: cursor ? 1 : 0,",
+  "expectGreen": [
+    "[AU:TA12][BB:5] (phần a)",
+    "[BB:5] (phần b)"
+  ],
+  "layer": "L1",
+  "testFile": "libs/database/test/rls-db.spec.ts",
+  "note": "Probe SỐNG SÓT (expectGreen), lệch SPEC-verification §6.3 ghi expectRed — claim của chính spec là 'RLS vẫn chặn' nên test phải CÒN XANH khi repo quên lọc. Đã chạy tay 2026-10-11: 2/2 xanh. Probe đỏ tương ứng: P-BB5-02 (bỏ set_config)."
+}

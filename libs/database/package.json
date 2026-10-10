@@ -8,7 +8,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "ts-node src/seed.ts"
+    "prisma:seed": "ts-node src/seed.ts",
+    "ensure-app-role": "ts-node src/ensure-app-role.ts"
   },
   "dependencies": {
     "@hub/common": "*",
