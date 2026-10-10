@@ -22,6 +22,7 @@ import { useDestinations, useExecutions, useFlowProjectStore, useSources } from 
 
 import { EventSheet } from "./_components/event-sheet";
 import { OrphanBanner } from "./_components/orphan-banner";
+import { useRealtimeProject } from "@/lib/hub/socket";
 
 const TABS: { id: ExecutionStatus | "all"; label: string }[] = [
   { id: "all", label: "Tất cả" },
@@ -59,6 +60,7 @@ function ExecutionsView() {
     [status, source, destination, type],
   );
   const q = useExecutions(filters, { paused });
+  useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
   // R-4: danh sách lọc theo ĐÚNG project đang xem; đổi project thì bỏ lọc source/đích cũ (id của project khác).
   const projectId = useFlowProjectStore((s) => s.projectId);
   const sources = useSources(projectId);

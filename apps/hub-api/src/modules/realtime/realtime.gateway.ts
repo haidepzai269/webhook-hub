@@ -5,7 +5,9 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { OnModuleDestroy } from '@nestjs/common';
+import { OnModuleDestroy, Optional } from '@nestjs/common';
+import { PrismaService } from '@hub/database';
+import { resolveProjectScope } from '../console/project-scope.guard';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { logger, TraceIngestedNotice } from '@hub/common';
@@ -58,7 +60,11 @@ export class RealtimeGateway
   // done = delivery đã ra kết quả cuối (SUCCEEDED|DEAD) -> successRate không vượt 100% khi fan-out nhiều subscription
   private counters = new Map<string, TickCounter>();
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    // R-5: kiểm `projectId` của handshake bằng CÙNG luật ProjectScopeGuard. Vắng (test cũ) -> từ chối mọi projectId.
+    @Optional() private readonly prisma?: PrismaService,
+  ) {}
 
   afterInit(server: Server) {
     logger.info('Socket.IO Gateway đã khởi tạo');
@@ -136,10 +142,20 @@ export class RealtimeGateway
       const payload = this.jwtService.verify<JwtPayload>(token);
       if (!payload?.tenantId) return next(new Error('UNAUTHORIZED'));
       socket.data.tenantId = payload.tenantId;
-      next();
     } catch {
-      next(new Error('UNAUTHORIZED'));
+      return next(new Error('UNAUTHORIZED'));
     }
+    // R-5: màn Event Flow đang xem project khác -> socket vào room của project đó (cùng luật ProjectScopeGuard:
+    // project phải tồn tại; admin env là operator). Sai/không tồn tại -> từ chối, KHÔNG rơi về tenant JWT.
+    const projectId = socket.handshake.auth?.projectId;
+    if (projectId === undefined || projectId === null || projectId === '') return next();
+    if (!this.prisma) return next(new Error('PROJECT_NOT_FOUND'));
+    resolveProjectScope(this.prisma, projectId)
+      .then((scoped) => {
+        if (scoped) socket.data.tenantId = scoped;
+        next();
+      })
+      .catch(() => next(new Error('PROJECT_NOT_FOUND')));
   }
 
   private counterFor(tenantId: string) {

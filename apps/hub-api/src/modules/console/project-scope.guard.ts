@@ -20,12 +20,22 @@ export class ProjectScopeGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<RequestWithTenant>();
     const raw = (req.query as Record<string, unknown> | undefined)?.projectId;
-    if (raw === undefined || raw === '') return true;
-    const projectId = Array.isArray(raw) ? raw[0] : raw;
-    if (typeof projectId !== 'string' || !UUID_RE.test(projectId) || !(await this.prisma.findProjectById(projectId))) {
-      throw new NotFoundException({ error: 'not_found', message: 'Project không tồn tại' });
-    }
-    req.tenantId = projectId;
+    const scoped = await resolveProjectScope(this.prisma, raw);
+    if (scoped) req.tenantId = scoped;
     return true;
   }
+}
+
+/**
+ * LUẬT DUY NHẤT của phạm vi project (dùng chung HTTP guard ở trên và handshake Socket.IO — R-5):
+ * trống -> `null` (giữ tenant của JWT); có -> phải là UUID của project tồn tại, không thì 404.
+ * Admin env là operator (ADR-056) nên vào được mọi project; AU3 thay luật membership ở ĐÂY.
+ */
+export async function resolveProjectScope(prisma: Pick<PrismaService, 'findProjectById'>, raw: unknown): Promise<string | null> {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const projectId = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof projectId !== 'string' || !UUID_RE.test(projectId) || !(await prisma.findProjectById(projectId))) {
+    throw new NotFoundException({ error: 'not_found', message: 'Project không tồn tại' });
+  }
+  return projectId;
 }
