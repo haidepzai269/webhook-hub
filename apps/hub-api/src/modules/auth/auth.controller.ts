@@ -26,6 +26,7 @@ import { clearSessionCookies, CSRF_COOKIE, CSRF_HEADER, readCookie, readHeader, 
 import { TooManyAttempts } from './auth-errors';
 import { clientIp } from './client-ip';
 import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
+import { PublicRoute } from '../service-api/require-scope.decorator';
 
 /** 429 kèm `Retry-After` (SPEC-auth §5.5). */
 @Catch(TooManyAttempts)
@@ -51,6 +52,7 @@ const user = (req: RequestWithPrincipal) => req.principal as UserPrincipal;
  * (cookie access + CSRF cho method thay đổi dữ liệu). Token chỉ đi qua cookie, không bao giờ trong body.
  */
 @Controller('auth')
+@PublicRoute('đăng ký/đăng nhập công khai; route có SessionGuard chỉ đụng phiên/tài khoản CỦA CHÍNH người gọi, không theo project')
 @UseFilters(TooManyAttemptsFilter)
 export class AuthController {
   constructor(

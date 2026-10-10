@@ -1,6 +1,7 @@
 import { Controller, Post, Res, Req, Body, Param, All, Query } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { logger } from '@hub/common';
+import { PublicRoute } from '../service-api/require-scope.decorator';
 
 /** `123456:ABCdef...` -> `123456:***` (giữ bot id để phân biệt, che phần bí mật). */
 export function maskToken(token: string | undefined): string {
@@ -10,6 +11,7 @@ export function maskToken(token: string | undefined): string {
 }
 
 @Controller('mock')
+@PublicRoute('đích giả Telegram/Discord cho local/verify (ADR-054), không đọc dữ liệu tenant')
 export class MockController {
   /**
    * S2-1: đích luôn hỏng để kiểm circuit breaker — `GET|POST /mock/fail?status=500` luôn trả đúng mã

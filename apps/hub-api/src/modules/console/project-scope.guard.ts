@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { MemberRole, PrismaService } from '@hub/database';
 import { logger, ROLE_SCOPES } from '@hub/common';
 import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
-import { REQUIRE_SCOPE_KEY } from '../service-api/require-scope.decorator';
+import { REQUIRE_SCOPE_KEY, scopeNotDeclared } from '../service-api/require-scope.decorator';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,7 +63,12 @@ export class ProjectScopeGuard implements CanActivate {
     principal.scopes = scope.scopes;
 
     const required = this.reflector.getAllAndOverride<string | undefined>(REQUIRE_SCOPE_KEY, [context.getHandler(), context.getClass()]);
-    if (required && !scope.scopes.includes(required)) {
+    // R-8: đóng mặc định — route quên @RequireScope là lỗi cấu hình (500), không phải "mọi role đều qua".
+    if (!required) {
+      logger.error({ path: req.path, method: req.method }, 'ProjectScopeGuard: route không khai @RequireScope -> 500 (R-8)');
+      scopeNotDeclared(`${req.method ?? ''} ${req.path ?? ''}`.trim());
+    }
+    if (!scope.scopes.includes(required)) {
       throw new HttpException({ error: 'missing_scope', message: `Role hiện tại không có quyền ${required}`, required }, HttpStatus.FORBIDDEN);
     }
 

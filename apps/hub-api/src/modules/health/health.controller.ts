@@ -3,8 +3,10 @@ import { Response } from 'express';
 import { PrismaService } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
 import * as amqp from 'amqplib';
+import { PublicRoute } from '../service-api/require-scope.decorator';
 
 @Controller('health')
+@PublicRoute('health check công khai cho Render/compose, không trả dữ liệu tenant')
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,

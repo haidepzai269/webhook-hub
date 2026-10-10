@@ -3,6 +3,10 @@ import { PrismaService } from '@hub/database';
 import { FlowController } from '../src/modules/flow/flow.controller';
 import { FlowService } from '../src/modules/flow/flow.service';
 import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
+import { REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
+/** R-8: guard đóng mặc định — handler giả phải khai scope như route thật. */
+const readProjectHandler = () => undefined;
+Reflect.defineMetadata(REQUIRE_SCOPE_KEY, 'read:project', readProjectHandler);
 
 /**
  * SPEC-event-flow-ui F2/F4/F5 trên Postgres THẬT (RUN_DB_TESTS=1): hành trình dựng từ dòng DB thật,
@@ -313,7 +317,7 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     const who = (u: { id: string }) => ({ kind: 'user', id: u.id, sessionId: 's', email: 'x', name: 'x', isOperator: false, emailVerified: true });
     const ctx = (query: Record<string, string>, u: { id: string } = member) => {
       const req: any = { query, params: {}, principal: who(u) };
-      return { req, ctx: { switchToHttp: () => ({ getRequest: () => req }), getHandler: () => () => undefined, getClass: () => class {} } as any };
+      return { req, ctx: { switchToHttp: () => ({ getRequest: () => req }), getHandler: () => readProjectHandler, getClass: () => class {} } as any };
     };
     try {
       const a = ctx({ projectId: tenant });

@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { ROLE_SCOPES, KEY_GRANTABLE_SCOPES } from '@hub/common';
 import { ProjectScopeGuard } from '../src/modules/console/project-scope.guard';
-import { REQUIRE_SCOPE_KEY, NO_PROJECT_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
+import { REQUIRE_SCOPE_KEY, NO_PROJECT_SCOPE_KEY, PUBLIC_ROUTE_KEY } from '../src/modules/service-api/require-scope.decorator';
 import { ApiController } from '../src/modules/api/api.controller';
 import { ProjectsController } from '../src/modules/console/projects.controller';
 import { FlowController } from '../src/modules/flow/flow.controller';
@@ -84,19 +84,45 @@ describe('ProjectScopeGuard — membership + scope', () => {
   });
 });
 
-describe('[AU:UA20] quét metadata: MỌI route /api/v1/* khai @RequireScope (hoặc @NoProjectScope có lý do)', () => {
-  it('ApiController, ProjectsController, FlowController, MembersController', () => {
+describe('[AU:UA20] quét metadata: MỌI route của MỌI controller khai @RequireScope | @NoProjectScope | @PublicRoute (R-8: đóng mặc định)', () => {
+  // R-8: không còn danh sách cứng — tự tìm mọi *.controller.ts trong apps/hub-api/src.
+  function controllers(): any[] {
+    const fs = require('fs');
+    const path = require('path');
+    const out: any[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (e.name.endsWith('.controller.ts')) for (const v of Object.values(require(f))) if (typeof v === 'function' && Reflect.getMetadata(PATH_METADATA, v) !== undefined) out.push(v);
+      }
+    };
+    walk(path.join(__dirname, '..', 'src'));
+    return out;
+  }
+
+  it('tìm thấy cả controller console lẫn controller ngoài console (không phải danh sách cứng)', () => {
+    const names = controllers().map((C) => C.name);
+    for (const n of ['ApiController', 'ProjectsController', 'FlowController', 'MembersController', 'AuthController', 'IngestController', 'ServiceApiController', 'ServiceResourcesController', 'HealthController']) expect(names).toContain(n);
+  });
+
+  it('mọi route có khai báo', () => {
     const missing: string[] = [];
-    for (const C of [ApiController, ProjectsController, FlowController, MembersController] as any[]) {
+    for (const C of controllers()) {
       const base = Reflect.getMetadata(PATH_METADATA, C);
       for (const name of Object.getOwnPropertyNames(C.prototype)) {
         const fn = C.prototype[name];
         if (name === 'constructor' || typeof fn !== 'function' || Reflect.getMetadata(METHOD_METADATA, fn) === undefined) continue;
-        const scope = Reflect.getMetadata(REQUIRE_SCOPE_KEY, fn) ?? Reflect.getMetadata(REQUIRE_SCOPE_KEY, C);
-        const open = Reflect.getMetadata(NO_PROJECT_SCOPE_KEY, fn);
-        if (!scope && !open) missing.push(`${base}/${Reflect.getMetadata(PATH_METADATA, fn)} (${C.name}.${name})`);
+        const declared = [REQUIRE_SCOPE_KEY, NO_PROJECT_SCOPE_KEY, PUBLIC_ROUTE_KEY].some((k) => Reflect.getMetadata(k, fn) ?? Reflect.getMetadata(k, C));
+        if (!declared) missing.push(`${base}/${Reflect.getMetadata(PATH_METADATA, fn)} (${C.name}.${name})`);
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it('[AR:R-8] (phần a) guard đóng mặc định: route console không khai @RequireScope -> 500 scope_not_declared (trước: qua cho mọi role)', async () => {
+    const req: any = { method: 'GET', path: '/api/v1/x', query: { projectId: P }, params: {}, principal: user() };
+    const r = await run(makeGuard('viewer').guard.canActivate(ctx(undefined, req)));
+    expect(r).toEqual({ status: 500, body: expect.objectContaining({ error: 'scope_not_declared' }) });
   });
 });

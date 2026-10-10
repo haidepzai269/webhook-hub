@@ -2,6 +2,7 @@ import { Controller, Get, Headers, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { bearerAuthorized } from '@hub/crypto';
 import { apiRegistry } from './metrics';
+import { PublicRoute } from '../service-api/require-scope.decorator';
 
 /**
  * `GET /metrics` (S3-4) — KHÔNG qua JWT (Prometheus không đăng nhập). Nếu đặt `METRICS_TOKEN`
@@ -13,6 +14,7 @@ export function metricsAuthorized(authHeader: string | undefined, token: string 
 }
 
 @Controller('metrics')
+@PublicRoute('Prometheus scrape, bảo vệ bằng METRICS_TOKEN; số liệu gộp, không theo tenant')
 export class MetricsController {
   @Get()
   async metrics(@Headers('authorization') auth: string | undefined, @Res() res: Response) {

@@ -7,14 +7,15 @@ Luật: RED→GREEN→GATED→PROBED, mỗi mục một commit có `Verify:`, `n
 | R-1 | xong | 275abbd | ADR-109; RED: 18 song song → 18×401 (unit), review: 17×401 |
 | R-2 | xong | d237654 | |
 | R-7 | xong | c05299f | gate data-migration-rls, ADR-111 | |
-| R-3 | xong | (commit R-3) | ADR-112 | |
+| R-3 | xong | e43a60d | ADR-112 | |
 | R-4 | chưa | | |
 | R-5 | chưa | | |
 | R-6 | chưa | | |
-| R-8 | chưa | | |
+| R-8 | xong | (commit R-8) | ADR-113 | |
 | R-9..R-14 | chưa | | |
 
 ## Bước kế
 - R-1 PROBED live (hubv, image mới): 18 login sai song song → 5×401 + 13×429.
 - R-2: web hubv chạy bằng `--profile web` (cổng 13000). e2e `[AR:R-2] (phần c)` RED trên api cũ (Y bị 429), GREEN sau rebuild.
 - Mã test cho review: namespace `AR` (verify/spec-sources.json + TAG_RE trong verify/lib/map.ts), test unit ở apps/hub-api/test/auth-review.spec.ts.
+- Smoke hubv: `HUB_URL=http://localhost:14000 PG_CONTAINER=hubv-postgres-1 bash scripts/e2e-smoke.sh` sau khi `set -a; . ./.env.verify` (PG_CONTAINER mặc định là stack DEV).

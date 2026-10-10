@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable } 
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '@hub/database';
 import { hashApiKey, logger } from '@hub/common';
-import { REQUIRE_SCOPE_KEY } from './require-scope.decorator';
+import { NO_PROJECT_SCOPE_KEY, REQUIRE_SCOPE_KEY, scopeNotDeclared } from './require-scope.decorator';
 import { KeyPrincipal, RequestWithPrincipal } from './principal';
 
 /** `lastUsedAt` ghi tối đa 1 lần / phút / key (so trong bộ nhớ) — không ghi DB mỗi request, không Redis. */
@@ -43,6 +43,10 @@ export class ApiKeyGuard implements CanActivate {
     if (key.project.slug !== req.params?.project) throw new HttpException(NOT_FOUND, HttpStatus.NOT_FOUND);
 
     const required = this.reflector.getAllAndOverride<string | undefined>(REQUIRE_SCOPE_KEY, [context.getHandler(), context.getClass()]);
+    // R-8: đóng mặc định — thiếu @RequireScope chỉ được phép khi route khai rõ @NoProjectScope (vd /me: key nào cũng xem được chính nó).
+    if (!required && !this.reflector.getAllAndOverride<string | undefined>(NO_PROJECT_SCOPE_KEY, [context.getHandler(), context.getClass()])) {
+      scopeNotDeclared(`${req.method ?? ''} ${req.path ?? ''}`.trim());
+    }
     if (required && !key.scopes.includes(required)) {
       throw new HttpException({ error: 'missing_scope', required }, HttpStatus.FORBIDDEN);
     }

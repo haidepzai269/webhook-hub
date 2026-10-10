@@ -2,8 +2,10 @@ import { Controller, Post, Param, Req, Res, Headers } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { IngestService } from './ingest.service';
 import { ProviderType, RawWebhookRequest } from '@hub/common';
+import { PublicRoute } from '../service-api/require-scope.decorator';
 
 @Controller('hooks')
+@PublicRoute('provider gọi vào; xác thực bằng chữ ký của provider trong ProviderAdapter (timingSafeEqual)')
 export class IngestController {
   constructor(private readonly ingestService: IngestService) {}
 

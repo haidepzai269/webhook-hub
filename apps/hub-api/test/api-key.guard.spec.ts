@@ -2,7 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { hashApiKey } from '@hub/common';
 import { ApiKeyGuard, LAST_USED_WRITE_INTERVAL_MS } from '../src/modules/service-api/api-key.guard';
-import { REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
+import { NO_PROJECT_SCOPE_KEY, REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
 
 /**
  * S3 (SPEC §4.3B bảng lỗi): ApiKeyGuard theo ĐÚNG thứ tự 401 → 404 → 403. Không chạm Redis (X9).
@@ -11,7 +11,7 @@ const PA = '11111111-1111-1111-1111-111111111111';
 const KEY_A = 'hk_test_' + 'a'.repeat(43);
 const KEY_REVOKED = 'hk_test_' + 'r'.repeat(43);
 
-function setup(requiredScope?: string) {
+function setup(requiredScope?: string, noProjectScope?: string) {
   const rows: Record<string, any> = {
     [hashApiKey(KEY_A)]: {
       id: 'key-a',
@@ -39,7 +39,7 @@ function setup(requiredScope?: string) {
     findApiKeyByHash: jest.fn(async (h: string) => rows[h] ?? null),
     forTenant: jest.fn(() => ({ touchApiKeyLastUsed: touch })),
   };
-  const reflector = { getAllAndOverride: jest.fn((k: string) => (k === REQUIRE_SCOPE_KEY ? requiredScope : undefined)) } as unknown as Reflector;
+  const reflector = { getAllAndOverride: jest.fn((k: string) => (k === REQUIRE_SCOPE_KEY ? requiredScope : k === NO_PROJECT_SCOPE_KEY ? noProjectScope : undefined)) } as unknown as Reflector;
   const guard = new ApiKeyGuard(prisma, reflector);
   const ctx = (req: any) => ({ switchToHttp: () => ({ getRequest: () => req }), getHandler: () => null, getClass: () => null }) as any;
   const call = async (req: any): Promise<{ status: number; body: unknown } | boolean> => {
@@ -95,7 +95,7 @@ describe('ApiKeyGuard (S3, SPEC §4.3B)', () => {
   });
 
   it('lastUsedAt ghi tối đa 1 lần / phút / key (so trong bộ nhớ, không Redis)', async () => {
-    const { call, touch } = setup();
+    const { call, touch } = setup('read:events');
     const t0 = Date.now();
     const spy = jest.spyOn(Date, 'now');
     spy.mockReturnValue(t0);
@@ -106,5 +106,10 @@ describe('ApiKeyGuard (S3, SPEC §4.3B)', () => {
     await call(req('cafe', `Bearer ${KEY_A}`));
     expect(touch).toHaveBeenCalledTimes(2);
     spy.mockRestore();
+  });
+
+  it('[AR:R-8] (phần b) route /v1/p không khai @RequireScope và không @NoProjectScope -> 500 scope_not_declared; có @NoProjectScope (vd /me) -> qua', async () => {
+    expect(await setup().call(req('cafe', `Bearer ${KEY_A}`))).toEqual({ status: 500, body: expect.objectContaining({ error: 'scope_not_declared' }) });
+    expect(await setup(undefined, 'me').call(req('cafe', `Bearer ${KEY_A}`))).toBe(true);
   });
 });

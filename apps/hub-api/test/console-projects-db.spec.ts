@@ -4,6 +4,10 @@ import { hashApiKey } from '@hub/common';
 import { ProjectsController, parseCreateKey } from '../src/modules/console/projects.controller';
 import { ProjectScopeGuard } from '../src/modules/console/project-scope.guard';
 import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
+import { REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
+/** R-8: guard đóng mặc định — handler giả phải khai scope như route thật. */
+const readProjectHandler = () => undefined;
+Reflect.defineMetadata(REQUIRE_SCOPE_KEY, 'read:project', readProjectHandler);
 
 /**
  * S2 (SPEC §4.3A) + AU1 trên Postgres THẬT: project + API key ở console; `?projectId=` đọc ở MỘT chỗ (X2) và từ
@@ -109,7 +113,7 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
 
   it('ProjectScopeGuard: không ?projectId -> 400 project_required (AU3); thành viên -> vào; không là thành viên / lạ / sai định dạng -> CÙNG 404; operator vào mọi project', async () => {
     const guard = new ProjectScopeGuard(svc);
-    const ctx = (r: any) => ({ switchToHttp: () => ({ getRequest: () => r }), getHandler: () => () => undefined, getClass: () => class {} }) as any;
+    const ctx = (r: any) => ({ switchToHttp: () => ({ getRequest: () => r }), getHandler: () => readProjectHandler, getClass: () => class {} }) as any;
     await expect(guard.canActivate(ctx(req(alice)))).rejects.toMatchObject({ status: 400 });
     const r2 = req(alice, { projectId: created[1] });
     await guard.canActivate(ctx(r2));

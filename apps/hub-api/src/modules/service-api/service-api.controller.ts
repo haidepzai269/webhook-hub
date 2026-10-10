@@ -5,6 +5,7 @@ import { IngestService } from '../ingest/ingest.service';
 import { ApiKeyGuard } from './api-key.guard';
 import { RequireScope } from './require-scope.decorator';
 import { RequestWithPrincipal } from './principal';
+import { NoProjectScope } from './require-scope.decorator';
 
 /** Kiểu sự kiện service tự phát: ít nhất 2 đoạn, chữ thường (SPEC §4.4). */
 export const PUBLISH_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
@@ -48,6 +49,7 @@ export class ServiceApiController {
 
   /** SDK dùng để kiểm kết nối (`hub.me()`). Scope bất kỳ. */
   @Get('me')
+  @NoProjectScope('key nào hợp lệ cũng xem được thông tin của CHÍNH nó (SDK hub.me())')
   me(@Req() req: RequestWithPrincipal) {
     const k = req.apiKey!;
     return {
