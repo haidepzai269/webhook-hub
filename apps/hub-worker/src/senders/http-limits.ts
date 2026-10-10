@@ -12,7 +12,20 @@ import axios, { AxiosRequestConfig } from 'axios';
  *
  * Signal tạo MỚI mỗi lần gửi (AbortSignal.timeout bắt đầu đếm từ lúc tạo).
  */
-export const SEND_TIMEOUT_MS = 5000;
+export const DEFAULT_SEND_TIMEOUT_MS = 5000;
+
+/**
+ * S10 (SPEC §4.9, ADR-078): `DELIVERY_TIMEOUT_MS` — trần TỔNG một lần gửi, kẹp 1000–10000ms (mặc định 5000).
+ * Trên 10s: một đích chậm giữ consumer quá lâu (noisy neighbor, hướng A); dưới 1s: đích bình thường cũng timeout.
+ * Đọc MỘT lần lúc load (đổi phải restart worker).
+ */
+export function resolveSendTimeoutMs(env = process.env.DELIVERY_TIMEOUT_MS): number {
+  const n = env === undefined || env === '' ? NaN : Number(env);
+  if (!Number.isFinite(n)) return DEFAULT_SEND_TIMEOUT_MS;
+  return Math.min(10_000, Math.max(1_000, Math.round(n)));
+}
+
+export const SEND_TIMEOUT_MS = resolveSendTimeoutMs();
 export const SEND_MAX_BYTES = 64 * 1024;
 /** Đọc tối đa từng này byte của phản hồi; phần dư bị huỷ (không làm phình RAM worker). */
 export const RESPONSE_READ_MAX_BYTES = 64 * 1024;

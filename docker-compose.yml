@@ -210,6 +210,10 @@ services:
       - DELIVERY_SWEEP_AFTER_MS=${DELIVERY_SWEEP_AFTER_MS:-600000}
       # S1-4: giữ outbox/processed_messages/raw_events REJECTED bao nhiêu ngày (phải > tổng TTL retry)
       - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-7}
+      # S7 (ADR-077): tên chính của retention (cả events); rỗng -> dùng CLEANUP_RETENTION_DAYS
+      - EVENT_RETENTION_DAYS=${EVENT_RETENTION_DAYS:-}
+      # S10 (ADR-078): trần TỔNG một lần gửi, kẹp 1000–10000ms
+      - DELIVERY_TIMEOUT_MS=${DELIVERY_TIMEOUT_MS:-5000}
     depends_on:
       hub-api:
         condition: service_started

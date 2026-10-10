@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T12:10:33.154Z, commit b4193a6).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T12:20:06.363Z, commit 2b5f16f).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 198 mã khai báo · 77 mã có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 198 mã khai báo · 79 mã có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -51,6 +51,7 @@ Tổng: 198 mã khai báo · 77 mã có test · 0 mồ côi · 10 mồ côi có 
 | `MS:T2` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/service-resources.spec.ts:139 | ✅ pass |
 | `MS:T4` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-api/test/endpoint-verifier.spec.ts:44<br>apps/hub-api/test/endpoint-verifier.spec.ts:53<br>apps/hub-api/test/service-resources.spec.ts:112<br>apps/hub-api/test/service-resources.spec.ts:129<br>libs/crypto/test/ssrf-metadata.spec.ts:11 | ✅ pass |
 | `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:79<br>apps/hub-api/test/service-resources.spec.ts:86<br>apps/hub-api/test/service-resources.spec.ts:104 | ✅ pass |
+| `MS:T10` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-timeout.spec.ts:29 | ✅ pass |
 | `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:71<br>libs/database/test/retention-db.spec.ts:49 | ✅ pass |
 | `MS:U1` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:16 | ✅ pass |
 | `MS:U2` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:20 | ✅ pass |
@@ -70,6 +71,7 @@ Tổng: 198 mã khai báo · 77 mã có test · 0 mồ côi · 10 mồ côi có 
 | `MS:U25` | SPEC-hub-multi-service.md · S7 | L1,L0 | apps/hub-api/test/polling-db.spec.ts:47<br>apps/hub-api/test/polling-params.spec.ts:26 | ✅ pass |
 | `MS:U26` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:101 | ✅ pass |
 | `MS:U27` | SPEC-hub-multi-service.md · S7 | L1 | apps/hub-api/test/polling-db.spec.ts:114 | ✅ pass |
+| `MS:U28` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-consumer.spec.ts:414 | ✅ pass |
 | `MS:U29` | SPEC-hub-multi-service.md · S0 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:112 | ✅ pass |
 | `MS:U30` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:142 | ✅ pass |
 | `MS:U34` | SPEC-hub-multi-service.md · S14 | L0 | libs/providers/test/canonical-payos.spec.ts:9<br>libs/providers/test/canonical-payos.spec.ts:29 | ✅ pass |
@@ -96,6 +98,6 @@ Tổng: 198 mã khai báo · 77 mã có test · 0 mồ côi · 10 mồ côi có 
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (75 file, 418 khai báo it/test)
+## File test (76 file, 421 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

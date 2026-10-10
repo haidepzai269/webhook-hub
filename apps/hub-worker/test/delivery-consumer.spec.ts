@@ -411,6 +411,18 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(cb.recordFailure).toHaveBeenCalledTimes(1);
   });
 
+  it('[MS:U28] S10: sender trả timeout (500 + error chứa "timeout") -> RETRYING (không DEAD), recordFailure được gọi', async () => {
+    const { prisma, tx } = buildFakePrisma();
+    const cb = buildFakeCircuitBreaker('CLOSED');
+    const consumer = new DeliveryConsumer(prisma, cb);
+    jest
+      .spyOn(SenderRegistry, 'get')
+      .mockReturnValue({ type: 'webhook', send: jest.fn().mockResolvedValue({ status: 500, error: 'timeout tổng 5000ms (AbortSignal)', durationMs: 5000 }) } as any);
+    await consumer.handleMessage(toAmqpMsg(buildSlimMsg()), buildChannel());
+    expect(cb.recordFailure).toHaveBeenCalledTimes(1);
+    expect(tx.delivery.updateMany.mock.calls[0][0].data.status).toBe('RETRYING');
+  });
+
   it('#3: probe HALF_OPEN nhận 404 -> nhả probe (đúng token), giữ HALF_OPEN (không recordFailure/recordSuccess)', async () => {
     const { prisma } = buildFakePrisma();
     const cb = buildFakeCircuitBreaker('HALF_OPEN', { probe: true });
