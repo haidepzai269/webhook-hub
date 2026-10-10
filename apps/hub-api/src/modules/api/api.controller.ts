@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
+import { ProjectScopeGuard } from '../console/project-scope.guard';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -82,7 +83,8 @@ function assertUuid(id: string, what: string) {
  * Response đi qua `RedactSecretsInterceptor` — không bao giờ trả ciphertext `*Encrypted`.
  */
 @Controller('api/v1')
-@UseGuards(JwtAuthGuard)
+// S2 (X2): `?projectId=` đọc ở MỘT chỗ — ProjectScopeGuard chạy sau JWT, đổi request.tenantId.
+@UseGuards(JwtAuthGuard, ProjectScopeGuard)
 @UseInterceptors(RedactSecretsInterceptor)
 export class ApiController {
   constructor(private readonly prisma: PrismaService) {}

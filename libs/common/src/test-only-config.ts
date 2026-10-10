@@ -11,7 +11,7 @@ export function testOnlyConfigProblems(env: Record<string, string | undefined>):
   if ((env.NODE_ENV ?? '').trim() !== 'production') return [];
   const problems: string[] = [];
   for (const [key, value] of Object.entries(env)) {
-    if (typeof value === 'string' && value.trim().startsWith(VERIFY_ONLY_PREFIX)) {
+    if (typeof value === 'string' && (value.trim().startsWith(VERIFY_ONLY_PREFIX) || value.trim().startsWith(`hk_test_${VERIFY_ONLY_PREFIX}`))) {
       problems.push(`${key} mang giá trị giả ${VERIFY_ONLY_PREFIX}… của .env.verify`);
     }
   }

@@ -139,6 +139,11 @@ services:
       - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
       - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
       - NODE_ENV=development
+      # S2 (SPEC §4.3A): host trong connection string `hub://<key>@<host>/<project>` trả về khi tạo key
+      - HUB_PUBLIC_URL=${HUB_PUBLIC_URL:-http://localhost:4000}
+      # S2/S11 (X6): key `shop` seed lưu sha256 của giá trị này; shop nhận CÙNG giá trị trong HUB_URL.
+      # Giá trị mặc định CHỈ cho local (giống HUB_SIGNING_SECRET mặc định); deployed không chạy seed.
+      - SEED_SHOP_API_KEY=${SEED_SHOP_API_KEY:-hk_test_dev_local_only_shop_key_0000000000000000000}
       - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
       - PAYOS_API_KEY=${PAYOS_API_KEY}
       - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}

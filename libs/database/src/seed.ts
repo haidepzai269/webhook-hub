@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { PrismaClient, ProviderEnum, DestinationType } from '@prisma/client';
 import { aesGcmEncrypt, aesGcmDecrypt } from '@hub/crypto';
+import { API_KEY_RE, apiKeyPrefix, buildConnectionString, generateApiKey, hashApiKey } from '@hub/common';
 import { DEFAULT_TENANT_ID, getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';
 import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, seedTelegramActive } from './seed-env';
@@ -87,8 +88,49 @@ export async function syncDestinations(): Promise<string[]> {
   return changed;
 }
 
+export async function ensureDefaultProject() {
+  await prisma.project.upsert({
+    where: { id: DEFAULT_TENANT_ID },
+    update: {},
+    create: { id: DEFAULT_TENANT_ID, slug: 'default', name: 'Default', environment: 'test' },
+  });
+}
+
+/**
+ * S2 (SPEC §4.3A, X6): key `shop` (manage:endpoints + read:events) của project default — Shop dùng nó để
+ * TỰ đăng ký endpoint (S11). Compose truyền CÙNG giá trị `SEED_SHOP_API_KEY` cho seed (lưu sha256) và cho
+ * Shop (trong `HUB_URL`), nên stack mới tự nối không cần thao tác tay. Không đặt -> sinh ngẫu nhiên và
+ * in connection string ra log ĐÚNG MỘT LẦN (lúc tạo). Idempotent: đã có key `shop` thì bỏ qua.
+ */
+export async function ensureShopKey(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  const repo = new TenantScopedRepository(prisma, DEFAULT_TENANT_ID);
+  const existing = (await repo.findApiKeys()).find((k) => k.serviceName === 'shop' && !k.revokedAt);
+  if (existing) return null;
+  const given = env.SEED_SHOP_API_KEY?.trim();
+  if (given && !API_KEY_RE.test(given)) {
+    throw new Error('SEED_SHOP_API_KEY sai định dạng (hk_test_|hk_live_ + 43 ký tự base64url)');
+  }
+  const key = given || generateApiKey('test');
+  const created = await repo.createApiKey({
+    serviceName: 'shop',
+    keyHash: hashApiKey(key),
+    keyPrefix: apiKeyPrefix(key),
+    scopes: ['manage:endpoints', 'read:events'],
+    readTypes: [],
+  });
+  await repo.createAuditLog({ action: 'api_key.created', entityType: 'api_key', entityId: created.id, actor: 'seed', metadata: { serviceName: 'shop', keyPrefix: created.keyPrefix } });
+  const publicUrl = (env.HUB_PUBLIC_URL && env.HUB_PUBLIC_URL.trim()) || 'http://localhost:4000';
+  console.log(`Đã tạo API key "shop" (${created.keyPrefix}…). HUB_URL=${buildConnectionString(publicUrl, key, 'default')}`);
+  return key;
+}
+
 async function seed() {
   console.log('--- Bắt đầu gieo dữ liệu ban đầu (Seed Database) ---');
+
+  // S1 (ADR-038): project mặc định (= DEFAULT_TENANT_ID) TRƯỚC mọi bảng khác. Upsert: chạy lại vô hại
+  // (migration 20261011000000 cũng chèn dòng này cho DB cũ).
+  await ensureDefaultProject();
+  await ensureShopKey();
 
   // An toàn / idempotent (BB-2: Postgres là trọng tài duy nhất, không được tự xoá dữ liệu).
   // Chỉ seed khi CHƯA có dữ liệu — không bao giờ xoá dữ liệu đang có.

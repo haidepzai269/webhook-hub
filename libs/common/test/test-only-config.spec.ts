@@ -31,3 +31,10 @@ describe('testOnlyConfigProblems — chặn cấu hình chỉ-dành-cho-test ở
     expect(testOnlyConfigProblems({ NODE_ENV: 'production', MASTER_KEY: 'real', MAIL_DRIVER: 'resend' })).toEqual([]);
   });
 });
+
+describe('testOnlyConfigProblems — API key giả của hubv (S2)', () => {
+  it('production + key `hk_test_VERIFY_ONLY_…` (SEED_SHOP_API_KEY / HUB_URL) → báo lỗi', () => {
+    const problems = testOnlyConfigProblems({ NODE_ENV: 'production', SEED_SHOP_API_KEY: 'hk_test_VERIFY_ONLY_shop_key_0000000000000000000000' });
+    expect(problems.join(' ')).toContain('SEED_SHOP_API_KEY');
+  });
+});

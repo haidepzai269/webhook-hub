@@ -35,7 +35,8 @@ export function envVerifyProblems(env: Record<string, string>): string[] {
       continue;
     }
     if (NOT_SECRET.has(key) || !SENSITIVE.test(key) || !value) continue;
-    if (!value.startsWith(VERIFY_ONLY_PREFIX)) {
+    // API key của hub (S2) bắt buộc dạng `hk_<env>_…` -> phần giả nằm sau tiền tố: `hk_test_VERIFY_ONLY_…`
+    if (!value.startsWith(VERIFY_ONLY_PREFIX) && !value.startsWith(`hk_test_${VERIFY_ONLY_PREFIX}`)) {
       problems.push(`${key} không mang tiền tố ${VERIFY_ONLY_PREFIX} — .env.verify chỉ chứa giá trị giả`);
     }
   }

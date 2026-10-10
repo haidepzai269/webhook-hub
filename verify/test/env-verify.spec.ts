@@ -29,3 +29,10 @@ describe('.env.verify — chỉ giá trị giả, đích trỏ vào /mock/*', ()
     expect(envVerifyProblems(parseEnvFile(raw))).toEqual([]);
   });
 });
+
+describe('envVerifyProblems — API key giả (S2)', () => {
+  it('`hk_test_VERIFY_ONLY_…` được nhận; key hk_ thật thì bị từ chối', () => {
+    expect(envVerifyProblems({ SEED_SHOP_API_KEY: 'hk_test_VERIFY_ONLY_shop_key_0000000000000000000000' })).toEqual([]);
+    expect(envVerifyProblems({ SEED_SHOP_API_KEY: 'hk_test_realrealrealrealrealrealrealrealrealrea' })).toHaveLength(1);
+  });
+});
