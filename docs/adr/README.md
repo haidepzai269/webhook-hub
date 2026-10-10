@@ -1176,3 +1176,9 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** `ProjectScopeGuard`/`ApiKeyGuard` chỉ kiểm khi route có `@RequireScope`; quên decorator = mở cho mọi role/mọi key. UA20 chỉ quét 4 controller ghi cứng nên controller mới lọt.
 **Chọn:** thêm `@PublicRoute(lý do)` cho controller tự xác thực bằng cơ chế riêng (`/auth`, `/hooks` chữ ký provider, `/metrics` token, `/health`, `/mock`); `/v1/p/:project/me` khai `@NoProjectScope`. Hai guard gặp route không có `@RequireScope` (và với ApiKeyGuard: cũng không có `@NoProjectScope`) → 500 `scope_not_declared` + log error. UA20 tự tìm mọi `*.controller.ts` dưới `apps/hub-api/src` và đòi mỗi route có một trong ba khai báo.
 **Đánh đổi:** quên decorator giờ là 500 ở runtime (lộ ra ngay khi thử) thay vì im lặng mở; UA20 bắt trước khi chạy. `@PublicRoute` vẫn là lời khai của dev — review phải đọc lý do.
+
+## ADR-114 — Review AU R-10: `/auth/login` và `/auth/register` chỉ nhận `application/json` (415 cho kiểu khác) (2026-10-11)
+
+**Vấn đề:** body parser mặc định của Nest nhận form urlencoded; login/register không đòi CSRF (chưa có phiên). Review: form POST từ `Origin: https://evil.example` → 200 + 3 cookie — trang lạ đăng nhập nạn nhân vào tài khoản kẻ tấn công (login CSRF), nạn nhân cấu hình đích webhook vào đó.
+**Chọn:** `requireJsonBody` trong controller: Content-Type (bỏ tham số) khác `application/json` → 415 `unsupported_media_type`. Request JSON cross-origin không phải "simple request" nên trình duyệt buộc preflight, mà CORS đã khoá origin (MS-P2-6).
+**Đánh đổi:** client nào gửi login bằng form (curl `-d` không kèm header) giờ nhận 415 — web, e2e, script demo đều đã gửi JSON. Không kiểm `Origin` (thêm một lớp nữa nhưng lệch giữa local/proxy/deployed).

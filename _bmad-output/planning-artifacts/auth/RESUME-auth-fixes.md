@@ -11,8 +11,9 @@ Luật: RED→GREEN→GATED→PROBED, mỗi mục một commit có `Verify:`, `n
 | R-4 | chưa | | |
 | R-5 | chưa | | |
 | R-6 | chưa | | |
-| R-8 | xong | (commit R-8) | ADR-113 | |
-| R-9..R-14 | chưa | | |
+| R-8 | xong | 3dbb7cd | ADR-113 | |
+| R-10 | xong | (commit R-10) | ADR-114 |
+| R-9,R-11..R-14 | chưa | | |
 
 ## Bước kế
 - R-1 PROBED live (hubv, image mới): 18 login sai song song → 5×401 + 13×429.

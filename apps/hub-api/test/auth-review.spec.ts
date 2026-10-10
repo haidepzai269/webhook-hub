@@ -99,3 +99,23 @@ describe('R-3 — socket đang mở bị ngắt khi mất phiên / mất quyền
     expect(got).toEqual(['u9', 'u9', 'u9']);
   });
 });
+
+describe('R-10 — login CSRF qua form urlencoded (ADR-114)', () => {
+  const { requireJsonBody } = require('../src/modules/auth/auth.controller');
+  const st = (ct?: string) => {
+    try {
+      requireJsonBody({ headers: ct === undefined ? {} : { 'content-type': ct } });
+      return 200;
+    } catch (e: any) {
+      return e.getStatus();
+    }
+  };
+  it('[AR:R-10] login/register: urlencoded / text/plain / multipart / thiếu -> 415; application/json (kèm charset) -> qua', () => {
+    expect(st('application/x-www-form-urlencoded')).toBe(415);
+    expect(st('text/plain')).toBe(415);
+    expect(st('multipart/form-data; boundary=x')).toBe(415);
+    expect(st(undefined)).toBe(415);
+    expect(st('application/json')).toBe(200);
+    expect(st('Application/JSON; charset=utf-8')).toBe(200);
+  });
+});

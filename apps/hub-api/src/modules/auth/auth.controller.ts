@@ -7,6 +7,7 @@ import {
   ExceptionFilter,
   Get,
   HttpCode,
+  HttpException,
   HttpStatus,
   Param,
   Post,
@@ -43,6 +44,18 @@ export function reqCtx(req: Request): ReqCtx {
   // R-2: đi qua proxy web có secret hợp lệ -> IP client do web chuyển tiếp (client-ip.ts).
   const ua = req.headers?.['user-agent'];
   return { ip: clientIp(req as never), userAgent: typeof ua === 'string' ? ua : null };
+}
+
+/**
+ * R-10 (review AU, ADR-114): login/register CHỈ nhận `application/json`. Form urlencoded / text/plain là "simple request"
+ * — trang lạ POST được mà không preflight (login CSRF: đăng nhập nạn nhân vào tài khoản kẻ tấn công). JSON cross-origin
+ * buộc preflight, mà CORS đã khoá origin. Sai kiểu -> 415.
+ */
+export function requireJsonBody(req: Pick<Request, 'headers'>): void {
+  const ct = String(req.headers?.['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+  if (ct !== 'application/json') {
+    throw new HttpException({ error: 'unsupported_media_type', message: 'Chỉ nhận Content-Type: application/json' }, HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+  }
 }
 
 const user = (req: RequestWithPrincipal) => req.principal as UserPrincipal;
@@ -99,6 +112,7 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+    requireJsonBody(req);
     const r = await this.auth.register(body ?? {}, reqCtx(req));
     if (r.session) setSessionCookies(res, r.session);
     return r.body;
@@ -107,6 +121,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+    requireJsonBody(req);
     const r = await this.auth.login(body ?? {}, reqCtx(req));
     setSessionCookies(res, r.session);
     return r.body;
