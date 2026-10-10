@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
-import { buildDeliveryMessage, generateCorrelationId, OutboxPayload, ProviderType } from '@hub/common';
+import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { ulid } from 'ulidx';
 import { randomUUID } from 'crypto';
@@ -48,6 +48,25 @@ function parseIsoDate(v: unknown, name: string): Date | undefined {
   const d = new Date(v.trim());
   if (Number.isNaN(d.getTime())) throw new BadRequestException(`${name} không phải thời điểm hợp lệ (ISO 8601)`);
   return d;
+}
+
+/**
+ * S3-3: `eventTypes` của subscription — mảng 1..50 mẫu, mỗi mẫu đúng ngữ pháp
+ * `^(\*|[a-z0-9_]+(\.[a-z0-9_]+)*(\.\*)?)$` (libs/common/src/event-pattern.ts). Sai -> 400 kèm mẫu sai.
+ */
+export function parseEventTypes(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length === 0 || v.length > 50) {
+    throw new BadRequestException('eventTypes phải là mảng 1–50 mẫu (vd ["payment.*", "repo.push"])');
+  }
+  const bad = v.filter((t) => !isValidEventPattern(t));
+  if (bad.length > 0) {
+    throw new BadRequestException({
+      error: 'invalid_event_pattern',
+      message: `Mẫu kiểu sự kiện không hợp lệ: ${bad.slice(0, 5).map((t) => JSON.stringify(t)).join(', ')}`,
+      fix: 'Dùng chữ thường, số, "_", phân tách bằng "."; wildcard chỉ ở cuối (".*") hoặc "*" một mình. Vd: payment.*, repo.push, *',
+    });
+  }
+  return [...new Set(v as string[])];
 }
 
 function assertUuid(id: string, what: string) {
@@ -291,11 +310,12 @@ export class ApiController {
         ? await repo.findDestinationById(body.destinationId)
         : null;
     if (!destination) throw new NotFoundException('Destination không tồn tại');
+    const eventTypes = parseEventTypes(body?.eventTypes);
     return this.withAudit(tenantId, async (txRepo) => {
       const created = await txRepo.createSubscription({
         destinationId: body.destinationId,
         name: body.name,
-        eventTypes: body.eventTypes || [],
+        eventTypes,
         template: body.template,
         isActive: true,
       });
@@ -317,12 +337,7 @@ export class ApiController {
     if (typeof body?.name === 'string' && body.name.trim()) data.name = body.name.trim();
     if (typeof body?.isActive === 'boolean') data.isActive = body.isActive;
     if (body?.template !== undefined) data.template = body.template === null ? null : String(body.template);
-    if (body?.eventTypes !== undefined) {
-      if (!Array.isArray(body.eventTypes) || !body.eventTypes.every((t: unknown) => typeof t === 'string' && t)) {
-        throw new BadRequestException('eventTypes phải là mảng chuỗi');
-      }
-      data.eventTypes = body.eventTypes;
-    }
+    if (body?.eventTypes !== undefined) data.eventTypes = parseEventTypes(body.eventTypes);
     if (Object.keys(data).length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes)');
     return this.withAudit(tenantId, async (repo) => {
       const u = await repo.updateSubscription(id, data);

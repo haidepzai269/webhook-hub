@@ -14,9 +14,15 @@ describe('TenantScopedRepository — scope tenant ở quan hệ (S1-5, S1-1)', (
 
   it('findActiveSubscriptionsForEventType lọc destination.tenantId (không trả subscription trỏ sang đích tenant khác)', async () => {
     const client = fakeClient();
-    await new TenantScopedRepository(client, T).findActiveSubscriptionsForEventType('payment.succeeded');
+    await new TenantScopedRepository(client, T).findActiveSubscriptionsForEventType('payment.received');
     const where = client.subscription.findMany.mock.calls[0][0].where;
-    expect(where).toMatchObject({ tenantId: T, isActive: true, eventTypes: { has: 'payment.succeeded' }, destination: { tenantId: T } });
+    // S3-3: ứng viên wildcard
+    expect(where).toMatchObject({
+      tenantId: T,
+      isActive: true,
+      eventTypes: { hasSome: ['payment.received', 'payment.*', '*'] },
+      destination: { tenantId: T },
+    });
   });
 
   it('findDeliveryForSend lọc tenant ở delivery, subscription VÀ destination', async () => {

@@ -1,3 +1,4 @@
+import { eventTypeCandidates } from '@hub/common';
 import { PrismaClient, Destination, Delivery, Prisma, CircuitState } from '@prisma/client';
 
 /**
@@ -130,12 +131,17 @@ export class TenantScopedRepository {
    * subscription trỏ sang đích của tenant khác (trước khi API kiểm). Không `include` đích:
    * normalize chỉ cần id subscription, cấu hình đích do worker nạp lúc gửi (S1-1).
    */
+  /**
+   * S3-3: khớp chính xác HOẶC theo mẫu (`payment.*`, `*`). Sinh danh sách ứng viên từ kiểu của event
+   * (`a.b.c` -> `a.b.c, a.b.*, a.*, *`) rồi hỏi `eventTypes && candidates` — một truy vấn, không quét
+   * mọi subscription trong bộ nhớ.
+   */
   async findActiveSubscriptionsForEventType(eventType: string) {
     return this.prisma.subscription.findMany({
       where: {
         tenantId: this.tenantId,
         isActive: true,
-        eventTypes: { has: eventType },
+        eventTypes: { hasSome: eventTypeCandidates(eventType) },
         destination: { tenantId: this.tenantId },
       },
       // Chỉ id/name/type để realtime `event.received` vẽ được N nhánh (S2-2) — KHÔNG đọc cấu hình mã hoá.

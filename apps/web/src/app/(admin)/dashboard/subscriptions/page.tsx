@@ -39,7 +39,14 @@ const schema = z.object({
         .map((t) => t.trim())
         .filter(Boolean),
     )
-    .pipe(z.array(z.string()).min(1, "Nhập ít nhất một loại sự kiện.")),
+    .pipe(
+      z
+        .array(
+          // Cùng ngữ pháp với hub (libs/common/src/event-pattern.ts, S3-3).
+          z.string().regex(/^(\*|[a-z0-9_]+(\.[a-z0-9_]+)*(\.\*)?)$/, "Mẫu không hợp lệ (vd payment.*, repo.push, *)."),
+        )
+        .min(1, "Nhập ít nhất một loại sự kiện."),
+    ),
   template: z.string(),
 });
 type FormIn = z.input<typeof schema>;
@@ -281,7 +288,10 @@ export default function SubscriptionsPage() {
                     placeholder="payment.received, repo.push"
                     aria-invalid={fieldState.invalid}
                   />
-                  <FieldDescription>Phân tách bằng dấu phẩy hoặc khoảng trắng. Khớp chính xác.</FieldDescription>
+                  <FieldDescription>
+                    Phân tách bằng dấu phẩy hoặc khoảng trắng. <code>payment.*</code> = mọi sự kiện thanh toán;{" "}
+                    <code>*</code> = mọi sự kiện.
+                  </FieldDescription>
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}

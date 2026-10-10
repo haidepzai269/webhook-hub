@@ -214,8 +214,10 @@ async function seed() {
       destinationId: telegramDest.id,
       name: 'Báo biến động thanh toán lên Telegram',
       // S3-2: một đầu ra duy nhất — mọi nguồn thanh toán ra kiểu chuẩn payment.* (ADR-053).
+      // S3-3: wildcard `payment.*` = mọi sự kiện thanh toán (received/sent/failed/refunded).
       // Văn bản thuần (ADR-042): không Markdown; placeholder đúng cho MỌI provider.
-      eventTypes: ['payment.received'],
+      // Lưu ý: `--sync-destinations` KHÔNG sửa subscription — DB đang chạy thì đổi qua dashboard/API.
+      eventTypes: ['payment.*'],
       template:
         'Giao dịch mới\nNguồn: {{source}}\nSố tiền: {{data.amount}} {{data.currency}}\nNội dung: {{data.memo}}\nMã tham chiếu: {{data.reference}}',
       isActive: true,

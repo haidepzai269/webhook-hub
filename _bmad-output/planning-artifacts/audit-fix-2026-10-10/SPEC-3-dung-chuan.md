@@ -239,4 +239,7 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
   - Thiếu `transactionDateTime`/`transactionDate` → dùng thời điểm nhận (không từ chối). SePay thiếu `id` → `providerTxnId = referenceCode`. Stripe `charge.refunded` lấy `method` từ `payment_method_details.type` (charge không có `payment_method_types`).
   - Metric `hub_normalize_schema_errors_total` nằm ở registry riêng của worker (`apps/hub-worker/src/metrics.ts`); đến S3-4 mới phục vụ qua `/metrics`.
   - Payload mẫu Playground (GitHub thêm `html_url`, `commits`; Stripe thêm `amount_received`, `payment_method_types`) và `scripts/e2e-smoke.sh` (GitHub thêm `html_url`, `commits`) sửa để qua validator.
-
+- **S3-3 (2026-10-10):**
+  - Lỗi 400 trả object `{error:'invalid_event_pattern', message, fix}` (kiểu ADR-055) thay vì chuỗi; `eventTypes` bắt buộc 1–50 mẫu và khử trùng lặp (trước đây POST cho mảng rỗng).
+  - Telegram seed `['payment.*']` (không có `bank.transfer.received` như SPEC-3 gốc — kiểu đó không còn, DINH-CHINH §0); Shop `['payment.received']`, không `payment.*` (Shop không xử lý failed/sent/refunded).
+  - Form UI kiểm cùng regex phía client + gợi ý `payment.*`/`*`. ADR-060.
