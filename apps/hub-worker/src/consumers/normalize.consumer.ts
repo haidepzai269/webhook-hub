@@ -147,6 +147,7 @@ export class NormalizeConsumer {
             rawEventId: evt.rawEventId,
             idempotencyKey: evt.id,
             correlationId: evt.correlationId,
+            sourceId, // S5: lọc subscription theo sourceIds + polling biết nguồn
             type: evt.type,
             source: evt.source,
             subject: evt.subject,
@@ -157,7 +158,7 @@ export class NormalizeConsumer {
             receivedAt: new Date(evt.receivedAt),
           });
 
-          const subscriptions = await repoTx.findActiveSubscriptionsForEventType(evt.type);
+          const subscriptions = await repoTx.findActiveSubscriptionsForEvent(evt.type, sourceId ?? null);
           log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
 
           for (const sub of subscriptions) {

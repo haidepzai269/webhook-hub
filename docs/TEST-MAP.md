@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T11:30:01.981Z, commit 6c72d65).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T11:38:06.087Z, commit b11406e).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 198 mã khai báo · 61 mã có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 198 mã khai báo · 63 mã có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -25,11 +25,11 @@ Tổng: 198 mã khai báo · 61 mã có test · 0 mồ côi · 10 mồ côi có 
 | `AF:#15` | REVIEW-CHECKLIST.md · S1-1 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:125 | ✅ pass |
 | `AF:#16` | REVIEW-CHECKLIST.md · S1-2 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:112 | ✅ pass |
 | `AF:#17` | REVIEW-CHECKLIST.md · S1-2 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:123 | ✅ pass |
-| `AF:#18` | REVIEW-CHECKLIST.md · S1-3 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:142 | ✅ pass |
+| `AF:#18` | REVIEW-CHECKLIST.md · S1-3 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:150 | ✅ pass |
 | `AF:#19` | REVIEW-CHECKLIST.md · S1-3 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:84 | ✅ pass |
 | `AF:#20` | REVIEW-CHECKLIST.md · S1-4 | — | — | mồ côi có lý do: docker compose restart rabbitmq — kịch bản chaos, chờ VF5 (L3) |
 | `AF:#21` | REVIEW-CHECKLIST.md · S1-4 | L0 | apps/hub-worker/test/cleanup-job.spec.ts:42 | ✅ pass |
-| `AF:#22` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:134 | ✅ pass |
+| `AF:#22` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:142 | ✅ pass |
 | `AF:#23` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:175 | ✅ pass |
 | `AF:#24` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:151 | ✅ pass |
 | `AF:#25` | REVIEW-CHECKLIST.md · S2-1 | L0 | apps/hub-worker/test/delivery-consumer.spec.ts:140 | ✅ pass |
@@ -48,9 +48,11 @@ Tổng: 198 mã khai báo · 61 mã có test · 0 mồ côi · 10 mồ côi có 
 | `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:213 | ✅ pass |
 | `AF:#41` | REVIEW-CHECKLIST.md · S3-6 | — | — | mồ côi có lý do: PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test |
 | `BB:5` | spec-sources.json | L1 | libs/database/test/project-schema-db.spec.ts:38 | ✅ pass |
+| `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:71<br>apps/hub-api/test/service-resources.spec.ts:78<br>apps/hub-api/test/service-resources.spec.ts:96 | ✅ pass |
 | `MS:U16` | SPEC-hub-multi-service.md · S4 | L0 | libs/providers/test/api.adapter.spec.ts:8 | ✅ pass |
 | `MS:U17` | SPEC-hub-multi-service.md · S5 | L0 | libs/common/test/event-pattern.spec.ts:11 | ✅ pass |
-| `MS:U19` | SPEC-hub-multi-service.md · S5 | L0 | libs/common/test/event-pattern.spec.ts:24 | ✅ pass |
+| `MS:U18` | SPEC-hub-multi-service.md · S5 | L0,L1 | apps/hub-worker/test/normalize-consumer.spec.ts:134<br>libs/database/test/repository-scope.spec.ts:28<br>libs/database/test/subscription-match-db.spec.ts:90 | ✅ pass |
+| `MS:U19` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:85<br>libs/common/test/event-pattern.spec.ts:24 | ✅ pass |
 | `MS:U20` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:59 | ✅ pass |
 | `MS:U21` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:68 | ✅ pass |
 | `MS:U22` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/api-key.guard.spec.ts:77 | ✅ pass |
@@ -80,6 +82,6 @@ Tổng: 198 mã khai báo · 61 mã có test · 0 mồ côi · 10 mồ côi có 
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (68 file, 374 khai báo it/test)
+## File test (69 file, 384 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

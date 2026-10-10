@@ -131,6 +131,14 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(payload).toMatchObject({ deliveryId: 'del-1', tenantId: TENANT, attemptCount: 0, attemptGeneration: 1 });
   });
 
+  it('[MS:U18] (phần c) S5: event lưu sourceId của raw_event; subscription lọc theo sourceIds (rỗng HOẶC chứa source)', async () => {
+    const { prisma, tx } = buildFakePrisma({ subs: 1 });
+    await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
+    expect(tx.event.create.mock.calls[0][0].data.sourceId).toBe('src-1');
+    const where = tx.subscription.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([{ sourceIds: { isEmpty: true } }, { sourceIds: { has: 'src-1' } }]);
+  });
+
   it('[AF:#22] S1-5: đọc raw_event qua repo.findRawEventById (scope tenant), không qua prisma.rawEvent', async () => {
     const { prisma, findRawEventById } = buildFakePrisma();
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());

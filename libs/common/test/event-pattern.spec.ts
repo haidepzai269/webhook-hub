@@ -21,7 +21,7 @@ describe('event-pattern (S3-3)', () => {
     expect(matchesEventPattern('*', 'github.ping')).toBe(true);
   });
 
-  it('[MS:U19] U19: hợp lệ / không hợp lệ', () => {
+  it('[MS:U19] (phần a) U19: hợp lệ / không hợp lệ', () => {
     for (const ok of ['*', 'payment.*', 'payment.received', 'repo.pull_request.*', 'a1_b.c2']) expect(isValidEventPattern(ok)).toBe(true);
     for (const bad of ['*.paid', 'payment.*.x', 'Payment.*', 'payment.', '.x', 'a..b', '', ' payment.*', '**', 'a.**', 'x'.repeat(129), 1 as any]) {
       expect(isValidEventPattern(bad)).toBe(false);

@@ -25,6 +25,16 @@ describe('TenantScopedRepository — scope tenant ở quan hệ (S1-5, S1-1)', (
     });
   });
 
+  it('[MS:U18] (phần b) findActiveSubscriptionsForEvent: không rõ source -> chỉ sub không lọc; có source -> rỗng HOẶC chứa source', async () => {
+    const client = fakeClient();
+    const repo = new TenantScopedRepository(client, T);
+    await repo.findActiveSubscriptionsForEvent('payment.received', null);
+    await repo.findActiveSubscriptionsForEvent('payment.received', 'S1');
+    const [w0, w1] = client.subscription.findMany.mock.calls.map((c: any) => c[0].where);
+    expect(w0).toMatchObject({ tenantId: T, isActive: true, destination: { tenantId: T }, OR: [{ sourceIds: { isEmpty: true } }] });
+    expect(w1.OR).toEqual([{ sourceIds: { isEmpty: true } }, { sourceIds: { has: 'S1' } }]);
+  });
+
   it('findDeliveryForSend lọc tenant ở delivery, subscription VÀ destination', async () => {
     const client = fakeClient();
     await new TenantScopedRepository(client, T).findDeliveryForSend('d1');

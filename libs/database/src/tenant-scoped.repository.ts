@@ -149,6 +149,33 @@ export class TenantScopedRepository {
     });
   }
 
+  /**
+   * S5 (SPEC §4.6): như `findActiveSubscriptionsForEventType` + lọc nguồn — `sourceIds` rỗng = mọi source của
+   * project, có giá trị = chỉ event từ các source đó. Event không rõ source (dữ liệu cũ) chỉ khớp sub không lọc.
+   * Hàm cũ GIỮ NGUYÊN cho module flow của nhánh UI (X16/X17); normalize dùng hàm này.
+   */
+  async findActiveSubscriptionsForEvent(eventType: string, sourceId: string | null) {
+    const anySource: Prisma.SubscriptionWhereInput = { sourceIds: { isEmpty: true } };
+    return this.prisma.subscription.findMany({
+      where: {
+        tenantId: this.tenantId,
+        isActive: true,
+        eventTypes: { hasSome: eventTypeCandidates(eventType) },
+        destination: { tenantId: this.tenantId },
+        OR: sourceId ? [anySource, { sourceIds: { has: sourceId } }] : [anySource],
+      },
+      include: { destination: { select: { id: true, name: true, type: true, verification: true } } },
+    });
+  }
+
+  /** S5: id nào trong danh sách KHÔNG phải source của project này (kiểm `sourceIds` của subscription). */
+  async findForeignSourceIds(ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const own = await this.prisma.source.findMany({ where: { id: { in: ids }, tenantId: this.tenantId }, select: { id: true } });
+    const ok = new Set(own.map((s) => s.id));
+    return ids.filter((id) => !ok.has(id));
+  }
+
   async updateSubscription(id: string, data: Prisma.SubscriptionUncheckedUpdateInput) {
     const result = await this.prisma.subscription.updateMany({ where: { id, tenantId: this.tenantId }, data });
     if (result.count !== 1) return null;

@@ -13,6 +13,7 @@ import { MetricsController } from './modules/metrics/metrics.controller';
 import { ProjectsController } from './modules/console/projects.controller';
 import { ProjectScopeGuard } from './modules/console/project-scope.guard';
 import { ServiceApiController } from './modules/service-api/service-api.controller';
+import { ServiceResourcesController } from './modules/service-api/service-resources.controller';
 import { ApiKeyGuard } from './modules/service-api/api-key.guard';
 
 /**
@@ -20,7 +21,7 @@ import { ApiKeyGuard } from './modules/service-api/api-key.guard';
  * production — trên Render nó là một endpoint công khai không xác thực, ai cũng gọi được.
  */
 export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE_ENV) {
-  const base = [IngestController, HealthController, ApiController, ProjectsController, ServiceApiController, MetricsController];
+  const base = [IngestController, HealthController, ApiController, ProjectsController, ServiceApiController, ServiceResourcesController, MetricsController];
   return nodeEnv === 'production' ? base : [...base, MockController];
 }
 

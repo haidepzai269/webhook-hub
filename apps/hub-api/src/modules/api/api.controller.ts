@@ -24,6 +24,7 @@ import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
+import { resolveSourceIds } from '../service-api/service-resources.controller';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -313,11 +314,14 @@ export class ApiController {
         : null;
     if (!destination) throw new NotFoundException('Destination không tồn tại');
     const eventTypes = parseEventTypes(body?.eventTypes);
+    // S5: lọc nguồn — id lạ / của project khác -> 422 unknown_source (cùng hàm với /v1/p)
+    const sourceIds = await resolveSourceIds(repo, body?.sourceIds);
     return this.withAudit(tenantId, async (txRepo) => {
       const created = await txRepo.createSubscription({
         destinationId: body.destinationId,
         name: body.name,
         eventTypes,
+        sourceIds,
         template: body.template,
         isActive: true,
       });
@@ -326,7 +330,7 @@ export class ApiController {
         entityType: 'subscription',
         entityId: created.id,
         actor,
-        metadata: { name: created.name, destinationId: created.destinationId, eventTypes: created.eventTypes },
+        metadata: { name: created.name, destinationId: created.destinationId, eventTypes: created.eventTypes, sourceIds: created.sourceIds },
       });
       return created;
     });
@@ -340,7 +344,8 @@ export class ApiController {
     if (typeof body?.isActive === 'boolean') data.isActive = body.isActive;
     if (body?.template !== undefined) data.template = body.template === null ? null : String(body.template);
     if (body?.eventTypes !== undefined) data.eventTypes = parseEventTypes(body.eventTypes);
-    if (Object.keys(data).length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes)');
+    if (body?.sourceIds !== undefined) data.sourceIds = await resolveSourceIds(this.prisma.forTenant(tenantId), body.sourceIds);
+    if (Object.keys(data).length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes, sourceIds)');
     return this.withAudit(tenantId, async (repo) => {
       const u = await repo.updateSubscription(id, data);
       if (!u) throw new NotFoundException('Subscription không tồn tại');
