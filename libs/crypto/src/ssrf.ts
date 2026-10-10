@@ -37,6 +37,19 @@ export function isPrivateIp(ip: string): boolean {
   return true;
 }
 
+/**
+ * S6 (ADR-076): link-local = metadata đám mây (169.254.169.254, fe80::/10). Chặn ở MỌI môi trường, kể cả
+ * development và `allowPrivate` — sink/echo của dev nằm ở dải private thường (10/172/192), không ở đây.
+ */
+export function isLinkLocalIp(ip: string): boolean {
+  const v = ip.toLowerCase().replace(/^::ffff:/, '');
+  if (net.isIPv4(v)) {
+    const [a, b] = v.split('.').map(Number);
+    return a === 169 && b === 254;
+  }
+  return net.isIPv6(v) && /^fe[89ab]/.test(v);
+}
+
 export interface PinnedUrl {
   originalUrl: string;
   protocol: string;
@@ -63,6 +76,9 @@ export async function validateAndPinUrl(rawUrl: string, allowPrivate = false): P
     ip = lookupResult.address;
   }
 
+  if (isLinkLocalIp(ip)) {
+    throw new Error(`SSRF Guard: Địa chỉ IP ${ip} thuộc dải link-local/metadata, luôn bị chặn`);
+  }
   const isDev = process.env.NODE_ENV === 'development';
   if (!allowPrivate && !isDev && isPrivateIp(ip)) {
     throw new Error(`SSRF Guard: Địa chỉ IP ${ip} thuộc dải nội bộ/riêng tư bị chặn`);

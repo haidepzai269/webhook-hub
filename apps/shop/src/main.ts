@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { randomInt } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { hmacSha256, timingSafeCompare } from '@hub/crypto';
+import { swVerify, timingSafeCompare } from '@hub/crypto';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
 import { applyPayment, EXPIRE_AFTER_MS, readPayment } from './payment';
@@ -104,24 +104,11 @@ app.get('/orders/:code', async (req: Request, res: Response) => {
 
 // 4. POST /hub-webhook — Nhận outbound webhook từ Webhook Hub
 app.post('/hub-webhook', async (req: any, res: Response) => {
-  const eventId = req.headers['x-hub-event-id'] as string;
-  const timestamp = parseInt((req.headers['x-hub-timestamp'] as string) || '0', 10);
-  const rawSig = req.headers['x-hub-signature'] as string;
-
-  // 4.1. Xác thực chữ ký Standard Webhooks
-  if (!rawSig || !rawSig.startsWith('v1=')) {
-    return res.status(401).json({ error: 'Thiếu hoặc sai định dạng chữ ký X-Hub-Signature' });
-  }
-
-  const expectedSig = hmacSha256(SIGNING_SECRET, `${eventId}.${timestamp}.${req.rawBody.toString('utf8')}`);
-  if (!timingSafeCompare(expectedSig, rawSig.substring(3))) {
-    return res.status(401).json({ error: 'Chữ ký không hợp lệ!' });
-  }
-
-  // 4.2. Chống Replay Attack: Timestamp không được lệch quá 5 phút (300s)
-  const currentTs = Math.floor(Date.now() / 1000);
-  if (Math.abs(currentTs - timestamp) > 300) {
-    return res.status(400).json({ error: 'Request đã quá hạn (> 5 phút), từ chối để chống replay attack' });
+  // 4.1. Standard Webhooks (ADR-040): chữ ký trên bytes gốc + timestamp lệch ≤ 300s (chống replay) — hub ký,
+  // shop chỉ verify bằng lib dùng chung. `webhook-id` = event id, giữ nguyên qua retry -> khoá chống trùng.
+  const eventId = req.headers['webhook-id'] as string;
+  if (!swVerify(SIGNING_SECRET, req.headers, req.rawBody ?? Buffer.alloc(0))) {
+    return res.status(401).json({ error: 'Chữ ký Standard Webhooks không hợp lệ hoặc quá hạn' });
   }
 
   // 4.3. Chỉ nhận kiểu chuẩn `payment.received` (VND); mã đơn DH\d+ trong data.memo rồi data.reference

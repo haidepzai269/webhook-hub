@@ -1,6 +1,6 @@
 import { DestinationSender, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent } from '@hub/common';
-import { hmacSha256, createSsrfSafeAxiosConfig } from '@hub/crypto';
+import { createSsrfSafeAxiosConfig, swHeaders } from '@hub/crypto';
 import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
 
 export class WebhookSender implements DestinationSender {
@@ -39,18 +39,11 @@ export class WebhookSender implements DestinationSender {
       };
 
       const bodyString = JSON.stringify(body);
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-Hub-Event-Id': event.id,
-        'X-Hub-Timestamp': String(timestamp),
-      };
-
-      // 2. Ký HMAC theo chuẩn Standard Webhooks
-      if (signingSecret) {
-        const payloadToSign = `${event.id}.${timestamp}.${bodyString}`;
-        const signature = hmacSha256(signingSecret, payloadToSign);
-        headers['X-Hub-Signature'] = `v1=${signature}`;
-      }
+      // 2. Standard Webhooks (S6, ADR-040): `webhook-id` = event.id — GIỮ NGUYÊN qua mọi retry/replay để đích
+      // chống trùng; chữ ký `v1,<base64>` trên `${id}.${ts}.${body}`. KHÔNG còn X-Hub-* (không gửi song song).
+      const headers: Record<string, string> = signingSecret
+        ? { 'Content-Type': 'application/json', ...swHeaders(signingSecret, event.id, bodyString, timestamp) }
+        : { 'Content-Type': 'application/json', 'webhook-id': event.id, 'webhook-timestamp': String(timestamp) };
 
       // 3. Gọi HTTP: maxRedirects: 0 để chống SSRF Redirect; agent đã pin IP ở trên. Phản hồi đọc tối
       // đa 64KB, status từ dòng trạng thái — 2xx body lớn vẫn là thành công (ADR-054).

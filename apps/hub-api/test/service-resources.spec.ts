@@ -1,5 +1,6 @@
 import { HttpException } from '@nestjs/common';
-import { TenantScopedRepository } from '@hub/database';
+import { TenantScopedRepository, getMasterKey } from '@hub/database';
+import { aesGcmEncrypt } from '@hub/crypto';
 import { ServiceResourcesController } from '../src/modules/service-api/service-resources.controller';
 
 /**
@@ -16,7 +17,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
 
   function build() {
     const destinations: any[] = [
-      { id: EA, tenantId: PA, name: 'A', type: 'webhook', configEncrypted: 'enc', signingSecretEncrypted: 'enc', verification: 'VERIFIED' },
+      { id: EA, tenantId: PA, name: 'A', type: 'webhook', configEncrypted: aesGcmEncrypt(JSON.stringify({ url: 'https://a.example/h' }), getMasterKey()), signingSecretEncrypted: aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey()), verification: 'VERIFIED' },
       { id: EB, tenantId: PB, name: 'B', type: 'webhook', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED' },
     ];
     const sources = [
@@ -38,6 +39,11 @@ describe('Service API — endpoint + subscription (S5)', () => {
           destinations.push(row);
           return row;
         }),
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          const rows = destinations.filter((d) => match(d, where));
+          rows.forEach((r) => Object.assign(r, data));
+          return { count: rows.length };
+        }),
       },
       source: { findMany: jest.fn(async ({ where }: any) => sources.filter((s) => match(s, where))) },
       subscription: {
@@ -55,7 +61,9 @@ describe('Service API — endpoint + subscription (S5)', () => {
       $transaction: async (fn: any) => fn(client),
     };
     const req = (tenantId: string) => ({ tenantId, apiKey: { id: 'key-1', tenantId, serviceName: 'cafe-be' } }) as any;
-    return { controller: new ServiceResourcesController(prisma), destinations, subs, audits, req };
+    const verifier = { challenge: jest.fn(async (): Promise<any> => verdict.next) };
+    const verdict: { next: any } = { next: { verification: 'VERIFIED', verificationError: null } };
+    return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, subs, audits, req, verifier, verdict };
   }
 
   async function status(p: Promise<unknown>): Promise<{ status: number; body: any }> {
@@ -101,14 +109,40 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(audits[0]).toMatchObject({ action: 'subscription.create', actor: 'key:key-1', tenantId: PA });
   });
 
-  it('S5: tạo endpoint -> PENDING, url lưu mã hoá, response không có config/secret mã hoá', async () => {
-    const { controller, destinations, req } = build();
+  it('[MS:T4] (phần d) tạo endpoint không truyền secret -> hub sinh whsec_ (trả ĐÚNG lần này), challenge VERIFIED, audit endpoint.verified', async () => {
+    const { controller, destinations, audits, req, verifier } = build();
     const created: any = await controller.createEndpoint(req(PA), { name: 'echo', url: 'https://example.com/hook' });
-    expect(created).toMatchObject({ name: 'echo', url: 'https://example.com/hook', verification: 'PENDING' });
-    expect(JSON.stringify(created)).not.toMatch(/Encrypted|configEncrypted/);
+    expect(created).toMatchObject({ name: 'echo', url: 'https://example.com/hook', verification: 'VERIFIED', verificationError: null });
+    expect(created.signingSecret).toMatch(/^whsec_/);
+    expect(verifier.challenge).toHaveBeenCalledWith('https://example.com/hook', created.signingSecret);
+    expect(JSON.stringify(created)).not.toMatch(/Encrypted/);
     const row = destinations.find((d) => d.id === created.id);
-    expect(row).toMatchObject({ tenantId: PA, type: 'webhook', verification: 'PENDING' });
+    expect(row).toMatchObject({ tenantId: PA, type: 'webhook', verification: 'VERIFIED' });
+    expect(row.verifiedAt).toBeInstanceOf(Date);
     expect(row.configEncrypted).not.toContain('example.com');
+    expect(row.signingSecretEncrypted).not.toContain('whsec_');
+    expect(audits.map((a) => a.action)).toEqual(['endpoint.create', 'endpoint.verified']);
+    // danh sách không bao giờ trả secret
+    expect(JSON.stringify(await controller.listEndpoints(req(PA)))).not.toMatch(/whsec_|signingSecret/);
+  });
+
+  it('[MS:T4] (phần e) challenge FAILED -> vẫn trả endpoint (201), verification FAILED + lý do, audit endpoint.verification_failed; secret tự truyền thì KHÔNG trả lại', async () => {
+    const { controller, destinations, audits, req, verdict } = build();
+    verdict.next = { verification: 'FAILED', verificationError: 'http_500' };
+    const created: any = await controller.createEndpoint(req(PA), { name: 'hong', url: 'https://example.com/fail', signingSecret: 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw' });
+    expect(created).toMatchObject({ verification: 'FAILED', verificationError: 'http_500' });
+    expect(created.signingSecret).toBeUndefined();
+    expect(destinations.find((d) => d.id === created.id)).toMatchObject({ verification: 'FAILED', verificationError: 'http_500', verifiedAt: null });
+    expect(audits.map((a) => a.action)).toEqual(['endpoint.create', 'endpoint.verification_failed']);
+  });
+
+  it('[MS:T2] (phần b) POST /endpoints/:id/verify: endpoint project khác -> 404 not_found; của mình -> chạy lại challenge', async () => {
+    const { controller, req, verdict, destinations } = build();
+    expect(await status(controller.verifyEndpoint(req(PA), EB))).toEqual({ status: 404, body: { error: 'not_found' } });
+    expect(await status(controller.verifyEndpoint(req(PA), 'khong-phai-uuid'))).toEqual({ status: 404, body: { error: 'not_found' } });
+    verdict.next = { verification: 'FAILED', verificationError: 'timeout' };
+    await expect(controller.verifyEndpoint(req(PA), EA)).resolves.toEqual({ verification: 'FAILED', verificationError: 'timeout' });
+    expect(destinations.find((d) => d.id === EA)).toMatchObject({ verification: 'FAILED', verificationError: 'timeout' });
   });
 
   it('S5: url không phải http(s) / thiếu name -> 422 có tên trường', async () => {

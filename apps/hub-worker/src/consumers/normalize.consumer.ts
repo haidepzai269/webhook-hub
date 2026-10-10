@@ -162,6 +162,13 @@ export class NormalizeConsumer {
           log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
 
           for (const sub of subscriptions) {
+            // S6 (SPEC §4.6, ADR-040): endpoint chưa chứng minh sở hữu (challenge) thì KHÔNG nhận sự kiện —
+            // không ghi delivery nào. Telegram/Discord/đích cũ mặc định VERIFIED.
+            const dest = sub.destination as { type?: string; verification?: string } | undefined;
+            if (dest?.type === 'webhook' && dest.verification && dest.verification !== 'VERIFIED') {
+              log.info({ subscriptionId: sub.id, destinationId: sub.destinationId, verification: dest.verification }, 'Bỏ qua đích webhook chưa VERIFIED');
+              continue;
+            }
             const delivery = await repoTx.createDelivery({
               eventId: evt.id,
               subscriptionId: sub.id,

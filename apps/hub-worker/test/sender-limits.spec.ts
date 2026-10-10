@@ -1,7 +1,7 @@
 jest.mock('axios', () => ({ __esModule: true, default: { post: jest.fn() } }));
 jest.mock('@hub/crypto', () => ({
+  ...jest.requireActual('@hub/crypto'),
   createSsrfSafeAxiosConfig: jest.fn(async (url: string) => ({ url, httpAgent: undefined, httpsAgent: undefined })),
-  hmacSha256: jest.fn(() => 'sig'),
 }));
 
 import axios from 'axios';

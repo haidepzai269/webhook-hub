@@ -1,7 +1,7 @@
 jest.mock('@hub/crypto', () => ({
+  ...jest.requireActual('@hub/crypto'),
   // Server cục bộ 127.0.0.1: bỏ qua SSRF guard (đã có test riêng), giữ nguyên đường axios THẬT.
   createSsrfSafeAxiosConfig: jest.fn(async (url: string) => ({ url, httpAgent: undefined, httpsAgent: undefined })),
-  hmacSha256: jest.fn(() => 'sig'),
 }));
 
 import * as http from 'http';

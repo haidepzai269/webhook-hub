@@ -53,11 +53,11 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     return { content: Buffer.from(JSON.stringify(payload)), properties: { headers: { 'x-correlation-id': 'corr-1', ...headers } } } as any;
   }
 
-  function buildFakePrisma(opts: { subs?: number; findRawEvent?: jest.Mock } = {}) {
+  function buildFakePrisma(opts: { subs?: number; findRawEvent?: jest.Mock; verification?: string[] } = {}) {
     const outboxRows: any[] = [];
     const subs = Array.from({ length: opts.subs ?? 2 }, (_, i) => ({
       id: `sub-${i}`,
-      destination: { id: `dest-${i}`, name: `Đích ${i}`, type: 'webhook' },
+      destination: { id: `dest-${i}`, name: `Đích ${i}`, type: 'webhook', verification: opts.verification?.[i] ?? 'VERIFIED' },
     }));
     let deliverySeq = 0;
     const tx = {
@@ -137,6 +137,16 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(tx.event.create.mock.calls[0][0].data.sourceId).toBe('src-1');
     const where = tx.subscription.findMany.mock.calls[0][0].where;
     expect(where.OR).toEqual([{ sourceIds: { isEmpty: true } }, { sourceIds: { has: 'src-1' } }]);
+  });
+
+  it('[MS:U30] S6: đích webhook PENDING/FAILED -> KHÔNG tạo delivery (không outbox); VERIFIED vẫn tạo', async () => {
+    const { prisma, tx, outboxRows } = buildFakePrisma({ subs: 3, verification: ['PENDING', 'VERIFIED', 'FAILED'] });
+    const channel = buildChannel();
+    await new NormalizeConsumer(prisma).handleMessage(buildMsg(), channel);
+    expect(tx.delivery.create).toHaveBeenCalledTimes(1);
+    expect(tx.delivery.create.mock.calls[0][0].data.subscriptionId).toBe('sub-1');
+    expect(outboxRows).toHaveLength(1);
+    expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 
   it('[AF:#22] S1-5: đọc raw_event qua repo.findRawEventById (scope tenant), không qua prisma.rawEvent', async () => {
