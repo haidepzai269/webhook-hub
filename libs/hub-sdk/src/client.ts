@@ -141,8 +141,9 @@ export class HubClient {
   readonly endpoints = {
     list: (): Promise<Endpoint[]> => this.request('GET', '/endpoints'),
     create: (input: { name: string; url: string; signingSecret?: string }): Promise<Endpoint> => this.request('POST', '/endpoints', input),
-    verify: (id: string): Promise<{ verification: Endpoint['verification']; verificationError: string | null }> =>
-      this.request('POST', `/endpoints/${encodeURIComponent(id)}/verify`),
+    /** Chạy lại challenge. Kèm `signingSecret` = xoay secret có chứng minh (chỉ lưu khi endpoint verify được bằng secret mới). */
+    verify: (id: string, opts: { signingSecret?: string } = {}): Promise<{ verification: Endpoint['verification']; verificationError: string | null; secretRotated?: boolean }> =>
+      this.request('POST', `/endpoints/${encodeURIComponent(id)}/verify`, opts.signingSecret ? { signingSecret: opts.signingSecret } : undefined),
     /**
      * Idempotent (gọi mỗi lần service khởi động): tìm endpoint theo `url`; chưa có thì tạo; chưa VERIFIED thì
      * `/verify`; rồi đảm bảo có subscription phủ `eventTypes` (+ `sourceIds`). Không VERIFIED được -> HubError
@@ -154,6 +155,10 @@ export class HubClient {
       const created = !endpoint;
       if (!endpoint) {
         endpoint = await this.endpoints.create({ name: input.name, url, ...(input.signingSecret ? { signingSecret: input.signingSecret } : {}) });
+      } else if (input.signingSecret) {
+        // MS-R4: endpoint đã có nhưng secret của service có thể đã đổi — luôn chứng minh lại bằng secret hiện tại
+        // (hub chỉ lưu khi khớp). Không làm vậy thì hub ký secret cũ -> service 401 -> DEAD mà log vẫn "VERIFIED".
+        endpoint = { ...endpoint, ...(await this.endpoints.verify(endpoint.id, { signingSecret: input.signingSecret })) };
       } else if (endpoint.verification !== 'VERIFIED') {
         endpoint = { ...endpoint, ...(await this.endpoints.verify(endpoint.id)) };
       }

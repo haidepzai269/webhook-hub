@@ -98,10 +98,28 @@ describe('@hub/sdk (S11)', () => {
     const first = await c.endpoints.ensure(input);
     expect(first).toMatchObject({ created: true, endpoint: { id: 'e1' }, subscription: { id: 's1', eventTypes: ['payment.received'] } });
     expect(calls.find((x) => x.method === 'POST' && x.url.endsWith('/endpoints'))!.body).toMatchObject({ signingSecret: 'hub_outbound_signing_secret_999' });
+    // Không kèm secret: endpoint VERIFIED + sub phủ -> chỉ 2 GET (có secret thì luôn /verify — xem MS-R4)
+    const noSecret = { ...input, signingSecret: undefined };
     const n = calls.length;
-    expect(await c.endpoints.ensure(input)).toMatchObject({ created: false, subscription: { id: 's1' } });
+    expect(await c.endpoints.ensure(noSecret)).toMatchObject({ created: false, subscription: { id: 's1' } });
     expect(calls.slice(n).map((x) => x.method)).toEqual(['GET', 'GET']);
     state.endpoints[0].verification = 'FAILED';
-    await expect(c.endpoints.ensure(input)).rejects.toMatchObject({ code: 'endpoint_not_verified' });
+    await expect(c.endpoints.ensure(noSecret)).rejects.toMatchObject({ code: 'endpoint_not_verified' });
+  });
+
+  it('MS-R4: ensure gặp endpoint ĐÃ VERIFIED + có signingSecret -> vẫn /verify kèm secret (lộ lệch secret thay vì DEAD âm thầm)', async () => {
+    const state: any = { endpoints: [{ id: 'e1', name: 'shop', url: 'http://shop:4001/hub-webhook', verification: 'VERIFIED', verificationError: null }], subs: [{ id: 's1', endpointId: 'e1', eventTypes: ['payment.received'], sourceIds: [], isActive: true }], verifyReply: { verification: 'FAILED', verificationError: 'http_401', secretRotated: false } };
+    const { fn, calls } = fakeFetch({
+      'GET /endpoints': () => ({ status: 200, body: state.endpoints }),
+      'POST /endpoints/e1/verify': () => ({ status: 200, body: state.verifyReply }),
+      'GET /subscriptions': () => ({ status: 200, body: state.subs }),
+    });
+    const c = createHubClient(`hub://${KEY}@h/default`, { fetch: fn });
+    const input = { name: 'shop', url: 'http://shop:4001/hub-webhook', eventTypes: ['payment.received'], signingSecret: 'secret-moi-cua-shop-123' };
+    await expect(c.endpoints.ensure(input)).rejects.toMatchObject({ code: 'endpoint_not_verified', message: expect.stringContaining('http_401') });
+    expect(calls.find((x) => x.url.endsWith('/verify'))!.body).toEqual({ signingSecret: 'secret-moi-cua-shop-123' });
+    state.verifyReply = { verification: 'VERIFIED', verificationError: null, secretRotated: true };
+    await expect(c.endpoints.ensure(input)).resolves.toMatchObject({ created: false, endpoint: { verification: 'VERIFIED' } });
   });
 });
+

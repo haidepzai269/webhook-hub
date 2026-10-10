@@ -896,3 +896,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** `POST /v1/p/:project/subscriptions` nhận mọi `destinationId` cùng project — key `manage:endpoints` gắn được đích Telegram/Discord của operator vào `*` (spam kênh admin); `GET` trả cả subscription của operator (lộ id đích). `readTypes` chỉ giới hạn polling nên key `readTypes=["order.*"]` vẫn nhận `payment.*` qua push.
 **Chọn:** Đích `type ≠ webhook` → 404 `not_found` (như không tồn tại, cùng khuôn `/verify`, `GET /endpoints`); `GET /subscriptions` lọc `destination.type = webhook`. Key có `readTypes` thì mỗi mẫu trong `eventTypes` phải được một mẫu của `readTypes` phủ (`*` phủ mọi thứ, `a.*` phủ `a.x` và `a.x.*`) — sai → 422 `{error:"outside_read_types", field:"eventTypes", invalid}`.
 **Đánh đổi:** Kiểm lúc TẠO subscription; subscription sống độc lập với key (đổi `readTypes` của key sau đó không thu hẹp subscription cũ — key hiện không sửa được scope, chỉ revoke/tạo mới).
+
+---
+
+## ADR-086 — Xoay signing secret của endpoint bằng challenge: `/verify` kèm `signingSecret` chỉ lưu khi endpoint chứng minh được secret mới; `ensure` luôn chứng minh lại (MS-R4, 2026-10-11)
+
+**Vấn đề:** `endpoints.ensure` gặp endpoint đã VERIFIED thì bỏ qua secret: Shop đổi `HUB_SIGNING_SECRET` → hub vẫn ký bằng secret cũ → Shop 401 mọi webhook → retry → DEAD, trong khi log Shop báo "endpoint VERIFIED". API không có cách xoay secret.
+**Chọn:** `POST /v1/p/:project/endpoints/:id/verify` nhận tuỳ chọn `{signingSecret}`: challenge ký bằng secret MỚI; endpoint trả đúng challenge (nghĩa là bên nhận đang verify bằng secret mới) → lưu secret mới + VERIFIED + audit `secretRotated`; sai → trả `{verification:"FAILED", verificationError, secretRotated:false}` và GIỮ NGUYÊN secret + trạng thái cũ (key không phá được endpoint đang chạy bằng một secret bậy). SDK `ensure` có `signingSecret` thì luôn gọi `/verify` kèm secret; không VERIFIED → `HubError endpoint_not_verified` kèm lý do (Shop log và thử lại). Không thêm endpoint API riêng.
+**Đánh đổi:** Mỗi lần service khởi động là một challenge (trong trần 5/phút/endpoint, ADR-083). Không có cửa sổ hai secret song song: đổi secret ở bên nhận phải kèm chạy `ensure`/`verify` (giữa hai bước, delivery tới đích có thể 401 và retry).

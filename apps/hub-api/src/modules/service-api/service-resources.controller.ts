@@ -183,7 +183,7 @@ export class ServiceResourcesController {
   @Post('endpoints/:id/verify')
   @HttpCode(200)
   @RequireScope('manage:endpoints')
-  async verifyEndpoint(@Req() req: RequestWithPrincipal, @Param('id') id: string) {
+  async verifyEndpoint(@Req() req: RequestWithPrincipal, @Param('id') id: string, @Body() body?: any) {
     const tenantId = req.tenantId!;
     const d = UUID_RE.test(id) ? await this.prisma.forTenant(tenantId).findDestinationById(id) : null;
     if (!d || d.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
@@ -192,6 +192,20 @@ export class ServiceResourcesController {
       throw new HttpException({ error: 'rate_limited', message: 'Tối đa 5 lần /verify mỗi phút cho một endpoint' }, HttpStatus.TOO_MANY_REQUESTS);
     }
     const url = endpointUrl(d.configEncrypted);
+    // MS-R4 (ADR-086): có `signingSecret` -> XOAY secret có chứng minh: challenge ký bằng secret MỚI; endpoint trả đúng
+    // (tức đang verify bằng secret mới) thì mới lưu. Sai thì giữ nguyên secret + trạng thái cũ (không để key nào
+    // làm hỏng endpoint đang chạy bằng một secret bậy).
+    const next = body?.signingSecret;
+    if (next !== undefined) {
+      if (typeof next !== 'string' || next.length < 16 || next.length > 256) {
+        unprocessable({ error: 'validation_failed', field: 'signingSecret', message: 'signingSecret là chuỗi 16–256 ký tự' });
+      }
+      if (!url) return { verification: 'FAILED', verificationError: 'invalid_url', secretRotated: false };
+      const o = await this.verifier.challenge(url, next);
+      if (o.verification !== 'VERIFIED') return { ...o, secretRotated: false };
+      await this.recordVerification(tenantId, d.id, o, `key:${req.apiKey!.id}`, aesGcmEncrypt(next, getMasterKey()));
+      return { ...o, secretRotated: true };
+    }
     let secret: string | null = null;
     try {
       secret = d.signingSecretEncrypted ? aesGcmDecrypt(d.signingSecretEncrypted, getMasterKey()) : null;
@@ -205,9 +219,10 @@ export class ServiceResourcesController {
   }
 
   /** Ghi kết quả challenge + audit `endpoint.verified` / `endpoint.verification_failed` cùng transaction. */
-  private recordVerification(tenantId: string, id: string, o: VerificationOutcome, actor: string) {
+  private recordVerification(tenantId: string, id: string, o: VerificationOutcome, actor: string, newSecretEncrypted?: string) {
     return this.withAudit(tenantId, async (repo) => {
       const u = await repo.updateDestination(id, {
+        ...(newSecretEncrypted ? { signingSecretEncrypted: newSecretEncrypted } : {}),
         verification: o.verification,
         verificationError: o.verificationError,
         verifiedAt: o.verification === 'VERIFIED' ? new Date() : null,
@@ -217,7 +232,7 @@ export class ServiceResourcesController {
         entityType: 'destination',
         entityId: id,
         actor,
-        metadata: { verificationError: o.verificationError },
+        metadata: { verificationError: o.verificationError, ...(newSecretEncrypted ? { secretRotated: true } : {}) },
       });
       return u;
     });

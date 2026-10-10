@@ -194,5 +194,21 @@ describe('Service API — endpoint + subscription (S5)', () => {
     await expect(controller.createSubscription(k, { endpointId: EA, name: 'ok', eventTypes: ['order.created', 'order.refund.*', 'payment.received'] })).resolves.toMatchObject({ eventTypes: ['order.created', 'order.refund.*', 'payment.received'] });
     await expect(controller.createSubscription(req(PA, ['*']), { endpointId: EA, name: 'all', eventTypes: ['*'] })).resolves.toBeTruthy();
   });
+
+  it('MS-R4: /verify kèm signingSecret -> challenge ký bằng secret MỚI; VERIFIED thì lưu secret mới, FAILED thì GIỮ secret + trạng thái cũ', async () => {
+    const { controller, req, verifier, verdict, destinations } = build();
+    const NEW = 'whsec_bmV3LXNlY3JldC1mb3ItbXMtcjQtdGVzdA==';
+    const before = destinations.find((d) => d.id === EA).signingSecretEncrypted;
+    verdict.next = { verification: 'FAILED', verificationError: 'http_401' };
+    expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'http_401', secretRotated: false });
+    expect(verifier.challenge).toHaveBeenLastCalledWith('https://a.example/h', NEW);
+    expect(destinations.find((d) => d.id === EA)).toMatchObject({ signingSecretEncrypted: before, verification: 'VERIFIED' });
+    verdict.next = { verification: 'VERIFIED', verificationError: null };
+    expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'VERIFIED', verificationError: null, secretRotated: true });
+    const after = destinations.find((d) => d.id === EA).signingSecretEncrypted;
+    expect(after).not.toBe(before);
+    expect(require('@hub/crypto').aesGcmDecrypt(after, getMasterKey())).toBe(NEW);
+    expect(await status(controller.verifyEndpoint(req(PA), EA, { signingSecret: 'ngan' }))).toMatchObject({ status: 422, body: { field: 'signingSecret' } });
+  });
 });
 
