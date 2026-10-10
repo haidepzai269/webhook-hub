@@ -129,7 +129,7 @@ npm run verify:down   # … down -v (xoá sạch volume của hubv, không đụ
 ```
 
 - `docker-compose.verify.yml` chỉ chứa phần **ghi đè**:
-  - cổng cộng 10000 (postgres `15433`, redis `16379`, rabbit `15672`/`25672`, hub-api `14000`, shop `13001`, web `13000`);
+  - cổng cộng 10000 (postgres `15433`, redis `16379`, rabbit AMQP `15673` (không phải 15672: trùng cổng UI RabbitMQ của stack dev) / UI `25672`, hub-api `14000`, shop `14001`, web `13000`, sink `14100`; sửa theo VF1 `3ea2cb5`);
   - volume riêng (`hubv_pgdata`…), mạng tự sinh `hubv_default`;
   - `container_name` bỏ trống để không trùng `webhook-hub-postgres`.
 - **Được phép** kill, restart, pause bất kỳ container nào của `hubv`. Đây là chỗ L3 chạy, và là chỗ phiên review làm những dòng trước đây chỉ được "✅ một phần".
@@ -352,7 +352,7 @@ Không có tự động chạy lại. Test chập chờn **là bug**, hoặc c�
 | `chaos` | nightly + bấm tay | `verify:up` → `verify:chaos` → `verify:probe --all` | ~15 phút |
 | `secrets` | mọi push | `gitleaks detect` trên toàn lịch sử | ~1 phút. Repo public |
 
-- Không secret thật nào trong CI. Chỉ `.env.verify`. Fixture "ký gốc" bị skip có lý do (§4.2). Vòng provider thật chỉ chạy tay (§9).
+- Không secret thật nào trong CI. Chỉ `.env.verify`; mọi fixture được ký lại bằng secret giả nên **không có skip** ở L1/L2 (§4.2). Vòng provider thật chỉ chạy tay (§9).
 - **Repo public (Admin chốt Q-V2, 10/10):** runner chuẩn của GitHub không giới hạn phút, nên **`e2e` chạy mọi push** chứ không chỉ khi PR, và `chaos` chạy nightly. Vẫn giữ `concurrency` huỷ lượt cũ của cùng nhánh, và `paths-ignore` cho commit chỉ sửa `*.md`/`docs/**`/`_bmad-output/**` (cho nhanh, không phải để tiết kiệm).
 - **Public nghĩa là ai cũng đọc được toàn bộ lịch sử git.** Vì vậy:
   - job `secrets` chạy `gitleaks` (pin version) trên **toàn bộ lịch sử** ở mọi push;
@@ -512,7 +512,7 @@ Lý do làm VF1, VF2, VF7 sớm: từ AU1 trở đi mọi story đi theo §6. N�
 
 ### 11.1 Definition of Done (áp thêm vào DoD của mọi spec, kể từ khi VF2 xong)
 
-- `npm run verify` xanh, skip = 0 ở L1/L2 (trừ skip có lý do ở §4.2).
+- `npm run verify` xanh, skip = 0 ở L1/L2 (không có ngoại lệ, §4.2).
 - `verify:map`: 0 mồ côi của story, 0 ma, 0 trùng.
 - Story chạm bất biến/bảo mật: probe liên quan đỏ khi phá.
 - Commit có khối `Verify:` do `--evidence` sinh.
@@ -528,7 +528,7 @@ Lý do làm VF1, VF2, VF7 sớm: từ AU1 trở đi mọi story đi theo §6. N�
 | VT2 | Xoá một test có mã rồi chạy `verify` | đỏ do bánh cóc |
 | VT3 | Spec có mã `UA99` thuộc story đã `[x]`, không test nào mang | `verify:map` đỏ, liệt kê `AU:UA99` |
 | VT4 | Test mang `[AU:UA999]` không có trong spec | `verify:map` đỏ "mã ma" |
-| VT5 | Fixture ký gốc GitHub/PayOS | `hub-sim` tính lại chữ ký **bằng** `signature.original` |
+| VT5 | Provider có SDK chính thức (PayOS…) | chữ ký `hub-sim` tính **bằng** chữ ký SDK trên cùng body + secret (§5.3) |
 | VT6 | Phát fixture Stripe cũ không ký lại | hub trả 401 |
 | VT7 | `hub-sim` import từ `libs/` | grep CI đỏ |
 | VT8 | `verify:up` khi stack dev đang chạy | cả hai cùng sống; `docker compose -p webhook-hub ps` không đổi |
