@@ -26,7 +26,18 @@ function fakeRedis() {
       store.set(k, v);
       return 'OK';
     },
-    eval: async (script: string, _n: number, key: string) => {
+    eval: async (script: string, n: number, ...rest: any[]) => {
+      const key = rest[0];
+      if (/redis\.call\('GET'/.test(script)) {
+        // LUA_STATE_AND_THROTTLE: KEYS open, failures, throttle
+        const [open, failures, throttle] = rest.slice(0, n);
+        let t = -1;
+        if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
+          t = Number(store.get(throttle) ?? 0) + 1;
+          store.set(throttle, String(t));
+        }
+        return [store.get(open) ?? '', store.get(failures) ?? '', t];
+      }
       if (/INCR/.test(script)) {
         const n = Number(store.get(key) ?? 0) + 1;
         store.set(key, String(n));
@@ -123,14 +134,14 @@ async function runNormalize(destinations: number) {
   expect(tx.delivery.create).toHaveBeenCalledTimes(destinations);
 }
 
-async function runDelivery(i: number) {
+async function runDelivery(i: number, rateLimitRps = 0) {
   const now = new Date();
   const row = {
     id: `del-${i}`, tenantId: TENANT, attemptGeneration: 1, attemptCount: 0, status: 'PENDING',
     event: { id: 'evt-1', tenantId: TENANT, type: 'payment.received', source: 'sepay', subject: null, data: {}, normalized: true, occurredAt: now, receivedAt: now, correlationId: 'c', rawEventId: RAW, parentEventId: null, origin: 'webhook', rawEvent: null },
     subscription: {
       id: `sub-${i}`, template: '',
-      destination: { id: `dest-${i}`, type: 'webhook', configEncrypted: aesGcmEncrypt('{"url":"https://x.example.com"}', MASTER), signingSecretEncrypted: null, rateLimitRps: 0, circuitState: 'CLOSED' },
+      destination: { id: `dest-${i}`, type: 'webhook', configEncrypted: aesGcmEncrypt('{"url":"https://x.example.com"}', MASTER), signingSecretEncrypted: null, rateLimitRps, circuitState: 'CLOSED' },
     },
   };
   const tx = {
@@ -179,6 +190,24 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
       await runDelivery(i);
       expect(take()).toEqual(['mget', 'publish']);
     }
+  });
+
+  it('review #2: đích CÓ throttle (rateLimitRps>0) vẫn 2 lệnh/đích — EVAL gộp circuit+throttle + PUBLISH', async () => {
+    await runIngest();
+    await runNormalize(2);
+    take();
+    await runDelivery(1, 10);
+    expect(take()).toEqual(['eval', 'publish']);
+    await runDelivery(2, 20);
+    expect(take()).toEqual(['eval', 'publish']);
+  });
+
+  it('tổng có throttle: 2 đích = 8 (giống không throttle)', async () => {
+    await runIngest();
+    await runNormalize(2);
+    await runDelivery(1, 10);
+    await runDelivery(2, 20);
+    expect(calls.length).toBe(8);
   });
 
   it('tổng: 1 đích = 6, 2 đích = 8 (≤ 4 + 2×N)', async () => {

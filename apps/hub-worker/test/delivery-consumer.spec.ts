@@ -283,7 +283,8 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
   it('outbound throttle (rateLimitRps đọc từ DB) hết token -> giữ tầng NGẮN nhất (10s)', async () => {
     const { prisma } = buildFakePrisma({ row: buildDeliveryRow({ rateLimitRps: 5 }) });
     const cb = buildFakeCircuitBreaker('CLOSED');
-    cb.checkThrottle.mockResolvedValue(false);
+    // Review SPEC-3 #2: throttle đọc cùng lệnh với circuit (getState trả throttleAllowed)
+    cb.getState.mockResolvedValue({ state: 'CLOSED', failures: 0, throttleAllowed: false });
     const consumer = new DeliveryConsumer(prisma, cb);
     const sendSpy = jest.fn();
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: sendSpy } as any);
@@ -291,7 +292,8 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     const channel = buildChannel();
     await consumer.handleMessage(toAmqpMsg(buildSlimMsg()), channel);
 
-    expect(cb.checkThrottle).toHaveBeenCalledWith('dest-1', 5);
+    expect(cb.getState).toHaveBeenCalledWith('dest-1', 5);
+    expect(cb.checkThrottle).not.toHaveBeenCalled();
     expect(sendSpy).not.toHaveBeenCalled();
     expect(channel.sendToQueue).toHaveBeenCalledWith('q.delivery.retry.10s', expect.anything(), expect.anything());
   });

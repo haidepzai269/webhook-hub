@@ -162,7 +162,9 @@ export class DeliveryConsumer {
         tenantId,
         persistedState: ((destination as { circuitState?: CircuitState }).circuitState ?? 'CLOSED') as CircuitState,
       };
-      const view: CircuitView = await this.circuitBreaker.getState(destinationId);
+      // Review SPEC-3 #2: circuit + throttle trong MỘT lệnh Redis khi đích có rate_limit_rps.
+      const rateLimitRps = destination.rateLimitRps && destination.rateLimitRps > 0 ? destination.rateLimitRps : 0;
+      const view: CircuitView = await this.circuitBreaker.getState(destinationId, rateLimitRps);
       // `:open` hết hạn (-> HALF_OPEN) hay mọi khoá hết hạn (-> CLOSED) không có sự kiện nào báo:
       // phát hiện ở message kế tiếp bằng cách so với bản DB.
       await this.circuitBreaker.syncObserved(circuit, view);
@@ -195,10 +197,10 @@ export class DeliveryConsumer {
       const releaseProbe = () => (isProbe ? this.circuitBreaker.releaseProbe(destinationId, probeToken) : Promise.resolve());
 
       // 1b. Outbound Throttle per destination (§5.4b & ADR-016): phòng ngừa, giữ tầng NGẮN nhất.
-      // (Không áp cho lần "thử" do circuit quá trần — lần đó không gọi đích.)
-      if (!circuitTimeout && destination.rateLimitRps && destination.rateLimitRps > 0) {
-        const allowed = await this.circuitBreaker.checkThrottle(destinationId, destination.rateLimitRps);
-        if (!allowed) {
+      // Bộ đếm đã tăng trong getState (cùng lệnh). Chỉ áp khi CLOSED: probe HALF_OPEN và lần "thử" do
+      // circuit quá trần không đi qua throttle (probe chỉ một request; lần quá trần không gọi đích).
+      if (!circuitTimeout && view.throttleAllowed !== undefined) {
+        if (!view.throttleAllowed) {
           log.warn(
             { destinationId, rateLimitRps: destination.rateLimitRps },
             'Outbound Throttle kích hoạt (vượt RPS đích) -> đẩy sang tầng retry ngắn nhất',

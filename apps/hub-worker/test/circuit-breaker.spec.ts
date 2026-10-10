@@ -7,6 +7,7 @@ import {
   LUA_ACQUIRE_PROBE,
   LUA_INCR_EXPIRE,
   LUA_RELEASE_PROBE,
+  LUA_STATE_AND_THROTTLE,
 } from '../src/circuit/circuit-breaker.service';
 
 /**
@@ -75,6 +76,15 @@ function fakeRedis() {
         store.set(probe, argv[0]);
         return 1;
       }
+      if (script === LUA_STATE_AND_THROTTLE) {
+        const [open, failures, throttle] = keys;
+        let t = -1;
+        if (!store.has(open) && parseInt(store.get(failures) ?? '0', 10) < Number(argv[0])) {
+          t = parseInt(store.get(throttle) ?? '0', 10) + 1;
+          store.set(throttle, String(t));
+        }
+        return [store.get(open) ?? '', store.get(failures) ?? '', t];
+      }
       if (script === LUA_RELEASE_PROBE) {
         if (store.get(keys[0]) === argv[0]) return store.delete(keys[0]) ? 1 : 0;
         return 0;
@@ -118,6 +128,18 @@ const target = (persisted: CircuitTarget['persistedState'] = 'CLOSED'): CircuitT
 });
 
 describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () => {
+  it('review #2: getState(dest, rps>0) dùng MỘT lệnh EVAL (không MGET riêng); CLOSED tiêu RPS, HALF_OPEN không', async () => {
+    const redis = fakeRedis();
+    const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
+    expect(await cb.getState(DEST, 2)).toEqual({ state: 'CLOSED', failures: 0, throttleAllowed: true });
+    expect(redis.calls).toEqual(['eval']);
+    expect((await cb.getState(DEST, 2)).throttleAllowed).toBe(true);
+    expect((await cb.getState(DEST, 2)).throttleAllowed).toBe(false);
+    redis.store.set(`circuit:${DEST}:failures`, '5');
+    expect(await cb.getState(DEST, 2)).toEqual({ state: 'HALF_OPEN', failures: 5 });
+    expect(redis.calls.filter((c: string) => c !== 'eval')).toEqual([]);
+  });
+
   it('mặc định CLOSED, getState chỉ dùng MỘT lệnh MGET', async () => {
     const redis = fakeRedis();
     const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
@@ -347,6 +369,20 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     expect(await redis.get(k('probe'))).toBe(owner);
     await cb.releaseProbe(dest, owner);
     expect(await redis.exists(k('probe'))).toBe(0);
+  });
+
+  it('review #2: getState(dest, rps) — MỘT EVAL đọc circuit + tăng throttle; OPEN không tiêu RPS (Redis thật)', async () => {
+    while (Date.now() % 1000 > 600) await new Promise((r) => setTimeout(r, 20));
+    await redis.del(k('failures'), k('open'), k('probe'));
+    expect(await cb.getState(dest, 2)).toEqual({ state: 'CLOSED', failures: 0, throttleAllowed: true });
+    expect((await cb.getState(dest, 2)).throttleAllowed).toBe(true);
+    expect((await cb.getState(dest, 2)).throttleAllowed).toBe(false);
+    const tk = `throttle:destination:${dest}:${Math.floor(Date.now() / 1000)}`;
+    expect(Number(await redis.ttl(tk))).toBeGreaterThan(0);
+    await redis.set(k('open'), 'OPEN', 'EX', 60);
+    await redis.set(k('failures'), '5');
+    expect(await cb.getState(dest, 2)).toEqual({ state: 'OPEN', failures: 5 });
+    await redis.del(k('open'), k('failures'), tk);
   });
 
   it('throttle dùng cùng script INCR+EXPIRE', async () => {

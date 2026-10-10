@@ -147,8 +147,8 @@ Rollback vì lý do khác (không phải unique) → trả **5xx** để provide
 ### 3.3. Deliver
 
 0. Message chỉ mang tham chiếu (ADR-042); nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
-1. Kiểm **circuit breaker** (1 MGET). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần `CIRCUIT_MAX_DEFERRALS` (ADR-048/054).
-2. Kiểm **outbound throttle** (cửa sổ cố định 1 giây, chỉ khi `rate_limit_rps > 0`). Vượt → `q.delivery.retry.10s`, `ack`. *(§5.4b)*
+1. Kiểm **circuit breaker** — một lệnh: `MGET`, hoặc một `EVAL` gộp circuit + throttle khi đích có `rate_limit_rps` (review #2, ADR-064). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần `CIRCUIT_MAX_DEFERRALS` (ADR-048/054).
+2. Áp **outbound throttle** (cửa sổ cố định 1 giây, chỉ khi `rate_limit_rps > 0` và circuit CLOSED; bộ đếm đã tăng trong lệnh ở bước 1). Vượt → `q.delivery.retry.10s`, `ack`. *(§5.4b)*
 3. Render template → gọi HTTP, timeout cứng 5s (`AbortSignal.timeout`), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
 4. INSERT `delivery_attempts` (status code, duration_ms, response body cắt 2KB, error).
 5. `2xx` → `SUCCEEDED`, reset circuit (0 lệnh Redis nếu chưa từng lỗi), `ack`. Chỉ `5xx`/`408`/`429`/lỗi mạng tính vào circuit.

@@ -30,6 +30,20 @@ export const LUA_INCR_EXPIRE = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 return n`;
 /**
+ * Review SPEC-3 #2 (ADR-064): đọc circuit + throttle trong MỘT lệnh. KEYS: open, failures, throttle;
+ * ARGV: ngưỡng lỗi, TTL cửa sổ throttle (giây). Chỉ tăng bộ đếm throttle khi CLOSED (OPEN/HALF_OPEN thì
+ * message không gửi theo đường thường nên không tiêu RPS). Trả {open|'', failures|'', count|-1}.
+ */
+export const LUA_STATE_AND_THROTTLE = `local open = redis.call('GET', KEYS[1])
+local failures = redis.call('GET', KEYS[2])
+local t = -1
+if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
+  t = redis.call('INCR', KEYS[3])
+  if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[2]) end
+end
+return {open or '', failures or '', t}`;
+
+/**
  * Giành probe HALF_OPEN: chỉ SET NX khi `:open` KHÔNG tồn tại và `:failures` ≥ ngưỡng (đúng là HALF_OPEN
  * ngay lúc này, không dựa vào MGET đọc trước có thể đã cũ). KEYS: open, failures, probe;
  * ARGV: token, TTL giây, ngưỡng. Trả 1 = giành được.
@@ -48,6 +62,11 @@ export const FAIL_OPEN_PROBE = 'fail-open';
 export interface CircuitView {
   state: CircuitState;
   failures: number;
+  /**
+   * Review SPEC-3 #2: chỉ có khi `getState` được gọi với `rateLimitRps > 0` VÀ circuit CLOSED —
+   * script đã tăng bộ đếm throttle trong CÙNG lệnh. `false` = vượt RPS, hoãn. Không có = không áp throttle.
+   */
+  throttleAllowed?: boolean;
   /** Redis lỗi: trạng thái là fail-open (CLOSED) chứ không phải quan sát thật -> không đồng bộ DB. */
   degraded?: boolean;
 }
@@ -92,10 +111,23 @@ export class CircuitBreakerService {
     return { failures: `${base}:failures`, open: `${base}:open`, probe: `${base}:probe` };
   }
 
-  /** MỘT lệnh MGET. */
-  async getState(destinationId: string): Promise<CircuitView> {
+  /**
+   * MỘT lệnh: MGET khi đích không throttle; khi `rateLimitRps > 0` thì một EVAL gộp đọc circuit + tăng
+   * bộ đếm throttle (review SPEC-3 #2) — đường delivery luôn ≤ 2 lệnh (lệnh này + PUBLISH).
+   */
+  async getState(destinationId: string, rateLimitRps = 0): Promise<CircuitView> {
     const k = this.keys(destinationId);
     try {
+      if (rateLimitRps > 0) {
+        const throttleKey = `throttle:destination:${destinationId}:${Math.floor(Date.now() / 1000)}`;
+        const [openRaw, failuresRaw, count] = (await this.redis.eval(
+          LUA_STATE_AND_THROTTLE, 3, k.open, k.failures, throttleKey, CIRCUIT_FAILURE_THRESHOLD, 2,
+        )) as [string, string, number];
+        const failures = parseInt(failuresRaw || '0', 10) || 0;
+        if (openRaw) return { state: 'OPEN', failures };
+        if (failures >= CIRCUIT_FAILURE_THRESHOLD) return { state: 'HALF_OPEN', failures };
+        return { state: 'CLOSED', failures, throttleAllowed: Number(count) <= rateLimitRps };
+      }
       const [open, failuresRaw] = await this.redis.mget(k.open, k.failures);
       const failures = parseInt(failuresRaw ?? '0', 10) || 0;
       if (open) return { state: 'OPEN', failures };

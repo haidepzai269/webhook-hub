@@ -171,12 +171,14 @@ new Redis(process.env.REDIS_URL, { enableAutoPipelining: true, maxRetriesPerRequ
 |---|---|---|
 | ingest | `EVAL` rate limit (INCR+EXPIRE trong Lua) · `GET` idem · `SET NX` idem (sau COMMIT) | 3 |
 | normalize | `PUBLISH hub:realtime:events` (một lần cho mỗi raw event) | 1 |
-| mỗi delivery | `MGET` circuit · `PUBLISH hub:realtime:deliveries` (thành công khi `failures=0`: 0 lệnh circuit) | 2 |
+| mỗi delivery | `MGET` circuit (đích không throttle) **hoặc** một `EVAL` gộp circuit + throttle (đích có `rate_limit_rps`, review #2) · `PUBLISH hub:realtime:deliveries` (thành công khi `failures=0`: 0 lệnh circuit) | 2 |
 | **Tổng** | 1 đích = **6**, 2 đích = **8** | |
 
-Ngoài đường nóng: đích có `rateLimitRps` thêm 1 `EVAL`/delivery; delivery lỗi thêm `EVAL` INCR circuit; gửi trùng (GET idem trúng) chỉ 2 lệnh. Cố ý **giữ** `GET` idem trước transaction (không làm R2): request trùng trả lời từ Redis, khỏi mở transaction và chịu P2002 + rollback.
+Ngoài đường nóng: delivery lỗi thêm `EVAL` INCR circuit; circuit HALF_OPEN thêm `EVAL` giành probe; gửi trùng (GET idem trúng) chỉ 2 lệnh. Đích có throttle **không** tốn thêm lệnh nào (đo `redis-cli MONITOR` 10/10 sau review #2: 1 SePay → 2 đích có `rate_limit_rps` = **8 lệnh client**, trước đó 10). Cố ý **giữ** `GET` idem trước transaction (không làm R2): request trùng trả lời từ Redis, khỏi mở transaction và chịu P2002 + rollback.
 
-**Quota Upstash free (kiểm 10/10/2026 trên upstash.com/pricing/redis): 500.000 lệnh/tháng** (≈ 16.600/ngày) → ≈ **2.700 sự kiện/ngày** với 1 đích (÷6), ≈ 2.000 với 2 đích (÷8) — chưa trừ lệnh nền (pub/sub adapter, health). Đủ cho demo; tải thật phải lên pay-as-you-go.
+**Quota Upstash free (kiểm 10/10/2026 trên [upstash.com/pricing/redis](https://upstash.com/pricing/redis)): 500.000 lệnh/tháng** (≈ 16.600/ngày) → ≈ **2.700 sự kiện/ngày** với 1 đích (÷6), ≈ 2.000 với 2 đích (÷8) — chưa trừ lệnh nền (pub/sub adapter, health).
+
+> ⚠️ **Chưa xác nhận** Upstash tính một `EVAL` là 1 lệnh: [tài liệu billing](https://upstash.com/docs/redis/overall/billing) chỉ nói "tính theo số lệnh", không nói riêng về script (tìm 10/10 không thấy). Mọi con số trên giả định 1 `EVAL` = 1 lệnh. Nếu Upstash tính cả lệnh bên trong script thì đường nóng tối đa: ingest 3 → 4 (INCR+EXPIRE ở lần đầu cửa sổ), delivery có throttle 2 → 4–5 (GET, GET, INCR, EXPIRE + PUBLISH). Cần hỏi support Upstash trước khi ghi số quota vào báo cáo.
 
 *Lịch sử (trước S3-5):* thiết kế cũ tiêu 5–8 lệnh/sự kiện, **cộng thêm phần tệ nhất**:
 
