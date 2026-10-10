@@ -25,6 +25,16 @@ export class SocketTicketService {
     if (!scoped.scopes.includes('read:project')) {
       throw new HttpException({ error: 'missing_scope', message: 'Role hiện tại không có quyền read:project', required: 'read:project' }, HttpStatus.FORBIDDEN);
     }
+    // R-13 (review AU): operator xin vé cho project không phải của mình -> để lại dấu vết như HTTP (UA21).
+    if (scoped.viaOperator) {
+      await this.prisma.forTenant(scoped.projectId).createAuditLog({
+        action: 'operator.access',
+        entityType: 'project',
+        entityId: scoped.projectId,
+        actor: principal.id,
+        metadata: { method: 'GET', path: '/auth/socket-ticket' },
+      });
+    }
     return { ticket: signSocketTicket(this.jwt, this.cfg, { userId: principal.id, sessionId: principal.sessionId, projectId: scoped.projectId }), projectId: scoped.projectId };
   }
 }

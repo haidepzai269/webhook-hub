@@ -84,3 +84,16 @@ describe('vé socket theo project (SPEC-auth §5.7)', () => {
     expect((await connect(gw, { token: legacy })).err?.message).toBe('UNAUTHORIZED');
   });
 });
+
+describe('R-13 — vé socket của operator để lại operator.access', () => {
+  it('[AR:R-13] (phần a) operator xin vé project không phải của mình -> audit_logs operator.access của project đó; thành viên thật -> không ghi', async () => {
+    const audits: any[] = [];
+    const p2: any = { ...prisma, forTenant: (tenantId: string) => ({ createAuditLog: async (a: any) => void audits.push({ tenantId, ...a }) }) };
+    const t = new SocketTicketService(p2, jwt, cfg);
+    await t.issue({ ...user, id: 'op-1', isOperator: true } as any, BOOK);
+    expect(audits).toEqual([expect.objectContaining({ tenantId: BOOK, action: 'operator.access', actor: 'op-1' })]);
+    audits.length = 0;
+    await t.issue(user, CAFE);
+    expect(audits).toEqual([]);
+  });
+});

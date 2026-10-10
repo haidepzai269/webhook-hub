@@ -205,7 +205,7 @@ export class IdentityRepository {
   peekInvite(tokenHash: string, at: Date) {
     return this.db.emailToken.findFirst({
       where: { tokenHash, purpose: 'invite', usedAt: null, expiresAt: { gt: at } },
-      select: { id: true, email: true, tenantId: true, role: true },
+      select: { id: true, email: true, tenantId: true, role: true, invitedBy: true },
     });
   }
 

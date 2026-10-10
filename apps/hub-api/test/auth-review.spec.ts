@@ -119,3 +119,14 @@ describe('R-10 — login CSRF qua form urlencoded (ADR-114)', () => {
     expect(st('Application/JSON; charset=utf-8')).toBe(200);
   });
 });
+
+describe('R-13 — production phải có WEB_PUBLIC_URL', () => {
+  const { authSecretProblems } = require('../src/modules/auth/auth-config');
+  const base = { JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40) };
+  it('[AR:R-13] (phần b) NODE_ENV=production thiếu WEB_PUBLIC_URL -> lỗi khởi động; có URL / không phải production -> không; WEB_PROXY_SECRET ngắn -> lỗi', () => {
+    expect(authSecretProblems({ ...base, NODE_ENV: 'production' })).toContain('WEB_PUBLIC_URL thiếu (production)');
+    expect(authSecretProblems({ ...base, NODE_ENV: 'production', WEB_PUBLIC_URL: 'https://hub.vercel.app' })).toEqual([]);
+    expect(authSecretProblems({ ...base, NODE_ENV: 'development' })).toEqual([]);
+    expect(authSecretProblems({ ...base, WEB_PROXY_SECRET: 'ngan' })).toEqual(['WEB_PROXY_SECRET < 32 ký tự (để trống để tắt)']);
+  });
+});

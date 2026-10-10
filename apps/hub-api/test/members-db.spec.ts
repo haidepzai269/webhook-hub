@@ -123,6 +123,21 @@ describeDb('Thành viên + lời mời (Postgres, AU4)', () => {
     expect(await status(members.removeMember(newbie, projectId, users.owner.id, ctx))).toBe('403 missing_scope');
     expect(await status(members.removeMember(newbie, projectId, users.newbie.id, ctx))).toBe('ok');
   });
+
+  it('[AR:R-13] (phần c) lời mời mất hiệu lực khi người mời bị hạ quyền trước lúc nhận -> 400 token_invalid (token không bị đốt); người còn quyền mời lại -> nhận được', async () => {
+    const dev = principal(users.dev, { scopes: ['manage:members'] }); // dev đang là owner (test UA18)
+    expect(await status(members.changeRole(dev, projectId, users.owner.id, { role: 'owner' }, ctx))).toBe('ok');
+    const exOwner = principal(users.owner, { scopes: ['manage:members'] });
+    expect(await status(members.invite(exOwner, projectId, { email: users.other.email, role: 'viewer' }, ctx))).toBe('ok');
+    await settle();
+    const token = lastToken(users.other.email);
+    expect(await status(members.changeRole(dev, projectId, users.owner.id, { role: 'viewer' }, ctx))).toBe('ok');
+    expect(await status(members.acceptInvitation(principal(users.other), { token }, ctx))).toBe('400 token_invalid');
+    expect(await raw.projectMember.count({ where: { tenantId: projectId, userId: users.other.id } })).toBe(0);
+    expect(await status(members.invite(dev, projectId, { email: users.other.email, role: 'viewer' }, ctx))).toBe('ok');
+    await settle();
+    expect(await status(members.acceptInvitation(principal(users.other), { token: lastToken(users.other.email) }, ctx))).toBe('ok');
+  });
 });
 
 describe('[AU:UA19] tạo API key xin scope không được cấp cho máy -> 422 scope_not_grantable', () => {

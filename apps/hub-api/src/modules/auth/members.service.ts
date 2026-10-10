@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { MemberRole, PrismaService, TenantScopedRepository } from '@hub/database';
-import { isMemberRole, isValidEmail, logger, MAIL_SENDER, MailSender, mailTemplates, maskEmail, normalizeEmail } from '@hub/common';
+import { isMemberRole, isValidEmail, roleHasScope, logger, MAIL_SENDER, MailSender, mailTemplates, maskEmail, normalizeEmail } from '@hub/common';
 import { AUTH_CONFIG, AuthConfig } from './auth-config';
 import { AUTH_CLOCK } from './session.guard';
 import { authError } from './auth-errors';
@@ -110,6 +110,10 @@ export class MembersService {
     }
     const projectId = peek.tenantId;
     const role = peek.role as MemberRole;
+    // R-13 (review AU, ADR-117): người mời phải CÒN quyền mời lúc nhận (bị hạ quyền / bị xoá -> lời mời mất hiệu lực).
+    if (!(await this.inviterStillAllowed(peek.invitedBy, projectId, role))) {
+      throw http(HttpStatus.BAD_REQUEST, 'token_invalid', 'Lời mời không còn hiệu lực (người mời đã mất quyền mời)');
+    }
     await this.prisma.$transaction(async (tx) => {
       const t = this.prisma.identity(tx);
       const used = await t.consumeEmailToken(hash, 'invite', now);
@@ -121,6 +125,15 @@ export class MembersService {
     const project = await this.prisma.findProjectById(projectId);
     const finalRole = await idn.findMembershipRole(me.id, projectId);
     return { membership: { projectId, slug: project?.slug, name: project?.name, role: finalRole } };
+  }
+
+  private async inviterStillAllowed(inviterId: string | null | undefined, projectId: string, role: MemberRole): Promise<boolean> {
+    if (!inviterId) return false;
+    const idn = this.prisma.identity();
+    const [inviter, inviterRole] = await Promise.all([idn.findUserById(inviterId), idn.findMembershipRole(inviterId, projectId)]);
+    if (inviter?.isOperator) return true;
+    if (!inviterRole || !roleHasScope(inviterRole, 'manage:members')) return false;
+    return role !== 'owner' || inviterRole === 'owner';
   }
 
   // ------------------------------------------------------------------ thành viên

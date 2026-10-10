@@ -277,8 +277,10 @@ export class AuthService {
     const user = await this.store.identity().findUserByEmail(email);
     await this.audit(user?.id ?? null, 'password.reset_requested', ctx.ip, { emailHash: sha256Hex(email) });
     if (!user) return;
-    const token = await this.newEmailToken('reset_password', user.email, user.id, RESET_TTL_MS);
-    this.sendLater(user.email, mailTemplates.resetPassword(this.webLink(`/reset-password?token=${token}`), user.name));
+    // R-13: tạo token + gửi mail SAU khi trả 202 — email có thật không tốn thêm một transaction trước response (chống dò bằng thời gian).
+    void this.newEmailToken('reset_password', user.email, user.id, RESET_TTL_MS)
+      .then((token) => this.sendLater(user.email, mailTemplates.resetPassword(this.webLink(`/reset-password?token=${token}`), user.name)))
+      .catch((err) => logger.warn({ err: (err as Error).message, to: maskEmail(user.email) }, 'Tạo token đặt lại mật khẩu thất bại'));
   }
 
   /** `POST /auth/reset-password {token, password}` — đổi mật khẩu + thu hồi MỌI session (§5.3). */
