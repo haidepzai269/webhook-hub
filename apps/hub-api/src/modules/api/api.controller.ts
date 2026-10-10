@@ -405,7 +405,7 @@ export class ApiController {
   // --- Events (hỗ trợ Polling ADR-016 §8.1) ---
   /**
    * S7 (ADR-077, X11): `before=<eventId>` = trang CŨ HƠN (giảm dần theo thời điểm nhận — hành vi dashboard cũ);
-   * `after=<seq>` = MỚI HƠN, tăng dần theo seq (cùng nghĩa với polling `/v1/p`). `after` không phải số (client
+   * `after=<seq>` = MỚI HƠN, tăng dần theo events.seq (thứ tự INSERT — KHÁC `cursor` của polling `/v1/p`, ADR-099). `after` không phải số (client
    * cũ gửi id) được hiểu như `before` để không vỡ.
    */
   @Get('events')

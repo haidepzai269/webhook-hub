@@ -33,6 +33,12 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
     expect((await setup([]).call({})).body).toEqual({ events: [], nextCursor: '0' });
   });
 
+  it('R3-2: thông điệp 422 của after nói `cursor` (không phải seq của dashboard)', async () => {
+    const r = await setup().call({ after: 'abc' });
+    expect(r.body.message).toMatch(/cursor/);
+    expect(r.body.message).not.toMatch(/seq/);
+  });
+
   it('S7: tham số sai -> 422 field (after, limit, types, status, wait)', async () => {
     const { call } = setup();
     for (const [q, field] of [

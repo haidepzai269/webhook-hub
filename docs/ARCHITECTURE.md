@@ -547,7 +547,7 @@ Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong m�
 ### 8.1. Polling (A) — cho service không nhận được push (ADR-016, ADR-077)
 
 ```
-GET /v1/p/:project/events?after=<seq>&limit=50&types=payment.*,repo.push&status=failed&endpointId=&wait=0..20
+GET /v1/p/:project/events?after=<cursor>&limit=50&types=payment.*,repo.push&status=failed&endpointId=&wait=0..20
 → { events: [{ id, cursor, type, … }], nextCursor: "<cursor>" }   (scope read:events; cursor là CHUỖI)
 ```
 
@@ -819,7 +819,7 @@ service ──POST /v1/p/cafe/events──▶ ApiKeyGuard ─▶ persistAccepted
                                                    (cùng lõi với /hooks — ADR-074; SET NX Redis SAU COMMIT)
 bên thứ ba ──/hooks/generic/<key>──▶ GenericAdapter (cấu hình theo source) ─▶ cùng đường ingest
 worker ──normalize──▶ subscription khớp type (wildcard) VÀ sourceIds ─▶ chỉ đích VERIFIED ─▶ ký Standard Webhooks
-service ◀──push──  hoặc  ──GET /v1/p/cafe/events?after=<seq>&wait=20──▶ (polling A)
+service ◀──push──  hoặc  ──GET /v1/p/cafe/events?after=<cursor>&wait=20──▶ (polling A)
 ```
 
 - **SDK** `@hub/sdk` (`libs/hub-sdk`): `createHubClient(HUB_URL)`, `publish`, `poll`, `endpoints.ensure` (idempotent), `verifyWebhook`, `challengeResponse`; 0 dependency runtime, key bị che khi log (ADR-081).
