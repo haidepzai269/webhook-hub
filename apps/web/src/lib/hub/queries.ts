@@ -33,7 +33,7 @@ function invalidateAudited(qc: ReturnType<typeof useQueryClient>, ...keys: (read
 export const hubKeys = {
   overview: ["overview"] as const,
   timeseries: (range: TimeseriesRange) => ["timeseries", range] as const,
-  events: (after?: string, limit?: number) => ["events", after ?? null, limit ?? null] as const,
+  events: (before?: string, limit?: number) => ["events", before ?? null, limit ?? null] as const,
   event: (id: string) => ["event", id] as const,
   deliveries: (status?: DeliveryStatus) => ["deliveries", status ?? "ALL"] as const,
   dlq: ["dlq"] as const,
@@ -56,11 +56,12 @@ export function useTimeseries(range: TimeseriesRange) {
   });
 }
 
-export function useEvents(after: string | undefined, limit: number) {
+/** Trang cũ hơn theo `before` (id event cuối trang trước). S7: `after` của API giờ là seq tăng dần (ADR-077). */
+export function useEvents(before: string | undefined, limit: number) {
   const params = new URLSearchParams({ limit: String(limit) });
-  if (after) params.set("after", after);
+  if (before) params.set("before", before);
   return useQuery({
-    queryKey: hubKeys.events(after, limit),
+    queryKey: hubKeys.events(before, limit),
     queryFn: () => hubFetch<EventsPage>(`/api/v1/events?${params.toString()}`),
     placeholderData: keepPreviousData,
   });

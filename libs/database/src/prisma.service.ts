@@ -110,6 +110,19 @@ export class PrismaService {
     });
   }
 
+  /**
+   * Escape hatch HẠ TẦNG cho retention (S7, DINH-CHINH §3, ADR-077): xoá MỘT lô `events` có `received_at` cũ
+   * hơn `olderThanSeconds`, XUYÊN project (job cleanup không thuộc tenant nào). FK CASCADE kéo theo
+   * `deliveries` -> `delivery_attempts`. KHÔNG đụng `raw_events` (ACCEPTED giữ vô hạn, ADR-045). Chỉ CleanupJob gọi.
+   */
+  public deleteExpiredEventsBatch(olderThanSeconds: number, limit: number): Promise<number> {
+    return this.client.$executeRaw`
+      DELETE FROM "hub"."events" WHERE id IN (
+        SELECT id FROM "hub"."events"
+        WHERE received_at < now() - make_interval(secs => ${olderThanSeconds}::double precision)
+        LIMIT ${limit})`;
+  }
+
   // ================== Project + API key (S1, ADR-038) ==================
   // `projects` là bảng GỐC (id = tenant_id), không mang tenant_id -> không đi qua repo được.
   // `api_keys` có tenant_id: CRUD theo project đi qua `forTenant(...)`; riêng tra theo hash là bước

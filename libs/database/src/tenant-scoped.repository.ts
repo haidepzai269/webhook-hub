@@ -212,6 +212,46 @@ export class TenantScopedRepository {
     });
   }
 
+  /**
+   * S7 (SPEC §4.5, ADR-077): polling (A). `seq > after` tăng dần, chỉ event đã LẮNG `settleSeconds` (mặc định 2s)
+   * tính theo `created_at` = lúc INSERT (clock_timestamp): seq cấp lúc INSERT, transaction seq nhỏ có thể COMMIT
+   * sau transaction seq lớn — đọc ngay thì cursor vượt qua và mất vĩnh viễn sự kiện đó.
+   * `types` và `readTypes` (mẫu wildcard như subscription) là hai điều kiện AND. `failedOnly`: có delivery
+   * DEAD/RETRYING ở generation MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có].
+   */
+  async pollEvents(o: PollEventsOptions): Promise<PolledEvent[]> {
+    const settle = o.settleSeconds ?? 2;
+    const failed = o.failedOnly
+      ? Prisma.sql`AND EXISTS (
+          SELECT 1 FROM "hub"."deliveries" d JOIN "hub"."subscriptions" s ON s.id = d.subscription_id
+          WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id AND d.status IN ('DEAD', 'RETRYING')
+          ${o.endpointId ? Prisma.sql`AND s.destination_id = ${o.endpointId}::uuid` : Prisma.empty}
+          AND NOT EXISTS (SELECT 1 FROM "hub"."deliveries" d2 WHERE d2.event_id = d.event_id
+                          AND d2.subscription_id = d.subscription_id AND d2.attempt_generation > d.attempt_generation))`
+      : Prisma.empty;
+    return this.prisma.$queryRaw<PolledEvent[]>`
+      SELECT e.id, e.seq, e.type, e.source, e.source_id AS "sourceId", e.subject, e.data, e.normalized,
+             e.correlation_id AS "correlationId", e.occurred_at AS "occurredAt", e.received_at AS "receivedAt"
+      FROM "hub"."events" e
+      WHERE e.tenant_id = ${this.tenantId}::uuid
+        AND e.seq > ${o.after}
+        AND e.created_at <= clock_timestamp() - ${settle} * interval '1 second'
+        AND ${typeFilterSql(o.types)} AND ${typeFilterSql(o.readTypes)}
+        ${failed}
+      ORDER BY e.seq ASC
+      LIMIT ${o.limit}`;
+  }
+
+  /** S7 (ADR-077): dashboard `?after=<seq>` — tăng dần theo seq (cùng nghĩa với polling, không cửa sổ lắng). */
+  async findEventsAfterSeq(after: bigint, take = 50) {
+    return this.prisma.event.findMany({
+      where: { tenantId: this.tenantId, seq: { gt: after } },
+      take,
+      orderBy: { seq: 'asc' },
+      include: { deliveries: true },
+    });
+  }
+
   async findEventById(id: string) {
     return this.prisma.event.findFirst({
       where: { id, tenantId: this.tenantId },
@@ -435,13 +475,16 @@ export class TenantScopedRepository {
    * adapter cố ý chuẩn hoá ra 0 event). Postgres là trọng tài; DLQ broker chỉ là bản sao.
    * `ids` (tuỳ chọn) lọc lại ở server: client không thể ép renormalize raw event không mồ côi.
    */
-  async findOrphanRawEvents(opts: { limit: number; ids?: string[]; olderThanSeconds?: number }) {
+  async findOrphanRawEvents(opts: { limit: number; ids?: string[]; olderThanSeconds?: number; maxAgeSeconds?: number }) {
     const olderThan = opts.olderThanSeconds ?? ORPHAN_MIN_AGE_SECONDS;
+    // S7 (DINH-CHINH §3): raw cũ hơn retention đã mất event (+ processed_messages) do cleanup — KHÔNG phải mồ côi.
+    const maxAge = opts.maxAgeSeconds ?? eventRetentionDaysFromEnv() * 86_400;
     const idFilter =
       opts.ids && opts.ids.length > 0 ? Prisma.sql`AND r.id IN (${Prisma.join(opts.ids.map((i) => Prisma.sql`${i}::uuid`))})` : Prisma.empty;
     const where = Prisma.sql`
       s.tenant_id = ${this.tenantId}::uuid AND r.status = 'ACCEPTED'
       AND r.received_at < now() - make_interval(secs => ${olderThan}::double precision)
+      AND r.received_at >= now() - make_interval(secs => ${maxAge}::double precision)
       AND NOT EXISTS (SELECT 1 FROM hub.events e WHERE e.raw_event_id = r.id)
       AND NOT EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text)
       ${idFilter}`;
@@ -607,6 +650,16 @@ export const DELIVERY_LEASE_SECONDS = 60;
 /** Raw event phải "nguội" bao lâu mới tính là mồ côi — tránh đụng cái đang nằm trong outbox/relay. */
 export const ORPHAN_MIN_AGE_SECONDS = 120;
 
+/**
+ * S7 (DINH-CHINH §3): MỘT biến retention — `EVENT_RETENTION_DAYS`, `CLEANUP_RETENTION_DAYS` là alias (env cũ).
+ * Mặc định 7. Kiểm "an toàn so với TTL retry" nằm ở CleanupJob (hub-worker).
+ */
+export function eventRetentionDaysFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const v = env.EVENT_RETENTION_DAYS || env.CLEANUP_RETENTION_DAYS;
+  const n = v ? Number(v) : 7;
+  return Number.isFinite(n) && n > 0 ? n : 7;
+}
+
 export interface OrphanRawEvent {
   id: string;
   sourceId: string;
@@ -666,4 +719,37 @@ export interface DeadDeliveryRef {
 /** `%` `_` `\` trong chuỗi người dùng gõ là ký tự thường, không phải wildcard của ILIKE. */
 function escapeLike(s: string) {
   return s.replace(/[\\%_]/g, (c) => '\\' + c);
+}
+
+export interface PollEventsOptions {
+  after: bigint;
+  limit: number;
+  /** Mẫu như subscription (`payment.*`, `*`, chính xác). Rỗng/không truyền = không lọc. */
+  types?: string[];
+  readTypes?: string[];
+  failedOnly?: boolean;
+  endpointId?: string;
+  settleSeconds?: number;
+}
+
+export interface PolledEvent {
+  id: string;
+  seq: bigint;
+  type: string;
+  source: string;
+  sourceId: string | null;
+  subject: string | null;
+  data: unknown;
+  normalized: boolean;
+  correlationId: string;
+  occurredAt: Date;
+  receivedAt: Date;
+}
+
+/** Mẫu kiểu -> điều kiện SQL: `*` = mọi kiểu, `a.*` = starts_with 'a.' (nhiều cấp), còn lại = bằng. */
+function typeFilterSql(patterns?: string[]): Prisma.Sql {
+  if (!patterns || patterns.length === 0 || patterns.includes('*')) return Prisma.sql`TRUE`;
+  const exact = patterns.filter((p) => !p.endsWith('.*'));
+  const prefixes = patterns.filter((p) => p.endsWith('.*')).map((p) => p.slice(0, -1));
+  return Prisma.sql`(e.type = ANY(${exact}::text[]) OR EXISTS (SELECT 1 FROM unnest(${prefixes}::text[]) p WHERE starts_with(e.type, p)))`;
 }

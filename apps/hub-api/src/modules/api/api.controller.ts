@@ -399,17 +399,26 @@ export class ApiController {
   }
 
   // --- Events (hỗ trợ Polling ADR-016 §8.1) ---
+  /**
+   * S7 (ADR-077, X11): `before=<eventId>` = trang CŨ HƠN (giảm dần theo thời điểm nhận — hành vi dashboard cũ);
+   * `after=<seq>` = MỚI HƠN, tăng dần theo seq (cùng nghĩa với polling `/v1/p`). `after` không phải số (client
+   * cũ gửi id) được hiểu như `before` để không vỡ.
+   */
   @Get('events')
-  async listEvents(@CurrentTenant() tenantId: string, @Query('after') after?: string, @Query('limit') limit = '50') {
+  async listEvents(
+    @CurrentTenant() tenantId: string,
+    @Query('after') after?: string,
+    @Query('limit') limit = '50',
+    @Query('before') before?: string,
+  ) {
     const repo = this.prisma.forTenant(tenantId);
     const take = Math.min(parseInt(limit, 10) || 50, 100);
-    const events = await repo.findEvents({}, take, after);
-
-    const nextCursor = events.length === take ? events[events.length - 1].id : null;
-    return {
-      events,
-      nextCursor,
-    };
+    if (after && /^\d{1,18}$/.test(after)) {
+      const events = await repo.findEventsAfterSeq(BigInt(after), take);
+      return { events, nextCursor: events.length ? events[events.length - 1].seq.toString() : after };
+    }
+    const events = await repo.findEvents({}, take, before ?? after);
+    return { events, nextCursor: events.length === take ? events[events.length - 1].id : null };
   }
 
   @Get('events/:id')

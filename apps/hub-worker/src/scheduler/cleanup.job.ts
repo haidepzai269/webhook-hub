@@ -15,8 +15,10 @@ import { NORMALIZE_MAX_RETRIES } from '../consumers/normalize-errors';
  * Xoá theo lô 5000 dòng tới khi hết:
  *  - hub.outbox đã publish quá N ngày;
  *  - hub.processed_messages quá N ngày;
- *  - hub.raw_events REJECTED quá N ngày (request ký sai — rác, không phải bằng chứng).
- * KHÔNG BAO GIỜ đụng raw_events ACCEPTED: đó là bằng chứng gốc để verify và phát lại.
+ *  - hub.raw_events REJECTED quá N ngày (request ký sai — rác, không phải bằng chứng);
+ *  - hub.events quá N ngày (S7, ADR-077) — cascade deliveries + delivery_attempts, qua escape hatch có tên.
+ * KHÔNG BAO GIỜ đụng raw_events ACCEPTED: đó là bằng chứng gốc để verify và phát lại (renormalize khi event đã bị xoá).
+ * Hệ quả: polling (A) chỉ lấy lại được trong N ngày.
  */
 export const CLEANUP_LOCK_KEY = 'cleanup:lock';
 export const CLEANUP_LOCK_TTL_SECONDS = 300;
@@ -36,7 +38,7 @@ export const TOTAL_RETRY_WINDOW_MS =
 export function assertRetentionSafe(retentionDays: number): void {
   if (!Number.isFinite(retentionDays) || retentionDays * DAY_MS <= TOTAL_RETRY_WINDOW_MS) {
     throw new Error(
-      `CLEANUP_RETENTION_DAYS=${retentionDays} không an toàn: phải lớn hơn tổng thời gian retry ` +
+      `EVENT_RETENTION_DAYS=${retentionDays} không an toàn: phải lớn hơn tổng thời gian retry ` +
         `(${Math.ceil(TOTAL_RETRY_WINDOW_MS / 60_000)} phút), nếu không chốt idempotency bị xoá trước khi retry xong.`,
     );
   }
@@ -45,7 +47,8 @@ export function assertRetentionSafe(retentionDays: number): void {
 // Assert lúc load: hằng số mặc định phải luôn an toàn, kể cả khi ai đó thêm tầng retry dài hơn.
 assertRetentionSafe(DEFAULT_RETENTION_DAYS);
 
-export function resolveRetentionDays(env = process.env.CLEANUP_RETENTION_DAYS): number {
+/** S7: `EVENT_RETENTION_DAYS` là tên chính; `CLEANUP_RETENTION_DAYS` vẫn đọc làm alias (đừng làm vỡ `.env` cũ). */
+export function resolveRetentionDays(env = process.env.EVENT_RETENTION_DAYS || process.env.CLEANUP_RETENTION_DAYS): number {
   const days = env === undefined || env === '' ? DEFAULT_RETENTION_DAYS : Number(env);
   assertRetentionSafe(days);
   return days;
@@ -56,6 +59,7 @@ export interface CleanupResult {
   outbox: number;
   processedMessages: number;
   rejectedRawEvents: number;
+  events: number;
 }
 
 /** Chỉ xoá lock nếu vẫn là của mình (lượt chạy quá 300s thì lock có thể đã thuộc instance khác). */
@@ -115,11 +119,11 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       // Không có Redis thì không có lock -> bỏ lượt (dọn dẹp chậm một giờ không làm hệ thống sai).
       logger.warn({ err: err.message }, 'Cleanup: không giành được lock (Redis lỗi) -> bỏ qua lượt');
-      return { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0 };
+      return { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0 };
     }
     if (acquired !== 'OK') {
       logger.debug('Cleanup: instance khác đang giữ lock -> bỏ qua lượt');
-      return { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0 };
+      return { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0 };
     }
 
     try {
@@ -141,6 +145,7 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
             SELECT id FROM hub.raw_events
             WHERE status = 'REJECTED' AND received_at < now() - make_interval(secs => ${secs}::double precision)
             LIMIT ${CLEANUP_BATCH})`),
+        events: await this.loopBatches(() => this.prisma.deleteExpiredEventsBatch(secs, CLEANUP_BATCH)),
       };
       logger.info({ ...result, retentionDays: this.retentionDays }, 'Cleanup: hoàn tất một lượt');
       return result;
@@ -149,10 +154,14 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async deleteInBatches(sql: Prisma.Sql): Promise<number> {
+  private deleteInBatches(sql: Prisma.Sql): Promise<number> {
+    return this.loopBatches(() => this.prisma.$executeRaw(sql));
+  }
+
+  private async loopBatches(once: () => Promise<number>): Promise<number> {
     let total = 0;
     for (;;) {
-      const n = await this.prisma.$executeRaw(sql);
+      const n = await once();
       total += n;
       if (n < CLEANUP_BATCH) return total;
     }

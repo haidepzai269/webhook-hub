@@ -197,6 +197,8 @@ model Event {
   origin         EventOrigin @default(webhook)
   occurredAt     DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
   receivedAt     DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)
+  /// S7 (ADR-077): lúc INSERT (clock_timestamp) — cửa sổ lắng của polling lọc theo cột này, không theo received_at.
+  createdAt      DateTime    @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(6)
 
   rawEvent   RawEvent?    @relation(fields: [rawEventId], references: [id], onDelete: SetNull)
   deliveries Delivery[]

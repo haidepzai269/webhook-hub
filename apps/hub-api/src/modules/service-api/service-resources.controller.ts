@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmDecrypt, aesGcmEncrypt, generateWhsecSecret } from '@hub/crypto';
 import { isValidEventPattern } from '@hub/common';
@@ -7,6 +8,7 @@ import { RequireScope } from './require-scope.decorator';
 import { RequestWithPrincipal } from './principal';
 import { unprocessable } from './service-api.controller';
 import { EndpointVerifier, VerificationOutcome } from './endpoint-verifier';
+import { longPoll } from './polling';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOT_FOUND = { error: 'not_found' };
@@ -213,6 +215,42 @@ export class ServiceResourcesController {
   async listSubscriptions(@Req() req: RequestWithPrincipal) {
     const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions();
     return rows.map(publicSubscription);
+  }
+
+  /**
+   * S7 (SPEC §4.5, ADR-077): polling (A) + long-poll. `?after=<seq>&limit=1..100&types=a.*,b&status=failed
+   * &endpointId=&wait=0..20`. Kết quả `{events, nextCursor}` — seq là CHUỖI; rỗng thì nextCursor = after.
+   * `types` giao với `readTypes` của key. 0 lệnh Redis.
+   */
+  @Get('events')
+  @RequireScope('read:events')
+  async pollEvents(@Req() req: RequestWithPrincipal, @Res({ passthrough: true }) res: Response, @Query() q: Record<string, string>) {
+    const after = q.after ?? '0';
+    if (!/^\d{1,19}$/.test(after) || BigInt(after) > 9223372036854775807n) unprocessable({ error: 'validation_failed', field: 'after', message: 'after là seq (chuỗi số ≥ 0)' });
+    const limit = q.limit === undefined ? 50 : Number(q.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) unprocessable({ error: 'validation_failed', field: 'limit', message: 'limit là số nguyên 1–100' });
+    const wait = q.wait === undefined ? 0 : Number(q.wait);
+    if (!Number.isInteger(wait) || wait < 0 || wait > 20) unprocessable({ error: 'validation_failed', field: 'wait', message: 'wait là số giây nguyên 0–20' });
+    const types = q.types ? q.types.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+    if (types?.some((t) => !isValidEventPattern(t))) unprocessable({ error: 'validation_failed', field: 'types', message: 'types là danh sách mẫu cách nhau dấu phẩy (vd order.*,payment.received)' });
+    if (q.status !== undefined && q.status !== 'failed') unprocessable({ error: 'validation_failed', field: 'status', message: 'status chỉ nhận "failed"' });
+    const repo = this.prisma.forTenant(req.tenantId!);
+    if (q.endpointId !== undefined && !(UUID_RE.test(q.endpointId) && (await repo.findDestinationById(q.endpointId)))) {
+      throw new NotFoundException(NOT_FOUND);
+    }
+    const readTypes = req.apiKey!.readTypes ?? [];
+    let closed = false;
+    res.on?.('close', () => (closed = true));
+    const opts = {
+      after: BigInt(after),
+      limit,
+      types,
+      readTypes,
+      ...(q.status === 'failed' ? { failedOnly: true, endpointId: q.endpointId } : {}),
+    };
+    const rows = await longPoll(() => repo.pollEvents(opts), wait, () => closed);
+    const events = rows.map((r) => ({ ...r, seq: r.seq.toString() }));
+    return { events, nextCursor: events.length ? events[events.length - 1].seq : after };
   }
 
   private withAudit<T>(tenantId: string, fn: (repo: TenantScopedRepository) => Promise<T>): Promise<T> {

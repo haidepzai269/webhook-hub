@@ -20,6 +20,7 @@ describe('CleanupJob (S1-4)', () => {
 
   afterEach(() => {
     delete process.env.CLEANUP_RETENTION_DAYS;
+    delete process.env.EVENT_RETENTION_DAYS;
   });
 
   it('không giành được khoá -> không chạy câu DELETE nào', async () => {
@@ -43,12 +44,13 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
       $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0),
+      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
     };
     const redis = buildRedis('OK');
     const result = await new CleanupJob(prisma, redis).runOnce();
 
     expect(redis.set).toHaveBeenCalledWith(CLEANUP_LOCK_KEY, expect.any(String), 'EX', 300, 'NX');
-    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0 });
+    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0 });
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
     expect(redis.eval).toHaveBeenCalledWith(expect.any(String), 1, CLEANUP_LOCK_KEY, expect.any(String));
   });
@@ -65,4 +67,28 @@ describe('CleanupJob (S1-4)', () => {
     process.env.CLEANUP_RETENTION_DAYS = '3';
     expect(resolveRetentionDays()).toBe(3);
   });
+
+  it('[MS:T13] (phần a) S7 retention: xoá events quá N ngày theo lô qua escape hatch có tên (cascade delivery/attempt), KHÔNG đụng raw ACCEPTED', async () => {
+    process.env.EVENT_RETENTION_DAYS = '9';
+    const prisma: any = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatch: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(7),
+    };
+    const result = await new CleanupJob(prisma, buildRedis('OK')).runOnce();
+    expect(result.events).toBe(CLEANUP_BATCH + 7);
+    expect(prisma.deleteExpiredEventsBatch).toHaveBeenCalledWith(9 * 86_400, CLEANUP_BATCH);
+    const sqls = prisma.$executeRaw.mock.calls.map((c: any) => c[0].strings.join('?'));
+    expect(sqls.some((q: string) => /raw_events/.test(q) && /ACCEPTED/.test(q))).toBe(false);
+  });
+
+  it('S7: EVENT_RETENTION_DAYS là tên chính, CLEANUP_RETENTION_DAYS là alias; giá trị không an toàn vẫn bị từ chối', () => {
+    expect(resolveRetentionDays()).toBe(DEFAULT_RETENTION_DAYS);
+    process.env.CLEANUP_RETENTION_DAYS = '10';
+    expect(resolveRetentionDays()).toBe(10);
+    process.env.EVENT_RETENTION_DAYS = '3';
+    expect(resolveRetentionDays()).toBe(3);
+    process.env.EVENT_RETENTION_DAYS = '0';
+    expect(() => resolveRetentionDays()).toThrow(/không an toàn/);
+  });
 });
+
