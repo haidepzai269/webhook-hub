@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { logger } from '@hub/common';
+import { logger, testOnlyConfigProblems } from '@hub/common';
 import { assertDatabaseLib } from '@hub/database';
 
 function assertMasterKeyConfigured(): void {
@@ -31,7 +31,17 @@ function assertJwtSecretConfigured(): void {
   }
 }
 
+// VF1 (SPEC-verification §4.2): secret giả `VERIFY_ONLY_…` / MAIL_DRIVER=capture ở production → thoát.
+function assertNoTestOnlyConfig(): void {
+  const problems = testOnlyConfigProblems(process.env);
+  if (problems.length > 0) {
+    logger.error({ problems }, 'FATAL: cấu hình chỉ dành cho kiểm chứng đang chạy ở production — không khởi động.');
+    process.exit(1);
+  }
+}
+
 async function bootstrap() {
+  assertNoTestOnlyConfig();
   // S1-6: bản build lệch (dist cũ của @hub/database) phải chết ngay lúc khởi động.
   assertDatabaseLib();
   // Chặn khởi động sớm nếu MASTER_KEY chưa được cấu hình đúng — tránh mã hoá

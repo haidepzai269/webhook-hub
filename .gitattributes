@@ -1,2 +1,5 @@
 # Script shell chạy trong container Linux: luôn LF, kể cả khi checkout trên Windows (core.autocrlf=true)
 *.sh text eol=lf
+# VF1: env-file của compose và file mount thẳng vào container Linux — luôn LF (§7.2)
+.env.verify text eol=lf
+tools/verify-sink/*.js text eol=lf

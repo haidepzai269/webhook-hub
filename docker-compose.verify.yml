@@ -1,0 +1,88 @@
+# =====================================================================================
+# VF1 (SPEC-verification §4.1, ADR-067): stack kiểm chứng `hubv`, CHỈ chứa phần GHI ĐÈ.
+#
+#   npm run verify:up     # docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify up -d --build --wait
+#   npm run verify:down   # ... down -v  (xoá volume hubv_*, KHÔNG đụng volume của stack dev `webhook-hub`)
+#
+# Luật:
+# - Cổng = cổng dev + 10000 để chạy song song với stack dev (postgres 15433, redis 16379,
+#   rabbit 15673 (AMQP — 15672 trùng UI RabbitMQ của dev, lệch spec) / 25672 (UI), hub-api 14000, shop 14001).
+# - `container_name: !reset null` — compose tự đặt tên `hubv-<service>-1`, không trùng `webhook-hub-*`.
+#   Script verify KHÔNG BAO GIỜ gọi docker bằng tên container cứng, chỉ `docker compose -p hubv ...`.
+# - `ports: !override` — mặc định compose GỘP danh sách ports của hai file (sẽ chiếm luôn 5433/4000 của dev).
+# - Volume tên ngắn (`pgdata`...) được compose gắn tiền tố project → `hubv_pgdata`, mạng `hubv_default`.
+# - Prometheus/Grafana chỉ chạy khi `VERIFY_WITH_METRICS=1` (profile `metrics`) để đỡ RAM.
+# - web chỉ chạy khi `VERIFY_WITH_WEB=1` (profile `web`): bundle web nhúng HUB_API_URL lúc build
+#   (mặc định localhost:4000 = API của stack DEV), nên chưa dùng được cho e2e của hubv. VF4 xử lý.
+# - Mọi secret đến từ `.env.verify` (giá trị giả `VERIFY_ONLY_…`). TELEGRAM_BOT_TOKEN/DISCORD_WEBHOOK_URL
+#   để TRỐNG → seed trỏ đích Telegram/Discord vào /mock/* của chính hub-api (ADR-054). `verify/cli/stack.ts`
+#   từ chối chạy nếu hai biến này có giá trị.
+# Cần Docker Compose ≥ 2.24 (tag `!reset` / `!override`).
+# =====================================================================================
+services:
+  postgres:
+    container_name: !reset null
+    ports: !override
+      - "15433:5432"
+
+  redis:
+    container_name: !reset null
+    ports: !override
+      - "16379:6379"
+
+  rabbitmq:
+    container_name: !reset null
+    ports: !override
+      - "15673:5672"
+      - "25672:15672"
+
+  rabbitmq-init:
+    container_name: !reset null
+
+  prometheus:
+    container_name: !reset null
+    profiles: ["metrics"]
+    ports: !override
+      - "19090:9090"
+
+  grafana:
+    container_name: !reset null
+    profiles: ["metrics"]
+    ports: !override
+      - "13001:3000"
+
+  hub-api:
+    container_name: !reset null
+    ports: !override
+      - "14000:4000"
+
+  hub-worker:
+    container_name: !reset null
+
+  shop:
+    container_name: !reset null
+    ports: !override
+      - "14001:4001"
+
+  web:
+    container_name: !reset null
+    profiles: ["web"]
+    ports: !override
+      - "13000:3000"
+
+  # Chỉ có ở hubv: "service của dev" ở đầu nhận (DINH-CHINH-AUTH §8 #6). hub-worker gọi http://sink:4100/<path>.
+  # Đọc lại request: GET http://localhost:14100/_requests. Không import code hub (tools/verify-sink/sink.js).
+  sink:
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /sink
+    command: ["node", "server.js", "4100"]
+    volumes:
+      - ./tools/verify-sink:/sink:ro
+    ports:
+      - "14100:4100"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4100/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

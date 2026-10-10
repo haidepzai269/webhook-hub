@@ -18,7 +18,12 @@
     "test:cov": "jest --coverage",
     "prisma:generate": "npm run prisma:generate --workspace=libs/database",
     "prisma:migrate": "npm run prisma:migrate --workspace=libs/database",
-    "prisma:seed": "npm run prisma:seed --workspace=libs/database"
+    "prisma:seed": "npm run prisma:seed --workspace=libs/database",
+    "verify:up": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts up",
+    "verify:down": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts down",
+    "verify:reset": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts reset",
+    "verify:seed": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts seed",
+    "verify:ps": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts ps"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

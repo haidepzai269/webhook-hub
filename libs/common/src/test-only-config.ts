@@ -1,0 +1,22 @@
+/**
+ * VF1 (SPEC-verification §4.2, ADR-067): cấu hình CHỈ dành cho test không bao giờ được chạy ở production.
+ * - Secret giả của `.env.verify` bắt đầu bằng `VERIFY_ONLY_` (file này được commit, ai cũng đọc được).
+ * - `MAIL_DRIVER=capture` ghi thư ra đĩa cho runner e2e đọc (SPEC-auth AU2).
+ * Trả danh sách vấn đề (rỗng = ổn). Không bao giờ in GIÁ TRỊ secret, chỉ tên biến.
+ * Đây là chỗ DUY NHẤT trong `src` được nhắc tới `MAIL_DRIVER … capture` ngoài driver (grep gác cổng §7.3).
+ */
+export const VERIFY_ONLY_PREFIX = 'VERIFY_ONLY_';
+
+export function testOnlyConfigProblems(env: Record<string, string | undefined>): string[] {
+  if ((env.NODE_ENV ?? '').trim() !== 'production') return [];
+  const problems: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === 'string' && value.trim().startsWith(VERIFY_ONLY_PREFIX)) {
+      problems.push(`${key} mang giá trị giả ${VERIFY_ONLY_PREFIX}… của .env.verify`);
+    }
+  }
+  if ((env.MAIL_DRIVER ?? '').trim().toLowerCase() === 'capture') {
+    problems.push('MAIL_DRIVER=capture chỉ dành cho stack kiểm chứng');
+  }
+  return problems;
+}

@@ -9,7 +9,7 @@ import { CleanupJob } from './scheduler/cleanup.job';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 import { InFlightTracker } from './consumers/in-flight';
-import { logger } from '@hub/common';
+import { logger, testOnlyConfigProblems } from '@hub/common';
 import * as amqp from 'amqplib';
 
 function assertMasterKeyConfigured(): void {
@@ -56,6 +56,12 @@ async function bootstrap() {
   // S1-6: bản build lệch (dist cũ) phải chết NGAY lúc khởi động, không đợi message đầu tiên vào DLQ.
   assertDatabaseLib();
   assertMasterKeyConfigured();
+  // VF1 (SPEC-verification §4.2): secret giả `VERIFY_ONLY_…` / MAIL_DRIVER=capture ở production → thoát.
+  const testOnly = testOnlyConfigProblems(process.env);
+  if (testOnly.length > 0) {
+    logger.error({ problems: testOnly }, 'FATAL: cấu hình chỉ dành cho kiểm chứng đang chạy ở production — không khởi động.');
+    process.exit(1);
+  }
 
   const app = await NestFactory.createApplicationContext(WorkerModule);
   // S3-4: /metrics trên WORKER_METRICS_PORT (mặc định 9101, 0 = tắt) — chỉ mạng nội bộ.

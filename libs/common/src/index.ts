@@ -5,3 +5,4 @@ export * from './template';
 export * from './delivery-message';
 export * from './canonical';
 export * from './event-pattern';
+export * from './test-only-config';

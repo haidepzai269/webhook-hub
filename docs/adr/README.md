@@ -743,3 +743,24 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** `docker compose up` trên volume sạch không seed (thiếu `RUN_SEED`), người kiểm phải chạy tay `docker-entrypoint.sh seed`. Bật seed tự động lại kéo theo subscription Telegram `payment.*` bật sẵn — `.env` local có token thật nên mọi stack mới sẽ gửi Telegram thật ngay sự kiện thanh toán đầu tiên.
 **Chọn:** Compose đặt `RUN_SEED=${RUN_SEED:-true}` cho hub-api; seed vốn idempotent (đã có source → bỏ qua, không tạo thêm/ghi đè/xoá). `seedTelegramActive(env)`: `SEED_TELEGRAM_ACTIVE` đặt rõ thì theo nó; không đặt thì bật chỉ khi có đủ `TELEGRAM_BOT_TOKEN` (không phải mock) và `TELEGRAM_CHAT_ID`. Compose đặt `SEED_TELEGRAM_ACTIVE=${SEED_TELEGRAM_ACTIVE:-false}` → local mặc định TẮT dù `.env` có token. Deployed (Render, không dùng compose, không đặt `RUN_SEED`) giữ nguyên: không tự seed.
 **Đánh đổi:** Muốn demo Telegram thật trên local phải bật tay (PATCH `isActive=true` hoặc `SEED_TELEGRAM_ACTIVE=true` trước khi seed). Seed chỉ xét bảng `sources` — DB có source nhưng thiếu đích/subscription sẽ không được bù (dùng `--sync-destinations` hoặc dashboard).
+
+## ADR-067 — Quy trình kiểm chứng: 5 tầng, stack `hubv` tách biệt, probe phá có chủ đích, CI bắt buộc (2026-10-10)
+
+**Vấn đề:** Test rải ở 5 spec, không có lệnh chung. `RUN_DB_TESTS` quên đặt thì 30 test skip mà jest vẫn xanh. Test DB chạy bằng superuser nên test RLS sau AU6 sẽ pass vô nghĩa. Review bị cấm restart docker (stack dùng chung) nên các kịch bản BB-3 chỉ "✅ một phần". Bốn kịch bản demo giành thứ tự. Chưa có CI. Admin: "chỉ mô phỏng sau khi dev xong thì chưa chắc chắn, viết cả luồng cho dev agent test", và chọn có CI (theo Murat).
+**Chọn:** `_bmad-output/planning-artifacts/verification/SPEC-verification.md`, story VF1–VF8, khoảng 26 giờ:
+- `verify` L0 unit → L1 db → L2 e2e → L3 chaos → L4 perf (chỉ local); skip > 0 ở L1 là đỏ; bánh cóc số test.
+- Stack compose `-p hubv` tách khỏi stack dev, được phép kill.
+- Test dùng hai role: owner chỉ để dựng fixture, `hub_app` cho code đang được test.
+- Mã test `[AU:UA12]` cùng `verify:map` sinh `docs/TEST-MAP.md`.
+- Bộ giả lập `tools/hub-sim` ký độc lập, không import code hub; fixture vàng ghi một lần từ sandbox, phát lại bytes nguyên bản (ký lại khi provider có timestamp).
+- Vòng đời story RED → GREEN → GATED → PROBED → REVIEWED (phiên khác); probe phá có chủ đích trong worktree tạm.
+- GitHub Actions: `unit` + `db` mọi push, `e2e` khi PR/nightly, `chaos` nightly.
+- Một kịch bản demo ba hồi (đăng ký → gãy rồi tự lành → thật và cô lập), thay thứ tự ở ARCHITECTURE §12.
+
+**Đánh đổi:** Thêm khoảng 26 giờ; VF1, VF2, VF7 (9,5 giờ) không được cắt. Admin chốt repo **public**: CI không giới hạn phút, e2e chạy mọi push, nhưng phải có gitleaks trên toàn lịch sử và xoay secret nếu từng lộ. Admin tự tay chuyển khoản PayOS khi demo. Driver `MAIL_DRIVER=capture` và `fake-github` là mã chỉ dành cho test, có assert khởi động chặn ở production. Đã bác: để hub tự ký để mô phỏng ("hub tự đồng ý với chính hub"); tự động chạy lại test chập chờn; đo p95 trên CI.
+
+## ADR-068 — Stack `hubv`: ghi đè bằng `!reset`/`!override`, AMQP 15673, sink nhận thử riêng, chờ healthy không dùng `--wait` trần (VF1, 2026-10-10)
+
+**Vấn đề:** Compose GỘP `ports` của hai file (hubv sẽ chiếm luôn 5433/4000 của dev) và không bỏ được `container_name` bằng ghi đè thường. Spec §4.1 đặt AMQP hubv ở 15672 — trùng cổng UI RabbitMQ của stack dev (đã thấy `port is already allocated`). `up --wait` coi one-shot `rabbitmq-init` "exited (0)" là lỗi. Web nhúng `HUB_API_URL` lúc build (mặc định API dev). SPEC đa service §7.0 bảo tự dựng echo.js ngoài compose.
+**Chọn:** `docker-compose.verify.yml` dùng `container_name: !reset null` và `ports: !override` (Compose ≥ 2.24). Cổng hubv = dev + 10000, riêng AMQP **15673**, sink 14100. `verify:up` = `up -d --build` → `up --wait` chỉ các service chạy lâu → kiểm `rabbitmq-init` exit 0 → chờ `/health` → seed. Prometheus/Grafana chỉ khi `VERIFY_WITH_METRICS=1`; web chỉ khi `VERIFY_WITH_WEB=1` (VF4 xử lý URL). Service `sink` (`tools/verify-sink`, không import code hub) trả challenge, ghi mọi request, `GET/DELETE /_requests`, `?mode=fail|slow` (DINH-CHINH-AUTH §8 #6). `.env.verify` chỉ có `VERIFY_ONLY_…`, đích Telegram/Discord trống → `/mock/*`; script từ chối chạy nếu khác, và xoá biến shell trùng tên trước khi gọi compose. hub-api/hub-worker thoát nếu `NODE_ENV=production` gặp `VERIFY_ONLY_…` hoặc `MAIL_DRIVER=capture`.
+**Đánh đổi:** Cổng AMQP lệch quy tắc +10000 (ghi lại để spec sửa). Seed hubv vẫn là seed hiện có (1 tenant, `src_*_main`), chưa phải thế giới §4.4: chờ S12/AU1, gộp chung, không tạo `cafe`/`bookstore` theo khuôn riêng. hubv build image riêng (`hubv-*`), dùng chung cache nên tránh hai phiên `--build` cùng lúc.
