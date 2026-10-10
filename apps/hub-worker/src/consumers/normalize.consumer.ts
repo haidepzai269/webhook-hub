@@ -10,6 +10,7 @@ import {
   EventReceivedNotice,
   isReservedType,
   validateCanonical,
+  fastFailRedisOptions,
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import * as amqp from 'amqplib';
@@ -64,7 +65,7 @@ export class NormalizeConsumer {
 
   constructor(private readonly prisma: PrismaService) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.redisPub = new Redis(redisUrl, { lazyConnect: true });
+    this.redisPub = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3
     this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (normalize) lỗi'));
     this.redisPub.connect().catch(() => {});
     this.faultsLeft =

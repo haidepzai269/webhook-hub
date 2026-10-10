@@ -2,7 +2,7 @@ import { circuitTransitions } from '../metrics';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
-import { CircuitState, logger } from '@hub/common';
+import { CircuitState, fastFailRedisOptions, logger } from '@hub/common';
 import { PrismaService } from '@hub/database';
 
 /** Token DI tuỳ chọn để test tiêm Redis giả; production tự tạo client riêng. */
@@ -99,7 +99,7 @@ export class CircuitBreakerService {
       this.redis = redisClient;
     } else {
       const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-      this.redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
+      this.redis = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3
       // Không để ioredis văng 'Unhandled error event' khi Redis chết (S1-4); circuit fail-open như cũ.
       this.redis.on('error', (err) => logger.warn({ err: err.message }, 'Redis (circuit breaker) lỗi'));
       this.redis.connect().catch(() => {});

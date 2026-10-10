@@ -16,6 +16,7 @@ import {
   buildDeliveryMessage,
   parseDeliveryMessage,
   renderTemplate,
+  fastFailRedisOptions,
 } from '@hub/common';
 import { aesGcmDecrypt } from '@hub/crypto';
 import * as amqp from 'amqplib';
@@ -94,7 +95,7 @@ export class DeliveryConsumer {
     private readonly circuitBreaker: CircuitBreakerService,
   ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.redisPub = new Redis(redisUrl, { lazyConnect: true });
+    this.redisPub = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3: không xếp hàng publish vô hạn khi Redis chết
     // Không để ioredis văng 'Unhandled error event' khi Redis chết (BB-2: Redis được phép sai).
     this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (delivery) lỗi'));
     this.redisPub.connect().catch(() => {});

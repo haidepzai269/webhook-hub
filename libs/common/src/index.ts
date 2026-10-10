@@ -8,3 +8,4 @@ export * from './event-pattern';
 export * from './test-only-config';
 export * from './bigint-json';
 export * from './api-key';
+export * from './redis-options';

@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
-import { logger } from '@hub/common';
+import { fastFailRedisOptions, logger } from '@hub/common';
 
 /**
  * INCR + EXPIRE (chỉ ở lần đầu của cửa sổ) trong MỘT lệnh EVAL (S3-5): Upstash tính EVAL là 1 lệnh;
@@ -17,12 +17,8 @@ export class RedisService implements OnModuleDestroy {
 
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.client = new Redis(redisUrl, {
-      maxRetriesPerRequest: 1,
-      retryStrategy: (times) => Math.min(times * 100, 3000),
-      enableReadyCheck: true,
-      lazyConnect: true,
-    });
+    // MS-P2-3 (ADR-090): Redis chết -> mỗi lệnh lỗi ngay / sau commandTimeout, đường ingest fail-open (BB-2).
+    this.client = new Redis(redisUrl, fastFailRedisOptions());
 
     this.client.on('connect', () => {
       this.isConnected = true;

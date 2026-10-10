@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { NORMALIZE_RETRY_TTL_MS, RETRY_TIERS } from '@hub/messaging';
-import { logger } from '@hub/common';
+import { fastFailRedisOptions, logger } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 import { hostname } from 'os';
@@ -84,7 +84,7 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
     if (redisClient) {
       this.redis = redisClient;
     } else {
-      this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });
+      this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', fastFailRedisOptions()); // MS-P2-3
       this.redis.on('error', (err) => logger.warn({ err: err.message }, 'Redis (cleanup) lỗi'));
       this.redis.connect().catch(() => {});
     }
