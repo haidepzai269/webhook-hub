@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { TenantScopedRepository } from '../src/tenant-scoped.repository';
+import { describeDb, newTestPrisma } from './support/test-db';
 
 const TENANT_A = '00000000-0000-4000-8000-00000000000a';
 const TENANT_B = '00000000-0000-4000-8000-00000000000b';
@@ -64,10 +65,9 @@ describe('TenantScopedRepository.getTimeseries (unit)', () => {
  *   RUN_DB_TESTS=1 DATABASE_URL=postgresql://hub_user:hub_password@localhost:5433/webhook_hub?schema=hub npx jest timeseries
  * Dùng 2 tenant ngẫu nhiên riêng để không đụng dữ liệu demo, xoá sạch sau khi chạy.
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 describeDb('TenantScopedRepository.getTimeseries (Postgres)', () => {
-  const prisma = new PrismaClient();
+  const prisma = newTestPrisma();
   const tenantA = randomUUID();
   const tenantB = randomUUID();
   const runId = randomUUID().slice(0, 8);

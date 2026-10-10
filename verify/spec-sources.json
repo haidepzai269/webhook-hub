@@ -1,0 +1,103 @@
+{
+  "$comment": "VF2 (SPEC-verification §3.2): nguồn mã test. pattern = regex theo dòng, nhóm 1 = mã. done.groups: story -> mã; mã không thuộc nhóm nào chỉ bắt buộc có test khi MỌI story trong checklist của spec đã [x]. doneOverrides: mã đã làm ở story của spec khác. acceptedOrphans: mã đã xong nhưng chưa có test tự động — PHẢI có lý do; map vẫn liệt kê, không đỏ.",
+  "sources": [
+    {
+      "ns": "AF",
+      "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/REVIEW-CHECKLIST.md",
+      "pattern": "^\\|\\s*(\\d+)\\s*\\|",
+      "codePrefix": "#",
+      "storyOnLine": "^\\|\\s*\\d+\\s*\\|[^|]*\\|\\s*(S\\d-\\d+)\\s*\\|",
+      "notDoneIfLineMatches": "⏭",
+      "done": { "all": true },
+      "note": "SPEC-1..3 đã xong + review (b7f22aa). Dòng ⏭ = hoãn sang đa service / cần tài khoản Admin."
+    },
+    {
+      "ns": "AF",
+      "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/SPEC-1-khong-mat-khong-lo.md",
+      "pattern": "^## (S\\d-\\d+) ·",
+      "requireTest": false,
+      "done": { "all": true }
+    },
+    {
+      "ns": "AF",
+      "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/SPEC-2-nhin-thay-duoc.md",
+      "pattern": "^## (S\\d-\\d+) ·",
+      "requireTest": false,
+      "done": { "all": true }
+    },
+    {
+      "ns": "AF",
+      "file": "_bmad-output/planning-artifacts/audit-fix-2026-10-10/SPEC-3-dung-chuan.md",
+      "pattern": "^## (S\\d-\\d+) ·",
+      "requireTest": false,
+      "done": { "all": true }
+    },
+    {
+      "ns": "MS",
+      "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-hub-multi-service.md",
+      "pattern": "^\\|\\s*(U\\d+)\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (S\\d+)",
+        "groups": { "S14": "U34-U50" }
+      },
+      "note": "Agent đa service: thêm nhóm story -> mã (vd \"S6\": \"U1-U6\") NGAY ở story đầu tiên để `verify:map --story Sx` biết mã nào bắt buộc."
+    },
+    {
+      "ns": "MS",
+      "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-hub-multi-service.md",
+      "pattern": "^\\*\\*(T\\d+) — ",
+      "done": {
+        "checklist": "\\[x\\] (S\\d+)",
+        "groups": { "S14": "T15" }
+      }
+    },
+    {
+      "ns": "DX",
+      "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-dev-experience.md",
+      "pattern": "^\\|\\s*((?:UX|TX)\\d+)\\s*\\|",
+      "done": { "checklist": "\\[x\\] (DX\\d+b?)" }
+    },
+    {
+      "ns": "AU",
+      "file": "_bmad-output/planning-artifacts/auth/SPEC-auth.md",
+      "pattern": "^\\|\\s*((?:UA|TA)\\d+)\\s*\\|",
+      "done": { "checklist": "\\[x\\] (AU\\d+)" },
+      "note": "Chưa có bảng mã -> story (spec không ghi). AU1 phải thêm done.groups trước khi đánh [x]."
+    },
+    {
+      "ns": "VF",
+      "file": "_bmad-output/planning-artifacts/verification/SPEC-verification.md",
+      "pattern": "^\\|\\s*(VT\\d+)\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (VF\\d+)",
+        "groups": {
+          "VF1": "VT8,VT9,VT13",
+          "VF2": "VT1-VT4",
+          "VF7": "VT7,VT15",
+          "VF3": "VT5,VT6",
+          "VF6": "VT10-VT12",
+          "VF8": "VT14"
+        }
+      }
+    }
+  ],
+  "inline": [
+    { "ns": "BB", "codes": "1-5", "requireTest": false, "note": "Bất biến BB-1..BB-5 (CLAUDE.md, §8.2). verify:bb (VF6) bắt buộc." }
+  ],
+  "doneOverrides": [
+    { "codes": "MS:U34-U45", "reason": "Lõi S14 đã làm dưới tên AF:S3-2 (ADR-059, DINH-CHINH-2026-10-10 §00)" },
+    { "codes": "MS:U50", "reason": "Lõi S14 đã làm dưới tên AF:S3-2 (ADR-059, DINH-CHINH-2026-10-10 §00)" }
+  ],
+  "acceptedOrphans": {
+    "AF:#1": "Kiểm bằng ls libs/*/dist + đổi tên export rồi khởi động container (docker) — chờ VF4/VF5 nhập vào runner L2",
+    "AF:#2": "Kiểm bằng grep docker-entrypoint.sh + thư mục migrations — không phải test jest",
+    "AF:#13": "Kiểm bằng grep seed.ts — không phải test jest",
+    "AF:#20": "docker compose restart rabbitmq — kịch bản chaos, chờ VF5 (L3)",
+    "AF:#27": "Kiểm tài liệu ARCHITECTURE (fixed window, không jitter) — không phải test",
+    "AF:#32": "Badge dashboard đổi đỏ live (GIF) — kiểm tay trên trình duyệt",
+    "AF:#35": "psql -U shop_user … → permission denied (docker) — chờ VF4 nhập vào runner L2",
+    "AF:#39": "bash scripts/e2e-smoke.sh — VF4 thay bằng runner L2 TS có tag",
+    "AF:#41": "PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test",
+    "VF:VT15": "Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local)"
+  }
+}

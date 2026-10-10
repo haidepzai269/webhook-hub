@@ -11,7 +11,7 @@ describe('checkSyncDestinationsEnv', () => {
     MOCK_BASE_URL: 'http://hub-api:4000',
   };
 
-  it('đủ env (dùng mock) -> không thiếu gì', () => {
+  it('[AF:#4] đủ env (dùng mock) -> không thiếu gì', () => {
     expect(checkSyncDestinationsEnv(full)).toEqual([]);
   });
 

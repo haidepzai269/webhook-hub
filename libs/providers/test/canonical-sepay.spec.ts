@@ -7,7 +7,7 @@ describe('SePay -> catalog', () => {
   const a = new SepayAdapter();
   const norm = (over: Record<string, unknown>) => a.normalize(req('sepay', sepayTx(over)), ctx)[0];
 
-  it('transferType in / out / không có -> received / sent / received', () => {
+  it('[MS:U36] transferType in / out / không có -> received / sent / received', () => {
     expect(norm({}).type).toBe('payment.received');
     expect(norm({ transferType: 'out' }).type).toBe('payment.sent');
     const noType: any = sepayTx();
@@ -15,7 +15,7 @@ describe('SePay -> catalog', () => {
     expect(a.normalize(req('sepay', noType), ctx)[0].type).toBe('payment.received');
   });
 
-  it('account.bank = gateway; counterparty = null; amount/memo/reference', () => {
+  it('[AF:#11] account.bank = gateway; counterparty = null; amount/memo/reference', () => {
     const e = norm({});
     expect(e.normalized).toBe(true);
     expect(e.data).toMatchObject({

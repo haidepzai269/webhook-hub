@@ -9,6 +9,7 @@ import {
   LUA_RELEASE_PROBE,
   LUA_STATE_AND_THROTTLE,
 } from '../src/circuit/circuit-breaker.service';
+import { describeDb } from '../../../libs/database/test/support/test-db';
 
 /**
  * Redis giả trong bộ nhớ, đủ cho circuit breaker: MGET, SET (EX/NX), DEL nhiều khoá, INCR, EXPIRE,
@@ -147,7 +148,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(redis.calls).toEqual(['mget']);
   });
 
-  it('5 lần lỗi -> OPEN; ghi DB circuit_state và publish ĐÚNG MỘT lần lên hub:realtime:circuit', async () => {
+  it('[AF:#24] 5 lần lỗi -> OPEN; ghi DB circuit_state và publish ĐÚNG MỘT lần lên hub:realtime:circuit', async () => {
     const redis = fakeRedis();
     const { prisma, db, repo } = fakePrisma();
     const cb = new CircuitBreakerService(prisma, redis);
@@ -171,7 +172,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(redis.eval.mock.calls.filter((c: any[]) => c[0] === LUA_INCR_EXPIRE)).toHaveLength(5);
   });
 
-  it('hết TTL :open -> HALF_OPEN (suy ra, không lưu); hai worker cùng lúc chỉ MỘT giành được probe', async () => {
+  it('[AF:#23] hết TTL :open -> HALF_OPEN (suy ra, không lưu); hai worker cùng lúc chỉ MỘT giành được probe', async () => {
     const redis = fakeRedis();
     const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
     const t = target();
@@ -236,7 +237,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(repo.updateDestinationCircuitState).not.toHaveBeenCalled();
   });
 
-  it('thành công khi CLOSED nhưng còn failures > 0 -> DEL bộ đếm (reset "liên tiếp"), không đổi trạng thái, không publish', async () => {
+  it('[AF:#26] thành công khi CLOSED nhưng còn failures > 0 -> DEL bộ đếm (reset "liên tiếp"), không đổi trạng thái, không publish', async () => {
     const redis = fakeRedis();
     const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
     await cb.recordFailure(target(), await cb.getState(DEST));
@@ -330,7 +331,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
  * Lua THẬT trên Redis thật (docker compose, localhost:6379) — chạy cùng RUN_DB_TESTS=1 (ioredis-mock
  * không có trong repo và eval của nó hạn chế). Khoá dùng id ngẫu nhiên, dọn sau test.
  */
-const describeRedis = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
+const describeRedis = describeDb; // Redis thật: cùng cổng L1 (RUN_DB_TESTS=1)
 describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)', () => {
   const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: 1 });
   const dest = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;

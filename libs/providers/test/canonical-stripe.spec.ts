@@ -6,7 +6,7 @@ import { ctx, req, stripeChargeRefunded, stripeCustomerCreated, stripePiFailed, 
 describe('Stripe -> catalog', () => {
   const a = new StripeAdapter();
 
-  it('U38 payment_intent.succeeded -> payment.received (cent, USD, card, paidAt = created)', () => {
+  it('[MS:U38] U38 payment_intent.succeeded -> payment.received (cent, USD, card, paidAt = created)', () => {
     const body = stripePiSucceeded();
     const [e] = a.normalize(req('stripe', body), ctx);
     expect(e.type).toBe('payment.received');
@@ -37,7 +37,7 @@ describe('Stripe -> catalog', () => {
     expect(validateCanonical(r.type, r.data)).toEqual({ ok: true });
   });
 
-  it('U39 customer.created -> stripe.customer.created, normalized:false, data chỉ có raw', () => {
+  it('[MS:U39] U39 customer.created -> stripe.customer.created, normalized:false, data chỉ có raw', () => {
     const body = stripeCustomerCreated();
     const [e] = a.normalize(req('stripe', body), ctx);
     expect(e.type).toBe('stripe.customer.created');

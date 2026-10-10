@@ -60,7 +60,7 @@ describe('hub-api metrics (S3-4)', () => {
     expect(metricsAuthorized('Bearer tok', 'tok')).toBe(true);
   });
 
-  it('controller trả text Prometheus; 401 khi sai token', async () => {
+  it('[AF:#38] controller trả text Prometheus; 401 khi sai token', async () => {
     const res: any = { status: jest.fn().mockReturnThis(), json: jest.fn(), setHeader: jest.fn(), send: jest.fn() };
     process.env.METRICS_TOKEN = 'tok';
     await new MetricsController().metrics('Bearer sai', res);

@@ -1,18 +1,17 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
 import { TenantScopedRepository } from '@hub/database';
 import { RETRY_TIERS } from '@hub/messaging';
 import { buildSweepSql, LEGACY_RETRY_SWEEP_AFTER_MS } from '../src/scheduler/delivery.sweeper';
+import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
 
 /**
  * S1-2 trên Postgres THẬT (RUN_DB_TESTS=1, DATABASE_URL trỏ localhost:5433):
  *  - lease: hai lần claimForSend liên tiếp cùng tham số -> lần 2 trả 0;
  *  - sweeper: delivery PENDING 11 phút không attempt -> được ghi outbox; có outbox chưa publish -> không.
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 describeDb('Lease + sweeper (Postgres, S1-2)', () => {
-  const prisma = new PrismaClient();
+  const prisma = newTestPrisma();
   const tenant = randomUUID();
   const runId = randomUUID().slice(0, 8);
   let subId = '';
@@ -82,7 +81,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     await prisma.$disconnect();
   });
 
-  it('S1-3: findOrphanRawEvents — raw ACCEPTED > 2 phút chưa có event thì là mồ côi; tenant khác không thấy', async () => {
+  it('[AF:#19] S1-3: findOrphanRawEvents — raw ACCEPTED > 2 phút chưa có event thì là mồ côi; tenant khác không thấy', async () => {
     const src = await prisma.source.create({
       data: { tenantId: tenant, provider: 'sepay', name: `orphan-${runId}`, sourceKey: `src_orphan_${runId}` },
     });
@@ -121,7 +120,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     expect(await new TenantScopedRepository(prisma, tenant).claimForSend(id, 2, 0)).toBe(1);
   });
 
-  it('sweeper: PENDING 11 phút không attempt -> có outbox; có outbox chưa publish -> không ghi thêm; PENDING mới -> không', async () => {
+  it('[AF:#17] sweeper: PENDING 11 phút không attempt -> có outbox; có outbox chưa publish -> không ghi thêm; PENDING mới -> không', async () => {
     const stuck = await mkDelivery(3, 11);
     const hasPending = await mkDelivery(4, 11);
     await prisma.outbox.create({

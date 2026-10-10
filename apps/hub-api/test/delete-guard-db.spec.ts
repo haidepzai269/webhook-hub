@@ -1,17 +1,16 @@
 import { randomUUID } from 'crypto';
 import { ConflictException } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@hub/database';
 import { ApiController } from '../src/modules/api/api.controller';
+import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
 
 /**
  * Review SPEC-2 #1 trên Postgres THẬT (RUN_DB_TESTS=1, ADR-054): xoá subscription/destination còn
  * lịch sử -> 409 và KHÔNG mất dòng nào; FK RESTRICT chặn cả khi xoá thẳng ngoài API.
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 describeDb('DELETE subscription/destination giữ lịch sử gửi (Postgres, ADR-054)', () => {
-  const raw = new PrismaClient();
+  const raw = newTestPrisma();
   const svc = new PrismaService();
   const controller = new ApiController(svc);
   const tenant = randomUUID();

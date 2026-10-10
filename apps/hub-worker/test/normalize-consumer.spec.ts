@@ -109,7 +109,7 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(raw).not.toMatch(/config|secret/i);
   });
 
-  it('S1-2: mỗi delivery có 1 dòng outbox delivery.requested trong CÙNG transaction, KHÔNG gọi channel.publish', async () => {
+  it('[AF:#16] S1-2: mỗi delivery có 1 dòng outbox delivery.requested trong CÙNG transaction, KHÔNG gọi channel.publish', async () => {
     const { prisma, outboxRows } = buildFakePrisma({ subs: 2 });
     const consumer = new NormalizeConsumer(prisma);
     const channel = buildChannel();
@@ -122,7 +122,7 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 
-  it('S1-1: payload outbox chỉ có tham chiếu — không config, signingSecret, event', async () => {
+  it('[AF:#15] S1-1: payload outbox chỉ có tham chiếu — không config, signingSecret, event', async () => {
     const { prisma, outboxRows } = buildFakePrisma({ subs: 1 });
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
 
@@ -131,7 +131,7 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(payload).toMatchObject({ deliveryId: 'del-1', tenantId: TENANT, attemptCount: 0, attemptGeneration: 1 });
   });
 
-  it('S1-5: đọc raw_event qua repo.findRawEventById (scope tenant), không qua prisma.rawEvent', async () => {
+  it('[AF:#22] S1-5: đọc raw_event qua repo.findRawEventById (scope tenant), không qua prisma.rawEvent', async () => {
     const { prisma, findRawEventById } = buildFakePrisma();
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
     expect(prisma.forTenant).toHaveBeenCalledWith(TENANT);
@@ -139,7 +139,7 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(prisma.rawEvent.findUnique).not.toHaveBeenCalled();
   });
 
-  it('S1-3: lỗi tạm -> q.normalize.retry.30s với header tăng dần; vượt 5 lần -> nack vào DLQ', async () => {
+  it('[AF:#18] S1-3: lỗi tạm -> q.normalize.retry.30s với header tăng dần; vượt 5 lần -> nack vào DLQ', async () => {
     const findRawEvent = jest.fn().mockRejectedValue(prismaKnown('P1001'));
     const { prisma } = buildFakePrisma({ findRawEvent });
     const consumer = new NormalizeConsumer(prisma);

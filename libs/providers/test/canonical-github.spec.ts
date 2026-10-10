@@ -7,7 +7,7 @@ describe('GitHub -> catalog', () => {
   const a = new GithubAdapter();
   const norm = (event: string, body: unknown) => a.normalize(req('github', body, { 'x-github-event': event }), ctx)[0];
 
-  it('U40 push refs/heads/main, 25 commit -> branch, tối đa 20 commit, commitCount 25, không email', () => {
+  it('[MS:U40] (phần a) U40 push refs/heads/main, 25 commit -> branch, tối đa 20 commit, commitCount 25, không email', () => {
     const e = norm('push', githubPush(25));
     expect(e.type).toBe('repo.push');
     expect(e.normalized).toBe(true);
@@ -24,14 +24,14 @@ describe('GitHub -> catalog', () => {
     expect(validateCanonical(e.type, e.data)).toEqual({ ok: true });
   });
 
-  it('U40b refs/tags/v1 -> branch null, tag v1', () => {
+  it('[MS:U40] (phần b) U40b refs/tags/v1 -> branch null, tag v1', () => {
     const e = norm('push', githubPush(0, 'refs/tags/v1'));
     expect(e.data.branch).toBeNull();
     expect(e.data.tag).toBe('v1');
     expect(validateCanonical(e.type, e.data)).toEqual({ ok: true });
   });
 
-  it('U41 PR closed + merged -> repo.pull_request.merged; merged:false -> closed', () => {
+  it('[MS:U41] U41 PR closed + merged -> repo.pull_request.merged; merged:false -> closed', () => {
     const m = norm('pull_request', githubPr('closed', true));
     expect(m.type).toBe('repo.pull_request.merged');
     expect(m.data).toMatchObject({
@@ -54,7 +54,7 @@ describe('GitHub -> catalog', () => {
     expect(validateCanonical(e.type, e.data)).toEqual({ ok: true });
   });
 
-  it('U42 ping, release -> github.ping, github.release.published, normalized:false', () => {
+  it('[MS:U42] U42 ping, release -> github.ping, github.release.published, normalized:false', () => {
     const p = norm('ping', githubPing());
     expect(p.type).toBe('github.ping');
     expect(p.normalized).toBe(false);

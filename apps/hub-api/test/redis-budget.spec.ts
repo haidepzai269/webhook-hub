@@ -210,7 +210,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(calls.length).toBe(8);
   });
 
-  it('tổng: 1 đích = 6, 2 đích = 8 (≤ 4 + 2×N)', async () => {
+  it('[AF:#40] tổng: 1 đích = 6, 2 đích = 8 (≤ 4 + 2×N)', async () => {
     for (const [n, expected] of [[1, 6], [2, 8]] as const) {
       calls.length = 0;
       store.clear();

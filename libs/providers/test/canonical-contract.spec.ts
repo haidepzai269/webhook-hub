@@ -6,7 +6,7 @@ import * as f from './fixtures';
  * U50 — hợp đồng catalog: chạy MỌI fixture của 4 adapter, tập khoá `data` phải khớp TUYỆT ĐỐI
  * với danh sách khoá khai báo của kiểu chuẩn. Thêm/bớt khoá mà không sửa catalog -> đỏ (luật 7).
  */
-describe('U50 hợp đồng catalog', () => {
+describe('[MS:U50] U50 hợp đồng catalog', () => {
   const gh = (event: string, body: unknown) =>
     new GithubAdapter().normalize(f.req('github', body, { 'x-github-event': event }), f.ctx);
   const all: [string, NormalizedEvent[]][] = [

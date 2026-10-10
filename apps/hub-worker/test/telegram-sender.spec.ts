@@ -8,7 +8,7 @@ import { TelegramSender } from '../src/senders/telegram.sender';
 
 /** S1-7: Telegram gửi văn bản THUẦN — '_' hay '*' lẻ trong dữ liệu không còn làm Telegram trả 400. */
 describe('TelegramSender (S1-7)', () => {
-  it('payload không có parse_mode, giữ nguyên ký tự _a_b*c', async () => {
+  it('[AF:#14] payload không có parse_mode, giữ nguyên ký tự _a_b*c', async () => {
     (axios.post as jest.Mock).mockResolvedValue({ status: 200, data: { ok: true } });
     const res = await new TelegramSender().send(
       { botToken: '123:mock-token', chatId: '-1', apiUrl: 'http://hub-api:4000/mock/telegram' },

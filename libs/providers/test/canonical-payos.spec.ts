@@ -6,7 +6,7 @@ import { ctx, payosFailed, payosSuccess, req } from './fixtures';
 describe('PayOS -> catalog', () => {
   const a = new PayosAdapter();
 
-  it('U34 code "00" -> payment.received, phần chung đúng, orderCode chỉ trong raw', () => {
+  it('[MS:U34] (phần a) U34 code "00" -> payment.received, phần chung đúng, orderCode chỉ trong raw', () => {
     const [e] = a.normalize(req('payos', payosSuccess()), ctx);
     expect(e.type).toBe('payment.received');
     expect(e.normalized).toBe(true);
@@ -26,7 +26,7 @@ describe('PayOS -> catalog', () => {
     expect(validateCanonical(e.type, e.data)).toEqual({ ok: true });
   });
 
-  it('U34b counterparty có dữ liệu -> object', () => {
+  it('[MS:U34] (phần b) U34b counterparty có dữ liệu -> object', () => {
     const [e] = a.normalize(
       req('payos', payosSuccess({ counterAccountName: 'NGUYEN VAN A', counterAccountNumber: '999', counterAccountBankName: 'VCB' })),
       ctx,
@@ -34,7 +34,7 @@ describe('PayOS -> catalog', () => {
     expect(e.data.counterparty).toEqual({ name: 'NGUYEN VAN A', accountNumber: '999', bank: 'VCB' });
   });
 
-  it('U35 code "01" hoặc success:false -> payment.failed, reason = desc', () => {
+  it('[MS:U35][AF:#10] U35 code "01" hoặc success:false -> payment.failed, reason = desc', () => {
     const [e] = a.normalize(req('payos', payosFailed()), ctx);
     expect(e.type).toBe('payment.failed');
     expect(e.data.reason).toBe('Giao dịch thất bại');

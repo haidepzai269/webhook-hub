@@ -84,7 +84,7 @@ describe('RealtimeGateway — phát theo room tenant (S2-2)', () => {
     expect(emits[0]).toMatchObject({ room: 'tenant:tenant-b', event: 'trace.ingested', data: { outcome: 'REJECTED' } });
   });
 
-  it('metrics.tick: successRate = null khi done = 0; có kết quả thì tính %', () => {
+  it('[AF:#31] metrics.tick: successRate = null khi done = 0; có kết quả thì tính %', () => {
     expect(computeTick(undefined).successRate).toBeNull();
     expect(computeTick({ events: 3, success: 0, done: 0 })).toMatchObject({ eventsPerMin: 36, successRate: null });
     expect(computeTick({ events: 0, success: 1, done: 2 }).successRate).toBe(50);

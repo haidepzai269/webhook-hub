@@ -68,7 +68,7 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     expect(db.deliveries.length + db.outbox.length + db.audit.length).toBe(0);
   });
 
-  it('chạy thật -> N delivery (generation+1) + N outbox delivery.replayed gọn + 1 audit, trong 1 transaction', async () => {
+  it('[AF:#28] chạy thật -> N delivery (generation+1) + N outbox delivery.replayed gọn + 1 audit, trong 1 transaction', async () => {
     const { controller, prisma, db } = build();
     const res: any = await controller.replayBulk(TENANT, 'admin', {
       reason: 'đích sống lại',

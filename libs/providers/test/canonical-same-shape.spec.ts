@@ -6,7 +6,7 @@ import { ctx, payosSuccess, req, sepayTx } from './fixtures';
  * ra hai event có tập khoá `data` giống hệt nhau và cùng amount/currency.
  */
 describe('U37 PayOS và SePay ra cùng hình dạng', () => {
-  it('Object.keys(data) giống hệt; amount + currency bằng nhau', () => {
+  it('[MS:U37][AF:#9] Object.keys(data) giống hệt; amount + currency bằng nhau', () => {
     const [p] = new PayosAdapter().normalize(req('payos', payosSuccess()), ctx);
     const [s] = new SepayAdapter().normalize(req('sepay', sepayTx()), ctx);
     expect(p.type).toBe(s.type);

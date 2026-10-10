@@ -24,7 +24,7 @@ describe('SSRF guard đi qua axios thật (S1-7)', () => {
     await new Promise<void>((r) => server.close(() => r()));
   });
 
-  it('createSsrfSafeAxiosConfig(url, true) + axios.post tới server cục bộ -> 200, Host giữ hostname gốc', async () => {
+  it('[AF:#3] createSsrfSafeAxiosConfig(url, true) + axios.post tới server cục bộ -> 200, Host giữ hostname gốc', async () => {
     const url = `http://localhost:${port}/hook`;
     const cfg = await createSsrfSafeAxiosConfig(url, true);
     const res = await axios.post(cfg.url, { a: 1 }, { httpAgent: cfg.httpAgent, httpsAgent: cfg.httpsAgent, timeout: 3000, maxRedirects: 0 });

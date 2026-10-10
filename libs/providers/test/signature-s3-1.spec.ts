@@ -39,7 +39,7 @@ describe('S3-1 — chữ ký + khoá chống trùng + extractSignature', () => {
       expect(await adapter.verify(await payosReq(), ['khoa-moi-chua-dung-0000000000', KEY])).toBe(true);
     });
 
-    it('so sánh bằng crypto.timingSafeEqual (không phải !== của SDK)', async () => {
+    it('[AF:#5] so sánh bằng crypto.timingSafeEqual (không phải !== của SDK)', async () => {
       const spy = jest.spyOn(nodeCrypto, 'timingSafeEqual');
       expect(await adapter.verify(await payosReq(), [KEY])).toBe(true);
       expect(spy).toHaveBeenCalled();
@@ -68,7 +68,7 @@ describe('S3-1 — chữ ký + khoá chống trùng + extractSignature', () => {
       expect(await adapter.verify(req(`APIKEY ${API}`), [API])).toBe(true);
     });
 
-    it('thiếu tiền tố -> false', async () => {
+    it('[AF:#6] thiếu tiền tố -> false', async () => {
       expect(await adapter.verify(req(API), [API])).toBe(false);
       expect(await adapter.verify(req(`Bearer ${API}`), [API])).toBe(false);
       expect(await adapter.verify(req(), [API])).toBe(false);
@@ -76,7 +76,7 @@ describe('S3-1 — chữ ký + khoá chống trùng + extractSignature', () => {
   });
 
   describe('Khoá chống trùng dự phòng = sha256(rawBody), không ngẫu nhiên', () => {
-    it('SePay thiếu id và referenceCode -> hai lần gọi cùng body ra cùng khoá, 32 hex', () => {
+    it('[AF:#7] SePay thiếu id và referenceCode -> hai lần gọi cùng body ra cùng khoá, 32 hex', () => {
       const a = new SepayAdapter();
       const raw = JSON.stringify({ transferAmount: 1000, content: 'DH1' });
       const r = (): RawWebhookRequest => ({ provider: 'sepay', sourceKey: 's', headers: {}, rawBody: Buffer.from(raw), body: JSON.parse(raw) });
@@ -135,7 +135,7 @@ describe('S3-1 — chữ ký + khoá chống trùng + extractSignature', () => {
       expect(new PayosAdapter().extractSignature({ ...r, body: {} })).toBeNull();
     });
 
-    it('SePay: "Apikey ***" — không bao giờ chứa key thật', () => {
+    it('[AF:#8] SePay: "Apikey ***" — không bao giờ chứa key thật', () => {
       const a = new SepayAdapter();
       const mk = (auth?: string): RawWebhookRequest => ({
         provider: 'sepay', sourceKey: 's', headers: auth ? { authorization: auth } : {}, rawBody: Buffer.from('{}'), body: {},

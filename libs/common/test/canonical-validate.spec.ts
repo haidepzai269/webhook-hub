@@ -14,7 +14,7 @@ const good = () => ({
 });
 
 /** U44 — validator viết tay của catalog. */
-describe('U44 validateCanonical payment.received', () => {
+describe('[MS:U44] U44 validateCanonical payment.received', () => {
   it.each([
     ['amount 1.5', { amount: 1.5 }, 'amount'],
     ['amount 0', { amount: 0 }, 'amount'],

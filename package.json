@@ -13,9 +13,9 @@
     "start:worker": "npm run start:dev --workspace=apps/hub-worker",
     "start:shop": "npm run start:dev --workspace=apps/shop",
     "start:web": "npm run dev --workspace=apps/web",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
+    "test": "jest --maxWorkers=2",
+    "test:watch": "jest --watch --maxWorkers=2",
+    "test:cov": "jest --coverage --maxWorkers=2",
     "prisma:generate": "npm run prisma:generate --workspace=libs/database",
     "prisma:migrate": "npm run prisma:migrate --workspace=libs/database",
     "prisma:seed": "npm run prisma:seed --workspace=libs/database",
@@ -23,7 +23,12 @@
     "verify:down": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts down",
     "verify:reset": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts reset",
     "verify:seed": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts seed",
-    "verify:ps": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts ps"
+    "verify:ps": "ts-node --transpile-only -P tsconfig.json verify/cli/stack.ts ps",
+    "verify": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts all",
+    "verify:unit": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts unit",
+    "verify:db": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts db",
+    "verify:map": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts map",
+    "verify:selftest": "ts-node --transpile-only -P tsconfig.json verify/scenarios/stack-isolation.ts"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

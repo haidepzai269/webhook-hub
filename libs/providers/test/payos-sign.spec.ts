@@ -41,7 +41,7 @@ describe('Playground PayOS — ký chéo với @payos/node (S2-4)', () => {
     },
   };
 
-  it.each(Object.entries(cases))('%s: chữ ký Playground == SDK', async (_name, data) => {
+  it.each(Object.entries(cases))('[AF:#37] %s: chữ ký Playground == SDK', async (_name, data) => {
     const sdk = await payos.crypto.createSignatureFromObj(data, KEY);
     expect(await signPayosData(data, KEY)).toBe(sdk);
   });

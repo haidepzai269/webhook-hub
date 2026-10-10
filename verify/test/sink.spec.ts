@@ -29,7 +29,7 @@ describe('verify-sink', () => {
   });
 
   it('ghi lại bytes thô + header, đọc lại theo path; DELETE xoá', async () => {
-    const raw = '{"a": 1,  "b":"\u00e0"}';
+    const raw = '{"a": 1,  "b":"\\u00e0"}';
     await fetch(`${base}/in/x?k=1`, { method: 'POST', headers: { 'webhook-id': 'msg_1' }, body: raw });
     await fetch(`${base}/in/y`, { method: 'POST', body: 'khác' });
     const list = await (await fetch(`${base}/_requests?path=/in/x`)).json();

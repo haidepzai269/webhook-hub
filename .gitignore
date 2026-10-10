@@ -15,3 +15,8 @@ coverage/
 libs/*/src/**/*.js
 libs/*/src/**/*.d.ts
 *.js.map
+# VF2: kết quả chạy verify (máy nào cũng tự sinh). baseline.json và docs/TEST-MAP.md thì commit.
+verify/.results/
+verify/.last-run.json
+verify/.last-red.json
+verify/.mail/

@@ -8,7 +8,7 @@ describe('event-pattern (S3-3)', () => {
     expect(eventTypeCandidates('x')).toEqual(['x', '*']);
   });
 
-  it('U17: payment.link.succeeded khớp payment.*, payment.link.*, chính nó; không khớp pay.*, payment', () => {
+  it('[MS:U17] U17: payment.link.succeeded khớp payment.*, payment.link.*, chính nó; không khớp pay.*, payment', () => {
     const t = 'payment.link.succeeded';
     expect(['payment.*', 'payment.link.*', 'payment.link.succeeded', 'pay.*', 'payment'].map((p) => matchesEventPattern(p, t))).toEqual([
       true, true, true, false, false,
@@ -21,7 +21,7 @@ describe('event-pattern (S3-3)', () => {
     expect(matchesEventPattern('*', 'github.ping')).toBe(true);
   });
 
-  it('U19: hợp lệ / không hợp lệ', () => {
+  it('[MS:U19] U19: hợp lệ / không hợp lệ', () => {
     for (const ok of ['*', 'payment.*', 'payment.received', 'repo.pull_request.*', 'a1_b.c2']) expect(isValidEventPattern(ok)).toBe(true);
     for (const bad of ['*.paid', 'payment.*.x', 'Payment.*', 'payment.', '.x', 'a..b', '', ' payment.*', '**', 'a.**', 'x'.repeat(129), 1 as any]) {
       expect(isValidEventPattern(bad)).toBe(false);

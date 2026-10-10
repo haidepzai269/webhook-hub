@@ -1,15 +1,14 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
 import { TenantScopedRepository } from '../src/tenant-scoped.repository';
+import { describeDb, newTestPrisma } from './support/test-db';
 
 /**
  * S3-3 trên Postgres THẬT (RUN_DB_TESTS=1): truy vấn ứng viên `eventTypes && candidates` khớp
  * wildcard đúng như hàm thuần — `payment.*` nhận `payment.failed`, không nhận `paymentx.y`.
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 describeDb('findActiveSubscriptionsForEventType — wildcard (Postgres, S3-3)', () => {
-  const raw = new PrismaClient();
+  const raw = newTestPrisma();
   const tenant = randomUUID();
   const run = randomUUID().slice(0, 8);
   const ids: Record<string, string> = {};
@@ -43,7 +42,7 @@ describeDb('findActiveSubscriptionsForEventType — wildcard (Postgres, S3-3)', 
       .sort();
   };
 
-  it('payment.failed -> payment.* và *', async () => {
+  it('[AF:#12] payment.failed -> payment.* và *', async () => {
     expect(await names('payment.failed')).toEqual(['all', 'wild']);
   });
 

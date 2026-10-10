@@ -40,7 +40,7 @@ describe('POST /api/v1/subscriptions — đích phải cùng tenant (S1-5)', () 
     return { controller: new ApiController(prisma), client, created };
   }
 
-  it('tenant A + destinationId của tenant B -> 404, không có dòng nào được tạo', async () => {
+  it('[AF:#34] tenant A + destinationId của tenant B -> 404, không có dòng nào được tạo', async () => {
     const { controller, client, created } = build();
     await expect(
       controller.createSubscription(TENANT_A, 'admin', { destinationId: DEST_B, name: 'x', eventTypes: ['a.b'] }),

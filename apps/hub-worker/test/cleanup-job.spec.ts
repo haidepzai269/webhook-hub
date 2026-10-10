@@ -39,7 +39,7 @@ describe('CleanupJob (S1-4)', () => {
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
   });
 
-  it('giành được khoá (SET NX EX 300) -> xoá theo lô tới khi một lô < 5000, rồi nhả khoá của mình', async () => {
+  it('[AF:#21] giành được khoá (SET NX EX 300) -> xoá theo lô tới khi một lô < 5000, rồi nhả khoá của mình', async () => {
     const prisma: any = {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
       $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0),

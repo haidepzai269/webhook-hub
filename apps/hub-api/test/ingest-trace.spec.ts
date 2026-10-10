@@ -57,7 +57,7 @@ describe('IngestService — trace.ingested (S2-2)', () => {
   });
   const good = () => req('sha256=' + createHmac('sha256', SECRET).update(body).digest('hex'));
 
-  it('ACCEPTED: gọi notifier đúng 1 lần với tenant, httpStatus 200, rawEventId', async () => {
+  it('[AF:#30] ACCEPTED: gọi notifier đúng 1 lần với tenant, httpStatus 200, rawEventId', async () => {
     const { svc, notifier } = build();
     const res = await svc.ingestWebhook(good());
     expect(res.status).toBe(200);

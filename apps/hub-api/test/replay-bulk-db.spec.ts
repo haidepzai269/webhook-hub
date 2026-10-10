@@ -1,16 +1,15 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@hub/database';
 import { ApiController } from '../src/modules/api/api.controller';
+import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
 
 /**
  * S2-3 trên Postgres THẬT (RUN_DB_TESTS=1): tập chọn dùng đúng điều kiện DLQ (ADR-031); bản đã replay
  * bị loại; dryRun không ghi; chạy thật N delivery + N outbox + 1 audit; lỗi giữa chừng rollback thật.
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 describeDb('replay-bulk (Postgres, S2-3)', () => {
-  const raw = new PrismaClient();
+  const raw = newTestPrisma();
   const svc = new PrismaService();
   const controller = new ApiController(svc);
   const tenant = randomUUID();
@@ -56,7 +55,7 @@ describeDb('replay-bulk (Postgres, S2-3)', () => {
     await svc.$disconnect();
   });
 
-  it('dryRun: đúng tập (bản đã replay bị loại), bộ lọc errorContains, KHÔNG ghi gì', async () => {
+  it('[AF:#29] dryRun: đúng tập (bản đã replay bị loại), bộ lọc errorContains, KHÔNG ghi gì', async () => {
     const before = await count();
     const all: any = await controller.replayBulk(tenant, 'tester', { reason: 'kiểm dryRun', dryRun: true });
     expect(all.count).toBe(3);

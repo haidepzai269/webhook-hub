@@ -137,7 +137,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(sendSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('S2-1: circuit OPEN -> không gọi sender; vào q.delivery.retry.1m, attemptCount GIỮ NGUYÊN; ghi next_attempt_at; không publish', async () => {
+  it('[AF:#25] S2-1: circuit OPEN -> không gọi sender; vào q.delivery.retry.1m, attemptCount GIỮ NGUYÊN; ghi next_attempt_at; không publish', async () => {
     const { prisma, repo } = buildFakePrisma();
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('OPEN'));
     const pub = (consumer as any).redisPub.publish as jest.Mock;

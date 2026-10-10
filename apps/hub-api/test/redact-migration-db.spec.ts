@@ -1,14 +1,13 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
+import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
 
 /**
  * Review SPEC-1 #1 (ADR-051) trên Postgres THẬT (RUN_DB_TESTS=1): migration
  * 20261010010000_redact_raw_event_headers che key trong dữ liệu cũ, giữ chữ ký HMAC GitHub,
  * không đụng body_raw, và chạy lại vô hại.
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 const MIGRATION = join(
   __dirname,
@@ -16,7 +15,7 @@ const MIGRATION = join(
 );
 
 describeDb('Migration che header raw_events (Postgres)', () => {
-  const prisma = new PrismaClient();
+  const prisma = newTestPrisma();
   const tenant = randomUUID();
   const runId = randomUUID().slice(0, 8);
   let sourceId = '';

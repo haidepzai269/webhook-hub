@@ -1,14 +1,13 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
 import { TenantScopedRepository } from '../src/tenant-scoped.repository';
+import { describeDb, newTestPrisma } from './support/test-db';
 
 /**
  * DLQ = DEAD chưa bị replay (ADR-031). Chạy trên Postgres local khi RUN_DB_TESTS=1 (xem timeseries.spec.ts).
  */
-const describeDb = process.env.RUN_DB_TESTS === '1' ? describe : describe.skip;
 
 describeDb('TenantScopedRepository DLQ (Postgres)', () => {
-  const prisma = new PrismaClient();
+  const prisma = newTestPrisma();
   const tenantA = randomUUID();
   const tenantB = randomUUID();
   const runId = randomUUID().slice(0, 8);

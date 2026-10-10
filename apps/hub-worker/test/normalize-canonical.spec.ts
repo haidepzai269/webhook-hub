@@ -30,7 +30,7 @@ function envelopeOf(type: string, data: Record<string, unknown>) {
  * U45 — adapter phát `payment.received` SAI khuôn -> lỗi vĩnh viễn (ADR-044): không có dòng `events`
  * hay `deliveries`, metric `hub_normalize_schema_errors_total{source}` +1, raw_event không bị đụng.
  */
-describe('U45 NormalizeConsumer kiểm catalog', () => {
+describe('[MS:U45] U45 NormalizeConsumer kiểm catalog', () => {
   afterEach(() => jest.restoreAllMocks());
 
   function setup() {
