@@ -202,7 +202,8 @@ async function seed() {
       destinationId: discordDest.id,
       name: 'Báo Git commits lên Discord',
       eventTypes: ['repo.push', 'repo.pull_request.opened'],
-      template: '📢 **GitHub Update**:\nRepo: {{data.repository.name}}\nAction: {{type}}\nSender: {{data.sender.login}}',
+      // S3-2: data theo catalog repo.* (docs/EVENT-CATALOG.md) — repo.fullName, actor.login
+      template: '📢 **GitHub Update**:\nRepo: {{data.repo.fullName}}\nAction: {{type}}\nSender: {{data.actor.login}}',
       isActive: true,
     },
   });
@@ -212,8 +213,11 @@ async function seed() {
       tenantId: DEFAULT_TENANT_ID,
       destinationId: telegramDest.id,
       name: 'Báo biến động thanh toán lên Telegram',
-      eventTypes: ['payment.succeeded', 'bank.transfer.received', 'order.paid'],
-      template: '💰 Giao dịch mới:\nNguồn: {{source}}\nMã đơn: {{data.orderCode}}\nSố tiền: {{data.amount}} VND',
+      // S3-2: một đầu ra duy nhất — mọi nguồn thanh toán ra kiểu chuẩn payment.* (ADR-053).
+      // Văn bản thuần (ADR-042): không Markdown; placeholder đúng cho MỌI provider.
+      eventTypes: ['payment.received'],
+      template:
+        'Giao dịch mới\nNguồn: {{source}}\nSố tiền: {{data.amount}} {{data.currency}}\nNội dung: {{data.memo}}\nMã tham chiếu: {{data.reference}}',
       isActive: true,
     },
   });
@@ -223,7 +227,7 @@ async function seed() {
       tenantId: DEFAULT_TENANT_ID,
       destinationId: shopDest.id,
       name: 'Chuyển webhook thanh toán về Demo Shop',
-      eventTypes: ['payment.succeeded', 'bank.transfer.received'],
+      eventTypes: ['payment.received'],
       isActive: true,
     },
   });

@@ -72,7 +72,8 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
       jest.fn().mockResolvedValue({
         id: rawEventId,
         headers: { 'x-github-event': 'push' },
-        body: { repository: { name: 'r' } },
+        // S3-2: push đủ trường để qua validator catalog (repo.push)
+        body: { ref: 'refs/heads/main', commits: [], repository: { name: 'r', full_name: 'o/r', html_url: 'https://github.com/o/r' }, sender: { login: 'u' } },
         bodyRaw: Buffer.from('{}'),
         contentType: 'application/json',
       });

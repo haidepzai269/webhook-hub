@@ -2,7 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 import { ProviderRegistry } from '@hub/providers';
 import { QUEUES } from '@hub/messaging';
-import { logger, OutboxPayload, NormalizedEvent, buildDeliveryMessage, EventReceivedNotice } from '@hub/common';
+import {
+  logger,
+  OutboxPayload,
+  NormalizedEvent,
+  buildDeliveryMessage,
+  EventReceivedNotice,
+  isReservedType,
+  validateCanonical,
+} from '@hub/common';
 import { Prisma } from '@prisma/client';
 import * as amqp from 'amqplib';
 import Redis from 'ioredis';
@@ -12,6 +20,35 @@ import {
   classifyNormalizeError,
   readNormalizeRetryCount,
 } from './normalize-errors';
+import { normalizeSchemaErrors } from '../metrics';
+
+/**
+ * S3-2 (ADR-053): adapter phát kiểu thuộc không gian dành riêng (`payment.*`, `repo.*`) mà `data`
+ * không qua validator catalog. Lỗi VĨNH VIỄN (ADR-044): không đẩy dữ liệu sai khuôn ra ngoài, không
+ * âm thầm hạ xuống `normalized:false`. raw_event còn nguyên -> sửa adapter rồi renormalize.
+ * `field` chỉ là TÊN trường, không bao giờ kèm giá trị.
+ */
+export class CanonicalSchemaError extends Error {
+  constructor(readonly eventType: string, readonly field: string) {
+    super(`Event kiểu '${eventType}' sai khuôn catalog ở trường '${field}'`);
+    this.name = 'CanonicalSchemaError';
+  }
+}
+
+/**
+ * Chỗ DUY NHẤT lõi biết về catalog: kiểu dành riêng thì phải đúng khuôn. Không hỏi provider nào.
+ * Ném `CanonicalSchemaError` ở event sai đầu tiên.
+ */
+export function assertCanonical(events: NormalizedEvent[], source: string): void {
+  for (const evt of events) {
+    if (!isReservedType(evt.type)) continue;
+    const r = validateCanonical(evt.type, evt.data);
+    if (!r.ok) {
+      normalizeSchemaErrors.inc({ source });
+      throw new CanonicalSchemaError(evt.type, r.field);
+    }
+  }
+}
 
 /** Topic outbox cho chặng normalize → delivery (S1-2). Relay định tuyến theo TOPIC_ROUTES. */
 export const DELIVERY_REQUESTED_TOPIC = 'delivery.requested';
@@ -87,6 +124,8 @@ export class NormalizeConsumer {
         },
         { tenantId, sourceId, correlationId, rawEventId },
       );
+      // 3b. Kiểu dành riêng phải đúng khuôn — kiểm TRƯỚC transaction: sai thì không có dòng nào.
+      assertCanonical(normalizedEvents, provider);
 
       // 4. Event + delivery + outbox `delivery.requested` + processed_messages trong MỘT transaction (S1-2).
       // Không còn publish thẳng sau COMMIT: hoặc tất cả cùng COMMIT, hoặc không có gì — relay lo phần gửi.
@@ -105,6 +144,7 @@ export class NormalizeConsumer {
             source: evt.source,
             subject: evt.subject,
             data: evt.data,
+            normalized: evt.normalized !== false,
             origin: evt.origin,
             occurredAt: new Date(evt.occurredAt),
             receivedAt: new Date(evt.receivedAt),
@@ -186,7 +226,7 @@ export class NormalizeConsumer {
     }
 
     log.error(
-      { err: err?.message, code: err?.code, kind, retries },
+      { err: err?.message, code: err?.code, kind, retries, ...(err instanceof CanonicalSchemaError ? { eventType: err.eventType, field: err.field } : {}) },
       kind === 'transient' ? 'Lỗi tạm ở normalize đã hết lượt thử lại -> DLQ' : 'Lỗi dữ liệu ở normalize -> DLQ',
     );
     channel.nack(msg, false, false);

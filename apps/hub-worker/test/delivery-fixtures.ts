@@ -23,7 +23,7 @@ export function buildLegacyMsg(overrides: Record<string, any> = {}) {
     destinationType: 'webhook',
     config: { url: 'https://STALE-from-message.example.com/hook' },
     signingSecret: 'STALE-secret-from-message',
-    event: { id: 'evt-1', type: 'payment.succeeded' },
+    event: { id: 'evt-1', type: 'payment.received' },
     attemptCount: 0,
     attemptGeneration: 1,
     correlationId: 'corr-1',
@@ -60,7 +60,7 @@ export function buildDeliveryRow(dest: { rateLimitRps?: number; signingSecret?: 
     event: {
       id: 'evt-1',
       tenantId: TENANT_ID,
-      type: 'payment.succeeded',
+      type: 'payment.received',
       source: 'payos',
       subject: null,
       data: {},

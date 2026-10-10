@@ -128,6 +128,8 @@ model Event {
   source         String      @db.VarChar(64)
   subject        String?     @db.VarChar(255)
   data           Json
+  /// S3-2 (ADR-053): true = data theo catalog kiểu chuẩn; false = kiểu chưa ánh xạ, data = { raw }
+  normalized     Boolean     @default(true)
   origin         EventOrigin @default(webhook)
   occurredAt     DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
   receivedAt     DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)

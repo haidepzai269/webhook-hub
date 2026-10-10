@@ -1,12 +1,12 @@
 import { ProviderAdapter } from './provider.interface';
-import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
+import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, parseProviderTime } from '@hub/common';
 import { bodyHashKey, timingSafeCompare } from '@hub/crypto';
 
 function headerValue(req: RawWebhookRequest, name: string): string | undefined {
   const v = req.headers[name] ?? req.headers[name.charAt(0).toUpperCase() + name.slice(1)];
   return Array.isArray(v) ? v[0] : v;
 }
-import { ulid } from 'ulidx';
+import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
 
 export class SepayAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'sepay';
@@ -44,47 +44,38 @@ export class SepayAdapter implements ProviderAdapter {
     return /^apikey /i.test(authHeader) ? 'Apikey ***' : '***';
   }
 
-  normalize(
-    req: RawWebhookRequest,
-    context: {
-      tenantId: string;
-      sourceId: string;
-      correlationId: string;
-      rawEventId: string;
-    },
-  ): NormalizedEvent[] {
+  /**
+   * S3-2 (ADR-053): `transferType` "in" (hoặc thiếu) -> `payment.received`, "out" -> `payment.sent`.
+   * SePay không gửi thông tin người trả -> `counterparty = null`. Body gốc ở `data.raw`.
+   */
+  normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
     const body = req.body || {};
-    const now = new Date().toISOString();
-    const isTransferIn = body.transferType === 'in' || !body.transferType;
-    const eventType = isTransferIn ? 'bank.transfer.received' : 'bank.transfer.sent';
+    const isOut = body.transferType === 'out';
+    const at = body.transactionDate ? parseProviderTime(body.transactionDate) : new Date().toISOString();
+    // SePay luôn gửi `id`; thiếu thì dùng referenceCode (không bịa id).
+    const providerTxnId = str(body.id) ?? str(body.referenceCode);
+
+    const data: Record<string, unknown> = {
+      amount: amountOf(body.transferAmount),
+      currency: 'VND',
+      method: 'bank_transfer',
+      reference: str(body.referenceCode),
+      memo: str(body.content),
+      counterparty: null,
+      account: { number: str(body.accountNumber), bank: str(body.gateway) },
+      providerTxnId,
+      raw: body,
+    };
+    data[isOut ? 'sentAt' : 'paidAt'] = at;
 
     return [
-      {
-        id: `evt_${ulid()}`,
-        tenantId: context.tenantId,
-        type: eventType,
-        source: 'sepay',
-        sourceId: context.sourceId,
-        subject: `bank:${body.accountNumber || 'account'}:${body.code || body.id}`,
-        data: {
-          id: body.id,
-          gateway: body.gateway,
-          transactionDate: body.transactionDate,
-          accountNumber: body.accountNumber,
-          code: body.code,
-          content: body.content,
-          transferType: body.transferType,
-          transferAmount: Number(body.transferAmount || 0),
-          accumulated: Number(body.accumulated || 0),
-          referenceCode: body.referenceCode,
-          description: body.description,
-        },
-        occurredAt: body.transactionDate || now,
-        receivedAt: now,
-        correlationId: context.correlationId,
-        rawEventId: context.rawEventId,
-        origin: 'webhook',
-      },
+      envelope('sepay', context, {
+        type: isOut ? 'payment.sent' : 'payment.received',
+        subject: providerTxnId ? `payment:${providerTxnId}` : undefined,
+        data,
+        occurredAt: at,
+        normalized: true,
+      }),
     ];
   }
 

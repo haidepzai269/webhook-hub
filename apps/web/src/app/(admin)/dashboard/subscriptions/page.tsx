@@ -278,7 +278,7 @@ export default function SubscriptionsPage() {
                     {...field}
                     id="sub-types"
                     className="font-mono text-xs"
-                    placeholder="payment.succeeded, repo.push"
+                    placeholder="payment.received, repo.push"
                     aria-invalid={fieldState.invalid}
                   />
                   <FieldDescription>Phân tách bằng dấu phẩy hoặc khoảng trắng. Khớp chính xác.</FieldDescription>
@@ -297,7 +297,7 @@ export default function SubscriptionsPage() {
                     id="sub-template"
                     rows={3}
                     className="font-mono text-xs"
-                    placeholder="💰 Nhận {{data.amount}}đ — {{subject}}"
+                    placeholder="Nhận {{data.amount}} {{data.currency}} — {{data.memo}}"
                   />
                   <FieldDescription>Để trống: gửi nguyên sự kiện dạng JSON.</FieldDescription>
                 </Field>

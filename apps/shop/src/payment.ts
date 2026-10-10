@@ -30,3 +30,18 @@ export function applyPayment(
 export function isExpired(order: { status: string; createdAt: Date }, now = new Date()) {
   return order.status === 'PENDING' && now.getTime() - order.createdAt.getTime() > EXPIRE_AFTER_MS;
 }
+
+/**
+ * Đọc khoản tiền từ webhook của hub (S3-2, ADR-053): Shop chỉ nói MỘT ngôn ngữ — kiểu chuẩn
+ * `payment.received` (`data.amount` số nguyên đơn vị nhỏ nhất, `data.currency`). Không còn `if`
+ * theo provider (trường riêng của SePay/PayOS chỉ còn trong `data.raw`). Mã đơn tìm trong `memo`, rồi `reference`.
+ */
+export function readPayment(body: any): { orderCode: string; amount: number } | { skip: 'IGNORED' | 'UNMATCHED' } {
+  const d = body?.data || {};
+  if (body?.type !== 'payment.received' || d.currency !== 'VND') return { skip: 'IGNORED' };
+  const match = `${d.memo ?? ''}`.match(/DH\d+/) ?? `${d.reference ?? ''}`.match(/DH\d+/);
+  if (!match) return { skip: 'UNMATCHED' };
+  const amount = Number(d.amount);
+  if (!Number.isSafeInteger(amount) || amount <= 0) return { skip: 'IGNORED' };
+  return { orderCode: match[0], amount };
+}

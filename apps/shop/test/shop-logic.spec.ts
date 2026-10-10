@@ -1,6 +1,6 @@
 import { hmacSha256, timingSafeCompare } from '@hub/crypto';
 import { MENU, priceOrder, maskCustomer } from '../src/menu';
-import { applyPayment, EXPIRE_AFTER_MS } from '../src/payment';
+import { applyPayment, EXPIRE_AFTER_MS, readPayment } from '../src/payment';
 
 describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
   const SIGNING_SECRET = 'hub_outbound_signing_secret_999';
@@ -11,8 +11,8 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       const timestamp = Math.floor(Date.now() / 1000);
       const rawBody = JSON.stringify({
         id: eventId,
-        type: 'payment.succeeded',
-        data: { orderCode: 'DH10001', amount: 2000 },
+        type: 'payment.received',
+        data: { amount: 2000, currency: 'VND', memo: 'DH10001 thanh toan' },
       });
 
       const payloadToSign = `${eventId}.${timestamp}.${rawBody}`;
@@ -29,9 +29,9 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
     it('phải từ chối chữ ký giả mạo hoặc bị chỉnh sửa', () => {
       const eventId = 'evt_01H1234567890ABCDEFGH';
       const timestamp = Math.floor(Date.now() / 1000);
-      const rawBody = JSON.stringify({ id: eventId, data: { orderCode: 'DH10001', amount: 2000 } });
+      const rawBody = JSON.stringify({ id: eventId, data: { memo: 'DH10001', amount: 2000 } });
 
-      const tamperedBody = JSON.stringify({ id: eventId, data: { orderCode: 'DH10001', amount: 5000 } });
+      const tamperedBody = JSON.stringify({ id: eventId, data: { memo: 'DH10001', amount: 5000 } });
       const signature = hmacSha256(SIGNING_SECRET, `${eventId}.${timestamp}.${rawBody}`);
 
       const computedOnTampered = hmacSha256(SIGNING_SECRET, `${eventId}.${timestamp}.${tamperedBody}`);
@@ -186,6 +186,33 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
         phone: '*******567',
       });
       expect(maskCustomer(null)).toBeNull();
+    });
+  });
+
+  describe('S3-2: đọc khoản tiền từ kiểu chuẩn payment.received (một đầu ra duy nhất)', () => {
+    const core = { amount: 50000, currency: 'VND', method: 'bank_transfer', reference: 'FT1', memo: 'DH123456 thanh toan', counterparty: null, account: null, providerTxnId: '1', paidAt: '2026-10-10T07:00:00.000Z', raw: {} };
+
+    it('cùng một hình dạng cho mọi provider: mã đơn trong memo, tiền ở data.amount', () => {
+      expect(readPayment({ type: 'payment.received', data: core })).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      // PayOS (method payment_link) và SePay (bank_transfer) đọc y hệt — không có nhánh theo provider
+      expect(readPayment({ type: 'payment.received', data: { ...core, method: 'payment_link' } })).toEqual({ orderCode: 'DH123456', amount: 50000 });
+    });
+
+    it('memo không có mã -> tìm trong reference', () => {
+      expect(readPayment({ type: 'payment.received', data: { ...core, memo: 'chuyen tien', reference: 'DH777' } })).toEqual({ orderCode: 'DH777', amount: 50000 });
+    });
+
+    it('không có mã -> UNMATCHED; kiểu khác / tiền tệ khác / số tiền sai -> IGNORED', () => {
+      expect(readPayment({ type: 'payment.received', data: { ...core, memo: null, reference: null } })).toEqual({ skip: 'UNMATCHED' });
+      expect(readPayment({ type: 'payment.failed', data: core })).toEqual({ skip: 'IGNORED' });
+      expect(readPayment({ type: 'payment.received', data: { ...core, currency: 'USD' } })).toEqual({ skip: 'IGNORED' });
+      expect(readPayment({ type: 'payment.received', data: { ...core, amount: 1.5 } })).toEqual({ skip: 'IGNORED' });
+    });
+
+    it('payload cũ (payment.succeeded + transferAmount/orderCode) không còn được đọc', () => {
+      expect(readPayment({ type: 'payment.succeeded', data: { orderCode: 'DH1', transferAmount: 1000 } })).toEqual({ skip: 'IGNORED' });
+      const src = require('fs').readFileSync(require('path').join(__dirname, '../src/main.ts'), 'utf8');
+      expect(src).not.toMatch(/transferAmount|eventData\.orderCode|eventData\.content/);
     });
   });
 });

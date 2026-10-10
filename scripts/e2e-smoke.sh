@@ -4,6 +4,8 @@
 #   bash scripts/e2e-smoke.sh            -> in bảng events × deliveries, "OK" và exit 0 nếu mọi thứ đúng
 #
 # Bắn: 1 GitHub ký đúng · 1 GitHub ký sai · 1 SePay "Apikey" đúng · gửi lại đúng SePay đó lần nữa.
+# ⚠ SePay ra `payment.received` -> khớp MỌI subscription `payment.*` (seed: Telegram). Không muốn gửi
+#   Telegram thật thì tắt subscription Telegram (PATCH isActive=false) trước khi chạy.
 # Exit ≠ 0 nếu: có delivery không SUCCEEDED · ký sai mà không nhận 401 · gửi lại sinh event thứ hai ·
 # hub.outbox có chuỗi giống secret.
 #
@@ -43,7 +45,8 @@ SEPAY_ID="$RUN_ID"
 echo "== Smoke run $RUN_ID -> $HUB_URL"
 
 # ---------- 1. GitHub ký đúng ----------
-GH_BODY="{\"ref\":\"refs/heads/main\",\"after\":\"smoke$RUN_ID\",\"repository\":{\"name\":\"smoke_repo\",\"full_name\":\"smoke/smoke_repo\"},\"sender\":{\"login\":\"smoke_bot\"}}"
+# S3-2: đủ trường để ra kiểu chuẩn repo.push (html_url, commits) — thiếu thì validator catalog từ chối.
+GH_BODY="{\"ref\":\"refs/heads/main\",\"after\":\"smoke$RUN_ID\",\"commits\":[],\"repository\":{\"name\":\"smoke_repo\",\"full_name\":\"smoke/smoke_repo\",\"html_url\":\"https://github.com/smoke/smoke_repo\"},\"sender\":{\"login\":\"smoke_bot\"}}"
 GH_SIG="sha256=$(printf '%s' "$GH_BODY" | openssl dgst -sha256 -hmac "$GH_SECRET" | awk '{print $NF}')"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$HUB_URL/hooks/github/src_github_main" \
   -H 'content-type: application/json' -H 'X-GitHub-Event: push' -H "X-GitHub-Delivery: $GH_DELIVERY" \

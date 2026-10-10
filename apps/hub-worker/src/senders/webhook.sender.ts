@@ -30,6 +30,8 @@ export class WebhookSender implements DestinationSender {
         type: event.type,
         source: event.source,
         subject: event.subject,
+        // S3-2 (ADR-053): true = `data` theo catalog kiểu chuẩn (docs/EVENT-CATALOG.md); false = `{ raw }`.
+        normalized: event.normalized !== false,
         data: event.data,
         occurredAt: event.occurredAt,
         receivedAt: event.receivedAt,

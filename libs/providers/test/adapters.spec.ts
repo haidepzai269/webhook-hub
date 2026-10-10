@@ -108,7 +108,7 @@ describe('Provider Adapters Tests', () => {
       expect(isValid).toBe(true);
     });
 
-    it('normalize sang payment.succeeded', () => {
+    it('normalize sang payment.received (S3-2, catalog)', () => {
       const events = adapter.normalize(
         {
           provider: 'payos',
@@ -120,9 +120,11 @@ describe('Provider Adapters Tests', () => {
         context,
       );
 
-      expect(events[0].type).toBe('payment.succeeded');
-      expect(events[0].subject).toBe('order:10234');
+      // body thiếu `code` -> không phải "00" -> payment.failed; có code "00" -> payment.received
+      expect(events[0].type).toBe('payment.failed');
+      expect(events[0].subject).toBe('payment:FT999');
       expect(events[0].data.amount).toBe(2000);
+      expect(events[0].data.memo).toBe('DH10234 thanh toan');
     });
   });
 
@@ -145,7 +147,7 @@ describe('Provider Adapters Tests', () => {
       expect(isValid).toBe(true);
     });
 
-    it('normalize sang bank.transfer.received', () => {
+    it('normalize sang payment.received (S3-2, catalog)', () => {
       const events = adapter.normalize(
         {
           provider: 'sepay',
@@ -163,8 +165,8 @@ describe('Provider Adapters Tests', () => {
         context,
       );
 
-      expect(events[0].type).toBe('bank.transfer.received');
-      expect(events[0].data.transferAmount).toBe(50000);
+      expect(events[0].type).toBe('payment.received');
+      expect(events[0].data.amount).toBe(50000);
     });
   });
 });

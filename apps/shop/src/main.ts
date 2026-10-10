@@ -5,7 +5,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { hmacSha256, timingSafeCompare } from '@hub/crypto';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
-import { applyPayment, EXPIRE_AFTER_MS } from './payment';
+import { applyPayment, EXPIRE_AFTER_MS, readPayment } from './payment';
 
 const expressFactory = typeof express === 'function' ? express : (express as any).default || require('express');
 const app = expressFactory();
@@ -124,19 +124,13 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
     return res.status(400).json({ error: 'Request đã quá hạn (> 5 phút), từ chối để chống replay attack' });
   }
 
-  // 4.3. Khớp mã đơn hàng DH\d+ từ data/subject/description
-  const eventData = req.body.data || {};
-  const searchString = `${req.body.subject || ''} ${eventData.description || ''} ${eventData.orderCode || ''} ${eventData.content || ''}`;
-  const match = searchString.match(/DH\d+/);
-  if (!match) {
-    logger.warn({ searchString }, '[Shop] Không tìm thấy mã đơn hàng DH\\d+ trong webhook');
-    return res.status(200).json({ success: true, status: 'UNMATCHED' });
+  // 4.3. Chỉ nhận kiểu chuẩn `payment.received` (VND); mã đơn DH\d+ trong data.memo rồi data.reference
+  const p = readPayment(req.body);
+  if ('skip' in p || !eventId) {
+    if ('skip' in p && p.skip === 'UNMATCHED') logger.warn({ eventId }, '[Shop] Không tìm thấy mã đơn DHxxx trong memo/reference');
+    return res.status(200).json({ success: true, status: 'skip' in p ? p.skip : 'IGNORED' });
   }
-  const orderCode = match[0];
-  const amount = Number(eventData.amount || eventData.transferAmount || 0);
-  if (!eventId || !Number.isSafeInteger(amount) || amount <= 0) {
-    return res.status(200).json({ success: true, status: 'IGNORED', orderCode });
-  }
+  const { orderCode, amount } = p;
 
   // 4.4. Chống trùng BỀN VỮNG + cộng dồn trong CÙNG transaction (ADR-034): ghi event-id và
   // paidAmount cùng commit hoặc cùng rollback -> mỗi khoản chỉ cộng một lần, thứ tự đến không quan trọng.

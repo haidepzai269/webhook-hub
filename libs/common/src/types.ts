@@ -32,7 +32,7 @@ export interface IngestResult {
 export interface NormalizedEvent {
   id: string; // ULID
   tenantId: string;
-  type: string; // vd: repo.push, payment.succeeded, bank.transfer.received
+  type: string; // kiểu chuẩn (payment.received, repo.push…) hoặc <provider>.<kiểu gốc> (github.ping…)
   source: ProviderType;
   sourceId: string;
   subject?: string;
@@ -43,6 +43,11 @@ export interface NormalizedEvent {
   rawEventId?: string;
   parentEventId?: string;
   origin: EventOrigin;
+  /**
+   * S3-2 (ADR-053): true = `data` theo catalog kiểu chuẩn (`libs/common/src/canonical`), đã qua
+   * validator. false = kiểu chưa có ánh xạ, `data = { raw }`. Thiếu = true (event cũ trước S3-2).
+   */
+  normalized?: boolean;
 }
 
 /**

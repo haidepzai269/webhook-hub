@@ -1,7 +1,7 @@
 import { verifyWithFallback } from '@octokit/webhooks-methods';
 import { ProviderAdapter } from './provider.interface';
-import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
-import { ulid } from 'ulidx';
+import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, REPO_PUSH_MAX_COMMITS, parseProviderTime } from '@hub/common';
+import { NormalizeContext, envelope, str } from './normalize-helpers';
 import { bodyHashKey } from '@hub/crypto';
 
 export class GithubAdapter implements ProviderAdapter {
@@ -52,43 +52,104 @@ export class GithubAdapter implements ProviderAdapter {
     return s ? String(s) : null;
   }
 
-  normalize(
-    req: RawWebhookRequest,
-    context: {
-      tenantId: string;
-      sourceId: string;
-      correlationId: string;
-      rawEventId: string;
-    },
-  ): NormalizedEvent[] {
-    const eventName = ((req.headers['x-github-event'] || req.headers['X-GitHub-Event']) as string) || 'unknown';
+  /**
+   * S3-2 (ADR-053): `push` -> `repo.push`; `pull_request` -> `repo.pull_request.<action>` (closed +
+   * merged -> `.merged`); `issues` -> `repo.issue.<action>`. Mọi event khác -> `github.<event>[.<action>]`,
+   * `normalized:false`, `data = { raw }` (trước S3-2 là `repo.<event>`). Không chép email vào phần chung.
+   */
+  normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
+    const h = req.headers['x-github-event'] || req.headers['X-GitHub-Event'];
+    const eventName = (Array.isArray(h) ? h[0] : h) || 'unknown';
     const body = req.body || {};
-    const now = new Date().toISOString();
+    const repository = body.repository || {};
+    const repo = { fullName: repository.full_name ?? repository.name, url: repository.html_url };
+    const actor = { login: body.sender?.login };
+    const subject = repo.fullName ? `repo:${repo.fullName}` : undefined;
 
-    let normalizedType = `repo.${eventName}`;
-    if (eventName === 'pull_request' && body.action) {
-      normalizedType = `repo.pull_request.${body.action}`;
-    } else if (eventName === 'issues' && body.action) {
-      normalizedType = `repo.issue.${body.action}`;
+    if (eventName === 'push') {
+      const ref: string = body.ref || '';
+      const commits: any[] = Array.isArray(body.commits) ? body.commits : [];
+      return [
+        envelope('github', context, {
+          type: 'repo.push',
+          subject,
+          occurredAt: body.head_commit?.timestamp ? parseProviderTime(body.head_commit.timestamp) : undefined,
+          normalized: true,
+          data: {
+            repo,
+            branch: ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : null,
+            tag: ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : null,
+            commits: commits.slice(0, REPO_PUSH_MAX_COMMITS).map((c) => ({
+              id: c.id,
+              message: c.message,
+              author: str(c.author?.username) ?? str(c.author?.name),
+              url: c.url,
+              timestamp: c.timestamp,
+            })),
+            commitCount: commits.length,
+            actor,
+            compareUrl: str(body.compare),
+            raw: body,
+          },
+        }),
+      ];
     }
 
-    const subject = body.repository?.full_name || body.repository?.name || 'github:repository';
+    if (eventName === 'pull_request' && body.pull_request) {
+      const pr = body.pull_request;
+      const merged = pr.merged === true;
+      const action = body.action === 'closed' && merged ? 'merged' : body.action;
+      return [
+        envelope('github', context, {
+          type: `repo.pull_request.${action}`,
+          subject,
+          normalized: true,
+          data: {
+            repo,
+            number: pr.number ?? body.number,
+            title: pr.title,
+            state: pr.state,
+            merged,
+            url: pr.html_url,
+            author: { login: pr.user?.login },
+            actor,
+            baseBranch: pr.base?.ref,
+            headBranch: pr.head?.ref,
+            raw: body,
+          },
+        }),
+      ];
+    }
+
+    if (eventName === 'issues' && body.issue) {
+      const issue = body.issue;
+      return [
+        envelope('github', context, {
+          type: `repo.issue.${body.action}`,
+          subject,
+          normalized: true,
+          data: {
+            repo,
+            number: issue.number,
+            title: issue.title,
+            state: issue.state,
+            url: issue.html_url,
+            author: { login: issue.user?.login },
+            actor,
+            labels: Array.isArray(issue.labels) ? issue.labels.map((l: any) => (typeof l === 'string' ? l : l?.name)) : [],
+            raw: body,
+          },
+        }),
+      ];
+    }
 
     return [
-      {
-        id: `evt_${ulid()}`,
-        tenantId: context.tenantId,
-        type: normalizedType,
-        source: 'github',
-        sourceId: context.sourceId,
-        subject,
-        data: body,
-        occurredAt: body.head_commit?.timestamp || now,
-        receivedAt: now,
-        correlationId: context.correlationId,
-        rawEventId: context.rawEventId,
-        origin: 'webhook',
-      },
+      envelope('github', context, {
+        type: body.action ? `github.${eventName}.${body.action}` : `github.${eventName}`,
+        subject: repo.fullName || undefined,
+        data: { raw: body },
+        normalized: false,
+      }),
     ];
   }
 

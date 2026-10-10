@@ -80,6 +80,7 @@ function toNormalizedEvent(row: DeliveryForSend): NormalizedEvent {
     rawEventId: e.rawEventId ?? undefined,
     parentEventId: e.parentEventId ?? undefined,
     origin: e.origin as NormalizedEvent['origin'],
+    normalized: (e as { normalized?: boolean }).normalized !== false,
   };
 }
 

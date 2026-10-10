@@ -231,3 +231,12 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
   - Khoá dự phòng hash body áp cho cả GitHub (thay `ulid()`) và Stripe (thay `stripe-signature` — header có timestamp nên lần gửi lại khác khoá).
   - SePay `extractSignature` trả `***` (không phải `Apikey ***`) khi header không có tiền tố, để không bao giờ lưu key.
   - Bỏ hàm `signatureHeaderFor` (`redact-headers.ts`) vì lõi không còn đoán header.
+- **S3-2 (2026-10-10) — làm theo DINH-CHINH §0 (lõi S14), không theo S3-2 gốc:**
+  - Không CloudEvents, không cột `events.provider`; ánh xạ CloudEvents chỉ ở `docs/EVENT-CATALOG.md` §6. ADR-059.
+  - Seed: Telegram và Shop đều `['payment.received']` ngay ở S3-2 (bỏ `order.paid`, `payment.succeeded`, `bank.transfer.*`); Telegram đổi sang `payment.*` ở S3-3 khi có wildcard. Template Discord đổi sang `{{data.repo.fullName}}`/`{{data.actor.login}}`.
+  - DB docker đang chạy: subscription Shop + Telegram đổi `eventTypes` qua `PATCH /api/v1/subscriptions/:id` (Telegram vẫn `isActive=false` trong lúc kiểm); template Discord cũng sửa qua API.
+  - Validator từ chối cả khoá lạ (không chỉ khoá thiếu) — chặt hơn spec để giữ luật 7.
+  - Thiếu `transactionDateTime`/`transactionDate` → dùng thời điểm nhận (không từ chối). SePay thiếu `id` → `providerTxnId = referenceCode`. Stripe `charge.refunded` lấy `method` từ `payment_method_details.type` (charge không có `payment_method_types`).
+  - Metric `hub_normalize_schema_errors_total` nằm ở registry riêng của worker (`apps/hub-worker/src/metrics.ts`); đến S3-4 mới phục vụ qua `/metrics`.
+  - Payload mẫu Playground (GitHub thêm `html_url`, `commits`; Stripe thêm `amount_received`, `payment_method_types`) và `scripts/e2e-smoke.sh` (GitHub thêm `html_url`, `commits`) sửa để qua validator.
+

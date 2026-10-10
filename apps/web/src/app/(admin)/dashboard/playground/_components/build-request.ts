@@ -20,10 +20,21 @@ export function samplePayload(provider: Provider): unknown {
   switch (provider) {
     case "github":
       return {
+        // Đủ trường để ra kiểu chuẩn `repo.push` (catalog S3-2, docs/EVENT-CATALOG.md).
         ref: "refs/heads/main",
-        repository: { name: "webhook-hub", full_name: "admin/webhook-hub" },
+        repository: { name: "webhook-hub", full_name: "admin/webhook-hub", html_url: "https://github.com/admin/webhook-hub" },
         sender: { login: "tester" },
-        head_commit: { id: `c_${now}`, message: "feat: test webhook từ Playground" },
+        compare: "https://github.com/admin/webhook-hub/compare/a...b",
+        commits: [
+          {
+            id: `c_${now}`,
+            message: "feat: test webhook từ Playground",
+            timestamp: new Date(now).toISOString(),
+            url: `https://github.com/admin/webhook-hub/commit/c_${now}`,
+            author: { name: "Tester", username: "tester" },
+          },
+        ],
+        head_commit: { id: `c_${now}`, message: "feat: test webhook từ Playground", timestamp: new Date(now).toISOString() },
       };
     case "sepay":
       return {
@@ -43,7 +54,17 @@ export function samplePayload(provider: Provider): unknown {
         object: "event",
         type: "payment_intent.succeeded",
         created: Math.floor(now / 1000),
-        data: { object: { id: `pi_test_${now}`, object: "payment_intent", amount: 2000, currency: "vnd" } },
+        data: {
+          object: {
+            id: `pi_test_${now}`,
+            object: "payment_intent",
+            amount: 2000,
+            amount_received: 2000,
+            currency: "vnd",
+            payment_method_types: ["card"],
+            description: "Test tu Playground",
+          },
+        },
       };
     case "payos":
       return {

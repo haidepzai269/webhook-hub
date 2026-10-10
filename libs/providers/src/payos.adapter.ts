@@ -1,7 +1,7 @@
 import { PayOS } from '@payos/node';
 import { ProviderAdapter } from './provider.interface';
-import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
-import { ulid } from 'ulidx';
+import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, parseProviderTime } from '@hub/common';
+import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
 import { bodyHashKey, timingSafeCompare } from '@hub/crypto';
 
 /**
@@ -56,41 +56,45 @@ export class PayosAdapter implements ProviderAdapter {
     return typeof sig === 'string' && sig ? sig : null;
   }
 
-  normalize(
-    req: RawWebhookRequest,
-    context: {
-      tenantId: string;
-      sourceId: string;
-      correlationId: string;
-      rawEventId: string;
-    },
-  ): NormalizedEvent[] {
-    const data = req.body?.data || {};
-    const now = new Date().toISOString();
+  /**
+   * S3-2 (ADR-053): ra kiểu chuẩn `payment.received` / `payment.failed` theo catalog
+   * (`libs/common/src/canonical/payment.ts`). `orderCode` là từ vựng của PayOS -> chỉ còn trong
+   * `data.raw` (BB-1); mã đơn của service nằm trong `memo` (description), service tự tìm.
+   */
+  normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
+    const body = req.body || {};
+    const d = body.data || {};
+    const ok = body.code === '00' && body.success !== false;
+    const type = ok ? 'payment.received' : 'payment.failed';
+    const at = d.transactionDateTime ? parseProviderTime(d.transactionDateTime) : new Date().toISOString();
+    const providerTxnId = str(d.paymentLinkId) ?? str(d.reference);
+    const cp = { name: str(d.counterAccountName), accountNumber: str(d.counterAccountNumber), bank: str(d.counterAccountBankName) };
+
+    const data: Record<string, unknown> = {
+      amount: amountOf(d.amount),
+      currency: str(d.currency) ?? 'VND',
+      method: 'payment_link',
+      reference: str(d.reference),
+      memo: str(d.description),
+      counterparty: cp.name || cp.accountNumber || cp.bank ? cp : null,
+      account: { number: str(d.accountNumber), bank: null },
+      providerTxnId,
+      raw: body,
+    };
+    if (ok) data.paidAt = at;
+    else {
+      data.failedAt = at;
+      data.reason = str(body.desc) ?? str(d.desc);
+    }
 
     return [
-      {
-        id: `evt_${ulid()}`,
-        tenantId: context.tenantId,
-        type: 'payment.succeeded',
-        source: 'payos',
-        sourceId: context.sourceId,
-        subject: `order:${data.orderCode}`,
-        data: {
-          orderCode: String(data.orderCode),
-          amount: Number(data.amount || 0),
-          currency: data.currency || 'VND',
-          reference: data.reference,
-          description: data.description,
-          transactionDateTime: data.transactionDateTime,
-          paymentLinkId: data.paymentLinkId,
-        },
-        occurredAt: data.transactionDateTime || now,
-        receivedAt: now,
-        correlationId: context.correlationId,
-        rawEventId: context.rawEventId,
-        origin: 'webhook',
-      },
+      envelope('payos', context, {
+        type,
+        subject: providerTxnId ? `payment:${providerTxnId}` : undefined,
+        data,
+        occurredAt: at,
+        normalized: true,
+      }),
     ];
   }
 
