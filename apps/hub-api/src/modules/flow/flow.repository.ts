@@ -97,6 +97,20 @@ export class FlowScopedRepository extends TenantScopedRepository {
           AND COALESCE(dl.n_active, 0) = 0 AND (j.event_id IS NOT NULL OR j.processed)`,
     };
     const statusCond = f.status ? Prisma.sql`AND ${status[f.status]}` : Prisma.empty;
+    // Lọc sơ bộ RẺ (index deliveries(event_id, subscription_id, generation)) trước LATERAL — để trạng thái
+    // hiếm (vd 'succeeded' khi một đích chết hẳn) không phải dựng JSON cho cả 10k dòng. Điều kiện chính
+    // xác vẫn là statusCond ở ngoài.
+    const latestDelivery = (statusSql: Prisma.Sql) => Prisma.sql`EXISTS (
+        SELECT 1 FROM hub.deliveries d WHERE d.event_id = j.event_id AND d.tenant_id = ${t}::uuid AND ${statusSql}
+          AND NOT EXISTS (SELECT 1 FROM hub.deliveries n WHERE n.event_id = d.event_id AND n.subscription_id = d.subscription_id
+                          AND n.attempt_generation > d.attempt_generation))`;
+    const pre: Record<string, Prisma.Sql> = {
+      rejected: Prisma.sql`j.raw_status = 'REJECTED'`,
+      failed: Prisma.sql`j.raw_status IS DISTINCT FROM 'REJECTED' AND (j.event_id IS NULL OR ${latestDelivery(Prisma.sql`d.status = 'DEAD'`)})`,
+      in_progress: Prisma.sql`j.raw_status IS DISTINCT FROM 'REJECTED'`,
+      succeeded: Prisma.sql`j.raw_status IS DISTINCT FROM 'REJECTED' AND NOT ${latestDelivery(Prisma.sql`d.status <> 'SUCCEEDED'`)}`,
+    };
+    const preCond = f.status ? pre[f.status] : Prisma.sql`true`;
     const destCond = f.destinationId
       ? Prisma.sql`AND EXISTS (SELECT 1 FROM hub.deliveries d2 JOIN hub.subscriptions s2 ON s2.id = d2.subscription_id
                               WHERE d2.event_id = j.event_id AND d2.tenant_id = ${t}::uuid AND s2.destination_id = ${f.destinationId}::uuid)`
@@ -126,7 +140,9 @@ export class FlowScopedRepository extends TenantScopedRepository {
              j.source_id AS "sourceId", j.source_name AS "sourceName", j.provider, j.processed,
              j.event_id AS "eventId", j.type, j.subject, j.normalized, j.origin, j.event_at AS "eventAt",
              COALESCE(dl.deliveries, '[]'::json) AS deliveries
-      FROM j
+      -- Sắp + đánh số TRƯỚC khi LATERAL: nested loop giữ thứ tự nên LIMIT dừng sớm, không tính
+      -- LATERAL cho cả 10k dòng rồi mới sắp (đo: 800ms → xem ADR-DRAFT EF-6).
+      FROM (SELECT * FROM j WHERE ${preCond} ORDER BY j.x_at DESC, j.x_key DESC) j
       LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object(
                  'id', d.id, 'attemptGeneration', d.attempt_generation, 'status', d.status, 'attemptCount', d.attempt_count,
@@ -165,9 +181,11 @@ export class FlowScopedRepository extends TenantScopedRepository {
   async normalizeStats(since: Date, orphanMinAgeSeconds: number) {
     const [ev] = await this.db.$queryRaw<{ events: number; unmapped: number; p50: number | null; p95: number | null }[]>(Prisma.sql`
       SELECT count(*)::int AS events, count(*) FILTER (WHERE NOT e.normalized)::int AS unmapped,
-             percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM e.received_at - r.received_at) * 1000) AS p50,
-             percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM e.received_at - r.received_at) * 1000) AS p95
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM fd.at - r.received_at) * 1000) AS p50,
+             percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM fd.at - r.received_at) * 1000) AS p95
+      -- events.received_at là bản sao giờ nhận raw → độ trễ normalize đo tới delivery đầu (cùng tx normalize+route).
       FROM hub.events e LEFT JOIN hub.raw_events r ON r.id = e.raw_event_id
+      LEFT JOIN LATERAL (SELECT min(d.created_at) AS at FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id) fd ON true
       WHERE e.tenant_id = ${this.tenantId}::uuid AND e.received_at >= ${since}`);
     const [orph] = await this.db.$queryRaw<{ orphans: number; pending: number }[]>(Prisma.sql`
       SELECT count(*) FILTER (WHERE r.received_at < now() - make_interval(secs => ${orphanMinAgeSeconds}::double precision))::int AS orphans,

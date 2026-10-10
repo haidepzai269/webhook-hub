@@ -12,6 +12,15 @@ import { emptyToastCursor, type ToastCursor } from "./ui-logic";
 import { getToken } from "./token";
 import type { CircuitChangedNotice, DeliveryAttemptNotice, MetricsTick, TraceIngestedNotice } from "./types";
 
+/** Payload `event.received` (khớp libs/common/src/types.ts EventReceivedNotice). */
+export interface EventReceivedNotice {
+  tenantId: string;
+  correlationId: string;
+  rawEventId: string;
+  events: { id: string; type: string; source: string }[];
+  deliveries: { deliveryId: string; eventId: string; destinationId: string; destinationName: string; destinationType: string }[];
+}
+
 const MAX_TICKS = 60; // 60 × 5s = 5 phút sparkline
 const MAX_TRACES = 20;
 const INVALIDATE_DEBOUNCE_MS = 400;
@@ -34,6 +43,39 @@ export const useRealtimeStore = create<RealtimeState>(() => ({
 
 let socket: Socket | null = null;
 let refCount = 0;
+
+/**
+ * Bus cục bộ trên CÙNG kết nối Socket.IO (không mở kết nối thứ hai): component nghe sự kiện thô
+ * để vẽ hiệu ứng (chấm chạy trên V3, dòng log). Trạng thái thật vẫn đến từ API qua invalidate.
+ */
+export interface HubSocketEvents {
+  "event.received": EventReceivedNotice;
+  "delivery.attempt": DeliveryAttemptNotice;
+  "circuit.changed": CircuitChangedNotice;
+  "trace.ingested": TraceIngestedNotice;
+}
+type Listener<K extends keyof HubSocketEvents> = (payload: HubSocketEvents[K]) => void;
+const listeners = new Map<keyof HubSocketEvents, Set<(payload: unknown) => void>>();
+
+function emitLocal<K extends keyof HubSocketEvents>(name: K, payload: HubSocketEvents[K]) {
+  for (const l of listeners.get(name) ?? []) {
+    try {
+      l(payload);
+    } catch {
+      /* hiệu ứng không bao giờ làm hỏng luồng realtime */
+    }
+  }
+}
+
+export function subscribeHubSocket<K extends keyof HubSocketEvents>(name: K, fn: Listener<K>): () => void {
+  let set = listeners.get(name);
+  if (!set) listeners.set(name, (set = new Set()));
+  const l = fn as (payload: unknown) => void;
+  set.add(l);
+  return () => {
+    set.delete(l);
+  };
+}
 
 /**
  * Gom nhiều sự kiện socket trong một cửa sổ ngắn thành MỘT lượt invalidate — dưới tải (k6)
@@ -80,15 +122,27 @@ export function useHubRealtime() {
 
     const onConnect = () => useRealtimeStore.setState({ connected: true });
     const onDisconnect = () => useRealtimeStore.setState({ connected: false });
-    const onEvent = () => invalidate("overview", "events", "timeseries");
+    // "flow" (SPEC-event-flow-ui): hành trình/danh sách/bản đồ gọi lại API — không tự ghép trạng thái.
+    const onEvent = (n: EventReceivedNotice) => {
+      emitLocal("event.received", n);
+      invalidate("overview", "events", "timeseries", "flow");
+    };
     // delivery.attempt (thay delivery.updated, S2-2): prefix "event" phủ cả sheet "Dấu vết" của đúng eventId.
-    const onDelivery = (_n: DeliveryAttemptNotice) =>
-      invalidate("overview", "deliveries", "dlq", "timeseries", "event", "events");
-    const onCircuit = (_n: CircuitChangedNotice) => invalidate("destinations");
-    const onTrace = (n: TraceIngestedNotice) =>
+    const onDelivery = (n: DeliveryAttemptNotice) => {
+      emitLocal("delivery.attempt", n);
+      invalidate("overview", "deliveries", "dlq", "timeseries", "event", "events", "flow");
+    };
+    const onCircuit = (n: CircuitChangedNotice) => {
+      emitLocal("circuit.changed", n);
+      invalidate("destinations", "flow");
+    };
+    const onTrace = (n: TraceIngestedNotice) => {
+      emitLocal("trace.ingested", n);
+      if (n.outcome === "REJECTED") invalidate("flow");
       useRealtimeStore.setState((st) => ({
         traces: [{ ...n, receivedAt: Date.now() }, ...st.traces].slice(0, MAX_TRACES),
       }));
+    };
     const onTick = (tick: MetricsTick) =>
       useRealtimeStore.setState((st) => ({ ticks: [...st.ticks, tick].slice(-MAX_TICKS) }));
 

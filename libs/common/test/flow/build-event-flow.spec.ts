@@ -239,7 +239,7 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
       'normalized=ok',
       'routed=ok',
     ]);
-    expect(f.stages.find((s) => s.key === 'normalized')?.offsetMs).toBe(40);
+    expect(f.stages.find((s) => s.key === 'normalized')?.offsetMs).toBe(45); // = created_at delivery đầu (cùng tx normalize+route)
     expect(f.stages.find((s) => s.key === 'routed')?.offsetMs).toBe(45);
     const attempt = f.branches[0].stages[1];
     expect(attempt).toMatchObject({ offsetMs: 140, durationMs: 84, status: 'ok' });

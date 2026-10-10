@@ -24,6 +24,9 @@ import type {
 } from "./types";
 import { keysAfterAudited } from "./ui-logic";
 
+// Event Flow (SPEC-event-flow-ui): query ở file riêng để giảm xung đột merge, vẫn xuất qua queries.ts.
+export * from "./flow-queries";
+
 /** Invalidate các key + LUÔN cả ["audit"] — dùng cho mọi mutation có ghi audit_logs (ADR-054). */
 function invalidateAudited(qc: ReturnType<typeof useQueryClient>, ...keys: (readonly unknown[])[]) {
   for (const key of keysAfterAudited(...keys)) void qc.invalidateQueries({ queryKey: key });

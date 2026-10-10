@@ -10,10 +10,12 @@
     "check": "biome check"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "@fortawesome/fontawesome-free": "^7.3.1",
     "@hookform/resolvers": "^5.9.1",
     "@tanstack/react-query": "^5.104.1",
     "@tanstack/react-table": "^9.2.8",
+    "@xyflow/react": "12.12.0",
     "aos": "^2.3.4",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
@@ -34,6 +36,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/aos": "^3.0.8",
     "@types/node": "^22.13.0",

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { type PlaygroundPrefill, takePlaygroundPrefill } from "@/components/flow/prefill";
 
 import Link from "next/link";
 
@@ -54,6 +56,16 @@ export default function PlaygroundPage() {
 
   const source = useMemo(() => sources.data?.find((s) => s.id === sourceId), [sources.data, sourceId]);
 
+  // "Tạo từ event này" (V1 Hành trình): điền sẵn source + body của event gốc — một lần.
+  const prefill = useRef<PlaygroundPrefill | null>(null);
+  useEffect(() => {
+    const p = takePlaygroundPrefill();
+    if (p) {
+      prefill.current = p;
+      if (p.sourceId) setSourceId(p.sourceId);
+    }
+  }, []);
+
   // Chọn sẵn nguồn đầu tiên khi danh sách về.
   useEffect(() => {
     if (!sourceId && sources.data?.length) setSourceId(sources.data[0].id);
@@ -62,7 +74,13 @@ export default function PlaygroundPage() {
   // Đổi nguồn → nạp payload mẫu của provider đó.
   useEffect(() => {
     if (!source) return;
-    setBody(JSON.stringify(samplePayload(source.provider), null, 2));
+    const p = prefill.current;
+    if (p && (!p.sourceId || p.sourceId === source.id) && p.body !== null && p.body !== undefined) {
+      prefill.current = null;
+      setBody(typeof p.body === "string" ? p.body : JSON.stringify(p.body, null, 2));
+    } else {
+      setBody(JSON.stringify(samplePayload(source.provider), null, 2));
+    }
     setSecret(source.provider === "sepay" ? DEMO_SEPAY_APIKEY : "");
     setResult(null);
   }, [source]);

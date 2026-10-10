@@ -1,6 +1,10 @@
 "use client";
 
+import { Route } from "lucide-react";
+import Link from "next/link";
+
 import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -35,6 +39,14 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
           <SheetDescription>
             Sự kiện đã chuẩn hoá + dấu vết từ lúc nhận tới từng đích (cập nhật trực tiếp).
           </SheetDescription>
+          {eventId && (
+            <Button asChild size="sm" variant="outline" className="mt-1 w-fit">
+              <Link href={`/dashboard/events/${encodeURIComponent(eventId)}`}>
+                <Route />
+                Mở hành trình đầy đủ
+              </Link>
+            </Button>
+          )}
         </SheetHeader>
 
         <div className="space-y-5 px-4 pb-6">

@@ -1,0 +1,199 @@
+/* =====================================================================================
+ * Event Flow (SPEC-event-flow-ui §0A.D) — MỘT bộ token trạng thái cho canvas, pill, log, cạnh:
+ * healthy / warning / crashed / idle / progress. Màu LUÔN đi kèm icon Lucide (xem tokens.tsx).
+ * Glow bằng box-shadow; cạnh chuyển động bằng stroke-dasharray; tôn trọng prefers-reduced-motion.
+ * ===================================================================================== */
+:root {
+  --flow-healthy: oklch(0.6 0.16 152);
+  --flow-warning: oklch(0.68 0.16 70);
+  --flow-crashed: oklch(0.58 0.22 25);
+  --flow-idle: oklch(0.62 0.02 260);
+  --flow-progress: oklch(0.58 0.17 250);
+  --flow-canvas: oklch(0.975 0.004 260);
+  --flow-grid: oklch(0.55 0.01 260 / 0.25);
+  --flow-card: oklch(1 0 0 / 0.86);
+  --flow-card-solid: oklch(1 0 0);
+  --flow-card-border: oklch(0.88 0.008 260);
+  --flow-chip: oklch(0.955 0.005 260);
+  --flow-text-dim: oklch(0.5 0.012 260);
+  --flow-glow: 0.3;
+  --flow-replay: oklch(0.7 0.18 50);
+  --flow-replay-fg: oklch(0.99 0 0);
+  --flow-json-key: oklch(0.5 0.15 250);
+  --flow-json-string: oklch(0.52 0.15 150);
+  --flow-json-number: oklch(0.6 0.16 60);
+  --flow-json-literal: oklch(0.55 0.2 330);
+}
+
+.dark {
+  --flow-healthy: oklch(0.76 0.18 150);
+  --flow-warning: oklch(0.83 0.16 85);
+  --flow-crashed: oklch(0.68 0.22 25);
+  --flow-idle: oklch(0.6 0.015 260);
+  --flow-progress: oklch(0.72 0.15 240);
+  --flow-canvas: oklch(0.155 0.005 260);
+  --flow-grid: oklch(1 0 0 / 0.09);
+  --flow-card: oklch(0.215 0.007 260 / 0.8);
+  --flow-card-solid: oklch(0.2 0.006 260);
+  --flow-card-border: oklch(1 0 0 / 0.11);
+  --flow-chip: oklch(1 0 0 / 0.06);
+  --flow-text-dim: oklch(0.7 0.01 260);
+  --flow-glow: 0.5;
+  --flow-replay: oklch(0.74 0.17 55);
+  --flow-replay-fg: oklch(0.17 0.02 50);
+  --flow-json-key: oklch(0.8 0.1 240);
+  --flow-json-string: oklch(0.8 0.15 150);
+  --flow-json-number: oklch(0.82 0.14 75);
+  --flow-json-literal: oklch(0.75 0.15 330);
+}
+
+.flow-canvas {
+  background-color: var(--flow-canvas);
+  background-image: radial-gradient(var(--flow-grid) 1px, transparent 1.2px);
+  background-size: 20px 20px;
+}
+
+.flow-surface {
+  background: var(--flow-card-solid);
+  border: 1px solid var(--flow-card-border);
+}
+
+/* Thẻ kính mờ, viền + glow theo tone (data-tone + --tone). */
+.flow-card {
+  --tone: var(--flow-idle);
+  background: var(--flow-card);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in oklch, var(--tone) 75%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--tone) 15%, transparent),
+    0 0 24px -4px color-mix(in oklch, var(--tone) calc(var(--flow-glow) * 100%), transparent),
+    0 10px 24px -14px oklch(0 0 0 / 0.35);
+}
+.flow-card[data-tone="crashed"] {
+  border-width: 1.5px;
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--tone) 35%, transparent),
+    0 0 38px -2px color-mix(in oklch, var(--tone) calc(var(--flow-glow) * 150%), transparent),
+    0 10px 24px -14px oklch(0 0 0 / 0.35);
+}
+.flow-card[data-tone="idle"] {
+  border-color: var(--flow-card-border);
+  box-shadow: 0 10px 24px -16px oklch(0 0 0 / 0.3);
+}
+.flow-card[data-tone="skipped"] {
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--flow-idle) 60%, transparent);
+  box-shadow: none;
+  opacity: 0.85;
+}
+.flow-card[data-tone="progress"] {
+  animation: flow-pulse 1.6s ease-in-out infinite;
+}
+.flow-card.is-selected {
+  outline: 2px solid color-mix(in oklch, var(--tone) 80%, transparent);
+  outline-offset: 2px;
+}
+
+.flow-icon-box {
+  --tone: var(--flow-idle);
+  background: color-mix(in oklch, var(--tone) 14%, transparent);
+  border: 1px solid color-mix(in oklch, var(--tone) 40%, transparent);
+  color: var(--tone);
+}
+.flow-pill {
+  --tone: var(--flow-idle);
+  background: color-mix(in oklch, var(--tone) 15%, transparent);
+  border: 1px solid color-mix(in oklch, var(--tone) 38%, transparent);
+  color: color-mix(in oklch, var(--tone) 78%, var(--foreground));
+}
+.flow-tone-text {
+  color: var(--tone);
+}
+.flow-edge-label {
+  --tone: var(--flow-idle);
+  background: var(--flow-card-solid);
+  border: 1px solid color-mix(in oklch, var(--tone) 55%, transparent);
+  color: color-mix(in oklch, var(--tone) 70%, var(--foreground));
+}
+.flow-replay-btn {
+  background: var(--flow-replay);
+  color: var(--flow-replay-fg);
+}
+.flow-replay-btn:hover {
+  background: color-mix(in oklch, var(--flow-replay) 88%, white);
+}
+
+@keyframes flow-pulse {
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--tone) 35%, transparent),
+      0 0 34px 0 color-mix(in oklch, var(--tone) 65%, transparent);
+  }
+}
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+@keyframes flow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.flow-edge-animated {
+  stroke-dasharray: 5 5;
+  animation: flow-dash 0.8s linear infinite;
+}
+.flow-spin {
+  animation: flow-spin 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-edge-animated,
+  .flow-card[data-tone="progress"],
+  .flow-spin {
+    animation: none;
+  }
+}
+
+/* React Flow: bỏ nền/viền mặc định, controls theo theme. */
+.flow-canvas .react-flow__node {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+  border-radius: 14px;
+}
+.flow-canvas .react-flow__attribution {
+  display: none;
+}
+.flow-canvas .react-flow__handle {
+  opacity: 0;
+  width: 6px;
+  height: 6px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+.flow-canvas .react-flow__controls {
+  box-shadow: none;
+}
+.flow-canvas .react-flow__controls-button {
+  background: var(--flow-card-solid);
+  border: 1px solid var(--flow-card-border);
+  color: var(--foreground);
+  fill: var(--foreground);
+}
+
+/* JSON viewer */
+.json-key {
+  color: var(--flow-json-key);
+}
+.json-string {
+  color: var(--flow-json-string);
+}
+.json-number {
+  color: var(--flow-json-number);
+}
+.json-literal {
+  color: var(--flow-json-literal);
+}

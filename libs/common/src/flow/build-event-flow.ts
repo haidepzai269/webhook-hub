@@ -384,12 +384,22 @@ function buildBranch(
       // Hoãn vì circuit (S2-1): PENDING mà có next_attempt_at, hoặc RETRYING khi circuit đích không CLOSED.
       const deferred = (d.status === 'PENDING' && nextAt !== null) || (d.status === 'RETRYING' && circuit !== 'CLOSED');
       if (deferred) {
+        const tierMs = d.status === 'RETRYING' && d.attemptCount >= 1 && d.attemptCount <= tiers.length ? tiers[d.attemptCount - 1] : null;
         Object.assign(done, {
           status: 'warning',
-          title: 'Hoãn — circuit đang mở',
-          subtitle: `circuit ${circuit}`,
+          title: d.status === 'RETRYING' ? `Chờ thử lại lần ${d.attemptCount + 1}/${maxAttempts}` : 'Hoãn — circuit đang mở',
+          subtitle: `circuit ${circuit} · hoãn gửi`,
           reason: reason('circuit_open', `Circuit ${circuit}`),
-          detail: { status: d.status, deferred: true, circuitState: circuit, nextAttemptAt: nextAt, attempts: d.attemptCount, lastError: d.lastError },
+          detail: {
+            status: d.status,
+            deferred: true,
+            circuitState: circuit,
+            nextAttemptAt: nextAt,
+            tier: tierMs !== null ? formatTierLabel(tierMs) : null,
+            attempts: d.attemptCount,
+            maxAttempts,
+            lastError: d.lastError,
+          },
         });
       } else if (d.status === 'RETRYING') {
         const tierMs = d.attemptCount >= 1 && d.attemptCount <= tiers.length ? tiers[d.attemptCount - 1] : null;
@@ -550,6 +560,13 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
     }
   }
 
+  // Normalize + route chạy trong CÙNG một transaction (ARCHITECTURE §3.2) và `events.received_at` là
+  // bản sao thời điểm nhận raw (không phải lúc normalize) → mốc kết thúc thật của normalize/route là
+  // `created_at` của delivery generation đầu. Không có delivery thì DB không lưu mốc → để null, không bịa.
+  const firstDeliveryAt = input.deliveries.length
+    ? iso(input.deliveries.reduce((m, d) => (ms(d.createdAt)! < ms(m.createdAt)! ? d : m)).createdAt)
+    : null;
+
   if (!terminal) {
     if (event) {
       const unmapped = event.normalized === false;
@@ -558,7 +575,7 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
         key: 'normalized',
         status: unmapped ? 'warning' : 'ok',
         startedAt: iso(raw?.receivedAt ?? event.receivedAt),
-        endedAt: iso(event.receivedAt),
+        endedAt: firstDeliveryAt,
         title: unmapped ? `Chưa ánh xạ: ${event.type}` : `Normalize ra ${event.type}`,
         subtitle: event.subject ?? undefined,
         reason: unmapped ? reason('unmapped_type') : undefined,
@@ -633,15 +650,13 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
 
   if (!terminal && event) {
     const skipped = input.skippedSubscriptions ?? [];
-    const routedAt = input.deliveries.length
-      ? iso(input.deliveries.reduce((m, d) => (ms(d.createdAt)! < ms(m.createdAt)! ? d : m)).createdAt)
-      : iso(event.receivedAt);
+    const routedAt = firstDeliveryAt;
     const matched = branches.length;
     drafts.push({
       id: 'routed',
       key: 'routed',
       status: matched > 0 ? 'ok' : 'skipped',
-      startedAt: iso(event.receivedAt),
+      startedAt: routedAt,
       endedAt: routedAt,
       title: matched > 0 ? `Khớp ${matched} subscription` : 'Không subscription nào nhận',
       subtitle: skipped.length ? `bỏ qua ${skipped.length}` : undefined,
