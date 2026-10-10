@@ -258,3 +258,11 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
   - File phụ lục `.docx` không tìm thấy ở `C:/Users/admin/Downloads/` (và Documents/Desktop) → `PHU-LUC-SUA.md` lấy câu cũ từ trích dẫn trong BB09 (9 câu tính năng); phần thông số kỹ thuật chưa đối chiếu câu chữ, chỉ đưa số đo mới.
   - ARCHITECTURE sửa rộng hơn danh sách S3-6 (§3.1–3.3, §5.2 khoá chống trùng theo provider, §7.2 xoay secret outbound ghi "chưa làm", §8 metrics + "tự cảnh báo" ghi "chưa làm", §11 theo catalog) vì các câu đó cũng sai so với code.
   - `.env.example` thêm `INGEST_RATE_LIMIT_PER_MIN`, `METRICS_TOKEN`, `WORKER_METRICS_PORT`, `CLEANUP_RETENTION_DAYS`, `CIRCUIT_MAX_DEFERRALS`, `SHUTDOWN_TIMEOUT_MS`; CLAUDE.md thêm `EVENT-CATALOG.md` vào bảng tài liệu + 2 quy tắc (khoá chống trùng không ngẫu nhiên, adapter ra kiểu chuẩn). Không đụng phần auth của `.env.example` (ADMIN_*), dù câu "không có bảng users" sẽ cũ khi ADR-056 làm xong.
+- **Sửa sau review SPEC-3 (2026-10-10):**
+  - #1 `01790b3`: `providerTxnId` dự phòng `sha:`+hash body (SePay/PayOS/Stripe) — trước đó body không id nào → 0 event dù 200.
+  - #2 `34fa59a`: circuit + throttle một `EVAL` (ADR-064); MONITOR 2 đích có throttle 10 → 8 lệnh. Upstash tính EVAL thế nào: chưa xác nhận.
+  - #3 `1695aee` (+ `cc4b2ed` test tất định): relay lô 200, confirm theo lô, một UPDATE `ANY`, lô đầy chạy ngay (ADR-065); lag k6 43,2s → 0,65s.
+  - #4 `624c60e`: thời gian dự phòng = `raw_events.received_at` (qua `NormalizeContext.receivedAt`); `events.received_at` giờ cũng là lúc hub nhận raw event.
+  - #5 `4af13e4`: `payment.failed` cho phép `amount = 0`.
+  - #6 `eace50d`: worker `/metrics` dùng chung `METRICS_TOKEN`; Prometheus không đọc env trong file cấu hình → khối `authorization` để comment, bật tay khi deploy.
+  - #7 `e3c2249`: compose `RUN_SEED` mặc định true; Telegram seed theo `SEED_TELEGRAM_ACTIVE` (compose mặc định false) — lệch đề xuất của review (review đề xuất "có token thì bật"): `.env` local có token thật nên chỉ dựa vào token sẽ bật Telegram trên stack mới; thêm cờ để local mặc định tắt (ADR-066).
