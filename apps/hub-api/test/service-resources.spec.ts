@@ -161,4 +161,13 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(list.map((e) => e.id)).toEqual([EA]);
     expect(JSON.stringify(list)).not.toMatch(/Encrypted/);
   });
+
+  it('MS-R1 (phần b): /verify giới hạn 5 lần/phút/endpoint trong bộ nhớ (0 Redis) -> lần 6: 429, không gọi challenge', async () => {
+    const { controller, req, verifier } = build();
+    for (let i = 0; i < 5; i++) await controller.verifyEndpoint(req(PA), EA);
+    const before = verifier.challenge.mock.calls.length;
+    expect(await status(controller.verifyEndpoint(req(PA), EA))).toMatchObject({ status: 429, body: { error: 'rate_limited' } });
+    expect(verifier.challenge.mock.calls.length).toBe(before);
+  });
 });
+

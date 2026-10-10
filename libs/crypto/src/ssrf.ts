@@ -6,35 +6,60 @@ import * as https from 'https';
 
 const lookupAsync = promisify(dns.lookup);
 
+function isPrivateIpv4(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts[0] === 0) return true; // 0.0.0.0/8
+  if (parts[0] === 10) return true; // 10.0.0.0/8
+  if (parts[0] === 127) return true; // 127.0.0.0/8
+  if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
+  if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
+  if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true; // 100.64.0.0/10 (CGNAT)
+  return false;
+}
+
+/** IPv6 -> 8 hextet số (mở `::`, đổi đuôi a.b.c.d nhúng thành 2 hextet). Sai định dạng -> null. */
+export function expandIpv6(ip: string): number[] | null {
+  let s = ip.toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
+  const v4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (v4) {
+    if (!net.isIPv4(v4[1])) return null;
+    const [a, b, c, d] = v4[1].split('.').map(Number);
+    s = s.slice(0, -v4[1].length) + `${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null;
+  const all = [...head, ...Array(fill).fill('0'), ...tail];
+  if (all.length !== 8 || all.some((h) => !/^[0-9a-f]{1,4}$/.test(h))) return null;
+  return all.map((h) => parseInt(h, 16));
+}
+
+/**
+ * Dải KHÔNG được gọi ra (ARCHITECTURE §7.3). MS-R1 (ADR-083): IPv6 được MỞ RA 8 hextet trước khi kiểm —
+ * `::ffff:a.b.c.d` / `::ffff:7f00:1` (ánh xạ IPv4), `::a.b.c.d` (tương thích, cũ) -> kiểm như IPv4;
+ * chặn `::`, `::1`, `64:ff9b::/96` (NAT64 — nhúng IPv4 bất kỳ), `fc00::/7`, `fe80::/10`. Không phân tích được -> chặn.
+ */
 export function isPrivateIp(ip: string): boolean {
-  if (net.isIPv4(ip)) {
-    const parts = ip.split('.').map(Number);
-    // 0.0.0.0/8
-    if (parts[0] === 0) return true;
-    // 10.0.0.0/8
-    if (parts[0] === 10) return true;
-    // 127.0.0.0/8
-    if (parts[0] === 127) return true;
-    // 169.254.0.0/16
-    if (parts[0] === 169 && parts[1] === 254) return true;
-    // 172.16.0.0/12
-    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-    // 192.168.0.0/16
-    if (parts[0] === 192 && parts[1] === 168) return true;
-    return false;
+  const raw = ip.replace(/^\[|\]$/g, '');
+  if (net.isIPv4(raw)) return isPrivateIpv4(raw);
+  if (!net.isIPv6(raw)) return true;
+  const h = expandIpv6(raw);
+  if (!h) return true;
+  const zeros5 = h.slice(0, 5).every((x) => x === 0);
+  const toV4 = (a: number, b: number) => `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`;
+  if (zeros5 && h[5] === 0xffff) return isPrivateIpv4(toV4(h[6], h[7])); // ::ffff:0:0/96
+  if (zeros5 && h[5] === 0) {
+    if (h[6] === 0 && h[7] <= 1) return true; // :: và ::1
+    return true; // ::a.b.c.d (IPv4-compatible, đã bỏ) -> không bao giờ là đích hợp lệ
   }
-
-  if (net.isIPv6(ip)) {
-    // ::1 loopback
-    if (ip === '::1') return true;
-    // fc00::/7 unique local
-    if (ip.toLowerCase().startsWith('fc') || ip.toLowerCase().startsWith('fd')) return true;
-    // fe80::/10 link local
-    if (ip.toLowerCase().startsWith('fe8') || ip.toLowerCase().startsWith('fe9') || ip.toLowerCase().startsWith('fea') || ip.toLowerCase().startsWith('feb')) return true;
-    return false;
-  }
-
-  return true;
+  if (h[0] === 0x64 && h[1] === 0xff9b && h.slice(2, 6).every((x) => x === 0)) return true; // 64:ff9b::/96
+  if ((h[0] & 0xfe00) === 0xfc00) return true; // fc00::/7
+  if ((h[0] & 0xffc0) === 0xfe80) return true; // fe80::/10
+  return false;
 }
 
 /**
@@ -42,12 +67,18 @@ export function isPrivateIp(ip: string): boolean {
  * development và `allowPrivate` — sink/echo của dev nằm ở dải private thường (10/172/192), không ở đây.
  */
 export function isLinkLocalIp(ip: string): boolean {
-  const v = ip.toLowerCase().replace(/^::ffff:/, '');
-  if (net.isIPv4(v)) {
-    const [a, b] = v.split('.').map(Number);
-    return a === 169 && b === 254;
+  const raw = ip.replace(/^\[|\]$/g, '');
+  let v4 = net.isIPv4(raw) ? raw : null;
+  const h = !v4 && net.isIPv6(raw) ? expandIpv6(raw) : null;
+  if (h) {
+    if ((h[0] & 0xffc0) === 0xfe80) return true;
+    if (h.slice(0, 5).every((x) => x === 0) && (h[5] === 0xffff || h[5] === 0)) {
+      v4 = `${h[6] >> 8}.${h[6] & 255}.${h[7] >> 8}.${h[7] & 255}`;
+    }
   }
-  return net.isIPv6(v) && /^fe[89ab]/.test(v);
+  if (!v4) return false;
+  const [a, b] = v4.split('.').map(Number);
+  return a === 169 && b === 254;
 }
 
 export interface PinnedUrl {
@@ -67,7 +98,8 @@ export async function validateAndPinUrl(rawUrl: string, allowPrivate = false): P
     throw new Error(`Giao thức không được hỗ trợ: ${parsed.protocol}`);
   }
 
-  const hostname = parsed.hostname;
+  // `new URL('http://[::1]/').hostname` = '[::1]' — bỏ ngoặc, không thì net.isIP() sai và rơi sang DNS (MS-R1).
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
   const port = parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === 'https:' ? 443 : 80;
 
   let ip = hostname;

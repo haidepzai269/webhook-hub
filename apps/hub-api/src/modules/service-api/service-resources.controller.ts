@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmDecrypt, aesGcmEncrypt, generateWhsecSecret } from '@hub/crypto';
@@ -79,6 +79,23 @@ function endpointUrl(configEncrypted: string): string | null {
   }
 }
 
+/** Cửa sổ cố định trong bộ nhớ theo khoá. Nhiều instance hub-api thì trần nhân theo số instance (chấp nhận). */
+export class WindowLimiter {
+  private readonly hits = new Map<string, { start: number; n: number }>();
+  constructor(private readonly max: number, private readonly windowMs: number) {}
+  tryAcquire(key: string, now = Date.now()): boolean {
+    const h = this.hits.get(key);
+    if (!h || now - h.start >= this.windowMs) {
+      if (this.hits.size > 10_000) this.hits.clear(); // chặn phình bộ nhớ
+      this.hits.set(key, { start: now, n: 1 });
+      return true;
+    }
+    if (h.n >= this.max) return false;
+    h.n += 1;
+    return true;
+  }
+}
+
 /** Bản công khai của source: không bao giờ có `secrets` (ciphertext). */
 function publicSource(s: any) {
   return {
@@ -117,6 +134,9 @@ export class ServiceResourcesController {
     private readonly prisma: PrismaService,
     private readonly verifier: EndpointVerifier,
   ) {}
+
+  /** MS-R1: 5 lần /verify / phút / endpoint, trong bộ nhớ từng instance (0 lệnh Redis, X9). */
+  private readonly verifyLimiter = new WindowLimiter(5, 60_000);
 
   /**
    * S6 (SPEC §4.7): không truyền `signingSecret` -> hub sinh `whsec_…` và trả ĐÚNG MỘT LẦN ở response này.
@@ -161,6 +181,10 @@ export class ServiceResourcesController {
     const tenantId = req.tenantId!;
     const d = UUID_RE.test(id) ? await this.prisma.forTenant(tenantId).findDestinationById(id) : null;
     if (!d || d.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
+    // MS-R1 (ADR-083): /verify là một POST ra ngoài theo URL do service khai — giới hạn để không thành máy dò cổng.
+    if (!this.verifyLimiter.tryAcquire(d.id)) {
+      throw new HttpException({ error: 'rate_limited', message: 'Tối đa 5 lần /verify mỗi phút cho một endpoint' }, HttpStatus.TOO_MANY_REQUESTS);
+    }
     const url = endpointUrl(d.configEncrypted);
     let secret: string | null = null;
     try {
