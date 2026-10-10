@@ -20,6 +20,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
+import { ProjectPicker } from "@/components/flow/project-picker";
 import { logout as serverLogout } from "@/lib/hub/client";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -60,6 +61,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        <ProjectPicker className="w-full justify-between" />
       </SidebarHeader>
       <SidebarContent>
         {sidebarItems.map((group) => (

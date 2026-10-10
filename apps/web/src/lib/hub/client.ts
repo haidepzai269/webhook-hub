@@ -1,3 +1,5 @@
+import { currentProjectId } from "./project-store";
+
 export class HubApiError extends Error {
   constructor(
     readonly status: number,
@@ -55,11 +57,21 @@ export function refreshSession(): Promise<boolean> {
 }
 
 /**
+ * AU3: mọi route `/api/v1/*` theo MỘT project (server: thiếu -> 400 project_required). Gắn project đang chọn nếu path
+ * chưa có — trừ `/api/v1/projects` (liệt kê/tạo của chính mình; route con mang id trên path).
+ */
+export function scopeToProject(path: string, projectId: string | null = currentProjectId()): string {
+  if (!projectId || !path.startsWith("/api/v1/") || path.startsWith("/api/v1/projects") || /[?&]projectId=/.test(path)) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}projectId=${encodeURIComponent(projectId)}`;
+}
+
+/**
  * fetch tới hub-api QUA PROXY của chính web (`/api/*`, `/auth/*` → rewrites): cookie first-party, URL tương đối,
- * `credentials:'include'`, gắn `x-csrf-token` cho method thay đổi dữ liệu. 401 → refresh một lần (single-flight)
- * rồi thử lại request gốc; refresh hỏng → về `/login`.
+ * `credentials:'include'`, gắn `x-csrf-token` cho method thay đổi dữ liệu, gắn `projectId` đang chọn.
+ * 401 → refresh một lần (single-flight) rồi thử lại request gốc; refresh hỏng → về `/login`.
  */
 export async function hubFetch<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
+  path = scopeToProject(path);
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const method = (init.method ?? "GET").toUpperCase();

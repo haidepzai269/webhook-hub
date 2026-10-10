@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-13",
+  "claim": "Operator vào project người khác luôn để lại audit operator.access",
+  "file": "apps/hub-api/src/modules/console/project-scope.guard.ts",
+  "find": "    if (scope.viaOperator) {",
+  "replace": "    if (false) {",
+  "expectRed": [
+    "[AU:UA21]"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/auth-scope.spec.ts"
+}

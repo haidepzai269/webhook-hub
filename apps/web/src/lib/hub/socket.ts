@@ -10,6 +10,7 @@ import { HUB_API_URL } from "@/lib/env";
 
 import { emptyToastCursor, type ToastCursor } from "./ui-logic";
 import { hubFetch } from "./client";
+import { currentProjectId, useProjectStore } from "./project-store";
 import type { CircuitChangedNotice, DeliveryAttemptNotice, MetricsTick, TraceIngestedNotice } from "./types";
 
 /** Payload `event.received` (khớp libs/common/src/types.ts EventReceivedNotice). */
@@ -106,22 +107,17 @@ function createInvalidator(qc: QueryClient) {
  * R-5: project mà realtime đang theo. Chỉ màn Event Flow đặt (khi mount, qua `useRealtimeProject`) và trả về
  * null khi rời màn — các trang khác của dashboard luôn theo tenant của JWT như trước.
  */
-const realtimeProject = { current: null as string | null };
+/** AU3: socket theo project đang chọn của TOÀN dashboard (project-store); đổi project -> xin vé mới, nối lại. */
 function realtimeProjectId() {
-  return realtimeProject.current;
+  return currentProjectId();
 }
 
-export function useRealtimeProject(projectId: string | null) {
-  useEffect(() => {
-    if (realtimeProject.current === projectId) return;
-    realtimeProject.current = projectId;
-    // Handshake chỉ chạy lúc (re)connect → nối lại để vào đúng room (cùng MỘT socket, không mở kết nối thứ hai).
-    if (socket?.connected) socket.disconnect().connect();
-    return () => {
-      realtimeProject.current = null;
-      if (projectId && socket?.connected) socket.disconnect().connect();
-    };
-  }, [projectId]);
+/**
+ * Giữ cho màn Event Flow (R-5): từ AU3 socket LUÔN theo project đang chọn của toàn dashboard (project-store),
+ * nên hook này không còn việc gì — đổi project ở đâu cũng nối lại socket (xem `useHubRealtime`).
+ */
+export function useRealtimeProject(_projectId: string | null) {
+  /* không còn việc gì — giữ chữ ký cho các màn đang gọi */
 }
 
 /**
@@ -151,6 +147,12 @@ export function useHubRealtime() {
     }
     const s = socket;
     const { invalidate, cancel } = createInvalidator(qc);
+    // AU3: đổi project -> bỏ cache của project cũ (query key không mang projectId) + xin vé socket mới cho project mới.
+    const unsubscribeProject = useProjectStore.subscribe((st, prev) => {
+      if (st.projectId === prev.projectId) return;
+      void qc.resetQueries();
+      if (s.connected) s.disconnect().connect();
+    });
 
     const onConnect = () => useRealtimeStore.setState({ connected: true });
     const onDisconnect = () => useRealtimeStore.setState({ connected: false });
@@ -196,6 +198,7 @@ export function useHubRealtime() {
     useRealtimeStore.setState({ connected: s.connected });
 
     return () => {
+      unsubscribeProject();
       cancel();
       s.off("connect", onConnect);
       s.off("disconnect", onDisconnect);

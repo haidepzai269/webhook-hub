@@ -5,6 +5,8 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { type AuthMe, hubFetch, LOGIN_PATH } from "@/lib/hub/client";
+import type { ProjectSummary } from "@/lib/hub/flow-project";
+import { ensureProject } from "@/lib/hub/project-store";
 import { useHubRealtime } from "@/lib/hub/socket";
 
 function Realtime() {
@@ -22,8 +24,14 @@ export function AuthGuard({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true;
+    // AU3: có phiên -> chọn project hợp lệ (đã nhớ nếu còn quyền, không thì cái đầu) TRƯỚC khi mount trang:
+    // mọi query /api/v1/* cần ?projectId=.
     hubFetch<AuthMe>("/auth/me")
-      .then(() => alive && setAuthed(true))
+      .then(() => hubFetch<ProjectSummary[]>("/api/v1/projects"))
+      .then((projects) => {
+        ensureProject(projects.map((p) => p.id));
+        if (alive) setAuthed(true);
+      })
       .catch(() => {
         if (!alive) return;
         setAuthed(false);

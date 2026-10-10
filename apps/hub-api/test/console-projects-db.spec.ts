@@ -60,39 +60,57 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
     const row = await raw.apiKey.findUniqueOrThrow({ where: { id: k.id } });
     expect(row.keyHash).toBe(hashApiKey(k.key));
     expect(JSON.stringify(row)).not.toContain(k.key);
-    const list = await ctrl.listKeys(req(alice), p.id);
+    const list = await ctrl.listKeys(p.id);
     expect(list).toHaveLength(1);
     expect(list[0]).not.toHaveProperty('key');
     expect(list[0]).not.toHaveProperty('keyHash');
     expect(await raw.auditLog.count({ where: { tenantId: p.id, action: 'api_key.created' } })).toBe(1);
-    // người ngoài project: cùng 404 như project không tồn tại
-    await expect(ctrl.listKeys(req(bob), p.id)).rejects.toMatchObject({ status: 404 });
-    await expect(ctrl.createKey(req(bob), bob.id, p.id, { serviceName: 'x', scopes: ['read:events'] })).rejects.toMatchObject({ status: 404 });
+    // người ngoài project: ProjectScopeGuard (đọc :projectId trên path) trả cùng 404 như project không tồn tại
+    const guard = new ProjectScopeGuard(svc);
+    const gctx = (r: any) => ({ switchToHttp: () => ({ getRequest: () => r }), getHandler: () => ctrl.listKeys, getClass: () => ProjectsController }) as any;
+    await expect(guard.canActivate(gctx({ params: { projectId: p.id }, query: {}, principal: bob }))).rejects.toMatchObject({ status: 404 });
   });
 
   it('key không scope / scope lạ -> 422; project không tồn tại -> 404', async () => {
     expect(() => parseCreateKey({ serviceName: 'rong', scopes: [] })).toThrow(expect.objectContaining({ status: 422 }));
     expect(() => parseCreateKey({ serviceName: 'x', scopes: ['manage:keys'] })).toThrow(expect.objectContaining({ status: 422 }));
     await expect(ctrl.createKey(req(alice), alice.id, randomUUID(), { serviceName: 'x', scopes: ['read:events'] })).rejects.toMatchObject({ status: 404 });
+
+  });
+
+  it('[AU:UA28] user CHƯA xác minh email: tạo project live / key hk_live_ -> 403 email_not_verified; hk_test_ thì được ngay', async () => {
+    const carol = principal(users[0]);
+    carol.emailVerified = false;
+    await expect(ctrl.create(req(carol), carol.id, { slug: `live-${run}`, name: 'Live', environment: 'live' })).rejects.toMatchObject({
+      status: 403,
+      response: expect.objectContaining({ error: 'email_not_verified' }),
+    });
+    const t = await ctrl.create(req(carol), carol.id, { slug: `test-${run}`, name: 'Test', environment: 'test' });
+    created.push(t.id);
+    const k = await ctrl.createKey(req(carol), carol.id, t.id, { serviceName: 'svc', scopes: ['read:events'] });
+    expect(k.key).toMatch(/^hk_test_/);
+    // project live (do người đã xác minh tạo) mà thành viên chưa xác minh tạo key -> 403
+    const live = await ctrl.create(req(alice), alice.id, { slug: `live2-${run}`, name: 'Live2', environment: 'live' });
+    created.push(live.id);
+    await expect(ctrl.createKey(req(carol), carol.id, live.id, { serviceName: 'svc', scopes: ['read:events'] })).rejects.toMatchObject({ status: 403 });
+    expect((await ctrl.createKey(req(alice), alice.id, live.id, { serviceName: 'svc', scopes: ['read:events'] })).key).toMatch(/^hk_live_/);
   });
 
   it('revoke: 204 hai lần (idempotent), audit api_key.revoked đúng MỘT lần; key project khác -> 404', async () => {
     const p = await ctrl.create(req(alice), alice.id, { slug: `rev-${run}`, name: 'Rev' });
     created.push(p.id);
     const k = await ctrl.createKey(req(alice), alice.id, p.id, { serviceName: 'svc', scopes: ['read:events'] });
-    await ctrl.revokeKey(req(alice), alice.id, p.id, k.id);
-    await ctrl.revokeKey(req(alice), alice.id, p.id, k.id);
+    await ctrl.revokeKey(alice.id, p.id, k.id);
+    await ctrl.revokeKey(alice.id, p.id, k.id);
     expect((await raw.apiKey.findUniqueOrThrow({ where: { id: k.id } })).revokedAt).not.toBeNull();
     expect(await raw.auditLog.count({ where: { tenantId: p.id, action: 'api_key.revoked' } })).toBe(1);
-    await expect(ctrl.revokeKey(req(op), op.id, DEFAULT_TENANT_ID, k.id)).rejects.toMatchObject({ status: 404 });
+    await expect(ctrl.revokeKey(op.id, DEFAULT_TENANT_ID, k.id)).rejects.toMatchObject({ status: 404 });
   });
 
-  it('ProjectScopeGuard: không ?projectId -> project đầu tiên của mình; thành viên -> vào; không là thành viên / lạ / sai định dạng -> CÙNG 404; operator vào mọi project', async () => {
+  it('ProjectScopeGuard: không ?projectId -> 400 project_required (AU3); thành viên -> vào; không là thành viên / lạ / sai định dạng -> CÙNG 404; operator vào mọi project', async () => {
     const guard = new ProjectScopeGuard(svc);
-    const ctx = (r: any) => ({ switchToHttp: () => ({ getRequest: () => r }) }) as any;
-    const r1 = req(alice);
-    await guard.canActivate(ctx(r1));
-    expect(r1.tenantId).toBe(created[0]);
+    const ctx = (r: any) => ({ switchToHttp: () => ({ getRequest: () => r }), getHandler: () => () => undefined, getClass: () => class {} }) as any;
+    await expect(guard.canActivate(ctx(req(alice)))).rejects.toMatchObject({ status: 400 });
     const r2 = req(alice, { projectId: created[1] });
     await guard.canActivate(ctx(r2));
     expect(r2.tenantId).toBe(created[1]);
@@ -103,7 +121,6 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
       bodies.push(JSON.stringify(e.getResponse()));
     }
     expect(new Set(bodies).size).toBe(1);
-    await expect(guard.canActivate(ctx(req(bob)))).rejects.toMatchObject({ status: 400 }); // bob chưa có project
     const r3 = req(op, { projectId: created[0] });
     await guard.canActivate(ctx(r3));
     expect(r3.tenantId).toBe(created[0]);

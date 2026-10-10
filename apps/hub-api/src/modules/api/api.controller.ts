@@ -24,6 +24,7 @@ import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
+import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
 import { parseSourceInput } from '../service-api/source-input';
 
@@ -93,6 +94,7 @@ export class ApiController {
 
   // --- Overview ---
   @Get('overview')
+  @RequireScope('read:project')
   async getOverview(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     const [totalSources, totalDestinations, totalEvents, totalDeliveries, deadDeliveries] = await Promise.all([
@@ -116,6 +118,7 @@ export class ApiController {
 
   // --- Stats: chuỗi thời gian cho biểu đồ dashboard (Postgres only, không Redis) ---
   @Get('stats/timeseries')
+  @RequireScope('read:project')
   async getTimeseries(@CurrentTenant() tenantId: string, @Query('range') range = '24h') {
     if (range !== '24h' && range !== '7d') {
       throw new BadRequestException("range phải là '24h' hoặc '7d'");
@@ -126,6 +129,7 @@ export class ApiController {
   // --- Sources ---
   // Không trả `secrets` (ciphertext) ra trình duyệt — dashboard chỉ cần biết có bao nhiêu version.
   @Get('sources')
+  @RequireScope('read:project')
   async listSources(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     const sources = await repo.findSources();
@@ -137,6 +141,7 @@ export class ApiController {
   }
 
   @Post('sources')
+  @RequireScope('manage:sources')
   async createSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     const masterKey = getMasterKey();
     // S8: cùng bộ kiểm với /v1/p (provider hợp lệ, generic bắt buộc verificationConfig) -> 422 có tên trường.
@@ -173,6 +178,7 @@ export class ApiController {
 
   /** Chỉ đổi tên / bật-tắt. Không xoá source: raw_events (bằng chứng đã nhận) sẽ mất theo. */
   @Patch('sources/:id')
+  @RequireScope('manage:sources')
   async updateSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any) {
     assertUuid(id, 'Source');
     const data: { name?: string; isActive?: boolean } = {};
@@ -191,12 +197,14 @@ export class ApiController {
 
   // --- Destinations ---
   @Get('destinations')
+  @RequireScope('read:project')
   async listDestinations(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     return repo.findDestinations();
   }
 
   @Post('destinations')
+  @RequireScope('manage:endpoints')
   async createDestination(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     const masterKey = getMasterKey();
     return this.withAudit(tenantId, async (repo) => {
@@ -224,6 +232,7 @@ export class ApiController {
    * được mã hoá lại; audit chỉ ghi TÊN trường đã đổi, không ghi giá trị.
    */
   @Patch('destinations/:id')
+  @RequireScope('manage:endpoints')
   async updateDestination(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any) {
     assertUuid(id, 'Destination');
     const masterKey = getMasterKey();
@@ -266,6 +275,7 @@ export class ApiController {
    * DB cũng chặn (FK RESTRICT); 409 ở đây chỉ để nói rõ lý do + con số.
    */
   @Delete('destinations/:id')
+  @RequireScope('manage:endpoints')
   async deleteDestination(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Query('reason') reason?: string) {
     assertUuid(id, 'Destination');
     return this.withFkGuard(() =>
@@ -302,12 +312,14 @@ export class ApiController {
 
   // --- Subscriptions ---
   @Get('subscriptions')
+  @RequireScope('read:project')
   async listSubscriptions(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     return repo.findSubscriptions();
   }
 
   @Post('subscriptions')
+  @RequireScope('manage:endpoints')
   async createSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     const repo = this.prisma.forTenant(tenantId);
     // S1-5 (BB-5): đích phải thuộc CÙNG tenant. Trả 404 (không phải 403) để không lộ việc
@@ -341,6 +353,7 @@ export class ApiController {
   }
 
   @Patch('subscriptions/:id')
+  @RequireScope('manage:endpoints')
   async updateSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any) {
     assertUuid(id, 'Subscription');
     const data: Record<string, unknown> = {};
@@ -370,6 +383,7 @@ export class ApiController {
    * kéo theo toàn bộ delivery/attempt (kể cả DEAD) và audit trỏ vào hư không. Muốn ngừng gửi: tắt.
    */
   @Delete('subscriptions/:id')
+  @RequireScope('manage:endpoints')
   async deleteSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Query('reason') reason?: string) {
     assertUuid(id, 'Subscription');
     return this.withFkGuard(() =>
@@ -409,6 +423,7 @@ export class ApiController {
    * cũ gửi id) được hiểu như `before` để không vỡ.
    */
   @Get('events')
+  @RequireScope('read:project')
   async listEvents(
     @CurrentTenant() tenantId: string,
     @Query('after') after?: string,
@@ -426,6 +441,7 @@ export class ApiController {
   }
 
   @Get('events/:id')
+  @RequireScope('read:project')
   async getEventDetail(@CurrentTenant() tenantId: string, @Param('id') id: string) {
     const repo = this.prisma.forTenant(tenantId);
     const event = await repo.findEventById(id);
@@ -441,6 +457,7 @@ export class ApiController {
 
   // --- Deliveries & DLQ ---
   @Get('deliveries')
+  @RequireScope('read:project')
   async listDeliveries(@CurrentTenant() tenantId: string, @Query('status') status?: string) {
     const repo = this.prisma.forTenant(tenantId);
     const where = status ? { status: status as any } : {};
@@ -448,6 +465,7 @@ export class ApiController {
   }
 
   @Get('dlq')
+  @RequireScope('read:project')
   async listDlq(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     return repo.findDeadDeliveries(50);
@@ -455,6 +473,7 @@ export class ApiController {
 
   // --- Replay Delivery (§5.3 Replay: attempt_generation + 1) ---
   @Post('deliveries/:id/replay')
+  @RequireScope('replay:deliveries')
   async replayDelivery(
     @CurrentTenant() tenantId: string,
     @CurrentUser() actor: string,
@@ -537,6 +556,7 @@ export class ApiController {
    * `delivery.replayed` (message gọn S1-1) + MỘT audit trong MỘT transaction.
    */
   @Post('deliveries/replay-bulk')
+  @RequireScope('replay:deliveries')
   async replayBulk(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     // Review SPEC-2 #2 (ADR-054): `dryRun` BẮT BUỘC là boolean JSON. Chuỗi "true" từng bị coi là
     // "không phải true" -> chạy thật. Thiếu cũng 400: thao tác ghi hàng loạt phải nói rõ ý định.
@@ -638,6 +658,7 @@ export class ApiController {
 
   // --- Audit log (S2-3) ---
   @Get('audit-logs')
+  @RequireScope('read:project')
   async listAuditLogs(@CurrentTenant() tenantId: string, @Query('limit') limit = '50', @Query('before') before?: string) {
     const take = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
     let beforeId: bigint | undefined;
@@ -675,11 +696,13 @@ export class ApiController {
   // Postgres là trọng tài (BB-2): raw_event ACCEPTED mà không sinh event nào = sự kiện chưa được
   // chuẩn hoá, bất kể bản sao trong q.normalize.dlq còn hay đã mất.
   @Get('raw-events/orphans')
+  @RequireScope('read:project')
   async listOrphanRawEvents(@CurrentTenant() tenantId: string) {
     return this.prisma.forTenant(tenantId).findOrphanRawEvents({ limit: ORPHAN_LIST_LIMIT });
   }
 
   @Post('raw-events/renormalize')
+  @RequireScope('replay:deliveries')
   async renormalizeRawEvents(
     @CurrentTenant() tenantId: string,
     @CurrentUser() actor: string,

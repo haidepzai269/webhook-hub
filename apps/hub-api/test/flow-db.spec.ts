@@ -303,7 +303,7 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     }
   });
 
-  it('[UI:F7-03] (BB-5) phạm vi project đi qua ProjectScopeGuard: thành viên + ?projectId= hợp lệ đổi tenant, lạ / không là thành viên → 404, không có → project đầu tiên của mình (AU1)', async () => {
+  it('[UI:F7-03] (BB-5) phạm vi project đi qua ProjectScopeGuard: thành viên + ?projectId= hợp lệ đổi tenant, lạ / không là thành viên → 404, không có → 400 project_required (AU3)', async () => {
     const { FlowProjectScopeGuard } = await import('../src/modules/flow/flow-scope');
     const guard = new FlowProjectScopeGuard(flow);
     await raw.project.create({ data: { id: tenant, slug: `flow-${run}`, name: `flow ${run}` } });
@@ -312,8 +312,8 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     await raw.projectMember.create({ data: { tenantId: tenant, userId: member.id, role: 'viewer' } });
     const who = (u: { id: string }) => ({ kind: 'user', id: u.id, sessionId: 's', email: 'x', name: 'x', isOperator: false, emailVerified: true });
     const ctx = (query: Record<string, string>, u: { id: string } = member) => {
-      const req: any = { query, principal: who(u) };
-      return { req, ctx: { switchToHttp: () => ({ getRequest: () => req }) } as any };
+      const req: any = { query, params: {}, principal: who(u) };
+      return { req, ctx: { switchToHttp: () => ({ getRequest: () => req }), getHandler: () => () => undefined, getClass: () => class {} } as any };
     };
     try {
       const a = ctx({ projectId: tenant });
@@ -323,9 +323,7 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
       expect(items.items.length).toBe(3);
       await expect(guard.canActivate(ctx({ projectId: randomUUID() }).ctx)).rejects.toThrow();
       await expect(guard.canActivate(ctx({ projectId: tenant }, outsider).ctx)).rejects.toMatchObject({ status: 404 });
-      const none = ctx({});
-      await expect(guard.canActivate(none.ctx)).resolves.toBe(true);
-      expect(none.req.tenantId).toBe(tenant);
+      await expect(guard.canActivate(ctx({}).ctx)).rejects.toMatchObject({ status: 400 });
     } finally {
       await raw.user.deleteMany({ where: { id: { in: [member.id, outsider.id] } } });
       await raw.project.delete({ where: { id: tenant } });

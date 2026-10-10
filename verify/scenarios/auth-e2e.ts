@@ -4,13 +4,15 @@
  * như trình duyệt. Trước mỗi kịch bản xoá khoá rate limit `rl:*` trong Redis CỦA HUBV để các kịch bản không
  * chặn lẫn nhau (giới hạn theo IP chung một máy). Không đụng stack dev.
  *
- * AU1: TA1 (phần đăng ký → key → event), TA3, TA4, TA5, TA6, TA7. AU2: TA2, TA10 — mail đọc từ file JSON của
+ * AU1: TA1 (phần đăng ký → key → event), TA3, TA4, TA5, TA6, TA7. AU3: TA8, TA15 (+ phần email_not_verified của TA2).
+ * AU2: TA2, TA10 — mail đọc từ file JSON của
  * MAIL_DRIVER=capture (verify/.mail, mount vào hub-api của hubv), KHÔNG grep log (SPEC-verification §4.2).
  */
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import Redis from 'ioredis';
+import { io as ioClient } from 'socket.io-client';
 import { composeOutput, hostUrls, ROOT } from '../lib/compose';
 import { createRunner, expect, HttpSession } from '../lib/http-session';
 
@@ -184,6 +186,8 @@ async function main() {
     await flushRateLimits();
     const { s, email } = await registered('ta2');
     expect((await s.get('/auth/me')).body?.user?.emailVerified === false, 'mới đăng ký đã xác minh?');
+    const liveBefore = await s.post('/api/v1/projects', { slug: `ta2-live-${RUN}`, name: 'TA2 live', environment: 'live' });
+    expect(liveBefore.status === 403 && liveBefore.body?.error === 'email_not_verified', `project live trước xác minh → ${liveBefore.status} ${liveBefore.text}`);
     const link = await mailLink(email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
     const anon = new HttpSession(API);
     const first = await anon.post('/auth/verify-email', { token: tokenOf(link) });
@@ -193,7 +197,10 @@ async function main() {
     const bogus = await anon.post('/auth/verify-email', { token: 'khong-phai-token' });
     expect(bogus.text === again.text, 'token sai và token đã dùng phải CÙNG body');
     expect((await s.get('/auth/me')).body?.user?.emailVerified === true, '/auth/me chưa thấy emailVerified');
-    console.log('  TA2: phần "hk_live_ trước xác minh → 403 email_not_verified" thuộc AU3 (chưa có scope/email_not_verified)');
+    const live = await s.post('/api/v1/projects', { slug: `ta2-live-${RUN}`, name: 'TA2 live', environment: 'live' });
+    expect(live.status === 201, `project live sau xác minh → ${live.status} ${live.text}`);
+    const k = await s.post(`/api/v1/projects/${live.body.id}/keys`, { serviceName: 'ta2-live', scopes: ['read:events'] });
+    expect(k.status === 201 && /^hk_live_/.test(k.body?.key), `key live → ${k.status} ${k.text}`);
   });
 
   await run.scenario('[AU:TA10] quên mật khẩu: email có / không có → CÙNG 202; đặt lại bằng link → mọi cookie jar cũ 401; mật khẩu mới đăng nhập được', async () => {
@@ -215,6 +222,64 @@ async function main() {
     }
     expect((await anon.post('/auth/login', { email, password: PASSWORD })).status === 401, 'mật khẩu cũ vẫn đăng nhập được');
     expect((await new HttpSession(API).post('/auth/login', { email, password: NEW })).status === 200, 'mật khẩu mới không đăng nhập được');
+  });
+
+  await run.scenario('[AU:TA8] cô lập 2 người 2 project: B gọi events của project A → 404 GIỐNG HỆT project ngẫu nhiên; socket của B (vé project B) không nhận event của A', async () => {
+    await flushRateLimits();
+    const A = await registered('ta8a');
+    const B = await registered('ta8b');
+    const pa = A.body.memberships[0];
+    const pb = B.body.memberships[0];
+    const cross = await B.s.get(`/api/v1/events?projectId=${pa.projectId}`);
+    const random = await B.s.get(`/api/v1/events?projectId=${randomUUID()}`);
+    expect(cross.status === 404 && cross.text === random.text, `chéo → ${cross.status} ${cross.text} vs ngẫu nhiên ${random.text}`);
+    const ticketCross = await B.s.get(`/auth/socket-ticket?projectId=${pa.projectId}`);
+    expect(ticketCross.status === 404, `vé socket cho project người khác → ${ticketCross.status}`);
+    const connect = async (sess: HttpSession, projectId: string) => {
+      const t = await sess.get(`/auth/socket-ticket?projectId=${projectId}`);
+      expect(t.status === 200, `xin vé → ${t.status} ${t.text}`);
+      const sock = ioClient(API, { transports: ['websocket'], auth: { ticket: t.body.ticket }, reconnection: false });
+      const got: any[] = [];
+      sock.on('event.received', (e: any) => got.push(e));
+      await new Promise<void>((ok, bad) => {
+        sock.once('connect', () => ok());
+        sock.once('connect_error', (e: Error) => bad(e));
+      });
+      return { sock, got };
+    };
+    const sa = await connect(A.s, pa.projectId);
+    const sb = await connect(B.s, pb.projectId);
+    try {
+      const key = await A.s.post(`/api/v1/projects/${pa.projectId}/keys`, { serviceName: 'ta8', scopes: ['publish:events'] });
+      expect(key.status === 201, `key A → ${key.status} ${key.text}`);
+      const pub = await fetch(`${API}/v1/p/${pa.slug}/events`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${key.body.key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ type: `ta8.created_${RUN}`, idempotencyKey: `ta8-${RUN}`, data: { a: 1 } }),
+      });
+      expect(pub.status === 202, `publish A → ${pub.status}`);
+      for (let i = 0; i < 40 && sa.got.length === 0; i++) await sleep(250);
+      expect(sa.got.length >= 1, 'socket của A (đối chứng) không nhận event của chính A — kiểm tra realtime');
+      await sleep(1500);
+      expect(sb.got.length === 0, `socket của B nhận ${sb.got.length} event của A`);
+      console.log(`  TA8: socket A nhận ${sa.got.length} event · socket B nhận ${sb.got.length}`);
+    } finally {
+      sa.sock.close();
+      sb.sock.close();
+    }
+  });
+
+  await run.scenario('[AU:TA15] operator mở project của người khác → 200, và audit_logs của project đó có operator.access', async () => {
+    await flushRateLimits();
+    const A = await registered('ta15');
+    const pa = A.body.memberships[0];
+    const op = new HttpSession(API);
+    const login = await op.post('/auth/login', { email: process.env.VERIFY_OPERATOR_EMAIL || 'operator@verify.local', password: process.env.VERIFY_OPERATOR_PASSWORD || 'VERIFY_ONLY_admin_password' });
+    expect(login.status === 200, `operator login → ${login.status} ${login.text}`);
+    const ev = await op.get(`/api/v1/events?projectId=${pa.projectId}`);
+    expect(ev.status === 200, `operator xem events project A → ${ev.status} ${ev.text}`);
+    const audit = await A.s.get(`/api/v1/audit-logs?projectId=${pa.projectId}`);
+    expect(audit.status === 200 && audit.text.includes('operator.access'), `audit của A không có operator.access: ${audit.text.slice(0, 300)}`);
   });
 
   await redis.quit();

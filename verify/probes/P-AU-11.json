@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-11",
+  "claim": "Gateway realtime nhận được PrismaService qua DI (không thì mọi socket bị từ chối)",
+  "file": "apps/hub-api/src/modules/realtime/realtime.gateway.ts",
+  "find": "@Optional() private readonly prisma?: PrismaService,",
+  "replace": "@Optional() private readonly prisma?: Pick<PrismaService, 'identity'>,",
+  "expectRed": [
+    "DI: tham số prisma"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/realtime-project.spec.ts"
+}

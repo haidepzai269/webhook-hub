@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-14",
+  "claim": "hk_live_ cần email đã xác minh",
+  "file": "apps/hub-api/src/modules/console/projects.controller.ts",
+  "find": "if (project.environment === 'live' && !me(req).emailVerified) emailNotVerified();",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA28]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/console-projects-db.spec.ts"
+}

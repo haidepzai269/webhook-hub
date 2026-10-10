@@ -67,7 +67,8 @@ export class RealtimeGateway
     private readonly jwtService: JwtService,
     @Inject(AUTH_CONFIG) private readonly authCfg: AuthConfig,
     // Vé hợp lệ vẫn phải có session còn sống (logout-all ngắt được cả socket mới). Vắng -> từ chối mọi kết nối.
-    @Optional() private readonly prisma?: Pick<PrismaService, 'identity'>,
+    // Kiểu PHẢI là lớp PrismaService (không Pick<>): Nest đọc design:paramtypes — Pick<> thành Object và không inject được.
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   afterInit(server: Server) {

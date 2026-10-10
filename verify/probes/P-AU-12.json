@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-12",
+  "claim": "Role không có scope thì 403 missing_scope (viewer không sửa được endpoint)",
+  "file": "apps/hub-api/src/modules/console/project-scope.guard.ts",
+  "find": "if (required && !scope.scopes.includes(required)) {",
+  "replace": "if (false) {",
+  "expectRed": [
+    "[AU:UA17]"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/auth-scope.spec.ts"
+}

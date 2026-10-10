@@ -162,6 +162,7 @@
     "AF:#35": "psql -U shop_user … → permission denied (docker) — chờ VF4 nhập vào runner L2",
     "AF:#39": "bash scripts/e2e-smoke.sh — VF4 thay bằng runner L2 TS có tag",
     "AF:#41": "PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test",
-    "VF:VT15": "Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local)"
+    "VF:VT15": "Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local)",
+    "AU:TA14": "Trình duyệt thật (Chrome + Firefox ở http://localhost:3000): F5 vẫn đăng nhập, document.cookie không thấy __Host-hub_at/rt — phiên TEST làm tay (SPEC-auth §10.2); phía server đã có TA1/TA5/TA6 tự động"
   }
 }

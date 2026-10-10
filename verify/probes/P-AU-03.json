@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-03",
+  "claim": "Guard bỏ kiểm membership -> IDOR ?projectId= của người khác phải 404 (SPEC-verification §6.3)",
+  "file": "apps/hub-api/src/modules/console/project-scope.guard.ts",
+  "find": "if (!project || (!role && !principal.isOperator))",
+  "replace": "if (!project)",
+  "expectRed": [
+    "[AU:UA16]"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/auth-scope.spec.ts"
+}

@@ -4,6 +4,7 @@ import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { SocketTicketService } from '../src/modules/auth/socket-ticket.service';
 import { loadAuthConfig } from '../src/modules/auth/auth-config';
 import { signSocketTicket } from '../src/modules/auth/tokens';
+import { PrismaService } from '@hub/database';
 
 /**
  * SPEC-auth §5.7 (thay R-5 cũ): socket vào room của project nhờ VÉ — vé chỉ phát khi người gọi qua CÙNG luật
@@ -71,6 +72,11 @@ describe('vé socket theo project (SPEC-auth §5.7)', () => {
     expect((await connect(gw, { ticket: valid })).err?.message).toBe('UNAUTHORIZED');
     liveSessions.add('sid-1');
     expect((await connect(new RealtimeGateway(jwt, cfg), { ticket: valid })).err?.message).toBe('UNAUTHORIZED'); // thiếu Prisma
+  });
+
+  it('DI: tham số prisma của gateway là LỚP PrismaService (Pick<> mất metadata -> Nest không inject -> mọi socket bị từ chối, bắt bởi TA8)', () => {
+    const types = Reflect.getMetadata('design:paramtypes', RealtimeGateway) as unknown[];
+    expect(types[2]).toBe(PrismaService);
   });
 
   it('token đăng nhập cũ (`auth.token`) không còn được chấp nhận', async () => {

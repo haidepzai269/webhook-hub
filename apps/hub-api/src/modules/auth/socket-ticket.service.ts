@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '@hub/database';
 import { AUTH_CONFIG, AuthConfig } from './auth-config';
@@ -21,6 +21,10 @@ export class SocketTicketService {
 
   async issue(principal: UserPrincipal, projectId: unknown): Promise<{ ticket: string; projectId: string }> {
     const scoped = await resolveProjectScope(this.prisma, projectId, principal);
+    // §5.7: vé chỉ cho người có read:project (mọi role hiện có đều có — kiểm tường minh để role mới không lọt).
+    if (!scoped.scopes.includes('read:project')) {
+      throw new HttpException({ error: 'missing_scope', message: 'Role hiện tại không có quyền read:project', required: 'read:project' }, HttpStatus.FORBIDDEN);
+    }
     return { ticket: signSocketTicket(this.jwt, this.cfg, { userId: principal.id, sessionId: principal.sessionId, projectId: scoped.projectId }), projectId: scoped.projectId };
   }
 }

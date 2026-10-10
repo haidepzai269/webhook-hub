@@ -1059,3 +1059,26 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** Đăng ký cần xác minh email thật, quên mật khẩu cần link một lần; E2E phải đọc được link mà không grep log; hai request song song có thể dùng cùng một token; mật khẩu mới yếu không được đốt mất token đặt lại.
 **Chọn:** `libs/common/src/mail`: `MailSender` + driver `log` (mặc định local, in link ra log), `resend` (fetch API Resend, thiếu key thì ném lúc khởi tạo), `capture` (mỗi thư một file JSON; hubv mount `verify/.mail`; production + capture thì app thoát). Mẫu thư tiếng Việt có bản text, escape HTML. Token 32 byte base64url, DB chỉ sha256, xác minh 24 giờ, đặt lại 1 giờ; dùng một lần bằng MỘT câu `UPDATE … WHERE used_at IS NULL AND expires_at > now RETURNING` (UA14); gửi lại thì vô hiệu token cũ chưa dùng. Mail gửi SAU COMMIT, không chặn response; lỗi gửi chỉ log. Đăng ký trùng email: 201 cùng hình dạng + mail "có người thử" (không kèm token). Quên mật khẩu luôn 202 cùng body; giới hạn 1/phút + 5/ngày theo email. Đặt lại mật khẩu: kiểm mật khẩu yếu TRƯỚC khi đốt token (peek không đốt), rồi đổi hash + thu hồi mọi phiên + đánh dấu email đã xác minh trong một transaction. Đổi mật khẩu thu hồi mọi phiên trừ phiên hiện tại. CleanupJob sẵn có thêm hai bước qua `IdentityRepository` (phiên hết hạn > 30 ngày, token > 7 ngày). Web: trang trần `/verify-email` (POST token ngay, `replaceState`, `Referrer-Policy: no-referrer`).
 **Đánh đổi:** Driver `log` in link có token vào log, nên DEPLOYMENT ghi rõ deployed phải dùng `resend`. Không có trang `/forgot-password`, `/reset-password` trên web (việc của phiên UI; API đã có). Đặt lại mật khẩu đánh dấu email đã xác minh (bấm link trong mail là bằng chứng sở hữu), lệch nhẹ so với spec (spec không nói).
+
+## ADR-105 — AU3: role = bó scope, ProjectScopeGuard là ProjectAccessGuard của spec, projectId bắt buộc, operator để lại dấu vết (2026-10-11)
+
+**Vấn đề:** Spec gọi guard là `ProjectAccessGuard`, nhưng repo (HTTP, vé socket, module flow) đã dựa vào `ProjectScopeGuard` + `resolveProjectScope`. Route `/api/v1/projects` (liệt kê/tạo) không thuộc project nào nên không có scope để khai. Query key của web không mang projectId, nên đổi project sẽ hiện dữ liệu cũ.
+**Chọn:**
+- `libs/common/src/auth/roles.ts` là hằng số DUY NHẤT: `ROLE_SCOPES` (viewer ⊂ developer ⊂ owner), `KEY_GRANTABLE_SCOPES` (4 scope, không bao giờ `manage:keys`/`members`/`project`).
+- GIỮ tên `ProjectScopeGuard` (chính là ProjectAccessGuard của spec):
+  - đọc `projectId` từ path hoặc query; thiếu thì 400 `project_required` (bỏ project mặc định của AU1);
+  - không tồn tại / không thành viên → CÙNG 404;
+  - thiếu scope → 403 `missing_scope {required}` (thứ tự 401 → 404 → 403 như ApiKeyGuard);
+  - operator không là thành viên được coi như owner và MỖI request ghi `audit_logs` `operator.access`.
+- Một `@RequireScope` cho cả người lẫn máy. Route không thuộc project khai `@NoProjectScope(lý do)`; UA20 quét metadata, route nào thiếu cả hai thì đỏ. Quy tắc §6.1, lệch duy nhất: `GET …/keys` là `read:project` (chỉ prefix, không bao giờ key/hash).
+- `email_not_verified`: project `live` / key `hk_live_`; `hk_test_` vẫn được ngay.
+- Vé socket kiểm thêm `read:project`.
+- Web:
+  - store project chung toàn dashboard (`project-store.ts`, localStorage chỉ id);
+  - `hubFetch` tự gắn `?projectId=` cho `/api/v1/*` (trừ `/api/v1/projects`);
+  - bộ chọn project ở sidebar (role hiển thị kèm);
+  - đổi project thì `resetQueries` + xin vé socket mới;
+  - AuthGuard chọn project hợp lệ trước khi mount trang.
+- Sửa bug AU1 (bắt bởi TA8): gateway khai `prisma?: Pick<PrismaService,…>` nên Nest không inject được (metadata là `Object`) và mọi socket thật bị từ chối. Đã có test DI hồi quy.
+
+**Đánh đổi:** Operator ghi một dòng audit cho MỖI request vào project người khác (nhiều dòng nếu xem lâu), chấp nhận vì operator ngày thường không dùng. Ẩn nút theo role trên web chưa làm (phiên UI). TA14 (trình duyệt thật) là mồ côi có lý do — phiên TEST làm tay.

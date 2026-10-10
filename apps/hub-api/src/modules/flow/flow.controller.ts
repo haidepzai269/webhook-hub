@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query, UseGuards, UseInterceptors } from '@nest
 import { SessionGuard } from '../auth/session.guard';
 import { FlowProjectScopeGuard, FlowScope } from './flow-scope';
 import { RedactSecretsInterceptor } from '../api/redact-secrets.interceptor';
+import { RequireScope } from '../service-api/require-scope.decorator';
 import { ExecutionQuery, FlowService } from './flow.service';
 
 /**
@@ -12,6 +13,8 @@ import { ExecutionQuery, FlowService } from './flow.service';
 @Controller('api/v1/flow')
 // X2: JWT trước, rồi ProjectScopeGuard (qua FlowProjectScopeGuard) đọc `?projectId=` — không controller nào tự đọc.
 @UseGuards(SessionGuard, FlowProjectScopeGuard)
+// SPEC-auth §6.1: cả module chỉ đọc -> read:project (FlowProjectScopeGuard bọc ProjectScopeGuard, kiểm scope ở đó)
+@RequireScope('read:project')
 @UseInterceptors(RedactSecretsInterceptor)
 export class FlowController {
   constructor(private readonly flow: FlowService) {}

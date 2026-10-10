@@ -17,37 +17,37 @@ import { restoreFlowProject, useFlowProjectStore, useProjects } from "@/lib/hub/
 
 import { ICON } from "./tokens";
 
-const DEFAULT = "__default";
-
-/** Bộ chọn project cho V2/V3 (F7). Danh sách từ `GET /api/v1/projects`; trống/lỗi thì ẩn. */
+/**
+ * Bộ chọn project (AU3: dùng cho TOÀN dashboard — gắn ở sidebar; màn Event Flow vẫn đặt thêm một cái).
+ * Danh sách từ `GET /api/v1/projects` (project mình là thành viên; operator thấy hết). Trống/lỗi thì ẩn.
+ * Đổi project: mọi query gắn projectId mới, socket xin vé mới (socket.ts).
+ */
 export function ProjectPicker({ className }: { className?: string }) {
   const { data } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const setProjectId = useFlowProjectStore((s) => s.setProjectId);
   useEffect(() => restoreFlowProject(), []);
   if (!data || data.length === 0) return null;
-  const current = data.find((p) => p.id === projectId) ?? data.find((p) => p.slug === "default");
+  const current = data.find((p) => p.id === projectId) ?? data[0];
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className={className} aria-label="Project">
           <FolderKanban {...ICON} />
-          {current?.name ?? "default"}
+          {current?.name ?? "Chọn project"}
           <ChevronDown {...ICON} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Project</DropdownMenuLabel>
         <DropdownMenuRadioGroup
-          value={projectId ?? DEFAULT}
-          onValueChange={(v) => {
-            const p = data.find((x) => x.id === v);
-            setProjectId(v === DEFAULT || p?.slug === "default" ? null : v);
-          }}
+          value={current?.id ?? ""}
+          onValueChange={(v) => setProjectId(v)}
         >
           {data.map((p) => (
-            <DropdownMenuRadioItem key={p.id} value={p.slug === "default" ? DEFAULT : p.id}>
+            <DropdownMenuRadioItem key={p.id} value={p.id}>
               {p.name}
+              {p.role && <span className="pl-2 text-muted-foreground text-xs">{p.role}</span>}
               <span className="ml-auto pl-3 font-mono text-muted-foreground text-xs">{p.slug}</span>
             </DropdownMenuRadioItem>
           ))}
