@@ -28,7 +28,8 @@
     "verify:unit": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts unit",
     "verify:db": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts db",
     "verify:map": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts map",
-    "verify:selftest": "ts-node --transpile-only -P tsconfig.json verify/scenarios/stack-isolation.ts"
+    "verify:selftest": "ts-node --transpile-only -P tsconfig.json verify/scenarios/stack-isolation.ts",
+    "verify:gates": "ts-node --transpile-only -P tsconfig.json verify/cli/gates.ts"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

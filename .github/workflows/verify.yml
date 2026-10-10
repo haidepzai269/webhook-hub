@@ -1,0 +1,119 @@
+# VF7 (SPEC-verification §7, ADR-067): CI bắt buộc. Repo PUBLIC → không có secret thật nào ở đây; chỉ .env.verify.
+#
+# Job ở bản này: unit (L0 + map + grep §7.3) · db (L1 trên service container) · secrets (gitleaks toàn lịch sử).
+# Job e2e (mọi push) và chaos (nightly) thêm ở VF8, khi đã có runner L2 (VF4) và L3 (VF5).
+# Bảo vệ nhánh (Admin bật trên GitHub): `unit` + `db` là required check để merge vào main.
+name: verify
+
+on:
+  push:
+    paths-ignore: ['**/*.md', 'docs/**', '_bmad-output/**']
+  # pull_request (KHÔNG pull_request_target): PR từ fork không đọc được secret nào. CI vốn không cần secret.
+  pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', '_bmad-output/**']
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit (L0 + map + gates)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Ngoại lệ DUY NHẤT của luật --maxWorkers=2: runner CI có 4 vCPU / 16GB, máy dev thì không.
+      VERIFY_JEST_WORKERS: '4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: Grep gác cổng §7.3
+        run: npm run verify:gates
+      - name: L0 unit
+        run: npm run verify:unit
+      - name: verify:map (mồ côi / ma / trùng)
+        run: npm run verify:map
+      - name: Lưu TEST-MAP + kết quả
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-unit
+          path: |
+            docs/TEST-MAP.md
+            verify/.results/
+            verify/.last-red.json
+          if-no-files-found: ignore
+
+  db:
+    name: db (L1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hub_user
+          POSTGRES_PASSWORD: hub_password
+          POSTGRES_DB: webhook_hub
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U hub_user -d webhook_hub"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
+      DIRECT_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
+      VERIFY_DATABASE_URL: postgresql://hub_user:hub_password@localhost:5432/webhook_hub?schema=hub
+      VERIFY_REDIS_URL: redis://localhost:6379
+      VERIFY_JEST_WORKERS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: Migration thật (không db push — ADR-047)
+        run: npx prisma migrate deploy --schema=libs/database/prisma/schema.prisma
+      # AU6 thêm bước tạo role `hub_app` (không superuser, không BYPASSRLS) và đặt DATABASE_URL/VERIFY_DATABASE_URL
+      # sang role đó, VERIFY_DB_OWNER_URL giữ owner (SPEC-verification §4.3). Trước AU6 chưa có role này.
+      - name: L1 db (skip > 0 = đỏ)
+        run: npm run verify:db
+      - name: Lưu kết quả
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-db
+          path: |
+            verify/.results/
+            verify/.last-red.json
+          if-no-files-found: ignore
+
+  secrets:
+    name: secrets (gitleaks, toàn lịch sử)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Ghim phiên bản image. Có phát hiện → XOAY secret đó ở provider, không chỉ xoá khỏi git (§7.1).
+      - name: gitleaks detect
+        run: >-
+          docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:v8.18.4
+          detect --source /repo --redact --verbose --exit-code 1

@@ -8,6 +8,10 @@ module.exports = {
   collectCoverageFrom: ['**/*.(t|j)s'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
+  // VF7: worktree của agent (.claude/worktrees/*) và của probe (VF6) nằm DƯỚI thư mục repo → haste map thấy hai
+  // bản @hub/* và mọi suite import @hub chết ("several different files … provide a module"). Bỏ qua chúng.
+  modulePathIgnorePatterns: ['<rootDir>/.claude/', '<rootDir>/dist/'],
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
   moduleNameMapper: {
     '^@hub/common(.*)$': '<rootDir>/libs/common/src$1',
     '^@hub/crypto(.*)$': '<rootDir>/libs/crypto/src$1',
