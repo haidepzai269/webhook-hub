@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T22:51:41.567Z, commit baadc21).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T23:04:08.858Z, commit 4609265).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 227 mã khai báo · 150 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 227 mã khai báo · 151 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -47,46 +47,47 @@ Tổng: 227 mã khai báo · 150 mã có test · 0 mồ côi · 12 mồ côi có
 | `AF:#39` | REVIEW-CHECKLIST.md · S1-8 | — | — | mồ côi có lý do: bash scripts/e2e-smoke.sh — VF4 thay bằng runner L2 TS có tag |
 | `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:222 | ✅ pass |
 | `AF:#41` | REVIEW-CHECKLIST.md · S3-6 | — | — | mồ côi có lý do: PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test |
-| `AR:R-2` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:15<br>apps/hub-api/test/auth-review.spec.ts:22<br>verify/scenarios/auth-e2e.ts:399 | ✅ pass |
-| `AR:R-3` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:47<br>apps/hub-api/test/auth-review.spec.ts:80<br>apps/hub-api/test/auth-review.spec.ts:88<br>verify/scenarios/auth-e2e.ts:332 | ✅ pass |
+| `AR:R-2` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:15<br>apps/hub-api/test/auth-review.spec.ts:22<br>verify/scenarios/auth-e2e.ts:433 | ✅ pass |
+| `AR:R-3` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:47<br>apps/hub-api/test/auth-review.spec.ts:80<br>apps/hub-api/test/auth-review.spec.ts:88<br>verify/scenarios/auth-e2e.ts:368 | ✅ pass |
 | `AR:R-4` | REVIEW-AUTH-2026-10-11.md | L0 | libs/database/test/repo-batch.spec.ts:29 | ✅ pass |
-| `AR:R-5` | REVIEW-AUTH-2026-10-11.md | L2* | verify/scenarios/auth-e2e.ts:389 | chưa chạy |
+| `AR:R-5` | REVIEW-AUTH-2026-10-11.md | L2* | verify/scenarios/auth-e2e.ts:423 | chưa chạy |
+| `AR:R-6` | REVIEW-AUTH-2026-10-11.md | L1,L2* | apps/hub-api/test/auth-mail-db.spec.ts:112<br>verify/scenarios/auth-e2e.ts:147 | ✅ pass |
 | `AR:R-7` | REVIEW-AUTH-2026-10-11.md | L0 | verify/test/gates.spec.ts:79 | ✅ pass |
 | `AR:R-8` | REVIEW-AUTH-2026-10-11.md | L0 | apps/hub-api/test/api-key.guard.spec.ts:111<br>apps/hub-api/test/auth-scope.spec.ts:123 | ✅ pass |
 | `AR:R-10` | REVIEW-AUTH-2026-10-11.md | L0 | apps/hub-api/test/auth-review.spec.ts:113 | ✅ pass |
 | `AR:R-12` | REVIEW-AUTH-2026-10-11.md | L1 | apps/hub-api/test/github-oauth-db.spec.ts:163<br>apps/hub-api/test/github-oauth-db.spec.ts:172 | ✅ pass |
 | `AR:R-13` | REVIEW-AUTH-2026-10-11.md | L0,L1 | apps/hub-api/test/auth-review.spec.ts:126<br>apps/hub-api/test/members-db.spec.ts:127<br>apps/hub-api/test/realtime-project.spec.ts:89 | ✅ pass |
 | `AR:R-14` | REVIEW-AUTH-2026-10-11.md | L1 | apps/hub-api/test/console-projects-db.spec.ts:85 | ✅ pass |
-| `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:75 | chưa chạy |
-| `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:192 | chưa chạy |
-| `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:104 | chưa chạy |
-| `AU:TA4` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:135 | chưa chạy |
-| `AU:TA5` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:151 | chưa chạy |
-| `AU:TA6` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:170 | chưa chạy |
-| `AU:TA7` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:183 | chưa chạy |
-| `AU:TA8` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:234 | chưa chạy |
-| `AU:TA9` | SPEC-auth.md · AU4 | L2* | verify/scenarios/auth-e2e.ts:292 | chưa chạy |
-| `AU:TA10` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:213 | chưa chạy |
+| `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:87 | chưa chạy |
+| `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:229 | chưa chạy |
+| `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:116 | chưa chạy |
+| `AU:TA4` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:172 | chưa chạy |
+| `AU:TA5` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:188 | chưa chạy |
+| `AU:TA6` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:207 | chưa chạy |
+| `AU:TA7` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:220 | chưa chạy |
+| `AU:TA8` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:272 | chưa chạy |
+| `AU:TA9` | SPEC-auth.md · AU4 | L2* | verify/scenarios/auth-e2e.ts:330 | chưa chạy |
+| `AU:TA10` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:251 | chưa chạy |
 | `AU:TA11` | SPEC-auth.md · AU5 | — | — | mồ côi có lý do: Thủ công, cần GitHub OAuth App thật (DINH-CHINH-AUTH §4 #9: TA11 để sau); fake-github là VF4. Logic phủ bằng github-oauth-db.spec (UA23-UA25, PKCE, operator, unlink) với fetch giả |
 | `AU:TA12` | SPEC-auth.md · AU6 | L1 | libs/database/test/rls-db.spec.ts:42 | ✅ pass |
-| `AU:TA13` | SPEC-auth.md · AU6 | L2* | verify/scenarios/auth-e2e.ts:319 | chưa chạy |
+| `AU:TA13` | SPEC-auth.md · AU6 | L2* | verify/scenarios/auth-e2e.ts:355 | chưa chạy |
 | `AU:TA14` | SPEC-auth.md · AU3 | — | — | mồ côi có lý do: Trình duyệt thật (Chrome + Firefox ở http://localhost:3000): F5 vẫn đăng nhập, document.cookie không thấy __Host-hub_at/rt — phiên TEST làm tay (SPEC-auth §10.2); phía server đã có TA1/TA5/TA6 tự động |
-| `AU:TA15` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:279 | chưa chạy |
+| `AU:TA15` | SPEC-auth.md · AU3 | L2* | verify/scenarios/auth-e2e.ts:317 | chưa chạy |
 | `AU:UA1` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:40 | ✅ pass |
 | `AU:UA2` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:163 | ✅ pass |
 | `AU:UA3` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:168 | ✅ pass |
 | `AU:UA4` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:192 | ✅ pass |
-| `AU:UA5` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:87 | ✅ pass |
+| `AU:UA5` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:93 | ✅ pass |
 | `AU:UA6` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:118 | ✅ pass |
-| `AU:UA7` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:65 | ✅ pass |
-| `AU:UA8` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:79 | ✅ pass |
-| `AU:UA9` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:92 | ✅ pass |
-| `AU:UA10` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:102 | ✅ pass |
+| `AU:UA7` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:68 | ✅ pass |
+| `AU:UA8` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:82 | ✅ pass |
+| `AU:UA9` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:95 | ✅ pass |
+| `AU:UA10` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:105 | ✅ pass |
 | `AU:UA11` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:132 | ✅ pass |
 | `AU:UA12` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:70<br>apps/hub-api/test/auth-unit.spec.ts:175 | ✅ pass |
 | `AU:UA13` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:86 | ✅ pass |
-| `AU:UA14` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:101 | ✅ pass |
-| `AU:UA15` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:123 | ✅ pass |
+| `AU:UA14` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:130 | ✅ pass |
+| `AU:UA15` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:152 | ✅ pass |
 | `AU:UA16` | SPEC-auth.md · AU3 | L0 | apps/hub-api/test/auth-scope.spec.ts:49 | ✅ pass |
 | `AU:UA17` | SPEC-auth.md · AU3 | L0 | apps/hub-api/test/auth-scope.spec.ts:58 | ✅ pass |
 | `AU:UA18` | SPEC-auth.md · AU4 | L1 | apps/hub-api/test/members-db.spec.ts:101 | ✅ pass |
@@ -171,6 +172,6 @@ Tổng: 227 mã khai báo · 150 mã có test · 0 mồ côi · 12 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (108 file, 625 khai báo it/test)
+## File test (108 file, 626 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

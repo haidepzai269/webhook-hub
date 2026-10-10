@@ -41,8 +41,11 @@ describeDb('Phiên đăng nhập — refresh xoay vòng (Postgres)', () => {
 
   beforeAll(async () => {
     const r = await auth.register({ email, name: 'Phiên Test', password: 'ca-phe-sua-da-2026' }, ctx);
-    userId = r.body.user.id;
-    projectIds.push(...r.body.memberships.map((m: { projectId: string }) => m.projectId));
+    await r.done; // R-6: tạo user chạy nền sau response
+    // R-6: chưa xác minh thì không đăng nhập được — test phiên đặt thẳng emailVerifiedAt (luồng link: auth-mail-db).
+    const u = await raw.user.update({ where: { email }, data: { emailVerifiedAt: new Date(clock.now) } });
+    userId = u.id;
+    projectIds.push(...(await raw.projectMember.findMany({ where: { userId } })).map((m) => m.tenantId));
   }, 60_000);
 
   afterAll(async () => {

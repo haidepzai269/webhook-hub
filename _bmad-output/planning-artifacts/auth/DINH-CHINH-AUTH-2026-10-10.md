@@ -104,3 +104,13 @@ Riêng `/register` và `/verify-email` được làm một **form trần** nếu
 | 6 | Đích nhận thử | Service **sink** trong `hubv`: trả challenge, ghi lại request và có API đọc lại, `?mode=fail` / `?mode=slow`. `/mock/*` giữ cho Telegram/Discord | VF4 (hoặc VF1) |
 | 7 | Đường dẫn ingest | `/hooks/<provider>/<sourceKey>`. Viết `/hooks/<sourceId>` ở SPEC-verification §5.2 là sai | VF3 |
 | 8 | T10 noisy neighbor có số đo | Tầng L4: local, chạy tay, không vào CI. Phần chức năng của T10 vẫn ở L2 | VF4/VF5 |
+
+## 9. Đính chính sau review AU (2026-10-11, REVIEW-AUTH R-1..R-14)
+
+| # | Spec cũ | Giờ (thắng spec) | ADR |
+|---|---|---|---|
+| 1 | §5.2 + §6: register 201 kèm cookie phiên (đăng nhập luôn) | register 201 `{ok,message}` cố định, **không cookie**; tài khoản mật khẩu chưa xác minh login → 401 `invalid_credentials`; `POST /auth/verify-email` xác minh **và** đặt cookie phiên. TA1 = đăng ký → bấm link → console; TA2 = login trước xác minh 401 | ADR-120 |
+| 2 | §5.5 rate limit theo IP | sau proxy web, IP lấy từ `x-hub-client-ip` kèm `WEB_PROXY_SECRET` (biến mới ở hub-api + web) | ADR-110 |
+| 3 | §5.7 socket chỉ kiểm lúc handshake | socket bị ngắt khi logout/logout-all/thu hồi thiết bị/đổi-đặt lại mật khẩu/bị xoá khỏi project (ngay ở instance đó, ≤ 30 s ở instance khác) | ADR-112 |
+| 4 | UA20 quét 4 controller | mọi route của mọi controller khai `@RequireScope`/`@NoProjectScope`/`@PublicRoute`; guard thiếu khai báo → 500 | ADR-113 |
+| 5 | (không có) | `/auth/login`, `/auth/register` chỉ nhận `application/json` (415) · trần project 3/10 · migration dữ liệu sau RLS phải `SET LOCAL app.rls_system='on'` | ADR-114, 118, 111 |

@@ -111,10 +111,10 @@ export class AuthController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  async register(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+  async register(@Req() req: Request, @Body() body: any) {
     requireJsonBody(req);
+    // R-6 (ADR-120): KHÔNG cookie, body cố định — email mới hay đã có trông giống hệt nhau.
     const r = await this.auth.register(body ?? {}, reqCtx(req));
-    if (r.session) setSessionCookies(res, r.session);
     return r.body;
   }
 
@@ -178,9 +178,11 @@ export class AuthController {
 
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
-  async verifyEmail(@Req() req: Request, @Body() body: any) {
-    await this.auth.verifyEmail(body ?? {}, reqCtx(req));
-    return { ok: true };
+  async verifyEmail(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+    // R-6: link xác minh đăng nhập luôn (đăng ký không còn tự đăng nhập).
+    const r = await this.auth.verifyEmail(body ?? {}, reqCtx(req));
+    setSessionCookies(res, r.session);
+    return r.body;
   }
 
   @Post('resend-verification')

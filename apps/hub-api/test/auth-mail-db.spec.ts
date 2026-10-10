@@ -50,13 +50,19 @@ describeDb('Email token + mật khẩu (Postgres, AU2)', () => {
       throw e;
     }
   };
-  async function newUser(tag: string) {
+  async function newUser(tag: string, verified = false) {
     const email = `${tag}-${run}@mail.test`;
     const r = await auth.register({ email, name: tag, password: PW }, ctx);
-    users.push(r.body.user.id);
-    projects.push(...r.body.memberships.map((m: any) => m.projectId));
+    await r.done; // R-6: tạo user + gửi mail chạy nền sau response
     await settle();
-    return { email, id: r.body.user.id as string, session: r.session! };
+    const u = verified
+      ? await raw.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } }) // R-6: chưa xác minh thì không login được
+      : await raw.user.findUniqueOrThrow({ where: { email } });
+    users.push(u.id);
+    projects.push(...(await raw.projectMember.findMany({ where: { userId: u.id } })).map((m) => m.tenantId));
+    // R-6: đăng ký không phát phiên; test cần phiên thì phát thẳng (luồng thật: link xác minh -> verifyEmail).
+    const session = await auth.issueSession(u.id, null, null, ctx);
+    return { email, id: u.id, session };
   }
 
   afterAll(async () => {
@@ -84,18 +90,41 @@ describeDb('Email token + mật khẩu (Postgres, AU2)', () => {
     }
   });
 
-  it('[AU:UA5] đăng ký email đã tồn tại → 201 cùng hình dạng, KHÔNG tạo user, mail "có người thử" gửi cho chủ email', async () => {
+  it('[AU:UA5] đăng ký email đã tồn tại (đã xác minh) → body GIỐNG HỆT email mới, không phiên, KHÔNG tạo user, mail "có người thử" gửi cho chủ email', async () => {
     const u = await newUser('dup');
+    await raw.user.update({ where: { id: u.id }, data: { emailVerifiedAt: new Date() } });
     const before = await raw.user.count({ where: { email: u.email } });
+    const fresh = await auth.register({ email: `dup-moi-${run}@mail.test`, name: 'Mới', password: PW }, ctx);
     const r = await auth.register({ email: u.email, name: 'Kẻ khác', password: PW + '-x' }, ctx);
+    await Promise.all([r.done, fresh.done]);
     await settle();
-    expect(Object.keys(r.body)).toEqual(['user', 'memberships']);
-    expect(Object.keys(r.body.user)).toEqual(['id', 'email', 'name', 'emailVerified']);
-    expect(r.session).toBeNull();
+    const freshUser = await raw.user.findUniqueOrThrow({ where: { email: `dup-moi-${run}@mail.test` } });
+    users.push(freshUser.id);
+    projects.push(...(await raw.projectMember.findMany({ where: { userId: freshUser.id } })).map((m) => m.tenantId));
+    expect(r.body).toEqual(fresh.body); // R-6: một body cố định, không cookie (controller không đặt cookie)
+    expect(Object.keys(r)).toEqual(['body', 'done']);
     expect(await raw.user.count({ where: { email: u.email } })).toBe(before);
     const m = lastMailTo(u.email);
     expect(m.subject).toMatch(/thử đăng ký/i);
     expect(m.text).not.toMatch(/token=/); // không kèm token nào
+  });
+
+  it('[AR:R-6] (phần a) chưa xác minh: đăng nhập ĐÚNG mật khẩu -> CÙNG 401 invalid_credentials; đăng ký lại = gửi lại link; link xác minh -> phiên + đăng nhập được', async () => {
+    const u = await newUser('chuaxm');
+    expect(await status(auth.login({ email: u.email, password: PW }, ctx))).toBe('401 invalid_credentials');
+    expect(await status(auth.login({ email: u.email, password: PW + '-sai' }, ctx))).toBe('401 invalid_credentials');
+    const first = tokenFrom(lastMailTo(u.email));
+    store.clear();
+    const again = await auth.register({ email: u.email, name: 'x', password: PW }, ctx);
+    await again.done;
+    await settle();
+    const resent = tokenFrom(lastMailTo(u.email));
+    expect(resent).not.toBe(first);
+    expect(lastMailTo(u.email).text).toContain('/verify-email?token=');
+    const v = await auth.verifyEmail({ token: resent }, ctx);
+    expect(v.session.accessToken).toBeTruthy();
+    expect(v.body.user.emailVerified).toBe(true);
+    expect(await status(auth.login({ email: u.email, password: PW }, ctx))).toBe('ok');
   });
 
   it('[AU:UA14] token email dùng 2 lần SONG SONG → đúng MỘT lần thành công', async () => {
@@ -121,7 +150,7 @@ describeDb('Email token + mật khẩu (Postgres, AU2)', () => {
   });
 
   it('[AU:UA15] đặt lại mật khẩu qua email → MỌI session bị thu hồi; email không tồn tại cũng 202, không gửi gì', async () => {
-    const u = await newUser('reset');
+    const u = await newUser('reset', true);
     const s2 = (await auth.login({ email: u.email, password: PW }, ctx)).session;
     store.clear();
     const n = sent.length;
@@ -142,7 +171,7 @@ describeDb('Email token + mật khẩu (Postgres, AU2)', () => {
   });
 
   it('đổi mật khẩu: sai mật khẩu hiện tại -> 401; đúng -> mọi session KHÁC bị thu hồi, phiên hiện tại giữ', async () => {
-    const u = await newUser('change');
+    const u = await newUser('change', true);
     const other = (await auth.login({ email: u.email, password: PW }, ctx)).session;
     const p = { kind: 'user', id: u.id, sessionId: u.session.sessionId, email: u.email } as any;
     expect(await status(auth.changePassword(p, { currentPassword: 'sai-mat-khau-2026', password: 'mat-khau-moi-2026' }, ctx))).toBe('401 invalid_credentials');

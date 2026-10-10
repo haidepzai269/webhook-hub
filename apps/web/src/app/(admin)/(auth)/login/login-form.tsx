@@ -72,6 +72,11 @@ export function LoginForm() {
         setServerError(`Thử quá nhiều lần. Đợi ${res.headers.get("Retry-After") ?? "vài"} giây rồi thử lại.`);
         return;
       }
+      if (res.status === 401) {
+        // R-6: tài khoản chưa xác minh cũng nhận CÙNG 401 (chống dò) — nhắc cả hai khả năng.
+        setServerError("Email hoặc mật khẩu không đúng, hoặc email chưa xác minh (mở link trong thư kích hoạt).");
+        return;
+      }
       if (!res.ok) {
         setServerError(data.message ?? `Đăng nhập thất bại (HTTP ${res.status}).`);
         return;

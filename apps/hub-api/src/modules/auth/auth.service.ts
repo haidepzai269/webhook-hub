@@ -18,6 +18,9 @@ export interface ReqCtx {
   userAgent: string | null;
 }
 
+/** R-6: body DUY NHẤT của `POST /auth/register` — giống hệt nhau dù email mới hay đã có. */
+export const REGISTER_ACCEPTED = { ok: true, message: 'Kiểm tra email để kích hoạt tài khoản' } as const;
+
 export interface AuthBody {
   user: { id: string; email: string; name: string; emailVerified: boolean };
   memberships: { projectId: string; slug: string; name: string; environment: 'test' | 'live'; role: string }[];
@@ -75,7 +78,13 @@ export class AuthService {
 
   // ------------------------------------------------------------------ đăng ký (§5.8)
 
-  async register(input: { email?: unknown; password?: unknown; name?: unknown }, ctx: ReqCtx): Promise<{ body: AuthBody; session: IssuedSession | null }> {
+  /**
+   * R-6 (review AU, ADR-120): đăng ký KHÔNG đăng nhập. Mọi email hợp lệ -> CÙNG 201 `REGISTER_ACCEPTED`, không cookie,
+   * cùng thời gian (băm mật khẩu ở cả hai nhánh, tạo user + gửi mail chạy NỀN). Email mới -> mail xác minh (link đăng
+   * nhập luôn); email đã có + chưa xác minh -> gửi lại link xác minh; đã xác minh -> mail "có người thử đăng ký".
+   * `created` chỉ để test chờ việc nền — controller không bao giờ trả nó ra ngoài.
+   */
+  async register(input: { email?: unknown; password?: unknown; name?: unknown }, ctx: ReqCtx): Promise<{ body: typeof REGISTER_ACCEPTED; done: Promise<void> }> {
     const email = normalizeEmail(typeof input?.email === 'string' ? input.email : '');
     const name = str(input?.name, 100);
     const password = typeof input?.password === 'string' ? input.password : '';
@@ -87,23 +96,40 @@ export class AuthService {
     await this.limit('registerIp', `rl:reg:ip:${ctx.ip ?? 'unknown'}`, email);
 
     const passwordHash = await hashPassword(password);
+    // Việc phụ thuộc "email đã có chưa" chạy SAU response: không lộ qua body, cookie hay thời gian (§5.2).
+    const done = this.registerInBackground(email, name, passwordHash, ctx).catch((err) =>
+      logger.warn({ err: (err as Error).message, to: maskEmail(email) }, 'Đăng ký nền thất bại (người dùng đăng ký lại = gửi lại link)'),
+    );
+    return { body: REGISTER_ACCEPTED, done };
+  }
+
+  private async registerInBackground(email: string, name: string, passwordHash: string, ctx: ReqCtx): Promise<void> {
     const existing = await this.store.identity().findUserByEmail(email);
     if (existing) {
-      // §5.2: KHÔNG lộ email nào đã có tài khoản — 201 cùng hình dạng, không cookie, không tạo gì.
-      // AU2 gửi mail "có người vừa thử đăng ký bằng email của bạn" cho chủ email.
       await this.audit(existing.id, 'user.register_attempt_existing', ctx.ip);
+      // Chưa xác minh (và có mật khẩu): đăng ký lại = xin lại link xác minh (người đăng ký trước có thể là chính họ).
+      if (!existing.emailVerifiedAt && existing.passwordHash) {
+        try {
+          await this.mailLimit('verify_email', existing.email);
+        } catch {
+          return; // quá hạn mức gửi lại -> im lặng (response đã trả)
+        }
+        await this.sendVerification(existing.id, existing.email, existing.name);
+        return;
+      }
       this.sendLater(existing.email, mailTemplates.registerAttempt(this.webLink('/forgot-password')));
-      return { body: this.decoyBody(email, name), session: null };
+      return;
     }
-
-    const created = await this.createUserWithFirstProject({ email, name, passwordHash, emailVerifiedAt: null }, ctx);
-    // §5.8: mail xác minh gửi SAU COMMIT, không chờ gửi xong (giống BB-3: không làm việc ra ngoài trước khi dữ liệu chắc).
-    // Gửi lỗi -> log, user bấm "gửi lại"; KHÔNG rollback đăng ký.
-    void this.sendVerification(created.userId, email, name).catch((err) =>
-      logger.warn({ err: (err as Error).message, to: maskEmail(email) }, 'Gửi mail xác minh thất bại (user có thể gửi lại)'),
-    );
-    const session = await this.issueSession(created.userId, null, null, ctx);
-    return { body: await this.body(created.userId), session };
+    let created: { userId: string };
+    try {
+      created = await this.createUserWithFirstProject({ email, name, passwordHash, emailVerifiedAt: null }, ctx);
+    } catch (e) {
+      // Đăng ký đồng thời cùng email: lượt kia đã tạo user và đã gửi mail.
+      if ((e as { code?: string })?.code === 'P2002') return;
+      throw e;
+    }
+    // §5.8: mail xác minh gửi SAU COMMIT; lỗi gửi -> log, đăng ký lại để gửi lại; KHÔNG rollback.
+    await this.sendVerification(created.userId, email, name);
   }
 
   /** User + project đầu tiên + membership owner + audit trong MỘT transaction; trùng slug -> thêm hậu tố, thử lại. Dùng chung với GitHub OAuth. */
@@ -141,12 +167,6 @@ export class AuthService {
     throw new Error('Không tạo được slug project duy nhất sau 3 lần');
   }
 
-  private decoyBody(email: string, name: string): AuthBody {
-    return {
-      user: { id: randomUUID(), email, name, emailVerified: false },
-      memberships: [{ projectId: randomUUID(), slug: slugFromName(name), name: `${name}'s project`, environment: 'test', role: 'owner' }],
-    };
-  }
 
   // ------------------------------------------------------------------ đăng nhập (§5.2, §5.3)
 
@@ -167,6 +187,12 @@ export class AuthService {
     const user = email ? await this.store.identity().findUserByEmail(email) : null;
     // Luôn chạy bcrypt.compare (hash giả khi không có user / user chỉ có GitHub) — cùng thời gian, cùng body.
     const ok = await verifyPassword(password, user?.passwordHash ?? null);
+    // R-6 (ADR-120): tài khoản mật khẩu CHƯA xác minh email không đăng nhập được — CÙNG 401 với sai mật khẩu
+    // (nếu không, đăng ký + đăng nhập vẫn dò ra email nào đã có tài khoản). Link xác minh trong mail đăng nhập luôn.
+    if (user && ok && !user.emailVerifiedAt && !user.isOperator) {
+      await this.audit(user.id, 'auth.login_unverified', ctx.ip);
+      throw authError(HttpStatus.UNAUTHORIZED, 'invalid_credentials');
+    }
     if (!user || !ok) {
       await this.audit(user?.id ?? null, 'auth.login_failed', ctx.ip, { emailHash: sha256Hex(email) });
       throw authError(HttpStatus.UNAUTHORIZED, 'invalid_credentials');
@@ -252,11 +278,14 @@ export class AuthService {
   // ------------------------------------------------------------------ email + mật khẩu (§5.2, §5.9 — AU2)
 
   /** `POST /auth/verify-email {token}` — sai / hết hạn / đã dùng: CÙNG 400 `token_invalid`. */
-  async verifyEmail(input: { token?: unknown }, ctx: ReqCtx): Promise<void> {
+  /** R-6 (ADR-120): bấm link = chứng minh sở hữu email -> xác minh VÀ đăng nhập (đăng ký không còn tự đăng nhập). */
+  async verifyEmail(input: { token?: unknown }, ctx: ReqCtx): Promise<{ body: AuthBody; session: IssuedSession }> {
     const row = await this.consume(input?.token, 'verify_email');
     if (!row?.userId) throw authError(HttpStatus.BAD_REQUEST, 'token_invalid');
     await this.store.identity().setEmailVerified(row.userId, this.now());
     await this.audit(row.userId, 'user.email_verified', ctx.ip);
+    const session = await this.issueSession(row.userId, null, null, ctx);
+    return { body: await this.body(row.userId), session };
   }
 
   /** `POST /auth/resend-verification` — luôn 202 (đã xác minh thì không gửi gì); 1 lần/phút, 5 lần/ngày theo email. */

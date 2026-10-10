@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { useRouter } from "next/navigation";
+import { MailCheck } from "lucide-react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
@@ -43,7 +43,7 @@ const FIELDS = [
 ] as const;
 
 export function RegisterForm() {
-  const router = useRouter();
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const form = useForm<RegisterValues>({
     resolver: zodResolver(formSchema),
@@ -68,13 +68,22 @@ export function RegisterForm() {
         setServerError(data.message ?? `Đăng ký thất bại (HTTP ${res.status}).`);
         return;
       }
-      // 201 luôn cùng hình dạng (không lộ email đã có tài khoản). Có cookie phiên -> vào dashboard; không thì /login.
-      const me = await fetch("/auth/me", { credentials: "include" });
-      router.replace(me.ok ? "/dashboard/flow" : "/login");
+      // R-6 (ADR-120): 201 luôn giống hệt và KHÔNG đăng nhập — link trong email xác minh rồi đăng nhập luôn.
+      setSentTo(email);
     } catch (e) {
       setServerError(`Không kết nối được hub-api: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+
+  if (sentTo) {
+    return (
+      <p>
+        <MailCheck size={18} aria-hidden style={{ verticalAlign: "text-bottom", marginRight: 6 }} />
+        Đã gửi link kích hoạt tới <b>{sentTo}</b>. Mở link trong email để xác minh và vào dashboard. Không thấy thư? Đăng
+        ký lại bằng cùng email để nhận link mới.
+      </p>
+    );
+  }
 
   return (
     <form noValidate onSubmit={form.handleSubmit(onSubmit)}>

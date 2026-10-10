@@ -59,12 +59,24 @@ function psql(sql: string): string {
   return r.stdout.trim();
 }
 
-async function registered(tag: string): Promise<{ s: HttpSession; email: string; body: any }> {
+const VERIFY_LINK = /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/;
+
+/** R-6 (ADR-120): đăng ký KHÔNG đăng nhập — 201 body cố định, 0 cookie. */
+async function registerOnly(tag: string): Promise<{ s: HttpSession; email: string; res: Awaited<ReturnType<HttpSession['post']>> }> {
   const s = new HttpSession(API);
   const email = `${tag}-${RUN}@e2e.test`;
-  const r = await s.post('/auth/register', { email, name: `E2E ${tag}`, password: PASSWORD });
-  expect(r.status === 201, `register ${tag} → ${r.status} ${r.text}`);
-  return { s, email, body: r.body };
+  const res = await s.post('/auth/register', { email, name: `E2E ${tag}`, password: PASSWORD });
+  expect(res.status === 201, `register ${tag} → ${res.status} ${res.text}`);
+  expect(res.setCookies.length === 0, `register ${tag} đặt ${res.setCookies.length} cookie (R-6: phải 0)`);
+  return { s, email, res };
+}
+
+/** Đăng ký + bấm link xác minh trong thư (capture) bằng CÙNG phiên -> đăng nhập (3 cookie), body = /auth/me. */
+async function registered(tag: string): Promise<{ s: HttpSession; email: string; body: any }> {
+  const { s, email } = await registerOnly(tag);
+  const v = await s.post('/auth/verify-email', { token: tokenOf(await mailLink(email, VERIFY_LINK)) });
+  expect(v.status === 200, `verify ${tag} → ${v.status} ${v.text}`);
+  return { s, email, body: v.body };
 }
 
 async function main() {
@@ -72,7 +84,7 @@ async function main() {
   const health = await fetch(`${API}/health`).catch(() => null);
   if (!health?.ok) throw new Error(`hubv không chạy (${API}/health) — npm run verify:up`);
 
-  await run.scenario('[AU:TA1] đăng ký → 3 cookie, owner → tạo key hk_test_ → publish → event hiện trong console (bấm giờ)', async () => {
+  await run.scenario('[AU:TA1] đăng ký → link xác minh → 3 cookie (R-6), owner → tạo key hk_test_ → publish → event hiện trong console (bấm giờ)', async () => {
     await flushRateLimits();
     const t0 = Date.now();
     const { s, body } = await registered('ta1');
@@ -93,7 +105,7 @@ async function main() {
     for (let i = 0; i < 30; i++) {
       const ev = await s.get(`/api/v1/events?projectId=${m.projectId}`);
       if (ev.status === 200 && ev.text.includes(type)) {
-        console.log(`  TA1: đăng ký → event hiện trong console: ${Date.now() - t0}ms (chưa tính mail xác minh — AU2; chưa có quickstart — DX2)`);
+        console.log(`  TA1: đăng ký → bấm link xác minh → event hiện trong console: ${Date.now() - t0}ms (chưa có quickstart — DX2)`);
         return;
       }
       await sleep(500);
@@ -125,11 +137,36 @@ async function main() {
     expect(diff < 50, `lệch thời gian ${diff.toFixed(1)}ms ≥ 50ms`);
     await flushRateLimits();
     const dup = await new HttpSession(API).post('/auth/register', { email, name: 'Kẻ thử', password: PASSWORD + '-khac' });
-    const fresh = await registered('ta3b');
+    const fresh = (await registerOnly('ta3b')).res;
     expect(dup.status === 201, `register trùng → ${dup.status}`);
-    const shape = (b: any) => JSON.stringify(Object.keys(b)) + JSON.stringify(Object.keys(b.user)) + JSON.stringify(Object.keys(b.memberships[0]));
-    expect(shape(dup.body) === shape(fresh.body), 'hình dạng body register trùng khác register mới');
-    expect(dup.setCookies.length === 0, 'register trùng không được đặt cookie phiên');
+    // R-6: GIỐNG HỆT từng byte, cả hai đều 0 cookie (trước: 201+0 cookie vs 201+3 cookie).
+    expect(dup.text === fresh.text, `body register trùng khác register mới: ${dup.text} vs ${fresh.text}`);
+    expect(dup.setCookies.length === 0 && fresh.setCookies.length === 0, `cookie: trùng ${dup.setCookies.length} / mới ${fresh.setCookies.length}`);
+  });
+
+  await run.scenario('[AR:R-6] (phần b) register email đã có (đã xác minh) vs email mới: cùng 201, cùng body từng byte, 0 cookie, lệch thời gian TB < 50ms; đăng ký + đăng nhập ngay không còn phân biệt được', async () => {
+    const { email: taken } = await registered('r6x');
+    const t = { taken: [] as number[], fresh: [] as number[] };
+    const bodies = new Set<string>();
+    for (let i = 0; i < 8; i++) {
+      await flushRateLimits(); // registerIp 5/giờ — xoá để đo thời gian
+      const a = await new HttpSession(API).post('/auth/register', { email: taken, name: 'R6', password: PASSWORD + '-x' });
+      const b = await new HttpSession(API).post('/auth/register', { email: `r6-moi-${i}-${RUN}@e2e.test`, name: 'R6', password: PASSWORD });
+      expect(a.status === 201 && b.status === 201 && a.setCookies.length === 0 && b.setCookies.length === 0, `status/cookie ${a.status}/${b.status} ${a.setCookies.length}/${b.setCookies.length}`);
+      bodies.add(a.text).add(b.text);
+      t.taken.push(a.ms);
+      t.fresh.push(b.ms);
+    }
+    expect(bodies.size === 1, `body khác nhau: ${[...bodies].join(' | ')}`);
+    // Kẻ dò: đăng ký email mới rồi đăng nhập ngay bằng chính mật khẩu đó -> 401 như email đã có (sai mật khẩu).
+    await flushRateLimits();
+    const probeNew = await new HttpSession(API).post('/auth/login', { email: `r6-moi-0-${RUN}@e2e.test`, password: PASSWORD });
+    const probeTaken = await new HttpSession(API).post('/auth/login', { email: taken, password: PASSWORD + '-x' });
+    expect(probeNew.status === 401 && probeNew.text === probeTaken.text, `login sau đăng ký: mới ${probeNew.status} vs đã có ${probeTaken.status}`);
+    const avg = (xs: number[]) => xs.reduce((x, y) => x + y, 0) / xs.length;
+    const diff = Math.abs(avg(t.taken) - avg(t.fresh));
+    console.log(`  R-6: TB đã có ${avg(t.taken).toFixed(1)}ms · mới ${avg(t.fresh).toFixed(1)}ms · lệch ${diff.toFixed(1)}ms`);
+    expect(diff < 50, `lệch thời gian ${diff.toFixed(1)}ms ≥ 50ms`);
   });
 
   await run.scenario('[AU:TA4] brute force: 6 lần sai cho một email → lần 6 là 429 + Retry-After; email không tồn tại cũng vậy', async () => {
@@ -191,14 +228,15 @@ async function main() {
 
   await run.scenario('[AU:TA2] xác minh email: link trong thư (capture) → 200; dùng lại → 400 token_invalid; /auth/me emailVerified = true', async () => {
     await flushRateLimits();
-    const { s, email } = await registered('ta2');
-    expect((await s.get('/auth/me')).body?.user?.emailVerified === false, 'mới đăng ký đã xác minh?');
-    const liveBefore = await s.post('/api/v1/projects', { slug: `ta2-live-${RUN}`, name: 'TA2 live', environment: 'live' });
-    expect(liveBefore.status === 403 && liveBefore.body?.error === 'email_not_verified', `project live trước xác minh → ${liveBefore.status} ${liveBefore.text}`);
-    const link = await mailLink(email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
+    const { s, email } = await registerOnly('ta2');
+    // R-6: chưa xác minh -> đăng nhập ĐÚNG mật khẩu vẫn 401, CÙNG body với sai mật khẩu (không còn phiên "chưa xác minh").
+    const early = await new HttpSession(API).post('/auth/login', { email, password: PASSWORD });
+    const wrong = await new HttpSession(API).post('/auth/login', { email, password: PASSWORD + '-sai' });
+    expect(early.status === 401 && early.text === wrong.text, `login trước xác minh → ${early.status} ${early.text}`);
+    const link = await mailLink(email, VERIFY_LINK);
     const anon = new HttpSession(API);
-    const first = await anon.post('/auth/verify-email', { token: tokenOf(link) });
-    expect(first.status === 200, `verify → ${first.status} ${first.text}`);
+    const first = await s.post('/auth/verify-email', { token: tokenOf(link) });
+    expect(first.status === 200 && first.setCookies.length >= 3, `verify → ${first.status} (${first.setCookies.length} cookie) ${first.text}`);
     const again = await anon.post('/auth/verify-email', { token: tokenOf(link) });
     expect(again.status === 400 && again.body?.error === 'token_invalid', `dùng lại → ${again.status} ${again.text}`);
     const bogus = await anon.post('/auth/verify-email', { token: 'khong-phai-token' });
@@ -294,9 +332,7 @@ async function main() {
     const A = await registered('ta9a');
     const B = await registered('ta9b');
     const pa = A.body.memberships[0];
-    // A phải xác minh email mới mời được người (§5.6)
-    const vlink = await mailLink(A.email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
-    expect((await new HttpSession(API).post('/auth/verify-email', { token: tokenOf(vlink) })).status === 200, 'A verify');
+    // registered() đã bấm link xác minh (R-6) — A mời được người (§5.6)
     const inv = await A.s.post(`/api/v1/projects/${pa.projectId}/invitations`, { email: B.email, role: 'viewer' });
     expect(inv.status === 201, `invite → ${inv.status} ${inv.text}`);
     const ilink = await mailLink(B.email, /https?:\/\/\S+\/invite\?token=[A-Za-z0-9_-]+/);
@@ -335,8 +371,6 @@ ${r.stderr}`;
     const E = await registered('r3e');
     const pa = A.body.memberships[0];
     const pe = E.body.memberships[0];
-    const vlink = await mailLink(A.email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
-    expect((await new HttpSession(API).post('/auth/verify-email', { token: tokenOf(vlink) })).status === 200, 'A verify');
     const inv = await A.s.post(`/api/v1/projects/${pa.projectId}/invitations`, { email: E.email, role: 'viewer' });
     expect(inv.status === 201, `invite → ${inv.status} ${inv.text}`);
     const ilink = await mailLink(E.email, /https?:\/\/\S+\/invite\?token=[A-Za-z0-9_-]+/);
