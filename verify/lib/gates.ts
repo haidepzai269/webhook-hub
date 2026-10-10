@@ -188,6 +188,12 @@ export const GATES: Gate[] = [
     source: 'SPEC-verification §4',
     include: (f) => isSrc(f) && f !== 'libs/common/src/test-only-config.ts',
     check: grepLines(new RegExp(OWNER_URL), { skipComments: true }),
+    exceptions: [
+      {
+        file: 'libs/common/src/mail/index.ts',
+        reason: 'Chính là nơi CÀI ĐẶT driver capture (SPEC-verification §4.2, AU2); production + capture bị chặn lúc khởi động ở test-only-config.ts. Không chỗ nào khác được chọn capture.',
+      },
+    ],
   },
   {
     id: 'verify-no-bypass',

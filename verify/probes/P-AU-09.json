@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-09",
+  "claim": "Đặt lại mật khẩu qua email thu hồi MỌI phiên",
+  "file": "apps/hub-api/src/modules/auth/auth.service.ts",
+  "find": "await idn.revokeUserSessions(row.userId!, 'password_reset', now);",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA15]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/auth-mail-db.spec.ts"
+}

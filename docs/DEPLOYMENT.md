@@ -319,6 +319,9 @@ OAUTH_COOKIE_SECRET=     # cookie state/PKCE của GitHub OAuth (AU5)
 OPERATOR_EMAIL=          # operator = root của hub (seed). Deployed không tự seed: chạy `docker-entrypoint.sh seed` một lần
 OPERATOR_PASSWORD_HASH=  # bcrypt cost 12. Render: dán hash nguyên `$` (không phải `$$` — chỉ compose nội suy)
 WEB_PUBLIC_URL=          # https://<web>.vercel.app — CORS có credentials, link trong mail, OAuth callback
+MAIL_DRIVER=resend       # AU2. KHÔNG dùng `log` trên deployed (link xác minh/đặt lại mật khẩu sẽ nằm trong log Render)
+RESEND_API_KEY=          # Admin cung cấp. Bẫy: chưa xác minh domain (DNS) thì Resend CHỈ gửi tới email chủ tài khoản
+MAIL_FROM=               # vd "Webhook Hub <onboarding@resend.dev>" (chưa có domain) hoặc no-reply@<domain đã xác minh>
 TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For. Lưu ý: request console đi qua
                          # proxy của Vercel (rewrites) nên IP thấy được có thể là IP egress của Vercel — giới hạn theo
                          # EMAIL (5 lần sai/15 phút) vẫn đúng; giới hạn theo IP chỉ là lớp phụ

@@ -60,7 +60,15 @@ export interface CleanupResult {
   processedMessages: number;
   rejectedRawEvents: number;
   events: number;
+  /** SPEC-auth §5.3 (AU2): phiên hết hạn quá 30 ngày, token mail hết hạn quá 7 ngày. */
+  authSessions: number;
+  emailTokens: number;
 }
+
+/** SPEC-auth §5.3: giữ phiên đã hết hạn thêm 30 ngày (điều tra reuse_detected), token mail thêm 7 ngày. */
+export const AUTH_SESSION_KEEP_DAYS = 30;
+export const EMAIL_TOKEN_KEEP_DAYS = 7;
+const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0 };
 
 
 @Injectable()
@@ -121,11 +129,11 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       // Không có Redis thì không có lock -> bỏ lượt (dọn dẹp chậm một giờ không làm hệ thống sai).
       logger.warn({ err: err.message }, 'Cleanup: không giành được lock (Redis lỗi) -> bỏ qua lượt');
-      return { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0 };
+      return { ...SKIPPED };
     }
     if (acquired !== 'OK') {
       logger.debug('Cleanup: instance khác đang giữ lock -> bỏ qua lượt');
-      return { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0 };
+      return { ...SKIPPED };
     }
 
     try {
@@ -148,6 +156,9 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
             WHERE status = 'REJECTED' AND received_at < now() - make_interval(secs => ${secs}::double precision)
             LIMIT ${CLEANUP_BATCH})`),
         events: await this.loopBatches(() => this.prisma.deleteExpiredEventsBatch(secs, CLEANUP_BATCH)),
+        // Bảng danh tính chỉ qua IdentityRepository (SPEC-auth §5.1) — mở rộng job sẵn có, không job mới.
+        authSessions: await this.loopBatches(() => this.prisma.identity().deleteExpiredSessionsBatch(AUTH_SESSION_KEEP_DAYS, CLEANUP_BATCH)),
+        emailTokens: await this.loopBatches(() => this.prisma.identity().deleteExpiredEmailTokensBatch(EMAIL_TOKEN_KEEP_DAYS, CLEANUP_BATCH)),
       };
       logger.info({ ...result, retentionDays: this.retentionDays }, 'Cleanup: hoàn tất một lượt');
       return result;

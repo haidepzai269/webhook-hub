@@ -10,3 +10,4 @@ export * from './bigint-json';
 export * from './api-key';
 export * from './redis-options';
 export * from './auth';
+export * from './mail';

@@ -4,11 +4,14 @@
  * như trình duyệt. Trước mỗi kịch bản xoá khoá rate limit `rl:*` trong Redis CỦA HUBV để các kịch bản không
  * chặn lẫn nhau (giới hạn theo IP chung một máy). Không đụng stack dev.
  *
- * AU1: TA1 (phần đăng ký → key → event; link xác minh trong mail là AU2), TA3, TA4, TA5, TA6, TA7.
+ * AU1: TA1 (phần đăng ký → key → event), TA3, TA4, TA5, TA6, TA7. AU2: TA2, TA10 — mail đọc từ file JSON của
+ * MAIL_DRIVER=capture (verify/.mail, mount vào hub-api của hubv), KHÔNG grep log (SPEC-verification §4.2).
  */
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import Redis from 'ioredis';
-import { composeOutput, hostUrls } from '../lib/compose';
+import { composeOutput, hostUrls, ROOT } from '../lib/compose';
 import { createRunner, expect, HttpSession } from '../lib/http-session';
 
 const API = process.env.VERIFY_API_URL || hostUrls().HUB_API_URL;
@@ -17,6 +20,24 @@ const run = createRunner();
 const RUN = randomUUID().slice(0, 8);
 const PASSWORD = 'ca-phe-sua-da-2026';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const MAIL_DIR = path.join(ROOT, 'verify', '.mail');
+
+/** Thư mới nhất gửi tới `to` có link khớp `re` (chờ tối đa 10s — mail gửi SAU COMMIT, không chặn response). */
+async function mailLink(to: string, re: RegExp): Promise<string> {
+  for (let i = 0; i < 40; i++) {
+    const files = fs.existsSync(MAIL_DIR) ? fs.readdirSync(MAIL_DIR).filter((f) => f.endsWith('.json')).sort().reverse() : [];
+    for (const f of files) {
+      const m = JSON.parse(fs.readFileSync(path.join(MAIL_DIR, f), 'utf8'));
+      const hit = m.to === to ? re.exec(m.text) : null;
+      if (hit) return hit[0];
+    }
+    await sleep(250);
+  }
+  throw new Error(`không thấy thư tới ${to} khớp ${re} trong ${MAIL_DIR}`);
+}
+
+const tokenOf = (link: string) => new URL(link).searchParams.get('token') ?? '';
 
 async function flushRateLimits() {
   const keys = await redis.keys('rl:*');
@@ -157,6 +178,43 @@ async function main() {
     expect(r.status === 403 && r.body?.error === 'csrf_failed', `→ ${r.status} ${r.text}`);
     const ok = await s.post('/api/v1/projects', { slug: `ta7-${RUN}`, name: 'TA7' });
     expect(ok.status === 201, `có CSRF → ${ok.status} ${ok.text}`);
+  });
+
+  await run.scenario('[AU:TA2] xác minh email: link trong thư (capture) → 200; dùng lại → 400 token_invalid; /auth/me emailVerified = true', async () => {
+    await flushRateLimits();
+    const { s, email } = await registered('ta2');
+    expect((await s.get('/auth/me')).body?.user?.emailVerified === false, 'mới đăng ký đã xác minh?');
+    const link = await mailLink(email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
+    const anon = new HttpSession(API);
+    const first = await anon.post('/auth/verify-email', { token: tokenOf(link) });
+    expect(first.status === 200, `verify → ${first.status} ${first.text}`);
+    const again = await anon.post('/auth/verify-email', { token: tokenOf(link) });
+    expect(again.status === 400 && again.body?.error === 'token_invalid', `dùng lại → ${again.status} ${again.text}`);
+    const bogus = await anon.post('/auth/verify-email', { token: 'khong-phai-token' });
+    expect(bogus.text === again.text, 'token sai và token đã dùng phải CÙNG body');
+    expect((await s.get('/auth/me')).body?.user?.emailVerified === true, '/auth/me chưa thấy emailVerified');
+    console.log('  TA2: phần "hk_live_ trước xác minh → 403 email_not_verified" thuộc AU3 (chưa có scope/email_not_verified)');
+  });
+
+  await run.scenario('[AU:TA10] quên mật khẩu: email có / không có → CÙNG 202; đặt lại bằng link → mọi cookie jar cũ 401; mật khẩu mới đăng nhập được', async () => {
+    await flushRateLimits();
+    const { s: jarA, email } = await registered('ta10');
+    const jarB = new HttpSession(API);
+    expect((await jarB.post('/auth/login', { email, password: PASSWORD })).status === 200, 'login B');
+    const anon = new HttpSession(API);
+    const r1 = await anon.post('/auth/forgot-password', { email });
+    const r2 = await anon.post('/auth/forgot-password', { email: `khong-co-ta10-${RUN}@e2e.test` });
+    expect(r1.status === 202 && r2.status === 202 && r1.text === r2.text, `forgot → ${r1.status}/${r2.status} ${r1.text} vs ${r2.text}`);
+    const link = await mailLink(email, /https?:\/\/\S+\/reset-password\?token=[A-Za-z0-9_-]+/);
+    const NEW = 'mat-khau-moi-ta10-2026';
+    const reset = await anon.post('/auth/reset-password', { token: tokenOf(link), password: NEW });
+    expect(reset.status === 204, `reset → ${reset.status} ${reset.text}`);
+    for (const [n, jar] of [['A', jarA], ['B', jarB]] as const) {
+      const me = await jar.get('/auth/me');
+      expect(me.status === 401, `jar ${n} sau reset → ${me.status}`);
+    }
+    expect((await anon.post('/auth/login', { email, password: PASSWORD })).status === 401, 'mật khẩu cũ vẫn đăng nhập được');
+    expect((await new HttpSession(API).post('/auth/login', { email, password: NEW })).status === 200, 'mật khẩu mới không đăng nhập được');
   });
 
   await redis.quit();

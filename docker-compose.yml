@@ -143,6 +143,11 @@ services:
       # Web (CORS có credentials, link trong mail, OAuth callback). Local: web docker ở :3000.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
       - TRUST_PROXY=${TRUST_PROXY:-0}
+      # AU2 (SPEC-auth §5.9): log (in link ra log, CHỈ local) | resend (RESEND_API_KEY + MAIL_FROM) | capture (CHỈ hubv)
+      - MAIL_DRIVER=${MAIL_DRIVER:-log}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - MAIL_CAPTURE_DIR=${MAIL_CAPTURE_DIR:-}
       - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
       - NODE_ENV=development
       # S2 (SPEC §4.3A): host trong connection string `hub://<key>@<host>/<project>` trả về khi tạo key

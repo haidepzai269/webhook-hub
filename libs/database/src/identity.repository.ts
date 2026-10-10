@@ -3,6 +3,18 @@ import { Prisma, PrismaClient } from '@prisma/client';
 type Db = PrismaClient | Prisma.TransactionClient;
 
 export type MemberRole = 'owner' | 'developer' | 'viewer';
+export type TokenPurpose = 'verify_email' | 'reset_password' | 'invite';
+
+export interface EmailTokenRow {
+  id: string;
+  purpose: TokenPurpose;
+  email: string;
+  userId: string | null;
+  tenantId: string | null;
+  role: MemberRole | null;
+  invitedBy: string | null;
+  expiresAt: Date;
+}
 
 export interface MembershipView {
   projectId: string;
@@ -169,6 +181,74 @@ export class IdentityRepository {
 
   findSessionById(id: string) {
     return this.db.authSession.findUnique({ where: { id }, select: { id: true, userId: true, familyId: true, revokedAt: true } });
+  }
+
+  // ---------------------------------------------------------------- mật khẩu + xác minh (SPEC-auth §5.2, AU2)
+
+  setEmailVerified(userId: string, at: Date) {
+    return this.db.user.updateMany({ where: { id: userId, emailVerifiedAt: null }, data: { emailVerifiedAt: at } });
+  }
+
+  updatePassword(userId: string, passwordHash: string, at: Date) {
+    return this.db.user.update({ where: { id: userId }, data: { passwordHash, passwordChangedAt: at } });
+  }
+
+  // ---------------------------------------------------------------- token trong mail (SPEC-auth §5.9, AU2)
+
+  createEmailToken(data: {
+    purpose: TokenPurpose;
+    email: string;
+    userId?: string | null;
+    tenantId?: string | null;
+    role?: MemberRole | null;
+    invitedBy?: string | null;
+    tokenHash: string;
+    expiresAt: Date;
+  }) {
+    return this.db.emailToken.create({ data });
+  }
+
+  /** Gửi mail lại cho cùng mục đích: token cũ CHƯA dùng của email đó bị vô hiệu (đánh dấu used). */
+  async invalidateEmailTokens(email: string, purpose: TokenPurpose, at: Date): Promise<number> {
+    const r = await this.db.emailToken.updateMany({ where: { email, purpose, usedAt: null }, data: { usedAt: at } });
+    return r.count;
+  }
+
+  /**
+   * Dùng token MỘT lần: MỘT câu `UPDATE … WHERE used_at IS NULL AND expires_at > now RETURNING` — hai request song
+   * song chỉ một dòng được cập nhật (UA14). Sai / hết hạn / đã dùng -> null (người gọi trả CÙNG một lỗi).
+   */
+  async consumeEmailToken(tokenHash: string, purpose: TokenPurpose, at: Date): Promise<EmailTokenRow | null> {
+    const rows = await this.db.$queryRaw<EmailTokenRow[]>`
+      UPDATE "hub"."email_tokens" SET used_at = ${at}
+      WHERE token_hash = ${tokenHash} AND purpose = ${purpose}::"hub"."TokenPurpose" AND used_at IS NULL AND expires_at > ${at}
+      RETURNING id, purpose::text AS purpose, email, user_id AS "userId", tenant_id AS "tenantId", role::text AS role,
+                invited_by AS "invitedBy", expires_at AS "expiresAt"`;
+    return rows[0] ?? null;
+  }
+
+  /** Email của token còn hiệu lực mà KHÔNG đốt (kiểm mật khẩu yếu trước khi tiêu token reset). */
+  async peekEmailTokenEmail(tokenHash: string, purpose: TokenPurpose, at: Date): Promise<string | null> {
+    const t = await this.db.emailToken.findFirst({ where: { tokenHash, purpose, usedAt: null, expiresAt: { gt: at } }, select: { email: true } });
+    return t?.email ?? null;
+  }
+
+  // ---------------------------------------------------------------- dọn dẹp (CleanupJob của hub-worker, §5.3)
+
+  /** Xoá MỘT lô session hết hạn (idle hoặc tuyệt đối) quá `olderThanDays` ngày. */
+  deleteExpiredSessionsBatch(olderThanDays: number, limit: number): Promise<number> {
+    return this.db.$executeRaw`
+      DELETE FROM "hub"."auth_sessions" WHERE id IN (
+        SELECT id FROM "hub"."auth_sessions"
+        WHERE LEAST(idle_expires_at, absolute_expires_at) < now() - make_interval(days => ${olderThanDays}::int)
+        LIMIT ${limit})`;
+  }
+
+  /** Xoá MỘT lô token mail hết hạn quá `olderThanDays` ngày. */
+  deleteExpiredEmailTokensBatch(olderThanDays: number, limit: number): Promise<number> {
+    return this.db.$executeRaw`
+      DELETE FROM "hub"."email_tokens" WHERE id IN (
+        SELECT id FROM "hub"."email_tokens" WHERE expires_at < now() - make_interval(days => ${olderThanDays}::int) LIMIT ${limit})`;
   }
 
   // ---------------------------------------------------------------- audit cấp user (SPEC-auth §6.2)

@@ -117,6 +117,45 @@ export class AuthController {
     await this.auth.revokeSession(user(req), id, reqCtx(req));
   }
 
+  // ---------------------------------------------------------------- AU2: email + mật khẩu (SPEC-auth §5.2, §5.9)
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Req() req: Request, @Body() body: any) {
+    await this.auth.verifyEmail(body ?? {}, reqCtx(req));
+    return { ok: true };
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(SessionGuard)
+  async resendVerification(@Req() req: RequestWithPrincipal) {
+    await this.auth.resendVerification(user(req), reqCtx(req));
+    return { ok: true };
+  }
+
+  /** LUÔN 202 `{ok:true}` dù email có hay không (§5.2). */
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async forgotPassword(@Req() req: Request, @Body() body: any) {
+    await this.auth.forgotPassword(body ?? {}, reqCtx(req));
+    return { ok: true };
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async resetPassword(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+    await this.auth.resetPassword(body ?? {}, reqCtx(req));
+    clearSessionCookies(res); // mọi phiên đã bị thu hồi
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(SessionGuard)
+  async changePassword(@Req() req: RequestWithPrincipal, @Body() body: any) {
+    await this.auth.changePassword(user(req), body ?? {}, reqCtx(req));
+  }
+
   /** §5.7: vé socket 60 giây cho đúng một project mà người gọi được vào. */
   @Get('socket-ticket')
   @UseGuards(SessionGuard)

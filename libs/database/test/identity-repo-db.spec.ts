@@ -61,4 +61,27 @@ describeDb('IdentityRepository (Postgres)', () => {
     await idn.recordAuthAudit({ userId: u.id, action: 'test.a', meta: { x: 1 } });
     expect((await idn.listAuthAudit(u.id)).map((a) => a.action)).toEqual(['test.a']);
   });
+
+  it('AU2 dọn dẹp: deleteExpiredSessionsBatch(30) / deleteExpiredEmailTokensBatch(7) chỉ xoá dòng hết hạn QUÁ ngưỡng', async () => {
+    const u = await idn.createUser({ email: `cl-${run}@t.vn`, name: 'C', passwordHash: null });
+    users.push(u.id);
+    const day = 86400_000;
+    const ago = (d: number) => new Date(Date.now() - d * day);
+    const hash = (c: string) => randomUUID().replace(/-/g, '').padEnd(64, c);
+    const old = await idn.createSession({ userId: u.id, familyId: randomUUID(), tokenHash: hash('a'), idleExpiresAt: ago(31), absoluteExpiresAt: ago(10) });
+    const recent = await idn.createSession({ userId: u.id, familyId: randomUUID(), tokenHash: hash('b'), idleExpiresAt: ago(29), absoluteExpiresAt: ago(29) });
+    const email = `cl-${run}@t.vn`;
+    const tOld = await idn.createEmailToken({ purpose: 'verify_email', email, userId: u.id, tokenHash: hash('c'), expiresAt: ago(8) });
+    const tNew = await idn.createEmailToken({ purpose: 'verify_email', email, userId: u.id, tokenHash: hash('d'), expiresAt: ago(6) });
+    await idn.deleteExpiredSessionsBatch(30, 1000);
+    await idn.deleteExpiredEmailTokensBatch(7, 1000);
+    expect(await db.authSession.findUnique({ where: { id: old.id } })).toBeNull();
+    expect(await db.authSession.findUnique({ where: { id: recent.id } })).not.toBeNull();
+    expect(await db.emailToken.findUnique({ where: { id: tOld.id } })).toBeNull();
+    expect(await db.emailToken.findUnique({ where: { id: tNew.id } })).not.toBeNull();
+    // invalidateEmailTokens: token chưa dùng của email đó bị đánh dấu dùng; consume sau đó trả null
+    expect(await idn.invalidateEmailTokens(email, 'verify_email', new Date())).toBe(1);
+    expect(await idn.consumeEmailToken(tNew.tokenHash, 'verify_email', new Date())).toBeNull();
+    await db.emailToken.deleteMany({ where: { email } });
+  });
 });

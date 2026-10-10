@@ -45,13 +45,14 @@ describe('CleanupJob (S1-4)', () => {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
       $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0),
       deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
     const redis = buildRedis('OK');
     const result = await new CleanupJob(prisma, redis).runOnce();
 
     // MS-P2-6: lock giữ ~90% chu kỳ (mặc định 1h -> 3240s) và KHÔNG nhả khi xong -> N worker = 1 lượt/chu kỳ
     expect(redis.set).toHaveBeenCalledWith(CLEANUP_LOCK_KEY, expect.any(String), 'EX', 3240, 'NX');
-    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0 });
+    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0 });
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
     expect(redis.eval).not.toHaveBeenCalled();
   });
@@ -74,12 +75,27 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       $executeRaw: jest.fn().mockResolvedValue(0),
       deleteExpiredEventsBatch: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(7),
+      identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
     const result = await new CleanupJob(prisma, buildRedis('OK')).runOnce();
     expect(result.events).toBe(CLEANUP_BATCH + 7);
     expect(prisma.deleteExpiredEventsBatch).toHaveBeenCalledWith(9 * 86_400, CLEANUP_BATCH);
     const sqls = prisma.$executeRaw.mock.calls.map((c: any) => c[0].strings.join('?'));
     expect(sqls.some((q: string) => /raw_events/.test(q) && /ACCEPTED/.test(q))).toBe(false);
+  });
+
+  it('AU2 (SPEC-auth §5.3): CÙNG job dọn auth_sessions hết hạn > 30 ngày và email_tokens hết hạn > 7 ngày, theo lô, qua IdentityRepository', async () => {
+    const sessions = jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(4);
+    const tokens = jest.fn().mockResolvedValueOnce(2);
+    const prisma: any = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      identity: () => ({ deleteExpiredSessionsBatch: sessions, deleteExpiredEmailTokensBatch: tokens }),
+    };
+    const result = await new CleanupJob(prisma, buildRedis('OK')).runOnce();
+    expect(result).toMatchObject({ authSessions: CLEANUP_BATCH + 4, emailTokens: 2 });
+    expect(sessions).toHaveBeenCalledWith(30, CLEANUP_BATCH);
+    expect(tokens).toHaveBeenCalledWith(7, CLEANUP_BATCH);
   });
 
   it('S7: EVENT_RETENTION_DAYS là tên chính, CLEANUP_RETENTION_DAYS là alias; giá trị không an toàn vẫn bị từ chối', () => {

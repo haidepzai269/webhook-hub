@@ -7,6 +7,7 @@ import { SocketTicketService } from './socket-ticket.service';
 import { AUTH_CONFIG, loadAuthConfig } from './auth-config';
 import { AuthRateLimiter } from './rate-limit';
 import { RedisService } from '../redis/redis.service';
+import { createMailSender, MAIL_SENDER } from '@hub/common';
 
 /**
  * SPEC-auth AU1. JwtModule KHÔNG có secret mặc định: mỗi lần ký/verify truyền secret + thuật toán + iss/aud
@@ -18,6 +19,8 @@ import { RedisService } from '../redis/redis.service';
   providers: [
     { provide: AUTH_CONFIG, useFactory: () => loadAuthConfig() },
     { provide: AuthRateLimiter, inject: [RedisService], useFactory: (redis: RedisService) => new AuthRateLimiter(redis.client) },
+    // SPEC-auth §5.9: MAIL_DRIVER=log|resend|capture (capture ở production -> app thoát, test-only-config.ts)
+    { provide: MAIL_SENDER, useFactory: () => createMailSender() },
     AuthService,
     SessionGuard,
     SocketTicketService,

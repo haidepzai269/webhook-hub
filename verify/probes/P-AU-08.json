@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-08",
+  "claim": "Token trong mail dùng đúng MỘT lần kể cả khi hai request song song (UPDATE … WHERE used_at IS NULL)",
+  "file": "libs/database/src/identity.repository.ts",
+  "find": "AND purpose = ${purpose}::\"hub\".\"TokenPurpose\" AND used_at IS NULL AND expires_at",
+  "replace": "AND purpose = ${purpose}::\"hub\".\"TokenPurpose\" AND expires_at",
+  "expectRed": [
+    "[AU:UA14]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/auth-mail-db.spec.ts"
+}

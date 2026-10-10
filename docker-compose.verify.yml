@@ -55,6 +55,9 @@ services:
     container_name: !reset null
     ports: !override
       - "14000:4000"
+    # AU2 (SPEC-verification §4.2): MAIL_DRIVER=capture ghi mỗi thư một file JSON -> runner e2e đọc link từ verify/.mail
+    volumes:
+      - ./verify/.mail:/mail
 
   hub-worker:
     container_name: !reset null

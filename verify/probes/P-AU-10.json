@@ -1,0 +1,12 @@
+{
+  "id": "P-AU-10",
+  "claim": "Đăng ký trùng email báo cho CHỦ email (mail \"có người thử\"), không im lặng",
+  "file": "apps/hub-api/src/modules/auth/auth.service.ts",
+  "find": "this.sendLater(existing.email, mailTemplates.registerAttempt(this.webLink('/forgot-password')));",
+  "replace": "",
+  "expectRed": [
+    "[AU:UA5]"
+  ],
+  "layer": "L1",
+  "testFile": "apps/hub-api/test/auth-mail-db.spec.ts"
+}
