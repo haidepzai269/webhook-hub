@@ -120,7 +120,7 @@
     {
       "ns": "AR",
       "file": "_bmad-output/planning-artifacts/REVIEW-AUTH-2026-10-11.md",
-      "pattern": "^### (R-\\d+) ·",
+      "pattern": "^### ([RN]-\\d+) ·",
       "requireTest": false,
       "done": {
         "all": true

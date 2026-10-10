@@ -278,14 +278,54 @@ export class AuthService {
   // ------------------------------------------------------------------ email + mật khẩu (§5.2, §5.9 — AU2)
 
   /** `POST /auth/verify-email {token}` — sai / hết hạn / đã dùng: CÙNG 400 `token_invalid`. */
-  /** R-6 (ADR-120): bấm link = chứng minh sở hữu email -> xác minh VÀ đăng nhập (đăng ký không còn tự đăng nhập). */
-  async verifyEmail(input: { token?: unknown }, ctx: ReqCtx): Promise<{ body: AuthBody; session: IssuedSession }> {
-    const row = await this.consume(input?.token, 'verify_email');
+  /**
+   * R-6 (ADR-120): bấm link = chứng minh sở hữu email -> xác minh VÀ đăng nhập.
+   * N-1 (ADR-121): tài khoản mật khẩu CHƯA xác minh thì mật khẩu hiện có là của "ai đó đã đăng ký" — có thể là kẻ đăng ký
+   * trước email người khác. Người bấm link phải ĐẶT mật khẩu (+ tên) — thiếu thì 400 `password_required`, token chưa bị
+   * đốt; đặt xong thì mọi thứ người trước để lại bị xoá (`claimAccount`).
+   */
+  async verifyEmail(input: { token?: unknown; password?: unknown; name?: unknown }, ctx: ReqCtx): Promise<{ body: AuthBody; session: IssuedSession }> {
+    const raw = typeof input?.token === 'string' && input.token.length <= 128 ? input.token : '';
+    const email = raw ? await this.store.identity().peekEmailTokenEmail(sha256Hex(raw), 'verify_email', this.now()) : null;
+    if (!email) throw authError(HttpStatus.BAD_REQUEST, 'token_invalid');
+    const user = await this.store.identity().findUserByEmail(email);
+    const claim = !!user && !!user.passwordHash && !user.emailVerifiedAt;
+    let passwordHash: string | null = null;
+    let name = '';
+    if (claim) {
+      const password = typeof input?.password === 'string' ? input.password : '';
+      if (!password) throw authError(HttpStatus.BAD_REQUEST, 'password_required', { message: 'Đặt mật khẩu để kích hoạt tài khoản' });
+      this.assertPassword(password, email);
+      name = str(input?.name, 100) ?? '';
+      passwordHash = await hashPassword(password);
+    }
+    const row = await this.consume(raw, 'verify_email');
     if (!row?.userId) throw authError(HttpStatus.BAD_REQUEST, 'token_invalid');
-    await this.store.identity().setEmailVerified(row.userId, this.now());
+    if (claim && passwordHash) {
+      await this.claimAccount(row.userId, row.email, passwordHash, name || row.email.split('@')[0], 'email_claimed');
+      await this.audit(row.userId, 'user.account_claimed', ctx.ip);
+    } else {
+      await this.store.identity().setEmailVerified(row.userId, this.now());
+    }
     await this.audit(row.userId, 'user.email_verified', ctx.ip);
     const session = await this.issueSession(row.userId, null, null, ctx);
     return { body: await this.body(row.userId), session };
+  }
+
+  /**
+   * N-1 (ADR-121): người chứng minh hộp thư nhận tài khoản: mật khẩu MỚI + xác minh + xoá dấu vết của người nắm tài khoản
+   * trước đó (tên, githubId, lời mời chờ, token email chờ, mọi phiên, key của project chỉ mình user là thành viên).
+   */
+  private async claimAccount(userId: string, email: string, passwordHash: string, name: string, reason: string): Promise<void> {
+    const now = this.now();
+    await this.store.$transaction(async (tx) => {
+      const idn = this.store.identity(tx);
+      await idn.updatePassword(userId, passwordHash, now);
+      await idn.setEmailVerified(userId, now);
+      const sole = await idn.resetClaimedAccount(userId, email, name, reason, now);
+      for (const pid of sole) await new TenantScopedRepository(tx, pid).revokeAllApiKeys(now);
+    });
+    notifyAccessRevoked(userId);
   }
 
   /** `POST /auth/resend-verification` — luôn 202 (đã xác minh thì không gửi gì); 1 lần/phút, 5 lần/ngày theo email. */
@@ -324,6 +364,14 @@ export class AuthService {
     this.assertPassword(password, row.email);
     const now = this.now();
     const passwordHash = await hashPassword(password);
+    // N-1 (ADR-121): tài khoản CHƯA xác minh nhận qua quên mật khẩu = cũng là "người nắm hộp thư nhận lại" -> xoá dấu vết.
+    const before = await this.store.identity().findUserById(row.userId);
+    if (before && !before.emailVerifiedAt) {
+      await this.claimAccount(row.userId, row.email, passwordHash, row.email.split('@')[0], 'password_reset');
+      await this.audit(row.userId, 'user.account_claimed', ctx.ip);
+      await this.audit(row.userId, 'password.reset', ctx.ip);
+      return;
+    }
     await this.store.$transaction(async (tx) => {
       const idn = this.store.identity(tx);
       await idn.updatePassword(row.userId!, passwordHash, now);

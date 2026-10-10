@@ -645,6 +645,12 @@ export class TenantScopedRepository {
     return r.count;
   }
 
+  /** N-1 (ADR-121): thu hồi MỌI key còn sống của project (tài khoản chủ vừa được người nắm hộp thư nhận lại). */
+  async revokeAllApiKeys(at: Date): Promise<number> {
+    const r = await this.prisma.apiKey.updateMany({ where: { tenantId: this.tenantId, revokedAt: null }, data: { revokedAt: at } });
+    return r.count;
+  }
+
   /** `lastUsedAt` (ApiKeyGuard gọi tối đa 1 lần/phút/key, không chặn request). */
   async touchApiKeyLastUsed(id: string, at: Date): Promise<number> {
     const r = await this.prisma.apiKey.updateMany({ where: { id, tenantId: this.tenantId }, data: { lastUsedAt: at } });

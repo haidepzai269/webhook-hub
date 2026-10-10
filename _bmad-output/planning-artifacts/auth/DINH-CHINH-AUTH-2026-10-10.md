@@ -126,3 +126,4 @@ Riêng `/register` và `/verify-email` được làm một **form trần** nếu
 | 3 | §5.7 socket chỉ kiểm lúc handshake | socket bị ngắt khi logout/logout-all/thu hồi thiết bị/đổi-đặt lại mật khẩu/bị xoá khỏi project (ngay ở instance đó, ≤ 30 s ở instance khác) | ADR-112 |
 | 4 | UA20 quét 4 controller | mọi route của mọi controller khai `@RequireScope`/`@NoProjectScope`/`@PublicRoute`; guard thiếu khai báo → 500 | ADR-113 |
 | 5 | (không có) | `/auth/login`, `/auth/register` chỉ nhận `application/json` (415) · trần project 3/10 · migration dữ liệu sau RLS phải `SET LOCAL app.rls_system='on'` | ADR-114, 118, 111 |
+| 6 | (sau vòng 2, N-1) `POST /auth/verify-email {token}` | tài khoản mật khẩu chưa xác minh: `{token}` → 400 `password_required` (token chưa đốt); `{token, password, name?}` → đặt mật khẩu mới + xoá dấu vết người trước (tên, githubId, token/lời mời chờ, phiên, key project riêng). Reset mật khẩu trên tài khoản chưa xác minh cũng vậy | ADR-121 |

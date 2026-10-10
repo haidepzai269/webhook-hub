@@ -74,7 +74,8 @@ async function registerOnly(tag: string): Promise<{ s: HttpSession; email: strin
 /** Đăng ký + bấm link xác minh trong thư (capture) bằng CÙNG phiên -> đăng nhập (3 cookie), body = /auth/me. */
 async function registered(tag: string): Promise<{ s: HttpSession; email: string; body: any }> {
   const { s, email } = await registerOnly(tag);
-  const v = await s.post('/auth/verify-email', { token: tokenOf(await mailLink(email, VERIFY_LINK)) });
+  // N-1 (ADR-121): tài khoản mật khẩu chưa xác minh -> người bấm link ĐẶT mật khẩu (ở đây đặt lại đúng PASSWORD).
+  const v = await s.post('/auth/verify-email', { token: tokenOf(await mailLink(email, VERIFY_LINK)), password: PASSWORD, name: `E2E ${tag}` });
   expect(v.status === 200, `verify ${tag} → ${v.status} ${v.text}`);
   return { s, email, body: v.body };
 }
@@ -169,6 +170,39 @@ async function main() {
     expect(diff < 50, `lệch thời gian ${diff.toFixed(1)}ms ≥ 50ms`);
   });
 
+  await run.scenario('[AR:N-1] (phần c) chiếm tài khoản bằng đăng ký trước: kẻ xấu đăng ký email nạn nhân (A) → nạn nhân đăng ký (V) → bấm link (phải đặt mật khẩu) → A 401, V 200, phiên kẻ xấu không còn', async () => {
+    await flushRateLimits();
+    const email = `n1-nannhan-${RUN}@e2e.test`;
+    const A = 'mat-khau-ke-xau-2026';
+    const V = 'mat-khau-nan-nhan-2026';
+    const atk = await new HttpSession(API).post('/auth/register', { email, name: 'Attacker', password: A });
+    expect(atk.status === 201, `1. kẻ xấu đăng ký → ${atk.status}`);
+    const firstLink = await mailLink(email, VERIFY_LINK);
+    await flushRateLimits();
+    const victim = new HttpSession(API);
+    expect((await victim.post('/auth/register', { email, name: 'Victim', password: V })).status === 201, '2. nạn nhân đăng ký');
+    let link = firstLink;
+    for (let i = 0; i < 40 && link === firstLink; i++) {
+      link = await mailLink(email, VERIFY_LINK);
+      if (link === firstLink) await sleep(250);
+    }
+    expect(link !== firstLink, 'không thấy link xác minh thứ hai');
+    const bare = await victim.post('/auth/verify-email', { token: tokenOf(link) });
+    expect(bare.status === 400 && bare.body?.error === 'password_required', `3. bấm link không đặt mật khẩu → ${bare.status} ${bare.text}`);
+    const ok = await victim.post('/auth/verify-email', { token: tokenOf(link), password: V, name: 'Victim' });
+    expect(ok.status === 200 && ok.body?.user?.name === 'Victim', `3. đặt mật khẩu → ${ok.status} ${ok.text}`);
+    await flushRateLimits();
+    const la = await new HttpSession(API).post('/auth/login', { email, password: A });
+    const lv = await new HttpSession(API).post('/auth/login', { email, password: V });
+    expect(la.status === 401, `4. kẻ xấu login bằng A → ${la.status} (phải 401)`);
+    expect(lv.status === 200, `4. nạn nhân login bằng V → ${lv.status}`);
+    const stale = await new HttpSession(API).post('/auth/verify-email', { token: tokenOf(firstLink), password: A });
+    expect(stale.status === 400, `link đầu (của lượt kẻ xấu) → ${stale.status}`);
+    const live = psql(`select count(*) from hub.auth_sessions s join hub.users u on u.id = s.user_id where u.email = '${email}' and s.revoked_at is null`);
+    expect(live === '2', `phiên còn sống = ${live} (mong 2: link xác minh + login của nạn nhân)`);
+    console.log(`  N-1: A → ${la.status} · V → ${lv.status} · phiên sống ${live} (đều của nạn nhân)`);
+  });
+
   await run.scenario('[AU:TA4] brute force: 6 lần sai cho một email → lần 6 là 429 + Retry-After; email không tồn tại cũng vậy', async () => {
     await flushRateLimits();
     const { email } = await registered('ta4');
@@ -235,7 +269,9 @@ async function main() {
     expect(early.status === 401 && early.text === wrong.text, `login trước xác minh → ${early.status} ${early.text}`);
     const link = await mailLink(email, VERIFY_LINK);
     const anon = new HttpSession(API);
-    const first = await s.post('/auth/verify-email', { token: tokenOf(link) });
+    const need = await s.post('/auth/verify-email', { token: tokenOf(link) });
+    expect(need.status === 400 && need.body?.error === 'password_required', `verify không mật khẩu → ${need.status} ${need.text}`);
+    const first = await s.post('/auth/verify-email', { token: tokenOf(link), password: PASSWORD });
     expect(first.status === 200 && first.setCookies.length >= 3, `verify → ${first.status} (${first.setCookies.length} cookie) ${first.text}`);
     const again = await anon.post('/auth/verify-email', { token: tokenOf(link) });
     expect(again.status === 400 && again.body?.error === 'token_invalid', `dùng lại → ${again.status} ${again.text}`);

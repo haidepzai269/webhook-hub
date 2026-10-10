@@ -31,3 +31,12 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
   đăng nhập luôn + đăng ký lại email chưa xác minh = gửi lại link. Sửa: auth.service register/login/verifyEmail,
   controller, web register-form + verify-email, e2e registered() (đi qua mail), TA1/TA2/TA3, L1 auth-session/auth-mail.
 - R-9: hoãn → CAN-ADMIN-QUYET (đường nóng /v1/p + migration; ghi lý do).
+
+## Vòng 2 (REVIEW-AUTH "Vòng 2": N-1..N-4)
+
+| Mục | Trạng thái | Commit | Ghi chú |
+|---|---|---|---|
+| N-1 | xong | (commit N-1) | ADR-121: verify-email buộc đặt mật khẩu cho tài khoản mật khẩu chưa xác minh + claimAccount |
+| N-2 | chưa | | |
+| N-3 | chưa | | |
+| N-4 | chưa | | |

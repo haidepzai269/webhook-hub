@@ -79,7 +79,7 @@ export function RegisterForm() {
     return (
       <p>
         <MailCheck size={18} aria-hidden style={{ verticalAlign: "text-bottom", marginRight: 6 }} />
-        Đã gửi link kích hoạt tới <b>{sentTo}</b>. Mở link trong email để xác minh và vào dashboard. Không thấy thư? Đăng
+        Đã gửi link kích hoạt tới <b>{sentTo}</b>. Mở link trong email, đặt mật khẩu để kích hoạt và vào dashboard. Không thấy thư? Đăng
         ký lại bằng cùng email để nhận link mới.
       </p>
     );

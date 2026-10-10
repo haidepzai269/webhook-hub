@@ -296,6 +296,22 @@ export class IdentityRepository {
 
   // ---------------------------------------------------------------- mật khẩu + xác minh (SPEC-auth §5.2, AU2)
 
+  /**
+   * N-1 (review AU vòng 2, ADR-121): người chứng minh được hộp thư nhận tài khoản — xoá mọi thứ do người đặt mật khẩu
+   * TRƯỚC đó để lại: tên hiển thị, githubId, lời mời họ gửi còn chờ, mọi token email chờ, mọi phiên. Trả id các project
+   * mà user là thành viên DUY NHẤT (người gọi thu hồi key của chúng — key do người nắm tài khoản trước đó tạo).
+   */
+  async resetClaimedAccount(userId: string, email: string, name: string, reason: string, at: Date): Promise<string[]> {
+    await this.db.user.update({ where: { id: userId }, data: { name, githubId: null } });
+    await this.db.emailToken.updateMany({ where: { invitedBy: userId, purpose: 'invite', usedAt: null }, data: { usedAt: at } });
+    await this.db.emailToken.updateMany({ where: { email, purpose: { in: ['verify_email', 'reset_password'] }, usedAt: null }, data: { usedAt: at } });
+    await this.revokeUserSessions(userId, reason, at);
+    const mine = await this.db.projectMember.findMany({ where: { userId }, select: { tenantId: true } });
+    const sole: string[] = [];
+    for (const { tenantId } of mine) if ((await this.db.projectMember.count({ where: { tenantId } })) === 1) sole.push(tenantId);
+    return sole;
+  }
+
   setEmailVerified(userId: string, at: Date) {
     return this.db.user.updateMany({ where: { id: userId, emailVerifiedAt: null }, data: { emailVerifiedAt: at } });
   }
