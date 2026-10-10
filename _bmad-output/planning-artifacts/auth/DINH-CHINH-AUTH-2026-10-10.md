@@ -1,0 +1,106 @@
+# Đính chính khi giao dev: SPEC-verification (VF1, VF2, VF7) rồi SPEC-auth (AU1–AU6)
+
+> Ngày 10/10/2026 tối, party mode (Winston, Amelia, John, Sally, Mary cùng Admin).
+> **File này THẮNG** `SPEC-auth.md` và `verification/SPEC-verification.md` ở mọi chỗ mâu thuẫn. Hai spec gốc vẫn là nguồn sự thật về *nội dung*; file này chỉ chốt **phạm vi, thứ tự, và những chỗ code hiện tại đã khác lúc viết spec**.
+> Code nền: `master` sau `e3c2249` (SPEC-3 + 7 sửa sau review).
+
+---
+
+## 1. Quyết định của Admin
+
+| # | Câu hỏi | Admin chốt |
+|---|---|---|
+| D1 | Thứ tự | **VF1 → VF2 → VF7**, review, rồi **AU1 → AU2 → AU3 → AU4 → AU5 → AU6**, review. Một agent, tuần tự |
+| D2 | Dashboard khi AU1/AU3 đổi sang cookie và bắt buộc `?projectId=` | **Agent auth làm luôn phần ống nước web** (§3). Các màn mới để phiên UI |
+| D3 | AU6 RLS | **Làm ngay đợt này**, không đợi đa service |
+| D4 | Đa service S0–S14 | **Vẫn hoãn** (DINH-CHINH-2026-10-10 §0) |
+
+## 2. Đa service đang hoãn → phần nào của auth bị cắt
+
+| Chỗ trong SPEC-auth | Xử lý |
+|---|---|
+| §0.3 tiền đề `projects` + `api_keys` | AU1 **tự tạo `projects`** đúng khuôn §4.1 của SPEC đa service: `id, slug, name, environment, createdAt`, có enum `ProjectEnv`. Seed upsert `Project{id: DEFAULT_TENANT_ID, slug:'default', name:'Default', environment:'test'}` **trước** các bảng khác. **Không** tạo `api_keys` |
+| Mọi thứ đụng API key: `scope_not_grantable` (UA19), route `manage:keys`, nút "Tạo key đầu tiên" ở onboarding, DX2 quickstart, chặn `hk_live_` khi chưa xác minh (một nửa UA28) | **Hoãn** tới S2. Ghi "hoãn" vào §12 SPEC-auth. `ROLE_SCOPES` **vẫn có** đủ các scope (kể cả `manage:keys`, `publish:events`), vì nó là hằng số dùng chung |
+| `ApiKeyGuard` "dùng chung `@RequireScope`" | Thiết kế `Principal` và `@RequireScope` sao cho `kind:'key'` cắm vào được sau này. Chỉ làm nhánh `kind:'user'` |
+| TA1 "đăng ký → event đầu tiên" + đồng hồ cà phê | Hoãn phần key/quickstart. TA1 dừng ở "đăng ký → vào dashboard project đầu tiên". Đồng hồ đo sau, khi có S2 + DX2 |
+| §6 bảng route `/api/v1/projects/:projectId/keys` | Không làm |
+| AU6 "sau S12" | Làm ngay (D3), trên các bảng nghiệp vụ hiện có. Bảng mới của đa service sau này phải tự thêm policy (ghi vào DINH-CHINH-2026-10-10 §2 khi xong) |
+
+## 3. Ống nước web mà agent auth phải làm (D2)
+
+**Làm** (đúng hợp đồng §9 SPEC-auth):
+- Xoá `apps/web/src/lib/hub/token.ts`, bỏ Bearer.
+- `client.ts`: URL tương đối, `credentials:'include'`, header `x-csrf-token` từ cookie `hub_csrf` cho method thay đổi dữ liệu. 401 → `/auth/refresh` kiểu single-flight → thử lại một lần → hỏng thì về `/login`.
+- `next.config`: `rewrites` cho `/api/:path*` và `/auth/:path*` → `HUB_API_INTERNAL_URL`. Không rewrite `/hooks/*`.
+- Mọi query gửi `projectId`.
+- **Bộ chọn project tối thiểu:** dropdown từ `memberships` của `/auth/me`, nhớ lựa chọn trong `localStorage`. Chỉ lưu id project, **không** lưu token.
+- Trang `/login` hiện có: đổi sang email + mật khẩu.
+- Socket: xin `/auth/socket-ticket?projectId=` rồi kết nối với `auth:{ticket}`; đổi project thì kết nối lại.
+- `npx tsc --noEmit` + build web sạch. Mọi trang dashboard hiện có vẫn chạy với operator.
+
+**Không làm** (để phiên UI):
+- `/register`, `/verify-email`, `/forgot-password`, `/reset-password`, `/invite`, `/onboarding`;
+- trang Thành viên, trang Thiết bị;
+- banner "chưa xác minh email";
+- ẩn nút theo role.
+
+Riêng `/register` và `/verify-email` được làm một **form trần** nếu cần để chạy TA14 trên trình duyệt thật. Ghi rõ là bản tạm.
+
+## 4. Code hiện tại khác lúc viết spec
+
+| # | Spec giả định | Thực tế (sau `e3c2249`) | Làm gì |
+|---|---|---|---|
+| 1 | ADR "số tiếp theo" | Số cuối là **067** (VF) | Bắt đầu từ **068**. Có phiên khác ghi song song → grep ngay trước khi ghi |
+| 2 | Rate limit dùng "Lua `INCR+EXPIRE` sẵn có (ADR-054 mục 6)" | Ingest rate limit đã là 1 `EVAL` (S3-5); circuit + throttle gộp `EVAL` (ADR-064) | Tái dùng script `INCR+EXPIRE` của ingest. Rate limit auth chỉ ở đường console, không tính vào R1 |
+| 3 | `CleanupJob` | Có, lock `cleanup:lock`, đã mở rộng nhiều lần | AU2 thêm bước dọn `auth_sessions` và `email_tokens` vào job này |
+| 4 | Smoke / k6 / script review đăng nhập bằng `ADMIN_USERNAME` | `scripts/e2e-smoke.sh`, `k6/*` | AU1 sửa theo cookie + `OPERATOR_EMAIL` trong cùng commit. Smoke phải xanh sau mỗi story (cho tới khi VF4 thay smoke) |
+| 5 | `withAudit` actor | `@CurrentUser()` trả username (`dev-amelia`, `admin`) | Sau AU1: actor = `user.id`, metadata kèm email đã che. Audit cũ giữ nguyên |
+| 6 | Role DB | `docker/postgres/init/02-shop-user.sh` đã tạo `shop_user`; runtime đang dùng `hub_user` (owner + superuser) | AU6: thêm `03-hub-app.sh` (local) + migration cấp quyền. Compose đổi `DATABASE_URL` của api/worker sang `hub_app`; migrate dùng `DIRECT_URL` (owner). Ghi bước tạo role trên Neon vào DEPLOYMENT. **Lưu ý:** init script chỉ chạy trên volume mới, nên migration phải tự tạo role nếu chưa có (spec §5.12.1) |
+| 7 | `.env` | Có `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH`, chưa có biến mới | Agent **được thêm** vào `.env` local (không commit): `OPERATOR_EMAIL=admin@hub.local`, `OPERATOR_PASSWORD_HASH` = **chép** từ `ADMIN_PASSWORD_HASH` (Admin giữ mật khẩu cũ), và `CSRF_SECRET`, `SOCKET_TICKET_SECRET`, `OAUTH_COOKIE_SECRET` (ngẫu nhiên ≥ 32 ký tự, khác nhau), `WEB_PUBLIC_URL`, `MAIL_DRIVER=log`. **Không** xoá hay sửa giá trị đã có. Báo lại Admin email operator |
+| 8 | Mail capture | SPEC-verification §4.2 có `MAIL_DRIVER=capture` | AU2 làm 3 driver: `log`, `resend`, `capture` |
+| 9 | Fake GitHub OAuth | VF4 mới có `fake-github` | AU5: unit test mock `fetch`, cho phép đặt `GITHUB_OAUTH_BASE_URL` (startup assert `https://github.com` khi production). TA11 thủ công, để sau |
+| 10 | Lỗi định dạng DX1 | Chưa có DX1 | Dùng `{error, message}` |
+| 11 | SPEC-verification §6 luật story | Có hiệu lực **từ khi VF2 xong** | AU1–AU6 phải theo §6: RED → GREEN → GATED → PROBED, commit có khối `Verify:`, mã test `[AU:UAxx]`. REVIEWED do phiên review làm |
+
+## 5. Luật cho phiên dev (cộng thêm luật trong hai spec)
+
+- Mỗi story một commit trên `master`. **Không push.** Commit kết thúc bằng `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- `npx jest -w 2`. Không chạy jest không giới hạn worker.
+- **Stack dev** (`webhook-hub`): **không** `down -v`, được `up -d --build`.
+- **Stack `hubv`** (sau VF1): được làm gì cũng được, kể cả kill, restart, `down -v`.
+- **Không gửi Telegram/Discord thật.** Trên stack dev, subscription Telegram đang tắt, phải giữ tắt. `hubv` trỏ đích vào `/mock/*`.
+- Không commit `.env`, `.env.verify.local`, hay `_bmad-output/tmp_template_extract.txt`. Không add file của phiên khác đang sửa: `_bmad-output/planning-artifacts/ui-revamp/README.md`, `SPEC-hub-multi-service.md`, memlog. `docs/adr/README.md` thì commit cả file (append-only) và ghi chú trong báo cáo.
+- CI (VF7): viết `.github/workflows/verify.yml` và **chạy thử local** những gì chạy được (vd bằng `act` nếu có, hoặc chạy tay từng bước). Không push, nên CI thật chưa chạy. Câu Q-V2 (repo public hay private) chưa chốt.
+- Hết **VF7**: dừng, báo cáo, chờ review. Hết **AU6**: báo cáo cuối.
+
+## 6. Kết quả (dev điền)
+
+| Story | Commit | Bằng chứng (`Verify:`) | Lệch / hoãn |
+|---|---|---|---|
+| VF1 | `3ea2cb5` | RED `[VF:VT13]` Received [] (stub) · `npm run verify:up` exit 0 (hubv: postgres 15433, redis 16379, AMQP **15673**, api 14000, shop 14001, sink 14100) · seed 3 source/3 subscription, Telegram/Discord → `/mock/*` ✓ · `bash scripts/e2e-smoke.sh` vào 14000 → OK (3 delivery SUCCEEDED) · VT8 `verify:selftest`: 9 container dev cùng ID trước/sau · VT9: `hubv_*` mất, `webhook-hub_*` còn | AMQP 15673 thay 15672 (trùng UI rabbit của dev) · shop 14001 thay 13001 (theo quy tắc +10000; 13001 trùng Grafana +10000) · web chỉ khi `VERIFY_WITH_WEB=1` (bundle nhúng URL API dev) · sink làm luôn ở VF1 (§8 #6) · seed vẫn là seed hiện có (chờ S12, X5) · ADR-068 |
+| VF2 | `fabb67e` | RED `[VF:VT3]` Received [] · map trước khi gắn mã: 43 mồ côi · L0 373/0/0 · L1 55/0/0 (hubv) · VT1 `verify:db` khi hubv tắt → exit 1 "skip > 0 ở L1 (55)" · VT2 `it.skip` một test `[AF:#14]` → exit 1 "GIẢM 373 → 372" · map 198 mã, 0 mồ côi/ma/trùng | L0/L1 chia theo FILE (3 file trộn unit+DB chạy cả ở L1) · `acceptedOrphans` có lý do (9 dòng AF + VT15) · `doneOverrides` MS:U34–U45,U50 · 45 test cũ gắn mã (30 AF + 15 MS) · L2 chưa có (VF4) · ADR-069 |
+| VF7 | `c96bf6b` | RED `[VF:VT7]` (stub) · gates repo thật 0 vi phạm / 7 ngoại lệ có lý do · probe `tools/hub-sim/probe.ts` import libs → exit 1 · CI chạy tay trong `node:22`: unit (npm ci, gates, L0 379/0/0) ✓, map ĐỎ vì spec nguồn chưa commit (có spec → xanh), db (migrate 5 + L1 55/0/0) ✓, gitleaks toàn lịch sử **3 phát hiện** (giá trị ví dụ trong spec, commit `0b2cef42`) | Không có `act` → chạy tay. CI thật CHƯA chạy (không push). Job e2e/chaos → VF8; bước role `hub_app` → AU6 · jest bỏ qua `.claude/` (worktree agent khác làm 34 suite chết) · ADR-070 |
+| AU1 | | | |
+| AU2 | | | |
+| AU3 (+ web) | | | |
+| AU4 | | | |
+| AU5 | | | |
+| AU6 | | | p95 trước/sau: |
+
+## 7. Kết quả review (phiên review điền)
+
+| Chặng | Phát hiện | Mức | Trạng thái |
+|---|---|---|---|
+
+## 8. Xung đột SPEC-verification × SPEC đa service: Admin chốt (10/10, chuyển qua phiên webhook-hub-54)
+
+| # | Chỗ | Bên thắng / làm gì | Ở story |
+|---|---|---|---|
+| 1 | Script jest | `verify:unit`/`verify:db` tự gắn `-w 2`; chỉ CI được ghi đè | VF2 |
+| 2 | `verify:map` với U34–U45, U50 | Đã làm ở SPEC-3/S3-2. Thêm bảng ghi đè `MS:U34..U45,U50` → `AF:S3-2 (done)` trong `verify/spec-sources.json` | VF2 |
+| 3 | Endpoint của Shop | **Đa service thắng** (S11/T11): Shop tự đăng ký. Sau S11, `verify:seed` không seed endpoint Shop; trước S11 giữ như hiện nay | VF1/VF4, S11 |
+| 4 | Hai seed cho cùng thế giới | Gộp làm một: `verify:seed` = seed S12 (`cafe`/`bookstore`) + phần riêng của verify (project `demo`, user theo role, key cố định theo `VERIFY_SEED`) | VF1, S12 |
+| 5 | E2E T1–T15 đa service | **Verify thắng**: chạy trên `hubv` (cổng 14000) bằng runner TS; không `down -v` stack dev; đăng nhập bằng cookie operator sau AU1 | VF4, khi mở lại đa service |
+| 6 | Đích nhận thử | Service **sink** trong `hubv`: trả challenge, ghi lại request và có API đọc lại, `?mode=fail` / `?mode=slow`. `/mock/*` giữ cho Telegram/Discord | VF4 (hoặc VF1) |
+| 7 | Đường dẫn ingest | `/hooks/<provider>/<sourceKey>`. Viết `/hooks/<sourceId>` ở SPEC-verification §5.2 là sai | VF3 |
+| 8 | T10 noisy neighbor có số đo | Tầng L4: local, chạy tay, không vào CI. Phần chức năng của T10 vẫn ở L2 | VF4/VF5 |

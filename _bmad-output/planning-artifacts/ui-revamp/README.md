@@ -88,3 +88,12 @@ Nhóm B: B-1 (backend apps/shop) chạy SONG SONG với Phase 0, vì không đ�
 ## 4. Prompt bàn giao cho phiên mới
 
 > Đọc `CLAUDE.md`, rồi `_bmad-output/planning-artifacts/ui-revamp/README.md` và spec của nhóm mình. Template Sarab nằm ở `C:\Users\admin\Downloads\sarab-v1.0.0.zip`: **giải nén vào thư mục scratch riêng, không giải nén vào repo**, và chỉ copy những gì spec cho phép (KHÔNG copy `css/all.min.css` hay `webfonts/` vì đó là FA Pro). Studio Admin: https://github.com/arhamkhnz/next-shadcn-admin-dashboard (MIT, nhánh `main`). Làm theo từng story, mỗi story đạt DoD rồi mới sang story kế. Quyết định mới → ghi ADR 3 dòng.
+
+> ⚠️ **(10/10, từ party mode) Đăng ký / đăng nhập / phân quyền — ADR-056, ADR-057.** Spec: `_bmad-output/planning-artifacts/auth/SPEC-auth.md` §9 là hợp đồng cho web. Tóm tắt:
+> - bỏ JWT trong `localStorage` (`lib/hub/token.ts`), chuyển sang cookie HttpOnly + header `x-csrf-token`;
+> - Next `rewrites` cho `/api` và `/auth`;
+> - refresh kiểu single-flight;
+> - màn hình register, login (GitHub), verify, forgot/reset, invite, onboarding, bộ chọn project, Thành viên, Thiết bị;
+> - socket kết nối bằng vé `/auth/socket-ticket`.
+>
+> Chờ backend AU1–AU3 xong mới nối API.

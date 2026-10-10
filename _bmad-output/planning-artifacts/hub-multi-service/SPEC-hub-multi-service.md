@@ -1,6 +1,7 @@
 # SPEC — Hub đa service: Project, API key, kết nối, GenericAdapter
 
 > **Đường dẫn file này:** `C:\webhook-hub\_bmad-output\planning-artifacts\hub-multi-service\SPEC-hub-multi-service.md`
+> ⚠️ **ĐỌC TRƯỚC: `DINH-CHINH-2026-10-10.md` (cùng thư mục) THẮNG file này** ở mọi chỗ mâu thuẫn — hiện trạng sau commit `0b2cef4`, quyết định Admin (gộp SPEC-3, retention, commit), thứ tự chặng A/B.
 > **Ngày:** 2026-10-10 · **Trạng thái:** sẵn sàng để dev · **Bổ sung 10/10 chiều:** S14 (§4.14), test U34–U50, T15, bước 6 demo
 > **Nguồn quyết định:** ADR-038, 039, 040, 041, **053** (S14, chuẩn hoá đầu ra) trong `docs/adr/README.md` · bối cảnh ở `HANDOFF-2026-10-09.md` (cùng thư mục)
 > **Spec nối tiếp:** `SPEC-dev-experience.md` (cùng thư mục, ADR-055): lỗi có `fix`, Quickstart 60 giây, `hub listen`. Làm **sau** khi xong S0–S14 của file này. Lưu ý: U22 bị DX1 sửa thành "body giống hệt trừ `requestId`".

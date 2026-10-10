@@ -1,0 +1,19 @@
+# Cấu hình gitleaks cho repo (CI job `secrets`, SPEC-verification §7.1).
+# Giữ nguyên toàn bộ luật mặc định, chỉ bỏ qua các chuỗi MẪU đã kiểm là không phải bí mật thật.
+# Thêm dòng mới vào allowlist phải ghi lý do; secret thật bị lộ thì XOAY ở provider, không allowlist.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Chuỗi mẫu trong spec/test, không phải secret thật"
+regexes = [
+  # SPEC-dev-experience.md: secret ví dụ dạng Standard Webhooks; base64 giải ra "testtesttest…".
+  '''whsec_dGVzdHRlc3R0ZXN0[A-Za-z0-9+/=]*''',
+  # SPEC-hub-multi-service.md T9: secret của "ngân hàng giả" trong kịch bản curl.
+  '''bank_secret_123''',
+  # Vector chuẩn công khai trong README của repo standard-webhooks (U6).
+  '''whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''',
+  # .env.verify: mọi secret của stack hubv là giá trị giả có tiền tố này (SPEC-verification §4.2).
+  '''VERIFY_ONLY_[A-Za-z0-9_\-]*''',
+]
