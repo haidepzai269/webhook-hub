@@ -149,7 +149,10 @@ export class RealtimeGateway
     // project phải tồn tại; admin env là operator). Sai/không tồn tại -> từ chối, KHÔNG rơi về tenant JWT.
     const projectId = socket.handshake.auth?.projectId;
     if (projectId === undefined || projectId === null || projectId === '') return next();
-    if (!this.prisma) return next(new Error('PROJECT_NOT_FOUND'));
+    if (!this.prisma) {
+      logger.warn('Realtime: handshake có projectId nhưng gateway không có PrismaService -> từ chối');
+      return next(new Error('PROJECT_NOT_FOUND'));
+    }
     resolveProjectScope(this.prisma, projectId)
       .then((scoped) => {
         if (scoped) socket.data.tenantId = scoped;
