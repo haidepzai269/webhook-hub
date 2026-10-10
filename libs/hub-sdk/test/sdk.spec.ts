@@ -121,5 +121,32 @@ describe('@hub/sdk (S11)', () => {
     state.verifyReply = { verification: 'VERIFIED', verificationError: null, secretRotated: true };
     await expect(c.endpoints.ensure(input)).resolves.toMatchObject({ created: false, endpoint: { verification: 'VERIFIED' } });
   });
+
+  it('MS-P2-1: ensure({sourceKeys, exclusive}) ghim nguồn và TẮT subscription khác cùng endpoint (vd sub cũ không lọc nguồn)', async () => {
+    const state: any = {
+      endpoints: [{ id: 'e1', name: 'shop', url: 'http://shop:4001/hub-webhook', verification: 'VERIFIED', verificationError: null }],
+      subs: [{ id: 'old', endpointId: 'e1', eventTypes: ['payment.received'], sourceIds: [], sourceKeys: [], isActive: true }],
+    };
+    const { fn, calls } = fakeFetch({
+      'GET /endpoints': () => ({ status: 200, body: state.endpoints }),
+      'GET /subscriptions': () => ({ status: 200, body: state.subs }),
+      'POST /subscriptions': (b: any) => {
+        const s = { id: 'pinned', isActive: true, sourceIds: ['sid1', 'sid2'], ...b };
+        state.subs.push(s);
+        return { status: 201, body: s };
+      },
+      'PATCH /subscriptions/old': (b: any) => ({ status: 200, body: Object.assign(state.subs[0], b) }),
+    });
+    const c = createHubClient(`hub://${KEY}@h/default`, { fetch: fn });
+    const input = { name: 'shop', url: 'http://shop:4001/hub-webhook', eventTypes: ['payment.received'], sourceKeys: ['src_sepay_main', 'src_payos_main'], exclusive: true };
+    const r = await c.endpoints.ensure(input);
+    expect(r.subscription.id).toBe('pinned');
+    expect(calls.find((x) => x.method === 'POST' && x.url.endsWith('/subscriptions'))!.body).toMatchObject({ sourceKeys: ['src_sepay_main', 'src_payos_main'] });
+    expect(state.subs[0].isActive).toBe(false);
+    // lần 2: sub ghim đã có (so theo sourceKeys), không tạo/tắt gì thêm
+    const n = calls.length;
+    await c.endpoints.ensure(input);
+    expect(calls.slice(n).map((x) => x.method)).toEqual(['GET', 'GET']);
+  });
 });
 

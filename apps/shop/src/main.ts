@@ -20,6 +20,7 @@ if (!SIGNING_SECRET) {
 }
 // Shop là SERVICE dùng hub: connection string chứa API key `shop` (manage:endpoints, read:events).
 const hub = process.env.HUB_URL ? createHubClient(process.env.HUB_URL) : null;
+const PAYMENT_SOURCE_KEYS = (process.env.SHOP_PAYMENT_SOURCE_KEYS || 'src_payos_main,src_sepay_main').split(',').map((k) => k.trim()).filter(Boolean);
 const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
 
@@ -203,7 +204,8 @@ if (RECONCILE_INTERVAL_MS > 0) {
 async function registerWithHub(attempt = 1): Promise<void> {
   if (!hub) return logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
   try {
-    const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET });
+    // MS-P2-1: chỉ nhận tiền từ ĐÚNG các source của operator (không phải mọi source tên "sepay"); tắt sub cũ không ghim.
+    const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys: PAYMENT_SOURCE_KEYS, exclusive: true });
     logger.info({ endpointId: r.endpoint.id, created: r.created, hub }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
   } catch (e: any) {
     logger.warn({ err: e?.message, code: e?.code, attempt }, '[Shop] Đăng ký endpoint với hub lỗi');

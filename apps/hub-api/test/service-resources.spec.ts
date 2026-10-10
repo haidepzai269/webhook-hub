@@ -26,8 +26,8 @@ describe('Service API — endpoint + subscription (S5)', () => {
       { id: ETG, tenantId: PA, name: 'Telegram Ops', type: 'telegram', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED' },
     ];
     const sources = [
-      { id: SA, tenantId: PA },
-      { id: SB, tenantId: PB },
+      { id: SA, tenantId: PA, sourceKey: 'src_sepay_main' },
+      { id: SB, tenantId: PB, sourceKey: 'src_sepay_other' },
     ];
     const subs: any[] = [];
     const audits: any[] = [];
@@ -52,8 +52,17 @@ describe('Service API — endpoint + subscription (S5)', () => {
       },
       source: { findMany: jest.fn(async ({ where }: any) => sources.filter((s) => match(s, where))) },
       subscription: {
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          const rows = subs.filter((x) => x.id === where.id && x.tenantId === where.tenantId);
+          rows.forEach((r) => Object.assign(r, data));
+          return { count: rows.length };
+        }),
+        findFirst: jest.fn(async ({ where }: any) => {
+          const r = subs.find((x) => x.id === where.id && x.tenantId === where.tenantId);
+          return r ? { ...r, destination: destinations.find((d) => d.id === r.destinationId) } : null;
+        }),
         create: jest.fn(async ({ data }: any) => {
-          const row = { id: `sub-${subs.length}`, createdAt: new Date(0), ...data };
+          const row = { id: `00000000-0000-4000-8000-${String(subs.length).padStart(12, "0")}`, createdAt: new Date(0), ...data };
           subs.push(row);
           return { ...row, destination: destinations.find((d) => d.id === data.destinationId) };
         }),
@@ -209,6 +218,26 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(after).not.toBe(before);
     expect(require('@hub/crypto').aesGcmDecrypt(after, getMasterKey())).toBe(NEW);
     expect(await status(controller.verifyEndpoint(req(PA), EA, { signingSecret: 'ngan' }))).toMatchObject({ status: 422, body: { field: 'signingSecret' } });
+  });
+
+  it('MS-P2-1: subscription ghim source theo sourceKey (không cần manage:sources); key lạ/khác project -> 422; response trả sourceKeys', async () => {
+    const { controller, req, subs } = build();
+    const c: any = await controller.createSubscription(req(PA), { endpointId: EA, name: 'pay', eventTypes: ['payment.received'], sourceKeys: ['src_sepay_main'] });
+    expect(subs[0].sourceIds).toEqual([SA]);
+    expect(c).toMatchObject({ sourceIds: [SA], sourceKeys: ['src_sepay_main'] });
+    expect(await status(controller.createSubscription(req(PA), { endpointId: EA, name: 'x', eventTypes: ['payment.received'], sourceKeys: ['src_sepay_other'] }))).toMatchObject({ status: 422, body: { error: 'unknown_source', keys: ['src_sepay_other'] } });
+    const list: any[] = await controller.listSubscriptions(req(PA));
+    expect(list[0].sourceKeys).toEqual(['src_sepay_main']);
+  });
+
+  it('MS-P2-1: PATCH subscription {isActive:false} (tắt subscription cũ không lọc nguồn); khác project / đích không phải webhook -> 404', async () => {
+    const { controller, req, subs, audits } = build();
+    await controller.createSubscription(req(PA), { endpointId: EA, name: 'old', eventTypes: ['payment.received'] });
+    await expect(controller.updateSubscription(req(PA), subs[0].id, { isActive: false })).resolves.toMatchObject({ isActive: false });
+    expect(subs[0].isActive).toBe(false);
+    expect(audits.map((a) => a.action)).toContain('subscription.update');
+    expect(await status(controller.updateSubscription(req(PB), subs[0].id, { isActive: true }))).toMatchObject({ status: 404 });
+    expect(await status(controller.updateSubscription(req(PA), subs[0].id, { isActive: 'x' }))).toMatchObject({ status: 422 });
   });
 });
 

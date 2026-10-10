@@ -116,7 +116,7 @@ Không chép email của author vào phần chung (dữ liệu cá nhân); email
   ```
   Bắt buộc `amount`, `currency`, `method`, `providerTxnId` và trường thời gian của kiểu; `counterparty`/`account` = `null`; `raw` = body. Số tiền chỉ nhận số nguyên hoặc chuỗi toàn chữ số (`"50.000"` là sai). Body thiếu trường → lỗi normalize vĩnh viễn; chế độ lắng nghe báo `mapping_field_missing` + tên trường. Không có `mapping` thì `data = { raw }`, `normalized: false`.
 - **SDK**: `import type { PaymentReceived, RepoPush } from '@hub/sdk'` — chỉ type, không kéo validator.
-- **Bên nhận xử lý TIỀN phải kiểm `source`** (MS-R2, ADR-084): `payment.received` từ `api` (service tự phát) hay `generic` (nguồn tuỳ chỉnh) đúng khuôn nhưng không phải bằng chứng thanh toán của cổng. Shop chỉ nhận `source ∈ {payos, sepay}`.
+- **Bên nhận xử lý TIỀN phải kiểm `source`** (MS-R2, ADR-084): `payment.received` từ `api` (service tự phát) hay `generic` (nguồn tuỳ chỉnh) đúng khuôn nhưng không phải bằng chứng thanh toán của cổng. Tên provider KHÔNG phải danh tính (key `manage:sources` tạo được source `sepay` của riêng nó): ghim **source cụ thể** bằng `sourceKeys`/`sourceIds` trong subscription (MS-P2-1, ADR-089) — Shop ghim `src_payos_main,src_sepay_main`.
 
 ## 6. Ánh xạ sang CloudEvents 1.0 (chỉ tài liệu — hub KHÔNG đổi body)
 

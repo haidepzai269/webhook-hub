@@ -75,6 +75,8 @@ export interface Subscription {
   endpointId: string;
   eventTypes: string[];
   sourceIds: string[];
+  /** MS-P2-1: sourceKey tương ứng sourceIds (để service so mà không cần manage:sources). */
+  sourceKeys?: string[];
   isActive: boolean;
 }
 export interface EnsureEndpointInput {
@@ -82,6 +84,10 @@ export interface EnsureEndpointInput {
   url: string;
   eventTypes: string[];
   sourceIds?: string[];
+  /** MS-P2-1: ghim nguồn theo sourceKey (vd `src_sepay_main`) — chỉ nhận sự kiện từ ĐÚNG các source này. */
+  sourceKeys?: string[];
+  /** Tắt mọi subscription KHÁC đang bật của endpoint này (vd sub cũ chưa ghim nguồn). */
+  exclusive?: boolean;
   signingSecret?: string;
 }
 
@@ -165,10 +171,12 @@ export class HubClient {
       if (endpoint.verification !== 'VERIFIED') {
         throw new HubError(409, 'endpoint_not_verified', `Endpoint ${url} chưa VERIFIED (${endpoint.verificationError ?? 'không rõ'})`);
       }
-      const wanted = [...(input.sourceIds ?? [])].sort().join(',');
+      const byKeys = !!input.sourceKeys?.length;
+      const wanted = [...((byKeys ? input.sourceKeys : input.sourceIds) ?? [])].sort().join(',');
+      const sourcesOf = (s: Subscription) => [...((byKeys ? s.sourceKeys : s.sourceIds) ?? [])].sort().join(',');
       const subs = await this.subscriptions.list();
       let subscription = subs.find(
-        (s) => s.endpointId === endpoint!.id && s.isActive && input.eventTypes.every((t) => s.eventTypes.includes(t)) && [...s.sourceIds].sort().join(',') === wanted,
+        (s) => s.endpointId === endpoint!.id && s.isActive && input.eventTypes.every((t) => s.eventTypes.includes(t)) && sourcesOf(s) === wanted,
       );
       if (!subscription) {
         subscription = await this.subscriptions.create({
@@ -176,7 +184,13 @@ export class HubClient {
           name: input.name,
           eventTypes: input.eventTypes,
           ...(input.sourceIds?.length ? { sourceIds: input.sourceIds } : {}),
+          ...(byKeys ? { sourceKeys: input.sourceKeys } : {}),
         });
+      }
+      if (input.exclusive) {
+        for (const s of subs) {
+          if (s.endpointId === endpoint.id && s.isActive && s.id !== subscription.id) await this.subscriptions.update(s.id, { isActive: false });
+        }
       }
       return { endpoint, subscription, created };
     },
@@ -184,8 +198,9 @@ export class HubClient {
 
   readonly subscriptions = {
     list: (): Promise<Subscription[]> => this.request('GET', '/subscriptions'),
-    create: (input: { endpointId: string; name: string; eventTypes: string[]; sourceIds?: string[] }): Promise<Subscription> =>
+    create: (input: { endpointId: string; name: string; eventTypes: string[]; sourceIds?: string[]; sourceKeys?: string[] }): Promise<Subscription> =>
       this.request('POST', '/subscriptions', input),
+    update: (id: string, patch: { isActive: boolean }): Promise<Subscription> => this.request('PATCH', `/subscriptions/${encodeURIComponent(id)}`, patch),
   };
 
   /** Phía nhận: verify Standard Webhooks trên BYTES gốc. */

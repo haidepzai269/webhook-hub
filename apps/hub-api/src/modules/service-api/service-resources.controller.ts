@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmDecrypt, aesGcmEncrypt, generateWhsecSecret } from '@hub/crypto';
@@ -42,6 +42,19 @@ export async function resolveSourceIds(repo: TenantScopedRepository, v: unknown)
   const foreign = [...malformed, ...(await repo.findForeignSourceIds(ids.filter((id) => UUID_RE.test(id))))];
   if (foreign.length > 0) unprocessable({ error: 'unknown_source', ids: foreign });
   return ids;
+}
+
+/** MS-P2-1: `sourceKeys` -> id source CỦA project; key lạ/khác project -> 422 `{error:"unknown_source", keys}`. */
+export async function resolveSourceKeys(repo: TenantScopedRepository, v: unknown): Promise<string[]> {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > 50 || v.some((x) => typeof x !== 'string')) {
+    unprocessable({ error: 'validation_failed', field: 'sourceKeys', message: 'sourceKeys là mảng ≤ 50 sourceKey' });
+  }
+  const keys = [...new Set(v as string[])];
+  const found = keys.length ? await repo.findSources({ sourceKey: { in: keys } }) : [];
+  const missing = keys.filter((k) => !found.some((s: any) => s.sourceKey === k));
+  if (missing.length > 0) unprocessable({ error: 'unknown_source', keys: missing });
+  return found.map((s: any) => s.id);
 }
 
 function parseEndpointUrl(v: unknown): string {
@@ -264,7 +277,8 @@ export class ServiceResourcesController {
       const invalid = eventTypes.filter((p) => !readTypes.some((r) => patternCovers(r, p)));
       if (invalid.length > 0) unprocessable({ error: 'outside_read_types', field: 'eventTypes', invalid, message: `Key chỉ đọc được: ${readTypes.join(', ')}` });
     }
-    const sourceIds = await resolveSourceIds(repo, body?.sourceIds);
+    // MS-P2-1 (ADR-089): ghim nguồn theo sourceKey (service biết key từ URL webhook, không cần manage:sources).
+    const sourceIds = [...new Set([...(await resolveSourceIds(repo, body?.sourceIds)), ...(await resolveSourceKeys(repo, body?.sourceKeys))])];
     const created = await this.withAudit(tenantId, async (tx) => {
       const s = await tx.createSubscription({ destinationId: endpoint.id, name, eventTypes, sourceIds, isActive: true });
       await tx.createAuditLog({
@@ -276,7 +290,24 @@ export class ServiceResourcesController {
       });
       return s;
     });
-    return publicSubscription(created);
+    return (await this.withSourceKeys(tenantId, [created]))[0];
+  }
+
+  /** MS-P2-1: bật/tắt subscription của endpoint (vd tắt subscription cũ chưa ghim nguồn). Chỉ `isActive`. */
+  @Patch('subscriptions/:id')
+  @RequireScope('manage:endpoints')
+  async updateSubscription(@Req() req: RequestWithPrincipal, @Param('id') id: string, @Body() body: any) {
+    const tenantId = req.tenantId!;
+    if (typeof body?.isActive !== 'boolean') unprocessable({ error: 'validation_failed', field: 'isActive', message: 'isActive là boolean' });
+    const repo = this.prisma.forTenant(tenantId);
+    const sub = UUID_RE.test(id) ? await repo.findSubscriptionById(id) : null;
+    if (!sub || (sub as any).destination?.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
+    const updated = await this.withAudit(tenantId, async (tx) => {
+      const u = await tx.updateSubscription(id, { isActive: body.isActive });
+      await tx.createAuditLog({ action: 'subscription.update', entityType: 'subscription', entityId: id, actor: `key:${req.apiKey!.id}`, metadata: { fields: ['isActive'], isActive: body.isActive } });
+      return u;
+    });
+    return (await this.withSourceKeys(tenantId, [updated ?? { ...sub, isActive: body.isActive }]))[0];
   }
 
   @Get('subscriptions')
@@ -284,7 +315,7 @@ export class ServiceResourcesController {
   async listSubscriptions(@Req() req: RequestWithPrincipal) {
     // MS-R3: chỉ subscription tới endpoint (webhook) — không lộ đích Telegram/Discord của operator.
     const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions({ destination: { type: 'webhook' } });
-    return rows.map(publicSubscription);
+    return this.withSourceKeys(req.tenantId!, rows);
   }
 
   /**
@@ -388,6 +419,14 @@ export class ServiceResourcesController {
       status: r.status,
       diagnosis: adapter.diagnose ? adapter.diagnose(r as any, ctx) : { ok: r.signatureValid },
     }));
+  }
+
+  /** Bản công khai kèm `sourceKeys` (map id -> sourceKey trong project, một truy vấn). */
+  private async withSourceKeys(tenantId: string, rows: any[]) {
+    const ids = [...new Set(rows.flatMap((r) => r.sourceIds ?? []))];
+    const found = ids.length ? await this.prisma.forTenant(tenantId).findSources({ id: { in: ids } }) : [];
+    const keyOf = new Map(found.map((x: any) => [x.id, x.sourceKey]));
+    return rows.map((r) => ({ ...publicSubscription(r), sourceKeys: (r.sourceIds ?? []).map((i: string) => keyOf.get(i)).filter(Boolean) }));
   }
 
   private withAudit<T>(tenantId: string, fn: (repo: TenantScopedRepository) => Promise<T>): Promise<T> {
