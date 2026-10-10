@@ -317,6 +317,17 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     }
   });
 
+  it('[UI:R9-01] repo flow dựng qua TenantScopedRepository.extend: cùng tenant, là TenantScopedRepository, không ép kiểu', async () => {
+    const { flowRepoFor, FlowScopedRepository } = await import('../src/modules/flow/flow.repository');
+    const { TenantScopedRepository } = await import('@hub/database');
+    const repo = flowRepoFor(svc, tenant);
+    expect(repo).toBeInstanceOf(FlowScopedRepository);
+    expect(repo).toBeInstanceOf(TenantScopedRepository);
+    expect(repo.tenantId).toBe(tenant);
+    expect((await repo.findRawEventForFlow(ids.rawOk))?.id).toBe(ids.rawOk);
+    expect(await flowRepoFor(svc, other).findRawEventForFlow(ids.rawOk)).toBeNull();
+  });
+
   it('[UI:F2-06] che bí mật: không ciphertext, signingSecret, token hay authorization thô trong response', async () => {
     for (const id of [ids.event, ids.rawRejected]) {
       const text = JSON.stringify(await controller.getEventFlow(tenant, id));

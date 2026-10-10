@@ -13,11 +13,9 @@ type PrismaClientOrTx = PrismaClient | Prisma.TransactionClient;
  * raw_events, bảng không có cột tenant). Lúc merge có thể chuyển nguyên các hàm này vào repo gốc.
  */
 export class FlowScopedRepository extends TenantScopedRepository {
-  constructor(
-    private readonly db: PrismaClientOrTx,
-    tenantId: string,
-  ) {
-    super(db, tenantId);
+  /** Client của repo cha (protected, R-9) — cùng tenant, không mở kết nối mới. */
+  private get db(): PrismaClientOrTx {
+    return this.prisma;
   }
 
   /** Raw event theo id, scope qua source.tenantId. KHÔNG nạp `body_raw` (chỉ độ dài). */
@@ -274,14 +272,9 @@ export class FlowScopedRepository extends TenantScopedRepository {
   }
 }
 
-/**
- * Dựng repo flow từ `PrismaService`. `PrismaService.client` là private (BB-5: không ai gọi model trần),
- * nên lấy client mà `forTenant()` đã bọc — đúng client đó, không mở kết nối mới. Hết cần khi các hàm
- * trên được chuyển vào `TenantScopedRepository` lúc merge (ADR nháp EF-2).
- */
+/** Dựng repo flow qua lối có tên `TenantScopedRepository.extend` (R-9) — không ép kiểu vào field nào. */
 export function flowRepoFor(svc: { forTenant(tenantId: string): TenantScopedRepository }, tenantId: string): FlowScopedRepository {
-  const base = svc.forTenant(tenantId) as unknown as { prisma: PrismaClientOrTx };
-  return new FlowScopedRepository(base.prisma, tenantId);
+  return svc.forTenant(tenantId).extend(FlowScopedRepository);
 }
 
 export interface ExecutionFilter {

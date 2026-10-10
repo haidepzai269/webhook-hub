@@ -10,12 +10,22 @@ type PrismaClientOrTx = PrismaClient | Prisma.TransactionClient;
 
 export class TenantScopedRepository {
   constructor(
-    private readonly prisma: PrismaClientOrTx,
+    // protected (không public): chỉ lớp con — vẫn bị ràng buộc tenantId ở constructor — dùng được (R-9).
+    protected readonly prisma: PrismaClientOrTx,
     public readonly tenantId: string,
   ) {
     if (!tenantId) {
       throw new Error('TenantScopedRepository: tenantId là bắt buộc (BB-5 vi phạm)');
     }
+  }
+
+  /**
+   * R-9 (review MS-UI): dựng một repo CON (lớp kế thừa TenantScopedRepository, vd FlowScopedRepository của
+   * module flow) trên CÙNG client và CÙNG tenant của repo này. Lối duy nhất có tên để mở rộng repo mà không
+   * chạm client gốc — thay cho ép kiểu vào field private. Tenant không đổi được (BB-5).
+   */
+  extend<T extends TenantScopedRepository>(Sub: new (prisma: PrismaClientOrTx, tenantId: string) => T): T {
+    return new Sub(this.prisma, this.tenantId);
   }
 
   // --- Sources ---
