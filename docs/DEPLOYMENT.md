@@ -334,6 +334,9 @@ METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub
                          # (Prometheus không tự đọc env trong file cấu hình). Local: để trống.
 WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
 INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
+RUN_SEED=                # deployed: ĐỂ TRỐNG (không tự seed). docker-compose local mặc định true (ADR-066)
+SEED_TELEGRAM_ACTIVE=    # seed tạo subscription Telegram `payment.*` BẬT hay TẮT. Không đặt: bật khi có đủ
+                         # TELEGRAM_BOT_TOKEN thật + TELEGRAM_CHAT_ID (hành vi cũ). Compose local mặc định false.
 
 # --- web (Vercel) — build-time, Next inline vào bundle → KHÔNG đặt secret ở đây ---
 NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — REST + Socket.IO của dashboard

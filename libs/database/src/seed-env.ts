@@ -21,3 +21,20 @@ export function checkSyncDestinationsEnv(env: NodeJS.ProcessEnv | Record<string,
 }
 
 export const ALLOW_DEFAULTS_FLAG = '--allow-defaults';
+
+/**
+ * Review SPEC-3 #7 (ADR-066): seed giờ tự chạy trên mọi stack compose mới, nên subscription Telegram
+ * (`payment.*`) KHÔNG được tự bật gửi Telegram thật. Bật khi và chỉ khi:
+ * - `SEED_TELEGRAM_ACTIVE` đặt rõ: 'true' -> bật, 'false' -> tắt (thắng mọi luật dưới);
+ * - không đặt: có ĐỦ `TELEGRAM_BOT_TOKEN` (không phải token mock) và `TELEGRAM_CHAT_ID` -> bật (hành vi cũ);
+ *   thiếu một trong hai -> tắt.
+ * docker-compose đặt `SEED_TELEGRAM_ACTIVE=${SEED_TELEGRAM_ACTIVE:-false}` -> stack local mặc định TẮT.
+ */
+export function seedTelegramActive(env: NodeJS.ProcessEnv | Record<string, string | undefined>): boolean {
+  const flag = (env.SEED_TELEGRAM_ACTIVE ?? '').trim().toLowerCase();
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
+  const token = (env.TELEGRAM_BOT_TOKEN ?? '').trim();
+  const chat = (env.TELEGRAM_CHAT_ID ?? '').trim();
+  return !!token && !token.includes('mock') && !!chat;
+}

@@ -39,3 +39,25 @@ describe('checkSyncDestinationsEnv', () => {
     expect(checkSyncDestinationsEnv({ ...rest, DISCORD_WEBHOOK_URL: 'https://discord/x' })).toEqual(['MOCK_BASE_URL']);
   });
 });
+
+describe('seedTelegramActive (review #7, ADR-066)', () => {
+  const { seedTelegramActive } = require('../src/seed-env');
+  it.each([
+    [{}, false],
+    [{ TELEGRAM_BOT_TOKEN: '123:abc' }, false],
+    [{ TELEGRAM_CHAT_ID: '-1' }, false],
+    [{ TELEGRAM_BOT_TOKEN: '123:mock-token', TELEGRAM_CHAT_ID: '-1' }, false],
+    [{ TELEGRAM_BOT_TOKEN: '123:abc', TELEGRAM_CHAT_ID: '-1' }, true],
+    [{ TELEGRAM_BOT_TOKEN: '123:abc', TELEGRAM_CHAT_ID: '-1', SEED_TELEGRAM_ACTIVE: 'false' }, false],
+    [{ SEED_TELEGRAM_ACTIVE: 'true' }, true],
+    [{ TELEGRAM_BOT_TOKEN: ' ', TELEGRAM_CHAT_ID: ' ' }, false],
+  ])('%j -> %s', (env, expected) => {
+    expect(seedTelegramActive(env)).toBe(expected);
+  });
+
+  it('compose mặc định tắt Telegram seed và bật RUN_SEED', () => {
+    const yml: string = require('fs').readFileSync(require('path').join(__dirname, '../../../docker-compose.yml'), 'utf8');
+    expect(yml).toContain('SEED_TELEGRAM_ACTIVE=${SEED_TELEGRAM_ACTIVE:-false}');
+    expect(yml).toContain('RUN_SEED=${RUN_SEED:-true}');
+  });
+});

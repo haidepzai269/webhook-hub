@@ -20,9 +20,9 @@ elif [ "$SERVICE" = "hub-api" ]; then
   # chưa áp dụng, không tự sinh thay đổi phá dữ liệu. Neon: dùng DIRECT_URL (directUrl trong schema).
   echo "==> [hub-api] Applying database migrations (prisma migrate deploy)..."
   npx prisma migrate deploy --schema=libs/database/prisma/schema.prisma
-  # Seed KHÔNG tự chạy mỗi lần khởi động/restart container (an toàn cho BB-2).
-  # Chỉ chạy khi người vận hành chủ động bật RUN_SEED=true (dev/demo), hoặc
-  # gọi riêng: docker-entrypoint.sh seed
+  # Seed chạy khi RUN_SEED=true (docker-compose local mặc định true — review #7, ADR-066). Seed idempotent:
+  # DB đã có source thì bỏ qua NGAY, không tạo thêm, không ghi đè, không xoá (BB-2). Deployed (Render) không
+  # đặt RUN_SEED -> không chạy; gọi riêng: docker-entrypoint.sh seed
   if [ "$RUN_SEED" = "true" ]; then
     echo "==> [hub-api] RUN_SEED=true, chạy seed (idempotent, chỉ tạo dữ liệu nếu DB đang rỗng)..."
     npm run prisma:seed || true

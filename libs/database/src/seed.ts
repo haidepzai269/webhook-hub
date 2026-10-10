@@ -4,7 +4,7 @@ import { PrismaClient, ProviderEnum, DestinationType } from '@prisma/client';
 import { aesGcmEncrypt, aesGcmDecrypt } from '@hub/crypto';
 import { DEFAULT_TENANT_ID, getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';
-import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv } from './seed-env';
+import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, seedTelegramActive } from './seed-env';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -101,6 +101,8 @@ async function seed() {
   }
 
   const masterKey = getMasterKey();
+  const telegramActive = seedTelegramActive(process.env);
+  console.log(`Subscription Telegram seed: ${telegramActive ? 'BẬT' : 'TẮT'} (SEED_TELEGRAM_ACTIVE / TELEGRAM_* — ADR-066)`);
 
   // Đọc cấu hình từ .env (nếu người dùng đã điền, nếu chưa thì dùng mock test key)
   const githubSecret = (process.env.GITHUB_WEBHOOK_SECRET && process.env.GITHUB_WEBHOOK_SECRET.trim()) || 'gh_webhook_secret_test_123';
@@ -220,7 +222,8 @@ async function seed() {
       eventTypes: ['payment.*'],
       template:
         'Giao dịch mới\nNguồn: {{source}}\nSố tiền: {{data.amount}} {{data.currency}}\nNội dung: {{data.memo}}\nMã tham chiếu: {{data.reference}}',
-      isActive: true,
+      // Review #7 (ADR-066): seed tự chạy trên stack mới -> KHÔNG tự bật Telegram thật (xem seedTelegramActive)
+      isActive: telegramActive,
     },
   });
 

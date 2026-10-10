@@ -146,6 +146,10 @@ services:
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      # Review #7 (ADR-066): seed tự chạy khi DB trống (idempotent: đã có source thì bỏ qua, không ghi đè).
+      # RUN_SEED=false để tắt. Subscription Telegram seed mặc định TẮT trên local — bật bằng SEED_TELEGRAM_ACTIVE=true.
+      - RUN_SEED=${RUN_SEED:-true}
+      - SEED_TELEGRAM_ACTIVE=${SEED_TELEGRAM_ACTIVE:-false}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
       - SHOP_WEBHOOK_URL=http://shop:4001/hub-webhook
       # Seed chạy TRONG container: mock Discord/Telegram phải trỏ tên service, không phải localhost
