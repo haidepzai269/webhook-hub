@@ -31,8 +31,8 @@ import { layoutLR } from "./layout";
 import { ProviderIcon } from "./provider-icon";
 import { destinationIcon, HEALTH_TONE, HealthGlyph, ICON, ICON_SM, KIND_ICON, TONE_VAR, toneStyle } from "./tokens";
 
-const NODE_W = 214;
-const NODE_H = 96;
+const NODE_W = 236;
+const NODE_H = 108;
 const POS_KEY = "flow:v3:positions";
 const MAX_PULSES_PER_SEC = 30;
 const PULSE_MS = 1400;
@@ -40,7 +40,7 @@ const PULSE_MS = 1400;
 const WINDOW_SHORT: Record<TopologyWindow, string> = { "15m": "15m", "1h": "1h", "24h": "24h" };
 
 type CardData = { node: FlowNode; window: TopologyWindow; onBadge: (href: string) => void };
-type EdgeData = { edge: FlowEdge; window: TopologyWindow; pulses: { id: number; tone: string }[] };
+type EdgeData = { edge: FlowEdge; window: TopologyWindow; pulses: { id: number; tone: string }[]; caption?: string };
 
 function fmtCount(n: number) {
   return n >= 10_000 ? `${(n / 1000).toFixed(0)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -97,51 +97,62 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           {crashedBadge}
         </span>
       )}
-      <div className="flex items-start gap-2.5">
-        <div className="flow-icon-box grid size-9 shrink-0 place-items-center rounded-xl" style={toneStyle(tone)}>
+      <div className="flex items-start gap-3">
+        <div className="flow-icon-box grid size-10 shrink-0 place-items-center rounded-xl" style={toneStyle(tone)}>
           <NodeIcon node={node} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold text-[13.5px] leading-5" title={node.label}>
+          <div className="line-clamp-2 break-words font-semibold text-[14.5px] leading-[1.25]" title={node.label}>
             {node.label}
           </div>
-          <div className="flex items-center gap-1 text-[12px] leading-4" style={{ color: TONE_VAR[tone] }}>
+          <div className="mt-0.5 flex items-center gap-1 font-medium text-[12.5px] leading-4" style={{ color: TONE_VAR[tone] }}>
             <HealthGlyph health={node.health} small />
             <span>{HEALTH_LABELS[node.health]}</span>
-            <span className="ml-1 truncate text-[11px]" style={{ color: "var(--flow-text-dim)" }} title={subtitleOf(node)}>
-              · {subtitleOf(node)}
-            </span>
+          </div>
+          <div className="mt-0.5 truncate text-[11.5px]" style={{ color: "var(--flow-text-dim)" }} title={subtitleOf(node)}>
+            {subtitleOf(node)}
           </div>
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-2 border-t pt-1.5 text-[12px] tabular-nums" style={{ borderColor: "var(--flow-card-border)" }}>
-        <span className="inline-flex items-center gap-1">
-          <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[tone] }} />
-          {node.successPct === null ? "—" : `${node.successPct}%`}
-        </span>
-        <span className="h-3 w-px" style={{ background: "var(--flow-card-border)" }} />
-        <span style={{ color: "var(--flow-text-dim)" }}>{node.p95Ms === null ? "— lat" : `${node.p95Ms}ms lat`}</span>
-        <span className="ml-auto" style={{ color: "var(--flow-text-dim)" }}>
-          {fmtCount(node.throughput)} ev
-        </span>
+      <div className="mt-2.5 flex items-center gap-2.5 border-t pt-2 text-[13px] tabular-nums" style={{ borderColor: "var(--flow-card-border)" }}>
+        {node.throughput === 0 && node.successPct === null ? (
+          <span className="text-[12px]" style={{ color: "var(--flow-text-dim)" }}>
+            chưa có traffic
+          </span>
+        ) : (
+          <>
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              <span className="size-2 rounded-full" style={{ background: TONE_VAR[tone] }} />
+              {node.successPct === null ? `${fmtCount(node.throughput)} ev` : `${node.successPct}%`}
+            </span>
+            {node.p95Ms !== null && (
+              <>
+                <span className="h-3.5 w-px" style={{ background: "var(--flow-card-border)" }} />
+                <span style={{ color: "var(--flow-text-dim)" }}>{node.p95Ms}ms lat</span>
+              </>
+            )}
+          </>
+        )}
       </div>
-      {(dst || src || sub) && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      {((dst && (dst.circuitState !== "CLOSED" || dst.throttleRps > 0 || dst.retrying > 0 || dst.dead > 0)) || (src && src.rejected > 0) || (sub && !sub.active)) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1">
           {dst && (
             <>
-              <span className="flow-pill inline-flex h-[18px] items-center gap-1 rounded-full px-1.5 text-[10px]" style={toneStyle(dst.circuitState === "CLOSED" ? "healthy" : dst.circuitState === "OPEN" ? "crashed" : "warning")}>
-                {dst.circuitState === "CLOSED" ? <Zap {...ICON_SM} aria-hidden /> : <ZapOff {...ICON_SM} aria-hidden />}
-                {dst.circuitState}
-              </span>
+              {dst.circuitState !== "CLOSED" && (
+                <span className="flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]" style={toneStyle(dst.circuitState === "OPEN" ? "crashed" : "warning")}>
+                  {dst.circuitState === "OPEN" ? <ZapOff {...ICON_SM} aria-hidden /> : <Zap {...ICON_SM} aria-hidden />}
+                  {dst.circuitState}
+                </span>
+              )}
               {dst.throttleRps > 0 && (
-                <span className="flow-pill inline-flex h-[18px] items-center gap-1 rounded-full px-1.5 text-[10px]" style={toneStyle("idle")}>
+                <span className="flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]" style={toneStyle("idle")}>
                   <Gauge {...ICON_SM} aria-hidden />≤{dst.throttleRps} rps
                 </span>
               )}
               {dst.retrying > 0 && (
                 <button
                   type="button"
-                  className="flow-pill nodrag inline-flex h-[18px] items-center rounded-full px-1.5 text-[10px] hover:brightness-110"
+                  className="flow-pill nodrag inline-flex h-5 items-center rounded-full px-2 text-[11px] hover:brightness-110"
                   style={toneStyle("warning")}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -154,7 +165,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
               {dst.dead > 0 && (
                 <button
                   type="button"
-                  className="flow-pill nodrag inline-flex h-[18px] items-center rounded-full px-1.5 text-[10px] hover:brightness-110"
+                  className="flow-pill nodrag inline-flex h-5 items-center rounded-full px-2 text-[11px] hover:brightness-110"
                   style={toneStyle("crashed")}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -168,13 +179,10 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           )}
           {src && (
             <>
-              <span className="text-[10.5px] tabular-nums" style={{ color: "var(--flow-text-dim)" }}>
-                {src.accepted} nhận · {src.duplicate} trùng
-              </span>
               {src.rejected > 0 && (
                 <button
                   type="button"
-                  className="flow-pill nodrag inline-flex h-[18px] items-center gap-1 rounded-full px-1.5 text-[10px]"
+                  className="flow-pill nodrag inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]"
                   style={toneStyle("crashed")}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -188,7 +196,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
             </>
           )}
           {sub && !sub.active && (
-            <span className="flow-pill inline-flex h-[18px] items-center rounded-full px-1.5 text-[10px]" style={toneStyle("idle")}>
+            <span className="flow-pill inline-flex h-5 items-center rounded-full px-2 text-[11px]" style={toneStyle("idle")}>
               đang tắt
             </span>
           )}
@@ -203,14 +211,14 @@ const TopologyEdge = memo(function TopologyEdge(props: EdgeProps<Edge<EdgeData>>
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd } = props;
   const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.35 });
   if (!data) return null;
-  const { edge, window, pulses } = data;
+  const { edge, window, pulses, caption } = data;
   const tone = HEALTH_TONE[edge.health];
   const color = TONE_VAR[tone];
-  const width = Math.min(1.5 + Math.log2(edge.count + 1) * 0.55, 5);
+  const width = Math.min(2 + Math.log2(edge.count + 1) * 0.6, 6);
   const live = edge.count > 0;
   return (
     <>
-      <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke: color, strokeWidth: width, opacity: live ? 0.35 : 0.5 }} />
+      <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke: color, strokeWidth: width, opacity: live ? 0.3 : 0.55 }} />
       {live && <path d={path} fill="none" stroke={color} strokeWidth={width} className="flow-edge-animated" style={{ filter: `drop-shadow(0 0 4px ${color})` }} />}
       {pulses.map((p) => (
         <circle key={p.id} r={3.6} fill={p.tone} style={{ filter: `drop-shadow(0 0 6px ${p.tone})` }}>
@@ -220,22 +228,20 @@ const TopologyEdge = memo(function TopologyEdge(props: EdgeProps<Edge<EdgeData>>
       {live && (
         <EdgeLabelRenderer>
           <div
-            className="flow-edge-label nodrag nopan pointer-events-none absolute rounded-md px-1.5 py-0.5 text-center font-medium text-[10.5px] leading-tight tabular-nums"
+            className="flow-edge-label nodrag nopan pointer-events-none absolute rounded-lg px-2 py-1 text-center font-semibold text-[12px] leading-[1.35] tabular-nums shadow-sm"
             style={{ ...toneStyle(tone), transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
           >
-            {fmtCount(edge.count)} ev/{WINDOW_SHORT[window]}
-            {edge.latencyMs !== null && (
-              <>
-                <br />
-                {edge.latencyMs}ms
-              </>
+            {caption && <div className="max-w-36 truncate font-mono font-medium text-[11px] opacity-90">{caption}</div>}
+            {live ? (
+              <div>
+                {fmtCount(edge.count)} ev/{WINDOW_SHORT[window]}
+                {edge.latencyMs !== null && <span className="font-medium opacity-80"> · {edge.latencyMs}ms</span>}
+              </div>
+            ) : (
+              <div className="font-medium opacity-70">chưa có traffic</div>
             )}
-            {edge.failed > 0 && (
-              <>
-                <br />
-                <span style={{ color: "var(--flow-crashed)" }}>{edge.failed} lỗi</span>
-              </>
-            )}
+            {edge.failed > 0 && <div style={{ color: "var(--flow-crashed)" }}>{edge.failed} lỗi</div>}
+            {edge.failed === 0 && edge.retrying > 0 && <div style={{ color: "var(--flow-warning)" }}>{edge.retrying} đang thử lại</div>}
           </div>
         </EdgeLabelRenderer>
       )}
@@ -245,6 +251,38 @@ const TopologyEdge = memo(function TopologyEdge(props: EdgeProps<Edge<EdgeData>>
 
 const nodeTypes = { card: TopologyCard };
 const edgeTypes = { flow: TopologyEdge };
+
+/**
+ * Gộp cột Subscription vào NHÃN cạnh Normalize → Đích (mặc định): bản đồ còn 4 cột nên thẻ đủ to để đọc
+ * (giống ảnh mẫu). Cạnh gộp mang tổng số + health xấu nhất của các cạnh subscription → đích (server tính).
+ */
+const HEALTH_RANK: Record<Health, number> = { crashed: 3, warning: 2, healthy: 1, idle: 0 };
+function foldSubscriptions(topo: FlowTopology): { topo: FlowTopology; captions: Record<string, string> } {
+  const subs = topo.nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription");
+  const captions: Record<string, string> = {};
+  const edges: FlowEdge[] = topo.edges.filter((e) => !e.source.startsWith("sub:") && !e.target.startsWith("sub:"));
+  const byDest = new Map<string, SubscriptionFlowNode[]>();
+  for (const s of subs) byDest.set(s.destinationId, [...(byDest.get(s.destinationId) ?? []), s]);
+  for (const [dest, group] of byDest) {
+    const outs = topo.edges.filter((e) => group.some((g) => e.source === g.id));
+    if (!outs.length) continue;
+    const id = `e:fold:${dest}`;
+    const worst = outs.reduce((w, e) => (HEALTH_RANK[e.health] > HEALTH_RANK[w] ? e.health : w), "idle" as Health);
+    edges.push({
+      id,
+      source: "normalize",
+      target: `dst:${dest}`,
+      count: outs.reduce((a, e) => a + e.count, 0),
+      failed: outs.reduce((a, e) => a + e.failed, 0),
+      retrying: outs.reduce((a, e) => a + e.retrying, 0),
+      latencyMs: outs[0].latencyMs,
+      health: worst,
+    });
+    const patterns = [...new Set(group.flatMap((g) => g.eventTypes))];
+    captions[id] = group.length > 1 ? `${group.length} sub · ${patterns.join(", ")}` : patterns.join(", ");
+  }
+  return { topo: { ...topo, nodes: topo.nodes.filter((n) => n.kind !== "subscription"), edges }, captions };
+}
 
 /** > 60 node: gộp các subscription cùng đích thành một node (SPEC §5). */
 function collapseIfLarge(topo: FlowTopology, force: boolean): FlowTopology {
@@ -286,14 +324,20 @@ export interface TopologyCanvasProps {
   layoutVersion: number;
   /** Ẩn subscription đang tắt (mặc định) — bớt node idle, thẻ to hơn. */
   hideInactive: boolean;
+  /** Hiện cột Subscription riêng; tắt (mặc định) = gộp vào nhãn cạnh. */
+  showSubscriptions: boolean;
 }
 
-export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilter, layoutVersion, hideInactive }: TopologyCanvasProps) {
+export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilter, layoutVersion, hideInactive, showSubscriptions }: TopologyCanvasProps) {
   const router = useRouter();
   const topo = useMemo(() => {
     let t = topology;
     if (hideInactive) {
-      const off = new Set(t.nodes.filter((n) => n.kind === "subscription" && !(n as SubscriptionFlowNode).active).map((n) => n.id));
+      // Chỉ ẩn subscription tắt mà KHÔNG còn lưu lượng/thử lại trong cửa sổ — tắt mà còn delivery đang chạy thì vẫn phải thấy.
+      const busy = (id: string) => t.edges.some((e) => (e.source === id || e.target === id) && (e.count > 0 || e.retrying > 0));
+      const off = new Set(
+        t.nodes.filter((n) => n.kind === "subscription" && !(n as SubscriptionFlowNode).active && !busy(n.id)).map((n) => n.id),
+      );
       const edges = t.edges.filter((e) => !off.has(e.source) && !off.has(e.target));
       // Đích không còn cạnh vào mà idle thì ẩn theo (nếu không dagre đặt nó lạc sang cột source).
       // Đích có vấn đề (crashed/warning) vẫn hiện dù subscription đã tắt.
@@ -302,11 +346,15 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
       );
       t = { ...t, nodes: t.nodes.filter((n) => !off.has(n.id) && !orphanIdle.has(n.id)), edges };
     }
-    t = collapseIfLarge(t, collapseSubs);
-    if (!sourceFilter) return t;
-    const keep = (id: string) => !id.startsWith("src:") || id === `src:${sourceFilter}`;
-    return { ...t, nodes: t.nodes.filter((n) => keep(n.id)), edges: t.edges.filter((e) => keep(e.source)) };
-  }, [topology, collapseSubs, sourceFilter, hideInactive]);
+    let captions: Record<string, string> = {};
+    if (showSubscriptions) t = collapseIfLarge(t, collapseSubs);
+    else ({ topo: t, captions } = foldSubscriptions(t));
+    if (sourceFilter) {
+      const keep = (id: string) => !id.startsWith("src:") || id === `src:${sourceFilter}`;
+      t = { ...t, nodes: t.nodes.filter((n) => keep(n.id)), edges: t.edges.filter((e) => keep(e.source)) };
+    }
+    return { ...t, captions };
+  }, [topology, collapseSubs, sourceFilter, hideInactive, showSubscriptions]);
 
   const [pulses, setPulses] = useState<Record<string, { id: number; tone: string }[]>>({});
   const onBadge = useCallback((href: string) => router.push(href), [router]);
@@ -314,14 +362,14 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
   const structureKey = topo.nodes.map((n) => n.id).join("|") + topo.edges.map((e) => e.id).join("|");
   const positions = useMemo(() => {
     const auto = layoutLR(
-      topo.nodes.map((n) => ({ id: n.id, width: NODE_W, height: n.kind === "destination" || n.kind === "source" ? NODE_H + 24 : NODE_H })),
+      topo.nodes.map((n) => ({ id: n.id, width: NODE_W, height: NODE_H + 30 })),
       topo.edges,
-      { ranksep: 66, nodesep: 22 },
+      { ranksep: showSubscriptions ? 70 : 118, nodesep: 46 },
     );
     const saved = typeof window !== "undefined" && layoutVersion >= 0 ? readPositions() : {};
     return { ...auto, ...saved };
     // biome-ignore lint/correctness/useExhaustiveDependencies: chỉ bố cục lại khi CẤU TRÚC đổi
-  }, [structureKey, layoutVersion]);
+  }, [structureKey, layoutVersion, showSubscriptions]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CardData>>([]);
   const [edges, setEdges] = useEdgesState<Edge<EdgeData>>([]);
@@ -348,7 +396,7 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
         target: e.target,
         type: "flow",
         markerEnd: { type: MarkerType.ArrowClosed, color: TONE_VAR[HEALTH_TONE[e.health]], width: 16, height: 16 },
-        data: { edge: e, window: topo.window, pulses: pulses[e.id] ?? [] },
+        data: { edge: e, window: topo.window, pulses: pulses[e.id] ?? [], caption: topo.captions[e.id] },
       })),
     );
   }, [topo, pulses, setEdges]);
@@ -363,6 +411,8 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
   const seq = useRef(0);
   const topoRef = useRef(topo);
   topoRef.current = topo;
+  const fullRef = useRef(topology);
+  fullRef.current = topology;
   const lastTrace = useRef(0);
 
   const pulse = useCallback(
@@ -398,7 +448,7 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
   useEffect(() => {
     const t = () => topoRef.current;
     const subsOfDest = (destinationId: string) =>
-      t().nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription" && n.destinationId === destinationId && n.active);
+      fullRef.current.nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription" && n.destinationId === destinationId && n.active);
     const offTrace = subscribeHubSocket("trace.ingested", (n) => {
       lastTrace.current = Date.now();
       const src = t().nodes.find((x): x is SourceFlowNode => x.kind === "source" && x.sourceKey === n.sourceKey);
@@ -415,12 +465,12 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
         setTimeout(() => pulse(["e:gate"], "var(--flow-healthy)"), 450);
       }
       const dests = [...new Set(n.deliveries.map((d) => d.destinationId))];
-      setTimeout(() => pulse(dests.flatMap((d) => subsOfDest(d).map((s) => `e:norm:${s.id.slice(4)}`).concat(`e:norm:subgroup:${d}`)), "var(--flow-healthy)"), 900);
+      setTimeout(() => pulse(dests.flatMap((d) => subsOfDest(d).map((s) => `e:norm:${s.id.slice(4)}`).concat(`e:norm:subgroup:${d}`, `e:fold:${d}`)), "var(--flow-healthy)"), 900);
     });
     const offAttempt = subscribeHubSocket("delivery.attempt", (n) => {
       const tone =
         n.status === "SUCCEEDED" ? "var(--flow-healthy)" : n.status === "DEAD" ? "var(--flow-crashed)" : "var(--flow-warning)";
-      pulse(subsOfDest(n.destinationId).map((s) => `e:sub:${s.id.slice(4)}`).concat(`e:sub:subgroup:${n.destinationId}`), tone);
+      pulse(subsOfDest(n.destinationId).map((s) => `e:sub:${s.id.slice(4)}`).concat(`e:sub:subgroup:${n.destinationId}`, `e:fold:${n.destinationId}`), tone);
     });
     return () => {
       offTrace();
@@ -454,7 +504,7 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
         else if (id === "gate") router.push("/dashboard/events?status=rejected");
       }}
       fitView
-      fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+      fitViewOptions={{ padding: 0.05, maxZoom: 1 }}
       minZoom={0.3}
       maxZoom={1.6}
       proOptions={{ hideAttribution: true }}

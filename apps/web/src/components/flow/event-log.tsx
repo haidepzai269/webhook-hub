@@ -60,7 +60,7 @@ export function EventLog() {
         </div>
       </div>
       {open && (
-        <div className="max-h-40 min-h-24 overflow-y-auto font-mono text-[12px]">
+        <div className="max-h-32 min-h-20 overflow-y-auto font-mono text-[12px]">
           {isLoading && <div className="px-3 py-2 text-muted-foreground">Đang tải…</div>}
           {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">Chưa có hành trình nào.</div>}
           {items.map((i) => {

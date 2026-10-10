@@ -11,6 +11,7 @@ import {
   EdgeLabelRenderer,
   type EdgeProps,
   getBezierPath,
+  getSmoothStepPath,
   Handle,
   MarkerType,
   type Node,
@@ -26,12 +27,13 @@ import { ProviderIcon } from "./provider-icon";
 import { destinationIcon, ICON, ICON_SM, STATUS_TONE, StatusGlyph, stageIcon, TONE_VAR, toneStyle } from "./tokens";
 import { clock, countdown, fmtMs, useNow } from "./time";
 
-const W = 142;
-const H = 92;
-const GAP = 46;
-const DW = 224; // node delivery (gồm chip các lần thử)
-const DONE_W = 190;
-const ROW = 128;
+const W = 196;
+const H = 112;
+const GAP = 38;
+const DW = 380; // node delivery (gồm chip các lần thử)
+const DONE_W = 300;
+const ROW_Y0 = 190; // nhánh bắt đầu dưới hàng chặng chính
+const ROW = 158;
 
 export type OnStageAction = (action: StageAction, stage: StageView, branch?: FlowBranch) => void;
 
@@ -67,12 +69,14 @@ function NodeShell({ tone, selected, width, children, onClick }: { tone: string;
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClick()}
-      className={`flow-card relative cursor-pointer rounded-xl px-2.5 py-2 ${selected ? "is-selected" : ""}`}
+      className={`flow-card relative cursor-pointer rounded-2xl px-3 py-2.5 ${selected ? "is-selected" : ""}`}
       data-tone={tone}
       style={{ ...toneStyle(tone as never), width, minHeight: H }}
     >
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+      <Handle id="l" type="target" position={Position.Left} />
+      <Handle id="r" type="source" position={Position.Right} />
+      <Handle id="t" type="target" position={Position.Top} />
+      <Handle id="b" type="source" position={Position.Bottom} />
       {children}
     </div>
   );
@@ -105,33 +109,35 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1 text-[10.5px] uppercase tracking-wide" style={{ color: TONE_VAR[tone] }}>
+          <div className="flex items-center gap-1 font-medium text-[11px] uppercase tracking-wide" style={{ color: TONE_VAR[tone] }}>
             <StatusGlyph status={stage.status} small />
             {STAGE_LABELS[stage.key]}
           </div>
         </div>
       </div>
-      <div className="mt-1.5 line-clamp-2 font-medium text-[12.5px] leading-4" title={stage.title}>
+      <div className="mt-1.5 font-semibold text-[13px] leading-[1.3]" title={stage.title}>
         {stage.title}
       </div>
       {stage.subtitle && (
-        <div className="mt-0.5 truncate text-[11px]" style={{ color: "var(--flow-text-dim)" }} title={stage.subtitle}>
+        <div className="mt-0.5 line-clamp-2 break-words text-[11.5px] leading-4" style={{ color: "var(--flow-text-dim)" }} title={stage.subtitle}>
           {stage.subtitle}
         </div>
       )}
       {showTime && stage.endedAt && (
-        <div className="mt-0.5 font-mono text-[11px] tabular-nums" style={{ color: "var(--flow-text-dim)" }}>
+        <div className="mt-0.5 font-mono text-[11.5px] tabular-nums" style={{ color: "var(--flow-text-dim)" }}>
           lúc {clock(stage.endedAt)}
         </div>
       )}
       {nextAt && (
-        <div className="mt-1 text-[11px] tabular-nums" style={{ color: TONE_VAR[tone] }}>
-          {tier ? `tầng ${tier} · ` : ""}lúc {clock(nextAt, false)}
-          {cd ? ` · còn ${cd}` : ""}
+        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-[12px] tabular-nums" style={{ color: TONE_VAR[tone] }}>
+          <span className="font-semibold text-[14px]">{cd === "đến hạn" ? "đến hạn" : `còn ${cd}`}</span>
+          <span>
+            {tier ? `tầng ${tier} · ` : ""}lúc {clock(nextAt, false)}
+          </span>
         </div>
       )}
       {stage.reason && stage.status !== "ok" && (
-        <div className="mt-1 line-clamp-2 text-[11px] leading-4" style={{ color: TONE_VAR[tone] }} title={stage.reason.message}>
+        <div className="mt-1 text-[11.5px] leading-4" style={{ color: TONE_VAR[tone] }} title={stage.reason.message}>
           {stage.reason.message}
         </div>
       )}
@@ -177,8 +183,8 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
           <D {...ICON} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold text-[12.5px]">{branch.destination.name}</div>
-          <div className="truncate text-[11px]" style={{ color: "var(--flow-text-dim)" }}>
+          <div className="font-semibold text-[13.5px] leading-tight">{branch.destination.name}</div>
+          <div className="text-[11.5px] leading-4" style={{ color: "var(--flow-text-dim)" }}>
             {branch.subscription.name} · gen {branch.generation}
             {circuit !== "CLOSED" ? ` · circuit ${circuit}` : ""}
           </div>
@@ -202,7 +208,7 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
                   e.stopPropagation();
                   onSelect(a, branch);
                 }}
-                className={`flow-pill inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
+                className={`flow-pill inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
                 style={toneStyle(t)}
                 title={`${a.title} · ${a.subtitle ?? ""}`}
               >
@@ -218,10 +224,12 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
   );
 });
 
-type EdgeData = { label: string | null; tone: string; animated: boolean };
+type EdgeData = { label: string | null; tone: string; animated: boolean; step?: boolean };
 const JourneyEdge = memo(function JourneyEdge(props: EdgeProps<Edge<EdgeData>>) {
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd } = props;
-  const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.3 });
+  const [path, lx, ly] = data?.step
+    ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 14, offset: 22 })
+    : getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.3 });
   const color = TONE_VAR[(data?.tone ?? "idle") as keyof typeof TONE_VAR];
   return (
     <>
@@ -230,7 +238,7 @@ const JourneyEdge = memo(function JourneyEdge(props: EdgeProps<Edge<EdgeData>>) 
       {data?.label && (
         <EdgeLabelRenderer>
           <div
-            className="flow-edge-label nodrag nopan pointer-events-none absolute rounded-md px-1.5 py-0.5 font-medium font-mono text-[10.5px] tabular-nums"
+            className="flow-edge-label nodrag nopan pointer-events-none absolute rounded-md px-2 py-0.5 font-mono font-semibold text-[12px] tabular-nums"
             style={{ ...toneStyle((data.tone ?? "idle") as never), transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
           >
             {data.label}
@@ -252,7 +260,7 @@ function delta(prev: StageView | undefined, cur: StageView): string | null {
 }
 
 export function journeyHeight(branchCount: number): number {
-  return Math.max(1, branchCount) * ROW + 40;
+  return ROW_Y0 + Math.max(0, branchCount) * ROW + 30;
 }
 
 /**
@@ -277,13 +285,12 @@ export function JourneyCanvas({
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge<EdgeData>[] = [];
-    const rows = Math.max(1, branches.length);
-    const midY = ((rows - 1) * ROW) / 2;
+    // Hàng chặng chính ở trên; mỗi delivery một hàng bên dưới, căn phải theo node Định tuyến ("toả nhánh").
     stages.forEach((s, i) => {
       nodes.push({
         id: s.id,
         type: "stage",
-        position: { x: i * (W + GAP), y: midY },
+        position: { x: i * (W + GAP), y: 0 },
         data: { stage: s, provider, selected: selectedId === s.id, onSelect, onAction },
         draggable: false,
       });
@@ -293,6 +300,8 @@ export function JourneyCanvas({
           id: `j:${stages[i - 1].id}->${s.id}`,
           source: stages[i - 1].id,
           target: s.id,
+          sourceHandle: "r",
+          targetHandle: "l",
           type: "journey",
           markerEnd: { type: MarkerType.ArrowClosed, color: TONE_VAR[tone], width: 14, height: 14 },
           data: { label: delta(stages[i - 1], s), tone, animated: s.status === "in_progress" },
@@ -300,7 +309,8 @@ export function JourneyCanvas({
       }
     });
     const routed = stages[stages.length - 1];
-    const bx = stages.length * (W + GAP);
+    const rightEdge = Math.max(stages.length, 1) * (W + GAP) - GAP;
+    const bx = Math.max(0, rightEdge - (DW + GAP + DONE_W));
     branches.forEach((b, r) => {
       const queued = b.stages[0];
       const attempts = b.stages.filter((s) => s.id.includes(":attempt:"));
@@ -308,29 +318,34 @@ export function JourneyCanvas({
       const dId = `${b.deliveryId}:delivery`;
       const lastAtt = attempts[attempts.length - 1];
       const dTone = lastAtt ? STATUS_TONE[lastAtt.status] : STATUS_TONE[queued.status];
-      nodes.push({
-        id: dId,
-        type: "delivery",
-        position: { x: bx, y: r * ROW },
-        data: { branch: b, selectedId, onSelect },
-        draggable: false,
-      });
+      const y = ROW_Y0 + r * ROW;
+      nodes.push({ id: dId, type: "delivery", position: { x: bx, y }, data: { branch: b, selectedId, onSelect }, draggable: false });
       nodes.push({
         id: done.id,
         type: "stage",
-        position: { x: bx + DW + GAP, y: r * ROW },
+        position: { x: bx + DW + GAP, y },
         data: { stage: done, selected: selectedId === done.id, onSelect, onAction, branch: b },
         draggable: false,
       });
       if (routed) {
+        const first = attempts[0];
         edges.push({
           id: `j:${routed.id}->${dId}`,
           source: routed.id,
           target: dId,
+          sourceHandle: "b",
+          targetHandle: "l",
           type: "journey",
           markerEnd: { type: MarkerType.ArrowClosed, color: TONE_VAR[dTone], width: 14, height: 14 },
-          // Thời gian từ định tuyến tới lần gửi đầu (relay outbox + hàng đợi).
-          data: { label: attempts[0] ? delta(routed, { ...attempts[0], offsetMs: attempts[0].offsetMs !== null && attempts[0].durationMs !== null ? attempts[0].offsetMs - attempts[0].durationMs : attempts[0].offsetMs }) : null, tone: dTone, animated: false },
+          // Thời gian từ định tuyến tới lúc bắt đầu lần gửi đầu (relay outbox + hàng đợi).
+          data: {
+            label: first
+              ? delta(routed, { ...first, offsetMs: first.offsetMs !== null && first.durationMs !== null ? first.offsetMs - first.durationMs : first.offsetMs })
+              : null,
+            tone: dTone,
+            animated: false,
+            step: true,
+          },
         });
       }
       const doneTone = STATUS_TONE[done.status];
@@ -338,6 +353,8 @@ export function JourneyCanvas({
         id: `j:${dId}->${done.id}`,
         source: dId,
         target: done.id,
+        sourceHandle: "r",
+        targetHandle: "l",
         type: "journey",
         markerEnd: { type: MarkerType.ArrowClosed, color: TONE_VAR[doneTone], width: 14, height: 14 },
         data: {
@@ -357,7 +374,7 @@ export function JourneyCanvas({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.04, maxZoom: 1.05, minZoom: 0.7 }}
+      fitViewOptions={{ padding: 0.05, maxZoom: 1, minZoom: 0.6 }}
       minZoom={0.4}
       maxZoom={1.5}
       nodesConnectable={false}

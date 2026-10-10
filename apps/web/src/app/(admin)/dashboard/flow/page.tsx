@@ -37,6 +37,7 @@ export default function FlowMapPage() {
   const [showPulses, setShowPulses] = useState(true);
   const [collapseSubs, setCollapseSubs] = useState(false);
   const [hideInactive, setHideInactive] = useState(true);
+  const [showSubscriptions, setShowSubscriptions] = useState(false);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const { data, error, isLoading } = useTopology(window);
 
@@ -107,6 +108,9 @@ export default function FlowMapPage() {
                 <DropdownMenuCheckboxItem checked={showPulses} onCheckedChange={(v) => setShowPulses(Boolean(v))}>
                   Chấm chạy theo sự kiện
                 </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem checked={showSubscriptions} onCheckedChange={(v) => setShowSubscriptions(Boolean(v))}>
+                  Hiện cột Subscription (mặc định gộp vào nhãn cạnh)
+                </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={!hideInactive} onCheckedChange={(v) => setHideInactive(!v)}>
                   Hiện subscription đang tắt
                 </DropdownMenuCheckboxItem>
@@ -143,6 +147,7 @@ export default function FlowMapPage() {
             sourceFilter={sourceFilter}
             layoutVersion={layoutVersion}
             hideInactive={hideInactive}
+            showSubscriptions={showSubscriptions}
           />
         ) : null}
         </div>

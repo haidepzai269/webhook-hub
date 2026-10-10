@@ -16,7 +16,7 @@
   --flow-card-border: oklch(0.88 0.008 260);
   --flow-chip: oklch(0.955 0.005 260);
   --flow-text-dim: oklch(0.5 0.012 260);
-  --flow-glow: 0.3;
+  --flow-glow: 0.45;
   --flow-replay: oklch(0.7 0.18 50);
   --flow-replay-fg: oklch(0.99 0 0);
   --flow-json-key: oklch(0.5 0.15 250);
@@ -38,7 +38,7 @@
   --flow-card-border: oklch(1 0 0 / 0.11);
   --flow-chip: oklch(1 0 0 / 0.06);
   --flow-text-dim: oklch(0.7 0.01 260);
-  --flow-glow: 0.5;
+  --flow-glow: 0.75;
   --flow-replay: oklch(0.74 0.17 55);
   --flow-replay-fg: oklch(0.17 0.02 50);
   --flow-json-key: oklch(0.8 0.1 240);
@@ -61,6 +61,7 @@
 /* Thẻ kính mờ, viền + glow theo tone (data-tone + --tone). */
 .flow-card {
   --tone: var(--flow-idle);
+  transition: box-shadow 0.2s;
   background: var(--flow-card);
   backdrop-filter: blur(10px);
   border: 1px solid color-mix(in oklch, var(--tone) 75%, transparent);
@@ -73,7 +74,13 @@
   border-width: 1.5px;
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--tone) 35%, transparent),
-    0 0 38px -2px color-mix(in oklch, var(--tone) calc(var(--flow-glow) * 150%), transparent),
+    0 0 44px 0 color-mix(in oklch, var(--tone) calc(var(--flow-glow) * 130%), transparent),
+    0 10px 24px -14px oklch(0 0 0 / 0.35);
+}
+.flow-card[data-tone="warning"] {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--tone) 28%, transparent),
+    0 0 34px -2px color-mix(in oklch, var(--tone) calc(var(--flow-glow) * 120%), transparent),
     0 10px 24px -14px oklch(0 0 0 / 0.35);
 }
 .flow-card[data-tone="idle"] {
