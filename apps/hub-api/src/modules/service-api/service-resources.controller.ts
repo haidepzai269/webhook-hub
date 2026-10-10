@@ -308,7 +308,8 @@ export class ServiceResourcesController {
     if (typeof body?.isActive !== 'boolean') unprocessable({ error: 'validation_failed', field: 'isActive', message: 'isActive là boolean' });
     const repo = this.prisma.forTenant(tenantId);
     const sub = UUID_RE.test(id) ? await repo.findSubscriptionById(id) : null;
-    if (!sub || (sub as any).destination?.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
+    // R-2 (ADR-094): chỉ subscription tới endpoint của CHÍNH key này — key khác không tắt được sub đã ghim của Shop.
+    if (!sub || !ownsEndpoint((sub as any).destination, req)) throw new NotFoundException(NOT_FOUND);
     const updated = await this.withAudit(tenantId, async (tx) => {
       const u = await tx.updateSubscription(id, { isActive: body.isActive });
       await tx.createAuditLog({ action: 'subscription.update', entityType: 'subscription', entityId: id, actor: `key:${req.apiKey!.id}`, metadata: { fields: ['isActive'], isActive: body.isActive } });

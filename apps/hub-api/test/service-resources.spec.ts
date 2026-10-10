@@ -253,5 +253,14 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect((await controller.listEndpoints(other)).map((e: any) => e.id)).toEqual([created.id]);
   });
 
-});
 
+  it('R-2: key khác KHÔNG tắt được (PATCH) / không thấy subscription của endpoint không phải của mình', async () => {
+    const { controller, req, subs } = build();
+    await controller.createSubscription(req(PA), { endpointId: EA, name: 'pinned', eventTypes: ['payment.received'] });
+    const other = req(PA, [], 'key-attacker');
+    expect(await status(controller.updateSubscription(other, subs[0].id, { isActive: false }))).toMatchObject({ status: 404 });
+    expect(subs[0].isActive).toBe(true);
+    expect(await controller.listSubscriptions(other)).toEqual([]);
+    expect((await controller.listSubscriptions(req(PA))).map((x: any) => x.id)).toEqual([subs[0].id]);
+  });
+});
