@@ -24,11 +24,16 @@ export function redactHeaderValue(value: string): string {
   return MASK;
 }
 
-/** Bản sao headers với các header nhạy cảm đã che. Không đột biến đầu vào. */
-export function redactHeaders<T extends Record<string, unknown>>(headers: T): T {
+/**
+ * Bản sao headers với các header nhạy cảm đã che. Không đột biến đầu vào. `extra` (S8): header bí mật theo cấu hình
+ * của source mà adapter khai (`sensitiveHeaders`), vd token static ở `x-token`.
+ */
+export function redactHeaders<T extends Record<string, unknown>>(headers: T, extra: readonly string[] = []): T {
+  const more = new Set(extra.map((h) => h.toLowerCase()));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(headers || {})) {
-    if (!SENSITIVE_HEADERS.has(k.toLowerCase())) {
+    const key = k.toLowerCase();
+    if (!SENSITIVE_HEADERS.has(key) && !more.has(key)) {
       out[k] = v;
     } else if (Array.isArray(v)) {
       out[k] = v.map((x) => redactHeaderValue(String(x)));

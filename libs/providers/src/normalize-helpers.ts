@@ -13,6 +13,8 @@ export interface NormalizeContext {
    * làm thời gian dự phòng khi provider không gửi thời gian giao dịch — renormalize ra CÙNG giá trị.
    */
   receivedAt?: string;
+  /** S8: `sources.verification_config` — chỉ GenericAdapter đọc. */
+  verificationConfig?: unknown;
 }
 
 /** Thời gian dự phòng ổn định: thời điểm nhận raw event; chỉ khi không có mới dùng giờ hiện tại. */

@@ -129,6 +129,8 @@ export class NormalizeConsumer {
           rawEventId,
           // Review SPEC-3 #4: thời gian dự phòng = lúc hub NHẬN, không phải lúc normalize -> renormalize ổn định.
           receivedAt: rawEvent.receivedAt ? new Date(rawEvent.receivedAt).toISOString() : undefined,
+          // S8: cấu hình riêng của source (GenericAdapter) — lõi chỉ chuyển qua.
+          verificationConfig: (rawEvent as { source?: { verificationConfig?: unknown } }).source?.verificationConfig ?? undefined,
         },
       );
       // 3b. Kiểu dành riêng phải đúng khuôn — kiểm TRƯỚC transaction: sai thì không có dòng nào.

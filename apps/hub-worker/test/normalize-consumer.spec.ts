@@ -149,6 +149,19 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 
+  it('S8: verificationConfig của source (nạp CÙNG raw_event) được chuyển cho adapter.normalize — lõi không đọc', async () => {
+    const cfg = { scheme: 'hmac-sha256', header: 'x-s', idempotency: { field: 'id' }, eventType: 'bank.x' };
+    const findRawEvent = jest.fn().mockResolvedValue({
+      id: rawEventId, headers: {}, body: { id: 1 }, bodyRaw: Buffer.from('{"id":1}'), contentType: 'application/json', source: { verificationConfig: cfg },
+    });
+    const { prisma, tx } = buildFakePrisma({ subs: 0, findRawEvent });
+    const spy = jest.spyOn(ProviderRegistry.get('generic'), 'normalize');
+    const msg = { content: Buffer.from(JSON.stringify({ rawEventId, sourceId: 'src-1', tenantId: TENANT, provider: 'generic', correlationId: 'corr-1' })), properties: { headers: {} } } as any;
+    await new NormalizeConsumer(prisma).handleMessage(msg, buildChannel());
+    expect(spy.mock.calls[0][1]).toMatchObject({ verificationConfig: cfg, sourceId: 'src-1' });
+    expect(tx.event.create.mock.calls[0][0].data).toMatchObject({ type: 'bank.x', normalized: false });
+  });
+
   it('[AF:#22] S1-5: đọc raw_event qua repo.findRawEventById (scope tenant), không qua prisma.rawEvent', async () => {
     const { prisma, findRawEventById } = buildFakePrisma();
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());

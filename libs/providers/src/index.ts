@@ -5,3 +5,6 @@ export * from './sepay.adapter';
 export * from './stripe.adapter';
 export * from './provider.registry';
 export * from './api.adapter';
+export * from './generic.adapter';
+export * from './generic-config';
+export * from './errors';

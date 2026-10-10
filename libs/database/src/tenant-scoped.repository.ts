@@ -466,6 +466,8 @@ export class TenantScopedRepository {
   async findRawEventById(id: string) {
     return this.prisma.rawEvent.findFirst({
       where: { id, source: { tenantId: this.tenantId } },
+      // S8: cấu hình GenericAdapter đi CÙNG truy vấn (không thêm query mỗi raw event).
+      include: { source: { select: { verificationConfig: true } } },
     });
   }
 

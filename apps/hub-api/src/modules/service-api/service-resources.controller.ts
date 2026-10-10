@@ -9,6 +9,8 @@ import { RequestWithPrincipal } from './principal';
 import { unprocessable } from './service-api.controller';
 import { EndpointVerifier, VerificationOutcome } from './endpoint-verifier';
 import { longPoll } from './polling';
+import { parseSourceInput } from './source-input';
+import { ulid } from 'ulidx';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOT_FOUND = { error: 'not_found' };
@@ -74,6 +76,20 @@ function endpointUrl(configEncrypted: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Bản công khai của source: không bao giờ có `secrets` (ciphertext). */
+function publicSource(s: any) {
+  return {
+    id: s.id,
+    name: s.name,
+    provider: s.provider,
+    sourceKey: s.sourceKey,
+    webhookUrl: `/hooks/${s.provider}/${s.sourceKey}`,
+    isActive: s.isActive,
+    verificationConfig: s.verificationConfig ?? null,
+    createdAt: s.createdAt,
+  };
 }
 
 function publicSubscription(s: any) {
@@ -251,6 +267,44 @@ export class ServiceResourcesController {
     const rows = await longPoll(() => repo.pollEvents(opts), wait, () => closed);
     const events = rows.map((r) => ({ ...r, seq: r.seq.toString() }));
     return { events, nextCursor: events.length ? events[events.length - 1].seq : after };
+  }
+
+  /**
+   * S8 (SPEC §4.3B, §4.8): service tự thêm nguồn bên thứ ba (GenericAdapter hoặc provider có sẵn). Secret mã hoá
+   * như console; response CHỈ `{id, webhookUrl}` (+ thông tin công khai) — không bao giờ trả secret.
+   */
+  @Post('sources')
+  @RequireScope('manage:sources')
+  async createSource(@Req() req: RequestWithPrincipal, @Body() body: any) {
+    const input = parseSourceInput(body);
+    const sourceKey = `src_${input.provider}_${ulid().toLowerCase()}`;
+    const masterKey = getMasterKey();
+    const created = await this.withAudit(req.tenantId!, async (repo) => {
+      const s = await repo.createSource({
+        provider: input.provider,
+        name: input.name,
+        sourceKey,
+        isActive: true,
+        ...(input.verificationConfig ? { verificationConfig: input.verificationConfig as any } : {}),
+        secrets: { create: { secretEncrypted: aesGcmEncrypt(input.secret, masterKey), version: 1 } },
+      } as any);
+      await repo.createAuditLog({
+        action: 'source.create',
+        entityType: 'source',
+        entityId: s.id,
+        actor: `key:${req.apiKey!.id}`,
+        metadata: { provider: s.provider, name: s.name, sourceKey },
+      });
+      return s;
+    });
+    return publicSource(created);
+  }
+
+  @Get('sources')
+  @RequireScope('manage:sources')
+  async listSources(@Req() req: RequestWithPrincipal) {
+    const rows = await this.prisma.forTenant(req.tenantId!).findSources();
+    return rows.map(publicSource);
   }
 
   private withAudit<T>(tenantId: string, fn: (repo: TenantScopedRepository) => Promise<T>): Promise<T> {

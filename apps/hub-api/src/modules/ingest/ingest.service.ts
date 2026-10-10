@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService, getMasterKey } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
-import { ProviderRegistry } from '@hub/providers';
+import { AdapterContext, IdempotencyKeyMissingError, ProviderRegistry } from '@hub/providers';
 import { aesGcmDecrypt } from '@hub/crypto';
 import {
   RawWebhookRequest,
@@ -267,54 +267,81 @@ export class IngestService {
       }
     }).filter(Boolean);
 
+    // S8: cấu hình riêng của source (GenericAdapter) — lõi chỉ chuyển qua, KHÔNG đọc, không `if (provider)`.
+    const ctx: AdapterContext = { verificationConfig: (source as { verificationConfig?: unknown }).verificationConfig ?? undefined };
+
     // 3. Adapter xác thực chữ ký (verify)
-    const isSignatureValid = await adapter.verify(req, decryptedSecrets);
-    // ADR-051: verify đã xong -> từ đây chỉ lưu bản headers ĐÃ che (Authorization/Cookie/X-API-Key...).
+    const isSignatureValid = await adapter.verify(req, decryptedSecrets, ctx);
+    // ADR-051: verify đã xong -> từ đây chỉ lưu bản headers ĐÃ che (Authorization/Cookie/X-API-Key...), cộng
+    // header bí mật theo cấu hình source mà adapter khai (S8: token static ở header tuỳ chọn).
     // `req.headers` gốc vẫn còn cho adapter (extractIdempotencyKey/buildAck); bodyRaw giữ nguyên bytes.
-    const storedHeaders = redactHeaders(req.headers as Record<string, unknown>);
+    const storedHeaders = redactHeaders(req.headers as Record<string, unknown>, adapter.sensitiveHeaders?.(ctx) ?? []);
     // S3-1: adapter tự biết chữ ký của mình ở đâu (header GitHub/Stripe, body PayOS, SePay đã che).
     // Lõi không đoán header -> thêm provider không phải sửa dòng này.
-    const signatureHeader = adapter.extractSignature(req);
+    const signatureHeader = adapter.extractSignature(req, ctx);
     if (!isSignatureValid) {
       log.warn('Chữ ký webhook không hợp lệ! Lưu raw_event với status REJECTED');
       // Lưu MẪU request lỗi để điều tra (§7.1) — có giới hạn (S1-4): tối đa 4KB body và
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
-      if (!this.rejectedLimiter.tryAcquire(source.id)) {
-        log.warn({ sourceId: source.id }, 'Vượt trần 20 bản ghi REJECTED/phút cho source này -> không lưu raw_event, chỉ log');
-      } else {
-        const sample = sampleRejectedBody(req.rawBody, req.body);
-        try {
-          await this.prisma.rawEvent.create({
-            data: {
-              sourceId: source.id,
-              idempotencyKey: `rejected_${correlationId}`,
-              headers: { ...(storedHeaders as any), [REJECTED_META_KEY]: sample.meta },
-              body: sample.body as any,
-              bodyRaw: new Uint8Array(sample.bodyRaw),
-              contentType: req.contentType,
-              signatureHeader,
-              signatureValid: false,
-              status: 'REJECTED',
-              origin: 'webhook',
-            },
-          });
-        } catch (err) {
-          log.error({ err }, 'Lỗi khi lưu rejected raw_event');
-        }
-      }
-
+      await this.storeRejected(source.id, req, storedHeaders, signatureHeader, false, correlationId, log);
       trace.outcome = 'REJECTED';
       return { status: 401, body: { error: 'Chữ ký webhook không hợp lệ (Unauthorized)' } };
     }
 
     // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)
-    const idempotencyKey = adapter.extractIdempotencyKey(req);
+    let idempotencyKey: string;
+    try {
+      idempotencyKey = adapter.extractIdempotencyKey(req, ctx);
+    } catch (err) {
+      if (!(err instanceof IdempotencyKeyMissingError)) throw err;
+      // S8: lỗi CHUNG — chữ ký đúng nhưng không có khoá chống trùng. KHÔNG fallback ulid (gửi lại = 2 sự kiện).
+      // Lưu REJECTED (signature_valid = true) để chế độ lắng nghe chẩn đoán được; trả 422.
+      log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
+      await this.storeRejected(source.id, req, storedHeaders, signatureHeader, true, correlationId, log);
+      trace.outcome = 'REJECTED';
+      return { status: 422, body: { error: 'missing_idempotency_key' } };
+    }
     const persisted = await this.persistAccepted(source, req, idempotencyKey, correlationId, {
       headers: storedHeaders as Record<string, unknown>,
       signatureHeader,
     });
     // 8. ACK theo định dạng của provider
     return this.ackFor(adapter, persisted, idempotencyKey, trace);
+  }
+
+  /** Mẫu request bị từ chối (§7.1, S1-4): ≤4KB body, ≤20 bản ghi/phút/source; vượt trần chỉ log. */
+  private async storeRejected(
+    sourceId: string,
+    req: RawWebhookRequest,
+    storedHeaders: Record<string, unknown>,
+    signatureHeader: string | null,
+    signatureValid: boolean,
+    correlationId: string,
+    log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void },
+  ): Promise<void> {
+    if (!this.rejectedLimiter.tryAcquire(sourceId)) {
+      log.warn({ sourceId }, 'Vượt trần 20 bản ghi REJECTED/phút cho source này -> không lưu raw_event, chỉ log');
+      return;
+    }
+    const sample = sampleRejectedBody(req.rawBody, req.body);
+    try {
+      await this.prisma.rawEvent.create({
+        data: {
+          sourceId,
+          idempotencyKey: `rejected_${correlationId}`,
+          headers: { ...(storedHeaders as any), [REJECTED_META_KEY]: sample.meta },
+          body: sample.body as any,
+          bodyRaw: new Uint8Array(sample.bodyRaw),
+          contentType: req.contentType,
+          signatureHeader,
+          signatureValid,
+          status: 'REJECTED',
+          origin: 'webhook',
+        },
+      });
+    } catch (err) {
+      log.error({ err }, 'Lỗi khi lưu rejected raw_event');
+    }
   }
 }
 

@@ -25,6 +25,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
+import { parseSourceInput } from '../service-api/source-input';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -138,17 +139,20 @@ export class ApiController {
   @Post('sources')
   async createSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     const masterKey = getMasterKey();
-    const sourceKey = body.sourceKey || `src_${body.provider}_${ulid().toLowerCase()}`;
+    // S8: cùng bộ kiểm với /v1/p (provider hợp lệ, generic bắt buộc verificationConfig) -> 422 có tên trường.
+    const input = parseSourceInput(body);
+    const sourceKey = body.sourceKey || `src_${input.provider}_${ulid().toLowerCase()}`;
 
     const source = await this.withAudit(tenantId, async (repo) => {
       const created = await repo.createSource({
-        provider: body.provider,
-        name: body.name,
+        provider: input.provider,
+        name: input.name,
         sourceKey,
         isActive: true,
+        ...(input.verificationConfig ? { verificationConfig: input.verificationConfig as any } : {}),
         secrets: {
           create: {
-            secretEncrypted: aesGcmEncrypt(body.secret, masterKey),
+            secretEncrypted: aesGcmEncrypt(input.secret, masterKey),
             version: 1,
           },
         },
