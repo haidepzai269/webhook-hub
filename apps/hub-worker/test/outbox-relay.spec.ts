@@ -88,6 +88,7 @@ describe('OutboxRelay — lô (review #3)', () => {
 
   it('lô đầy -> lượt kế chạy NGAY (0ms); lô lẻ -> chờ ~500ms', async () => {
     jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0.5); // khoảng chờ = đúng 500ms -> test tất định
     const prisma: any = { $transaction: jest.fn() };
     const relay = new OutboxRelay(prisma);
     relay.setChannel({} as any);
@@ -98,8 +99,10 @@ describe('OutboxRelay — lô (review #3)', () => {
     expect(spy).toHaveBeenCalledTimes(2);
     await jest.advanceTimersByTimeAsync(100); // lô lẻ -> chưa chạy lượt 3
     expect(spy).toHaveBeenCalledTimes(2);
-    await jest.advanceTimersByTimeAsync(700);
+    // t=1301: lượt 3 ở t=1000 (500ms sau lô lẻ), lượt 4 mới tới t=1500
+    await jest.advanceTimersByTimeAsync(600);
     expect(spy).toHaveBeenCalledTimes(3);
     relay.stop();
+    jest.restoreAllMocks();
   });
 });
