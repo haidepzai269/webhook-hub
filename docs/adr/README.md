@@ -1024,3 +1024,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** ADR-098 chuyển chủ trước rồi mới chạy challenge: key mới (cùng `serviceName`, chủ cũ đã revoke) gửi secret SAI → vẫn `adopted:true`, endpoint chuyển FAILED `http_401` → Shop ngừng nhận tiền.
 **Chọn:** Đảo thứ tự: challenge trước (secret mới nếu có, không thì secret đang lưu); chỉ khi VERIFIED mới chuyển chủ + xoay secret + `verification=VERIFIED` + audit `endpoint.adopted` trong MỘT transaction. Không VERIFIED → 409 `{error:"adoption_not_verified", verificationError}`, KHÔNG ghi gì (chủ cũ, secret cũ, trạng thái cũ giữ nguyên). SDK `ensure` nhận 409 như lỗi → Shop log và thử lại (ADR-097).
 **Đánh đổi:** Không có audit cho lần nhận lại thất bại (chỉ log + 409 trả về caller) — tránh ghi gì khi chưa chứng minh sở hữu.
+
+---
+
+## ADR-102 — Sửa ADR-100: gate `repo-subclass` bắt cả bí danh (R3-3, 2026-10-11)
+
+**Vấn đề:** Regex của ADR-100 chỉ bắt `class X extends TenantScopedRepository` — `import { TenantScopedRepository as Base }` rồi `extends Base` lọt.
+**Chọn:** `repoSubclassCheck` (per file): gom tên gốc + bí danh từ `import { TenantScopedRepository as X }` và `const|let|var X = TenantScopedRepository`, rồi bắt `class … extends <tên bất kỳ trong tập>`. Test gate thêm hai dạng bí danh (đỏ) và dùng bí danh để `new` (không phải lớp con, không bắt).
+**Đánh đổi:** Vẫn là grep, không phải AST: bí danh qua re-export ở file khác (`export { TenantScopedRepository as X }` rồi import X) chưa bắt — chấp nhận ở quy mô repo; AU6 bật RLS là lưới cuối.

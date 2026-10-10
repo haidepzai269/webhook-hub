@@ -61,6 +61,21 @@ describe('grep gác cổng §7.3', () => {
     expect(r[0].violations.map((v) => v.file)).toEqual(['apps/hub-api/src/modules/x/x.repository.ts']);
   });
 
+  it('R3-3: bí danh (import { TenantScopedRepository as Base }, const B = TenantScopedRepository) cũng bị bắt', () => {
+    const T = 'TenantScoped' + 'Repository';
+    const f = files({
+      'apps/hub-api/src/modules/y/a.ts': `import { ${T} as Base } from '@hub/database';
+export class Lach extends Base {}`,
+      'apps/hub-api/src/modules/y/b.ts': `import { ${T} } from '@hub/database';
+const B = ${T};
+export class Lach2 extends B {}`,
+      'apps/hub-api/src/modules/y/c.ts': `import { ${T} as Base } from '@hub/database';
+const r = new Base(p, t);`,
+    });
+    const r = runGates([byId('repo-subclass')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/y/a.ts:2', 'apps/hub-api/src/modules/y/b.ts:3']);
+  });
+
   it('Shop ≤ 300 dòng', () => {
     const f = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(301) });
     expect(runGates([byId('shop-size')], f.list, f.read)[0].violations).toHaveLength(1);
