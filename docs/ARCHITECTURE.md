@@ -111,9 +111,11 @@ Tách ra mua được ba thứ:
 
 ```
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
-2.  Rate limit theo source (Redis token bucket; Redis chết -> fail-OPEN + cảnh báo)
-3.  Nạp source + secrets (cache Redis) · adapter.verify(rawBytes, headers, secrets[])
-       sai chữ ký -> INSERT raw_events(status=REJECTED) -> 401 -> DỪNG
+2.  Rate limit theo source (cửa sổ CỐ ĐỊNH 60s, 1 lệnh EVAL INCR+EXPIRE, trần INGEST_RATE_LIMIT_PER_MIN;
+    Redis chết -> fail-OPEN + log cảnh báo)
+3.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant) · adapter.verify(rawBytes, headers, secrets[])
+       sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) -> 401 -> DỪNG
+    Header nhạy cảm che trước khi lưu (ADR-051); signature_header = adapter.extractSignature(req) (S3-1)
 4.  key = adapter.extractIdempotencyKey(req)
 5.  GET idem:{sourceId}:{key}          <- đường tắt, chỉ ĐỌC
        hit -> trả ACK duplicate -> DỪNG (không chạm DB)
@@ -128,30 +130,31 @@ Tách ra mua được ba thứ:
 
 **Nguyên tắc:** ingest **không gọi bất kỳ dịch vụ ngoài nào**. Chỉ verify → lưu → trả lời. Mục tiêu p95 < 100ms.
 
-Rollback vì lý do khác (không phải unique) → `DEL idem:{...}` cho chắc, rồi trả **5xx** để provider retry.
+Rollback vì lý do khác (không phải unique) → trả **5xx** để provider retry. (Không cần `DEL idem`: `SET NX` chỉ chạy SAU `COMMIT`, nên rollback thì khoá Redis chưa từng được ghi.)
+
+**Khoá chống trùng dự phòng** (thiếu id của provider) = `sha256(rawBody)` 32 hex — **không bao giờ ngẫu nhiên** (S3-1, ADR-058).
 
 ### 3.2. Normalize + Route
 
 1. Nhận `{rawEventId, correlationId}` từ `q.normalize`.
 2. Kiểm `processed_messages(consumer='normalize', message_id=rawEventId)` → đã xử lý thì `ack`, bỏ qua.
-3. `adapter.normalize(rawEvent)` → 1..n `NormalizedEvent`.
-4. INSERT `events` (có `idempotency_key` **riêng** — xem §5.2).
-5. Tìm `subscriptions` khớp `event.type` (cache Redis TTL 60s, invalidate khi sửa).
-6. INSERT `deliveries` — một bản ghi / subscription, `ON CONFLICT DO NOTHING`.
-7. Publish từng delivery lên `x.hub.delivery`.
-8. Ghi `processed_messages` **cùng transaction** với bước 4–6. Rồi `ack`.
-9. Lỗi vĩnh viễn (payload không parse được, adapter ném lỗi non-retryable) → `nack(requeue=false)` → `q.normalize.dlq`.
+3. Đọc `raw_events` qua `TenantScopedRepository` · `adapter.normalize(rawEvent)` → 1..n `NormalizedEvent` theo **catalog kiểu chuẩn** (`docs/EVENT-CATALOG.md`, ADR-053/059).
+4. Kiểu thuộc không gian dành riêng (`payment.*`, `repo.*`) mà `data` sai khuôn → **lỗi vĩnh viễn**, không ghi gì (metric `hub_normalize_schema_errors_total`).
+5. **Một transaction:** INSERT `events` · tìm `subscriptions` khớp `event.type` (khớp chính xác hoặc mẫu `payment.*`/`*`, S3-3 — truy vấn Postgres, không cache) · INSERT `deliveries` · INSERT `outbox(topic='delivery.requested')` cho từng delivery · INSERT `processed_messages`. Rồi `ack`.
+6. **Không publish thẳng** lên `x.hub.delivery`: relay đọc outbox `delivery.requested` và publish (S1-2, ADR-043). Một PUBLISH Redis `hub:realtime:events` sau COMMIT (best-effort).
+7. Lỗi **tạm** (Prisma P1001/P1002/P1008/P1017/P2024/P2028/P2034, lỗi mạng) → `q.normalize.retry.30s`, tối đa 5 lần; lỗi **vĩnh viễn** hoặc hết lượt → `nack(requeue=false)` → `q.normalize.dlq` (ADR-044). Phát lại dựa trên Postgres: `GET /api/v1/raw-events/orphans` + `POST /raw-events/renormalize`.
 
 ### 3.3. Deliver
 
-1. Kiểm **outbound throttle** của destination (token bucket Redis). Hết token → đẩy sang tầng retry ngắn nhất, `ack`. *(§5.8)*
-2. Kiểm **circuit breaker** của destination trong Redis. `OPEN` → đẩy thẳng sang tầng retry, `ack`.
-3. Render template → gọi HTTP timeout 5s, **không follow redirect**, qua SSRF guard (§7.3).
+0. Message chỉ mang tham chiếu (ADR-042); nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
+1. Kiểm **circuit breaker** (1 MGET). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần `CIRCUIT_MAX_DEFERRALS` (ADR-048/054).
+2. Kiểm **outbound throttle** (cửa sổ cố định 1 giây, chỉ khi `rate_limit_rps > 0`). Vượt → `q.delivery.retry.10s`, `ack`. *(§5.4b)*
+3. Render template → gọi HTTP, timeout cứng 5s (`AbortSignal.timeout`), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
 4. INSERT `delivery_attempts` (status code, duration_ms, response body cắt 2KB, error).
-5. `2xx` → `SUCCEEDED`, reset circuit, `ack`.
+5. `2xx` → `SUCCEEDED`, reset circuit (0 lệnh Redis nếu chưa từng lỗi), `ack`. Chỉ `5xx`/`408`/`429`/lỗi mạng tính vào circuit.
 6. Lỗi **retryable** (`5xx`, `408`, `429`, timeout, lỗi mạng) → tăng `x-attempt` → publish vào tầng retry tương ứng → `ack` message cũ.
 7. Lỗi **non-retryable** (`4xx` trừ 408/429 — lỗi cấu hình, retry vô nghĩa) → `DEAD` ngay, không đốt 5 lần retry.
-8. Quá tầng cuối → `q.delivery.dlq`, trạng thái `DEAD`.
+8. Quá tầng cuối → trạng thái `DEAD` trong Postgres (**nguồn sự thật của DLQ**) + một bản sao vào `q.delivery.dlq` để quan sát.
 9. Mọi đổi trạng thái → publish Redis pub/sub → Socket.IO đẩy lên dashboard.
 
 ---
@@ -166,6 +169,7 @@ x.hub.events (topic, durable)
                                      | nack(requeue=false)
                                      v
                                   x.hub.normalize.dlx --> q.normalize.dlq   <- BẢN GỐC THIẾU
+   lỗi tạm -> q.normalize.retry.30s (TTL 30s, dead-letter về x.hub.events/event.received)
 
 x.hub.delivery (direct, durable)
    rk: deliver ------------------> q.delivery.main
@@ -183,7 +187,9 @@ x.hub.delivery (direct, durable)
    +--------------------------------------------------------------+
                                      | quá tầng cuối
                                      v
-                       x.hub.delivery.dlx --> q.delivery.dlq  (DEAD, chờ replay tay)
+                       x.hub.delivery.dlx --> q.delivery.dlq  (BẢN SAO để quan sát; nguồn sự thật = deliveries.status='DEAD')
+
+Cả hai DLQ broker bị chặn trần bằng POLICY `hub-dlq-bounded` (5000, drop-head — ADR-052).
 ```
 
 **Tại sao mỗi tầng trễ một queue riêng:** RabbitMQ chỉ hết hạn message ở **đầu queue**. Per-message TTL trong một queue chung → message 2h chặn message 10s phía sau (head-of-line blocking). Mỗi tầng một queue là cách duy nhất đúng.
@@ -194,7 +200,7 @@ x.hub.delivery (direct, durable)
 | ack | **manual** | Worker chết → RabbitMQ trả message về queue |
 | publisher confirms | **bật** | Relay chỉ đánh dấu `published_at` sau khi broker xác nhận |
 | `x-attempt` | header | Đếm số lần thử |
-| jitter | ±20% TTL | Tránh retry storm dồn cùng thời điểm |
+| jitter | **không có ở tầng retry** (xem §5.9 "Cố tình không làm") · relay ±100ms, sweeper ±10s, cleanup ±10% | TTL của queue không cho jitter theo từng message |
 | durable | queue + message | Broker restart không mất |
 
 ---
@@ -203,13 +209,13 @@ x.hub.delivery (direct, durable)
 
 ### 5.1. Transactional Outbox
 
-`raw_events` + `outbox` ghi **cùng một transaction**. Relay chạy **bên trong mọi `hub-worker`** (ADR-020) và đọc:
+Có **hai** chặng qua outbox: ingest (`raw_events` + `outbox(event.received)` cùng transaction) và normalize (`events` + `deliveries` + `outbox(delivery.requested)` cùng transaction, ADR-043). Relay chạy **bên trong mọi `hub-worker`** (ADR-020), poll mỗi ~500ms, định tuyến theo bảng `TOPIC_ROUTES`, và đọc:
 
 ```sql
 SELECT * FROM hub.outbox
 WHERE published_at IS NULL
 ORDER BY id
-LIMIT 100
+LIMIT 50
 FOR UPDATE SKIP LOCKED;
 ```
 
@@ -217,27 +223,35 @@ FOR UPDATE SKIP LOCKED;
 
 `SKIP LOCKED` khiến relay **an toàn với nhiều instance** — nên **không cần Redis lock** cho relay (bản gốc nói cả hai, dư thừa), và đó chính là lý do relay chạy được trong mọi worker thay vì cần một tiến trình `scheduler` riêng. Thêm **jitter** vào chu kỳ poll để N worker không cùng đập vào bảng `outbox` một nhịp. Redis lock chỉ dùng cho job `cleanup`.
 
+**Sweeper** (60s ± 10s) ghi lại outbox cho delivery PENDING/DELIVERING kẹt > 10 phút và RETRYING quá hạn; lease `claimForSend` đảm bảo bản trùng không gửi hai lần. **Cleanup** (mỗi giờ, khoá `cleanup:lock`) xoá theo lô outbox đã publish, `processed_messages`, `raw_events` REJECTED cũ hơn 7 ngày — **không** xoá `raw_events` ACCEPTED (ADR-045).
+
 Kết quả: **at-least-once delivery**.
 
-### 5.2. Idempotency — 5 chốt
+### 5.2. Idempotency — 5 chốt (khớp code sau S1-2)
 
 | Chốt | Nơi | Ràng buộc | Vai trò |
 |---|---|---|---|
 | 1 | Redis | `SET idem:{src}:{key} NX EX 86400` | Đường tắt. **Được phép sai.** |
 | 2 | PG `raw_events` | `UNIQUE(source_id, idempotency_key)` | **Trọng tài** (BB-2) |
-| 3 | PG `events` | `UNIQUE(idempotency_key)` | Chặn sự kiện phái sinh trùng |
+| 3 | PG `events` | `UNIQUE(raw_event_id)` + `UNIQUE(idempotency_key)` | Một raw event chỉ normalize ra một bộ event, kể cả khi message normalize bị giao lại |
 | 4 | PG `deliveries` | `UNIQUE(event_id, subscription_id, attempt_generation)` | Chặn fan-out trùng, **vẫn cho replay** |
-| 5 | PG `processed_messages` | `UNIQUE(consumer, message_id)` | Consumer xử lý lại không gây tác dụng phụ |
+| 5 | PG `processed_messages` | `UNIQUE(consumer, message_id)` | Consumer xử lý lại không gây tác dụng phụ — ghi CÙNG transaction với kết quả |
+| + | PG lease `claimForSend` | `UPDATE … WHERE status/generation/attempt_count` | Chỉ một worker gửi một lần thử (chặn bản sao do sweeper/redeliver) |
+
+Chốt 1 thực tế là hai lệnh: `GET` trước transaction (đường tắt, trả duplicate không chạm DB) và `SET NX` **sau** `COMMIT`.
 
 **Khoá chống trùng theo provider:**
 
 | Provider | `idempotency_key` |
 |---|---|
-| PayOS | `payos:{data.orderCode}:{data.reference}` |
-| SePay | `sepay:{id}` |
-| GitHub | `github:{X-GitHub-Delivery}` |
+| PayOS | `payos:{data.orderCode}:{data.reference ?? data.paymentLinkId ?? sha256(body)}` |
+| SePay | `sepay:{id ?? referenceCode ?? sha256(body)}` |
+| GitHub | `github:{X-GitHub-Delivery ?? head_commit.id ?? sha256(body)}` |
+| Stripe | `stripe:{event.id}` (thiếu → `stripe:no-id:{sha256(body)}`) |
 
-**Sự kiện phái sinh** (worker sinh ra, không có `raw_event`): `idempotency_key = sha256(parentEventId + ':' + type)`. Không có cái này thì normalize retry một lần là Telegram bắn hai lần.
+`sha256(body)` = 32 ký tự hex đầu của sha256 trên **bytes gốc** — provider gửi lại thì y hệt (S3-1).
+
+**Event từ webhook:** `idempotency_key = event.id`; chống normalize lặp nhờ `processed_messages` + `UNIQUE(raw_event_id)` trong cùng transaction. *(Sự kiện phái sinh `sha256(parentEventId:type)` là thiết kế ban đầu, hiện chưa có luồng nào sinh sự kiện phái sinh.)*
 
 > at-least-once + idempotent consumer = **effectively-once**.
 
@@ -253,26 +267,35 @@ Mọi replay ghi `audit_logs` (ai, lúc nào, lý do).
 
 ### 5.4. Circuit breaker
 
-Redis, theo từng destination:
+**3 trạng thái thật** (S2-1, ADR-048/054). Redis là nguồn chạy, `destinations.circuit_state` chỉ để hiển thị (ghi khi đổi):
 
 | Trạng thái | Điều kiện | Hành vi |
 |---|---|---|
 | `CLOSED` | bình thường | gửi |
-| `OPEN` | ≥ 5 lỗi liên tiếp | ngừng 60s; message đẩy sang tầng retry **dài nhất còn lại** (tránh quay vòng đốt CPU) |
-| `HALF_OPEN` | hết 60s | cho 1 request thử; thành công → `CLOSED`, thất bại → `OPEN` lại |
+| `OPEN` | ≥ 5 lỗi phía đích (5xx/408/429/mạng) trong cửa sổ `:failures` | ngừng 60s (`:open` EX 60); message hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, trần 30 lần hoãn |
+| `HALF_OPEN` | `:open` hết hạn mà `failures ≥ 5` (trạng thái **suy ra**, không lưu) | đúng **1** probe (Lua `SET NX` có token); thành công → `CLOSED` (DEL 3 khoá), thất bại → `OPEN` lại; probe nhận 4xx → nhả probe, giữ `HALF_OPEN` |
 
-Redis chết → circuit breaker **fail-open** + log cảnh báo.
+Redis chết → circuit breaker **fail-open** + log cảnh báo. 4xx khác không tính vào circuit (lỗi cấu hình của ta, đích vẫn sống).
 
 ### 5.4b. Outbound throttle — khác circuit breaker, và đi thành một cặp (ADR-016)
 
-Token bucket trong Redis, **theo từng destination**: `destinations.rate_limit_rps` (mặc định 0 = không giới hạn). Hết token → message đẩy sang `q.delivery.retry.10s`, không gọi HTTP.
+**Cửa sổ cố định 1 giây** (không phải token bucket) trong Redis, **theo từng destination**: khoá `throttle:destination:{id}:{epochGiây}`, một `EVAL` INCR+EXPIRE; `destinations.rate_limit_rps` (mặc định 0 = không giới hạn, 0 lệnh Redis). Vượt → message đẩy sang `q.delivery.retry.10s`, không gọi HTTP. Sai số: ở mép hai cửa sổ có thể lọt tối đa **2× RPS** trong một giây — chấp nhận được vì mục đích là bảo vệ đích khỏi bị dội, không phải tính cước chính xác.
 
 > **Cặp khái niệm nên trình bày cùng nhau khi bảo vệ:**
 > **Throttle** là *phòng ngừa* — giữ nhịp để **không làm đích quá tải**.
 > **Circuit breaker** là *phản ứng* — khi đích **đã** hỏng thì ngừng đập vào nó.
 > Thiếu throttle: worker scale lên 5 sẽ bắn gấp 5 lần vào một đích yếu và **tự tay tạo ra sự cố mà circuit breaker phải đi dọn**.
 
-Dùng lại nguyên code token bucket của rate limit inbound, chỉ đổi key. ~1 giờ.
+Cùng script Lua với rate limit inbound (cửa sổ 60s), chỉ đổi key và độ dài cửa sổ.
+
+### 5.4c. Cố tình không làm (và vì sao)
+
+| Không làm | Vì sao | Bù lại |
+|---|---|---|
+| **Jitter ở tầng retry delivery** | Retry dùng TTL của **queue** (mỗi tầng một queue, §4) — RabbitMQ không cho TTL ngẫu nhiên theo từng message mà không quay về head-of-line blocking | Relay ±100ms, sweeper ±10s, cleanup ±10%; circuit breaker chặn retry storm vào đích chết |
+| **Token bucket** cho rate limit / throttle | Cửa sổ cố định 1 lệnh Redis, đủ để chống spam/bảo vệ đích | Sai số tối đa 2× ở mép cửa sổ (§5.4b) |
+| **DLQ broker là nguồn sự thật** | Broker không truy vấn/lọc được, có trần policy (ADR-052) | Postgres `deliveries.status='DEAD'` + `raw_events` là nguồn; trang DLQ và replay đọc DB |
+| **Tự cảnh báo Telegram khi circuit OPEN** | Kênh `hub:alerts` đã bỏ ở ADR-048; chưa làm lại | `circuit.changed` realtime trên dashboard + metric `hub_circuit_transitions_total` |
 
 ### 5.5. Máy trạng thái
 
@@ -394,9 +417,9 @@ CREATE TYPE hub.circuit_state    AS ENUM ('CLOSED','OPEN','HALF_OPEN');
 | `parent_event_id` | uuid FK NULL ⭐ MỚI | |
 | `idempotency_key` | varchar UNIQUE ⭐ MỚI | |
 | `correlation_id` | uuid ⭐ MỚI | index — truy vết cả hành trình |
-| `type` | varchar | index, vd `order.paid` |
+| `type` | varchar | index, vd `payment.received` (catalog: `docs/EVENT-CATALOG.md`) |
 | `source` | varchar | |
-| `subject` | varchar | vd `order:DH10234` |
+| `subject` | varchar | vd `payment:<providerTxnId>`, `repo:<fullName>` |
 | `data` | jsonb | index GIN |
 | `origin` | event_origin | |
 | `occurred_at` / `received_at` | timestamptz | |
@@ -465,12 +488,12 @@ Cập nhật dùng optimistic locking: `UPDATE ... WHERE id = ? AND version = ?`
 
 | Biện pháp | Chi tiết |
 |---|---|
-| Xác thực chữ ký | PayOS: checksum HMAC-SHA256 trên `data` đã sort key · SePay: header `Authorization: Apikey` · GitHub: `X-Hub-Signature-256` HMAC-SHA256 trên **raw body** |
+| Xác thực | PayOS: checksum HMAC-SHA256 trên `data` đã sort key (tính bằng SDK, **so bằng `timingSafeEqual` của ta**, S3-1) · SePay: **không ký nội dung** — chỉ là **API key dùng chung** trong `Authorization: Apikey <key>` (bắt buộc tiền tố) · GitHub: `X-Hub-Signature-256` HMAC-SHA256 trên **raw body** · Stripe: `Stripe-Signature` (SDK, raw body) |
 | Raw body | `NestFactory.create(AppModule, { rawBody: true })` — **cấu hình NGÀY 1** |
 | So sánh | `crypto.timingSafeEqual` — luôn luôn, kể cả khi so API key |
 | URL khó đoán | `/hooks/:provider/:sourceKey`, `sourceKey` ngẫu nhiên 32 ký tự |
-| Giới hạn | payload ≤ 1MB · rate limit token bucket theo source |
-| Lưu cả request hỏng | chữ ký sai vẫn INSERT `status=REJECTED` để điều tra |
+| Giới hạn | payload ≤ 1MB · rate limit cửa sổ cố định 60s theo source (mặc định 100/phút) |
+| Lưu cả request hỏng | chữ ký sai vẫn INSERT `status=REJECTED` để điều tra — chỉ 4KB đầu, ≤ 20 bản/phút/source; header nhạy cảm đã che (ADR-045, ADR-051) |
 
 ### 7.2. Outbound (hub ký webhook gửi đi)
 
@@ -484,7 +507,7 @@ X-Hub-Signature:  v1=<HMAC-SHA256(secret, "{id}.{timestamp}.{body}")>
 
 Bên nhận (Shop) **bắt buộc**: (1) verify chữ ký · (2) từ chối nếu timestamp lệch > 5 phút (**chống replay attack**) · (3) chống trùng theo `X-Hub-Event-Id`.
 
-Xoay secret: trong cửa sổ chuyển đổi gửi hai chữ ký `v1=<cũ>,v1=<mới>`.
+Xoay secret outbound (gửi hai chữ ký `v1=<cũ>,v1=<mới>`): **chưa làm** — hiện gửi một chữ ký. Header theo Standard Webhooks thật (`webhook-id`/`webhook-signature`) để cho đợt đa service (ADR-040).
 
 ### 7.3. SSRF — chặn dải IP nội bộ là CHƯA ĐỦ
 
@@ -512,15 +535,15 @@ Cho phép bỏ qua **chỉ** khi `NODE_ENV=development`.
 |---|---|---|
 | **Correlation ID** | `correlation_id = raw_event.id`, truyền qua AMQP `properties.headers['x-correlation-id']`, gắn vào mọi log | Tra được toàn bộ hành trình một sự kiện qua mọi tiến trình |
 | Log | `pino`, JSON có cấu trúc | |
-| Metrics | `prom-client` → `/metrics` | `hub_ingest_duration_seconds` · `hub_events_total{source,type}` · `hub_delivery_total{status,destination}` · `hub_queue_depth` · `hub_circuit_state` |
-| Grafana | vào `docker-compose`, 1 dashboard JSON commit sẵn | ~30 phút công, là **cảnh demo mạnh nhất** |
+| Metrics | `prom-client`, đếm trong bộ nhớ (0 lệnh Redis). hub-api `GET /metrics` (không JWT; `METRICS_TOKEN` nếu đặt); hub-worker http tối giản `:9101/metrics` (chỉ mạng nội bộ) — S3-4, ADR-061 | api: `hub_ingest_requests_total{provider,outcome}` · `hub_ingest_duration_seconds{provider}` · worker: `hub_deliveries_total{destination_type,status}` · `hub_delivery_duration_seconds` · `hub_circuit_transitions_total{to}` · `hub_outbox_lag_seconds` · `hub_normalize_retries_total` · `hub_normalize_schema_errors_total{source}` · default process metrics |
+| Grafana | provisioning trong repo `infra/grafana/provisioning` (datasource + dashboard "Webhook Hub" 6 panel); Prometheus/Grafana ghim phiên bản | Đo bằng `k6/ingest-github.js` (`k6/README.md`) |
 | Health | `/health` kiểm Postgres · Redis · RabbitMQ | |
-| **Tự cảnh báo** ⭐ | Circuit breaker chuyển `OPEN` → hub gửi cảnh báo qua `telegram.sender` của chính nó | **Hub dùng chính nó để báo động về chính nó.** ~30 phút, ADR-016 |
+| **Tự cảnh báo** | *Chưa làm* (bỏ cùng kênh `hub:alerts`, ADR-048) — xem §5.4c | Hiện có `circuit.changed` realtime + metric |
 
 ### 8.1. Polling endpoint — cho đích không nhận được push (ADR-016)
 
 ```
-GET /api/v1/events?after=<cursor>&types=repo.push,order.paid&limit=100
+GET /api/v1/events?after=<cursor>&types=repo.push,payment.received&limit=100
 → { events: [...], nextCursor: "evt_01J..." }
 ```
 
@@ -591,7 +614,7 @@ webhook-hub/
 
 ```ts
 export interface ProviderAdapter {
-  readonly provider: 'payos' | 'sepay' | 'github';
+  readonly provider: ProviderType; // 'payos' | 'sepay' | 'github' | 'stripe'
 
   /** Xác thực. Nhận MẢNG secret để hỗ trợ xoay secret. Tính trên raw bytes. */
   verify(req: RawWebhookRequest, secrets: string[]): Promise<boolean>;
@@ -599,8 +622,11 @@ export interface ProviderAdapter {
   /** Khoá chống trùng, ổn định giữa các lần provider gửi lại */
   extractIdempotencyKey(req: RawWebhookRequest): string;
 
-  /** Payload gốc -> sự kiện chuẩn (có thể ra nhiều sự kiện) */
-  normalize(req: RawWebhookRequest): NormalizedEvent[];
+  /** Chữ ký/bằng chứng để lưu raw_events.signature_header; bí mật dùng chung phải che (S3-1) */
+  extractSignature(req: RawWebhookRequest): string | null;
+
+  /** Payload gốc -> sự kiện chuẩn theo catalog (có thể ra nhiều sự kiện) */
+  normalize(req: RawWebhookRequest, ctx: NormalizeContext): NormalizedEvent[];
 
   /** Phản hồi đúng định dạng provider mong đợi */
   buildAck(result: IngestResult): { status: number; body: unknown };
@@ -629,37 +655,42 @@ export interface ProviderAdapter {
 
 ---
 
-## 11. Sự kiện chuẩn hoá (lấy cảm hứng CloudEvents)
+## 11. Sự kiện chuẩn hoá — "vào nhiều kiểu, ra một kiểu" (ADR-053, ADR-059)
+
+> **Hợp đồng chi tiết: [`docs/EVENT-CATALOG.md`](EVENT-CATALOG.md)** (catalog v1, bảng ánh xạ từng provider, luật ổn định hình dạng, ánh xạ sang CloudEvents). Body **không** theo CloudEvents; `source` = tên provider.
 
 ```json
 {
   "id": "evt_01J9ZK...",
-  "type": "payment.succeeded",
-  "source": "payos",
-  "sourceId": "src_payos_main",
-  "subject": "order:DH10234",
-  "occurredAt": "2026-09-18T10:20:30+07:00",
-  "receivedAt": "2026-09-18T10:20:31+07:00",
-  "correlationId": "raw_01J9ZK...",
+  "type": "payment.received",
+  "source": "sepay",
+  "subject": "payment:92704",
+  "normalized": true,
+  "occurredAt": "2026-10-10T07:02:37.000Z",
+  "receivedAt": "2026-10-10T07:02:38.120Z",
   "data": {
-    "orderCode": "DH10234",
-    "amount": 2000,
-    "currency": "VND",
-    "reference": "FT2426..."
-  },
-  "rawEventId": "raw_01J9ZK..."
+    "amount": 50000, "currency": "VND", "method": "bank_transfer",
+    "reference": "MBVCB.3278907687", "memo": "DH123456 thanh toan",
+    "counterparty": null, "account": { "number": "0123499999", "bank": "Vietcombank" },
+    "providerTxnId": "92704", "paidAt": "2026-10-10T07:02:37.000Z",
+    "raw": { "...": "body gốc của SePay" }
+  }
 }
 ```
 
 | Nguồn | Sự kiện gốc | → chuẩn |
 |---|---|---|
-| PayOS | `success = true` | `payment.succeeded` |
-| SePay | `transferType = in` / `out` | `bank.transfer.received` / `.sent` |
+| PayOS | `code = "00"` và `success ≠ false` / còn lại | `payment.received` / `payment.failed` |
+| SePay | `transferType = in` (hoặc thiếu) / `out` | `payment.received` / `payment.sent` |
+| Stripe | `payment_intent.succeeded` / `.payment_failed` / `charge.refunded` / khác | `payment.received` / `.failed` / `.refunded` / `stripe.<type>` (`normalized:false`) |
 | GitHub | `push` | `repo.push` |
-| GitHub | `pull_request` | `repo.pull_request.opened` / `.closed` |
-| GitHub | `issues` | `repo.issue.*` |
+| GitHub | `pull_request` | `repo.pull_request.<action>` (closed + merged → `.merged`) |
+| GitHub | `issues` | `repo.issue.<action>` |
+| GitHub | khác (`ping`, `release`…) | `github.<event>[.<action>]` (`normalized:false`) |
 
-> **Sự kiện nghiệp vụ** (`order.paid`, `order.underpaid`, `payment.unmatched`) **thuộc Shop**, không phải Hub — BB-1.
+`payment.*` và `repo.*` là không gian **dành riêng**: sai khuôn → lỗi normalize vĩnh viễn, không đẩy dữ liệu sai hình dạng ra ngoài.
+
+> **Sự kiện nghiệp vụ** (đơn đã trả, trả thiếu, không khớp mã đơn) **thuộc Shop**, không phải Hub — BB-1. Hub không có `orderCode`: mã đơn nằm trong `data.memo`/`data.reference`, Shop tự tìm.
 
 ---
 
@@ -742,9 +773,9 @@ Vì Hub là hạ tầng generic (BB-1). Nếu Hub biết `orderCode` thì nó kh
 | **Security** — signed payloads, secret rotation, SSRF, replay, forged events | ✅ **Ngang, một số điểm hơn** | Ký Standard Webhooks ✓ · xoay secret **cả inbound lẫn outbound** ✓ · chống replay theo timestamp 5' ✓ · `timingSafeEqual` ✓ · SSRF **có pin IP chống DNS rebinding + chặn redirect** (§7.3) — mức đa số triển khai bỏ qua |
 | **Automatic & Manual Retries** | ✅ Ngang | 5 tầng TTL tự động qua DLX + Replay tay đơn lẻ/hàng loạt từ DLQ, có `attempt_generation` |
 | **Event Filtering** | ✅ Ngang | `subscriptions.event_types[]` — đúng phạm vi Svix quảng cáo (lọc theo loại sự kiện). Lọc theo *nội dung payload* đã cắt có chủ đích (ADR-011) |
-| **Logs and Monitoring** | ✅ Ngang | `raw_events` · `events` · `deliveries` · `delivery_attempts` (status code, duration, body cắt 2KB) · Live Events · Event Detail · Grafana · **tự cảnh báo khi circuit OPEN** (§8) |
+| **Logs and Monitoring** | ✅ Ngang | `raw_events` · `events` · `deliveries` · `delivery_attempts` (status code, duration, body cắt 2KB) · Live Events · Event Detail · Grafana + `/metrics` (§8) |
 | **Development Experience** | ✅ Ngang | Gửi thử từ Destinations · Send Example payload mẫu · Replay · Inspect Raw/Normalized/Deliveries |
-| **Throttling** | ✅ Ngang | Rate limit **inbound** per source + **outbound** token bucket per destination (§5.4b) |
+| **Throttling** | ✅ Ngang | Rate limit **inbound** per source + **outbound** per destination, cửa sổ cố định (§5.4b) |
 | **Multi-tenancy** | ✅ Kiến trúc có | `tenant_id` trên 5 bảng + guard ở tầng repository (§6.0). Chạy 1 tenant, kiến trúc không cản trở nhiều tenant |
 | **Advanced Endpoints** — Webhook, Polling, FIFO, S3/Azure/GCS, EventBridge | 🟡 Một phần | Có **Webhook · Polling · Telegram · Discord**. Thêm sender mới = một class, cùng pattern với `ProviderAdapter`. **FIFO không làm** — lý do bên dưới |
 | **Payload Transformations** | ⚫ **Cố tình không** | Ta có template `{{path}}`. Svix chạy **JS người dùng viết**, tức là bài toán **thực thi code không tin cậy**: sandbox, timeout, giới hạn bộ nhớ, chống thoát sandbox. Đó là một đề tài riêng, không phải một tính năng |

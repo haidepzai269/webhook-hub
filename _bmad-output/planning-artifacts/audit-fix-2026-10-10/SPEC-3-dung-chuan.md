@@ -254,3 +254,7 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
   - Chỉ cần sửa rate limit ingest (INCR+EXPIRE → 1 EVAL); circuit MGET/0 lệnh khi `failures=0`, throttle 1 EVAL, realtime gộp đã có từ đợt 9/10 (S2-1, S2-2, ADR-054).
   - Quota Upstash ghi theo số kiểm 10/10 (500K lệnh/tháng), không phải "10k/ngày" như SPEC-3: ≈ 2.700 sự kiện/ngày (1 đích), ≈ 2.000 (2 đích).
   - Đích có `rateLimitRps` tốn thêm 1 EVAL/delivery (3 thay vì 2) — vượt "≤ 2/delivery" của R1 khi bật throttle; ghi trong DEPLOYMENT §5.2, không đổi.
+- **S3-6 (2026-10-10):**
+  - File phụ lục `.docx` không tìm thấy ở `C:/Users/admin/Downloads/` (và Documents/Desktop) → `PHU-LUC-SUA.md` lấy câu cũ từ trích dẫn trong BB09 (9 câu tính năng); phần thông số kỹ thuật chưa đối chiếu câu chữ, chỉ đưa số đo mới.
+  - ARCHITECTURE sửa rộng hơn danh sách S3-6 (§3.1–3.3, §5.2 khoá chống trùng theo provider, §7.2 xoay secret outbound ghi "chưa làm", §8 metrics + "tự cảnh báo" ghi "chưa làm", §11 theo catalog) vì các câu đó cũng sai so với code.
+  - `.env.example` thêm `INGEST_RATE_LIMIT_PER_MIN`, `METRICS_TOKEN`, `WORKER_METRICS_PORT`, `CLEANUP_RETENTION_DAYS`, `CIRCUIT_MAX_DEFERRALS`, `SHUTDOWN_TIMEOUT_MS`; CLAUDE.md thêm `EVENT-CATALOG.md` vào bảng tài liệu + 2 quy tắc (khoá chống trùng không ngẫu nhiên, adapter ra kiểu chuẩn). Không đụng phần auth của `.env.example` (ADMIN_*), dù câu "không có bảng users" sẽ cũ khi ADR-056 làm xong.

@@ -214,8 +214,8 @@ export class CircuitBreakerService {
   }
 
   /**
-   * Outbound throttle per destination (§5.4b). Thực chất là cửa sổ cố định 1 giây (fixed window),
-   * không phải token bucket — S3-6 sẽ sửa tài liệu.
+   * Outbound throttle per destination (§5.4b): cửa sổ CỐ ĐỊNH 1 giây (fixed window), một EVAL;
+   * lệch tối đa 2× RPS ở mép cửa sổ — chấp nhận được để bảo vệ đích (ARCHITECTURE §5.4b).
    */
   async checkThrottle(destinationId: string, rateLimitRps: number): Promise<boolean> {
     if (!rateLimitRps || rateLimitRps <= 0) return true;

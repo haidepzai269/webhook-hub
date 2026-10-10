@@ -9,6 +9,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | **Nguồn sự thật về kiến trúc.** Mọi thứ khác phải khớp với file này. |
 | [`docs/ROADMAP-14D.md`](docs/ROADMAP-14D.md) | Lộ trình 14 ngày + Definition of Done từng ngày |
+| [`docs/EVENT-CATALOG.md`](docs/EVENT-CATALOG.md) | **Catalog kiểu chuẩn** (`payment.*`, `repo.*`) — hợp đồng đầu ra của hub. Thêm/đổi trường = sửa catalog + test U50 |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Hai môi trường · Render/Vercel/Neon/Upstash/CloudAMQP · ràng buộc free tier · env vars |
 | [`docs/adr/README.md`](docs/adr/README.md) | Nhật ký quyết định — **append-only, ghi ngay khi quyết định** |
 | `webhook-hub-y-tuong.md` | Ý tưởng gốc. **Chỉ tham khảo.** Mâu thuẫn với ARCHITECTURE.md → ARCHITECTURE.md thắng. |
@@ -27,7 +28,9 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 - **Topology RabbitMQ khai báo ở MỘT chỗ duy nhất:** `libs/messaging/topology.ts`. Rải rác → `PRECONDITION_FAILED`, app không lên.
 - **`apps/shop` trần cứng ~300 dòng.** Vượt = đang lạc đề, dừng lại. Giỏ hàng chỉ ở client, server tự tính tổng (ADR-024). Không đăng nhập, không kho.
 - **Thêm provider = viết một class `ProviderAdapter` + đăng ký registry.** Không sửa ingest/worker/DB. Đây là luận điểm chính của đề tài — đừng phá nó bằng một cái `if (provider === 'x')` trong lõi.
-- **Mọi so sánh chữ ký dùng `crypto.timingSafeEqual`.** Luôn luôn.
+- **Mọi so sánh chữ ký dùng `crypto.timingSafeEqual`.** Luôn luôn — kể cả khi SDK provider có hàm verify riêng (PayOS SDK so bằng `!==`, ADR-058).
+- **Khoá chống trùng không bao giờ ngẫu nhiên** — thiếu id của provider thì `bodyHashKey(rawBody)`.
+- **Adapter ra kiểu chuẩn** theo `docs/EVENT-CATALOG.md`; `payment.*`/`repo.*` sai khuôn là lỗi normalize vĩnh viễn, không hạ cấp âm thầm.
 - **HMAC tính trên `body_raw` (bytes), không phải trên JSON đã parse.**
 - **Không query DB trực tiếp.** Đi qua `TenantScopedRepository` — kể cả query "chỉ để debug". Một chỗ lọt là BB-5 chết.
 - **Ghi ADR 3 dòng mỗi khi quyết định gì đó** (vấn đề / chọn / đánh đổi). Lúc làm tốn 2 phút; ghi lại sau thì mất hai ngày và sẽ bịa sai.

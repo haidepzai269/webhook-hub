@@ -51,7 +51,7 @@ export class RedisService implements OnModuleDestroy {
   }
 
   /**
-   * Rate limit cửa sổ CỐ ĐỊNH `windowSeconds` (không phải token bucket): đếm request trong cửa sổ,
+   * Rate limit cửa sổ CỐ ĐỊNH `windowSeconds` (fixed window): đếm request trong cửa sổ,
    * vượt `limit` thì chặn. Lệch tối đa 2× ở mép cửa sổ — chấp nhận được cho mục đích chống spam.
    * MỘT lệnh Redis (EVAL). Fail-open nếu Redis chết (ARCHITECTURE.md §3.1, BB-2: Redis được phép sai).
    */
