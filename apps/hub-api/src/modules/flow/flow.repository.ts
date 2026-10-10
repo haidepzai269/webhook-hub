@@ -263,9 +263,10 @@ export class FlowScopedRepository extends TenantScopedRepository {
    * qua và vì sao. CHỖ DUY NHẤT phải sửa khi đa service thêm `source_ids` / `destinations.verification`
    * (F7): thêm hai trường đó vào select dưới đây.
    */
-  async findSubscriptionsMatching(eventType: string) {
+  async findSubscriptionsMatching(eventType: string, existedAt: Date) {
     return this.db.subscription.findMany({
-      where: { tenantId: this.tenantId, eventTypes: { hasSome: eventTypeCandidates(eventType) } },
+      // R-6: chỉ subscription ĐÃ TỒN TẠI lúc event được tạo — cái tạo sau không thể là lý do bỏ qua event này.
+      where: { tenantId: this.tenantId, eventTypes: { hasSome: eventTypeCandidates(eventType) }, createdAt: { lte: existedAt } },
       // F7 (§6A): source_ids + destinations.verification của đợt đa service.
       select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, destination: { select: { verification: true } } },
     });

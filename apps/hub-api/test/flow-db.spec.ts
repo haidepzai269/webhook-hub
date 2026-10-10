@@ -266,10 +266,17 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     const pend = await raw.destination.create({
       data: { tenantId: tenant, name: `Pending-${run}`, type: 'webhook', configEncrypted: 'x', verification: 'PENDING' },
     });
+    // createdAt lùi về trước event: R-6 chỉ xét subscription đã tồn tại lúc event được định tuyến.
+    const before = new Date(Date.now() - 60 * 60_000);
     const subFiltered = await raw.subscription.create({
-      data: { tenantId: tenant, destinationId: ids.destOk, name: 'chỉ từ source khác', eventTypes: ['payment.*'], sourceIds: [otherSrc.id] },
+      data: { tenantId: tenant, destinationId: ids.destOk, name: 'chỉ từ source khác', eventTypes: ['payment.*'], sourceIds: [otherSrc.id], createdAt: before },
     });
-    const subPending = await raw.subscription.create({ data: { tenantId: tenant, destinationId: pend.id, name: 'chờ xác minh', eventTypes: ['payment.*'] } });
+    const subPending = await raw.subscription.create({
+      data: { tenantId: tenant, destinationId: pend.id, name: 'chờ xác minh', eventTypes: ['payment.*'], createdAt: before },
+    });
+    const subLater = await raw.subscription.create({
+      data: { tenantId: tenant, destinationId: pend.id, name: 'tạo SAU event', eventTypes: ['payment.*'], isActive: false },
+    });
     try {
       const topo: any = await controller.getTopology(tenant, '1h');
       const subNode = topo.nodes.find((n: any) => n.id === `sub:${subFiltered.id}`);
@@ -287,8 +294,10 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
           [ids.subOff, 'subscription_inactive'],
         ]),
       );
+      // [UI:R6-01] subscription tạo SAU event không bao giờ là lý do bỏ qua event đó.
+      expect(skipped.map((x: string[]) => x[0])).not.toContain(subLater.id);
     } finally {
-      await raw.subscription.deleteMany({ where: { id: { in: [subFiltered.id, subPending.id] } } });
+      await raw.subscription.deleteMany({ where: { id: { in: [subFiltered.id, subPending.id, subLater.id] } } });
       await raw.destination.delete({ where: { id: pend.id } });
       await raw.source.delete({ where: { id: otherSrc.id } });
     }
