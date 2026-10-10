@@ -944,3 +944,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** Danh sách chặn (ADR-083) vẫn lọt 192.0.0/24, 198.18/15, multicast 224/4, 255.255.255.255, NAT64 local-use `64:ff9b:1::/48`, 6to4 `2002::/16` (vd `2002:7f00:1::` nhúng 127.0.0.1), `::ffff:0:a.b.c.d`; ở development `[64:ff9b::a9fe:a9fe]` (link-local trong NAT64) đi qua. Blocklist thì luôn thiếu dải mới.
 **Chọn:** IPv4: chặn mọi dải đặc biệt IANA (0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24, 192.88.99/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, 224/4, 240/4) — còn lại là global unicast. IPv6: CHỈ cho `2000::/3`, trừ `2001::/23`, `2001:db8::/32`, `2002::/16`; `::ffff:a.b.c.d` kiểm như IPv4; mọi thứ khác (gồm NAT64 cả hai dải, `::ffff:0:a.b.c.d`, ULA, link-local, multicast) bị chặn. `isLinkLocalIp` (chạy cả ở development) mở IPv4 nhúng trong ánh xạ / NAT64 / 6to4. Không thêm thư viện (`ipaddr.js`): 30 dòng viết tay, có test từng dạng.
 **Đánh đổi:** Dải IPv6 global mới ngoài `2000::/3` (nếu IANA cấp) sẽ bị chặn tới khi sửa — chấp nhận, an toàn hơn lọt.
+
+---
+
+## ADR-092 — Migration backfill `projects` cho mọi tenant_id cũ (MS-P2-5, 2026-10-11)
+
+**Vấn đề:** `20261011000000_projects_api_keys` chỉ chèn project `default`. DB cũ có dữ liệu mang tenant_id khác (thử `2222…` ở review) không có dòng `projects`: console không thấy, không tạo được key; bảng nghiệp vụ không có FK tới `projects` nên migrate vẫn "xanh".
+**Chọn:** Migration MỚI `20261011030000_backfill_projects_for_tenants` (không sửa migration cũ): `INSERT … SELECT` tenant_id từ hợp của sources, destinations, subscriptions, events, deliveries, api_keys, audit_logs; slug `tenant-<32 hex>` (duy nhất, khớp `PROJECT_SLUG_RE`), name `Tenant <8 ký tự>`, environment `test`; `ON CONFLICT DO NOTHING` (idempotent). Test L1 tạo tenant mồ côi rồi chạy chính file SQL hai lần.
+**Đánh đổi:** Tenant backfill mặc định môi trường `test` (key mới mang `hk_test_`) — operator đổi tay nếu cần. Vẫn chưa thêm FK `tenant_id → projects` (để AU6, ADR-071).
