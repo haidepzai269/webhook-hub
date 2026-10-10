@@ -46,5 +46,8 @@ export function authSecretProblems(env: Record<string, string | undefined> = pro
   }
   const values = SECRET_VARS.map((k) => env[k] ?? '').filter((v) => v.length >= 32);
   if (new Set(values).size !== values.length) problems.push(`${SECRET_VARS.join(', ')} phải khác nhau`);
+  // R-2 (ADR-110): tuỳ chọn, nhưng đã đặt thì phải đủ dài (secret ngắn = ai cũng giả được IP client).
+  const wps = env.WEB_PROXY_SECRET ?? '';
+  if (wps.length > 0 && wps.length < 32) problems.push('WEB_PROXY_SECRET < 32 ký tự (để trống để tắt)');
   return problems;
 }

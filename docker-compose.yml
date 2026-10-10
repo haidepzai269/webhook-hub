@@ -144,6 +144,8 @@ services:
       - CSRF_SECRET=${CSRF_SECRET}
       - SOCKET_TICKET_SECRET=${SOCKET_TICKET_SECRET}
       - OAUTH_COOKIE_SECRET=${OAUTH_COOKIE_SECRET}
+      # R-2 (ADR-110): tin x-hub-client-ip CHỈ khi kèm secret này (web proxy.ts gửi). Trống = tắt.
+      - WEB_PROXY_SECRET=${WEB_PROXY_SECRET:-}
       # Web (CORS có credentials, link trong mail, OAuth callback). Local: web docker ở :3000.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
       - TRUST_PROXY=${TRUST_PROXY:-0}
@@ -296,6 +298,8 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=production
+      # R-2 (ADR-110): đọc lúc CHẠY trong src/proxy.ts (không nhúng vào bundle)
+      - WEB_PROXY_SECRET=${WEB_PROXY_SECRET:-}
     depends_on:
       hub-api:
         condition: service_started

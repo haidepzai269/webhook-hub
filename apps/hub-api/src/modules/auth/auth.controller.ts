@@ -24,6 +24,7 @@ import { MembersService } from './members.service';
 import { GithubOAuthService, OAUTH_COOKIE } from './github-oauth.service';
 import { clearSessionCookies, CSRF_COOKIE, CSRF_HEADER, readCookie, readHeader, REFRESH_COOKIE, setSessionCookies } from './cookies';
 import { TooManyAttempts } from './auth-errors';
+import { clientIp } from './client-ip';
 import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
 
 /** 429 kèm `Retry-After` (SPEC-auth §5.5). */
@@ -38,8 +39,9 @@ export class TooManyAttemptsFilter implements ExceptionFilter {
 
 export function reqCtx(req: Request): ReqCtx {
   // `req.ip` = địa chỉ socket, hoặc X-Forwarded-For CHỈ khi `trust proxy` bật (TRUST_PROXY=1, main.ts).
+  // R-2: đi qua proxy web có secret hợp lệ -> IP client do web chuyển tiếp (client-ip.ts).
   const ua = req.headers?.['user-agent'];
-  return { ip: req.ip ?? null, userAgent: typeof ua === 'string' ? ua : null };
+  return { ip: clientIp(req as never), userAgent: typeof ua === 'string' ? ua : null };
 }
 
 const user = (req: RequestWithPrincipal) => req.principal as UserPrincipal;

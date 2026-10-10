@@ -4,8 +4,8 @@ Luật: RED→GREEN→GATED→PROBED, mỗi mục một commit có `Verify:`, `n
 
 | Mục | Trạng thái | Commit | Ghi chú |
 |---|---|---|---|
-| R-1 | đang commit | | ADR-109; RED: 18 song song → 18×401 (unit), review: 17×401 |
-| R-2 | chưa | | |
+| R-1 | xong | 275abbd | ADR-109; RED: 18 song song → 18×401 (unit), review: 17×401 |
+| R-2 | xong | (commit R-2) | |
 | R-7 | chưa | | |
 | R-3 | chưa | | |
 | R-4 | chưa | | |
@@ -15,3 +15,6 @@ Luật: RED→GREEN→GATED→PROBED, mỗi mục một commit có `Verify:`, `n
 | R-9..R-14 | chưa | | |
 
 ## Bước kế
+- R-1 PROBED live (hubv, image mới): 18 login sai song song → 5×401 + 13×429.
+- R-2: web hubv chạy bằng `--profile web` (cổng 13000). e2e `[AR:R-2] (phần c)` RED trên api cũ (Y bị 429), GREEN sau rebuild.
+- Mã test cho review: namespace `AR` (verify/spec-sources.json + TAG_RE trong verify/lib/map.ts), test unit ở apps/hub-api/test/auth-review.spec.ts.

@@ -333,9 +333,11 @@ GITHUB_OAUTH_CLIENT_ID=  # AU5: GitHub → Settings → Developer settings → O
 GITHUB_OAUTH_CLIENT_SECRET=
                          # Authorization callback URL = https://<web>.vercel.app/auth/github/callback (qua proxy web)
                          # KHÔNG đặt GITHUB_OAUTH_BASE_URL trên deployed (chỉ cho fake-github; khác github.com -> app thoát)
-TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For. Lưu ý: request console đi qua
-                         # proxy của Vercel (rewrites) nên IP thấy được có thể là IP egress của Vercel — giới hạn theo
-                         # EMAIL (5 lần sai/15 phút) vẫn đúng; giới hạn theo IP chỉ là lớp phụ
+TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For (request gọi THẲNG API)
+WEB_PROXY_SECRET=        # R-2/ADR-110: ≥ 32 ký tự, GIỐNG HỆT biến cùng tên ở Vercel. Request console đi qua proxy của
+                         # Vercel (rewrites) nên `req.ip` là IP egress của Vercel (chung cho mọi người). Web gửi IP thật
+                         # trong `x-hub-client-ip` kèm secret này; API chỉ tin khi khớp (timingSafeEqual). Để trống =
+                         # rate limit theo IP của console thành giới hạn CHUNG toàn hệ thống (khoá theo email vẫn đúng)
 INTERNAL_TOKEN=          # cho /api/internal/reconcile
 
 # --- Provider (nạp vào source_secrets, không đọc trực tiếp trong adapter) ---
@@ -369,6 +371,8 @@ NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — Socket.IO (vé) + 
 HUB_API_INTERNAL_URL=      # https://hub-api.onrender.com — đích proxy /api/* và /auth/* (Next tính lúc BUILD). REST của
                            # dashboard đi QUA proxy này để cookie phiên là cookie first-party của domain web
 NEXT_PUBLIC_SHOP_API_URL=  # URL shop — storefront gọi
+WEB_PROXY_SECRET=          # RUNTIME (không phải NEXT_PUBLIC_, không vào bundle) — giống hệt bên hub-api (R-2/ADR-110).
+                           # `src/proxy.ts` gắn IP client (x-real-ip/x-forwarded-for do Vercel ghi đè) + secret
 NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
 NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel
 ```

@@ -329,6 +329,29 @@ ${r.stderr}`;
     console.log(`  TA13: exit ${r.status}, log có "superuser/BYPASSRLS"`);
   });
 
+  // R-2 (ADR-110) — đi QUA proxy web (cổng 13000, profile `web`). Web chưa chạy -> bỏ qua có ghi rõ (không tính).
+  const WEB = process.env.VERIFY_WEB_URL || 'http://localhost:13000';
+  const webUp = await fetch(`${WEB}/login`, { redirect: 'manual' }).then((r) => r.status < 500).catch(() => false);
+  if (!webUp) {
+    console.log(`∅ R-2 (phần c) bỏ qua: web hubv chưa chạy ở ${WEB} (COMPOSE_PROFILES=web npm run verify:up)`);
+  } else {
+    await run.scenario('[AR:R-2] (phần c) qua proxy web: client X đăng ký 6 lần -> lần 6 bị 429; client Y (IP khác, cùng proxy) vẫn 201; header IP giả gửi THẲNG API (không secret) bị bỏ qua', async () => {
+      await flushRateLimits();
+      const reg = (base: string, ip: string, i: string, extra: Record<string, string> = {}) =>
+        new HttpSession(base).post('/auth/register', { email: `r2-${i}-${RUN}@e2e.test`, name: 'R2', password: PASSWORD }, { headers: { 'x-forwarded-for': ip, ...extra } });
+      const x: number[] = [];
+      for (let i = 0; i < 6; i++) x.push((await reg(WEB, '203.0.113.10', `x${i}`)).status);
+      expect(x.slice(0, 5).every((s) => s === 201) && x[5] === 429, `client X qua web: ${x.join(',')} (mong 201×5, 429)`);
+      const y = await reg(WEB, '198.51.100.20', 'y');
+      expect(y.status === 201, `client Y qua web bị ${y.status} — giới hạn theo IP đang là giới hạn CHUNG (R-2)`);
+      // Kẻ gọi thẳng API tự đặt x-hub-client-ip, không có secret -> vẫn tính theo IP socket của chính nó.
+      const z: number[] = [];
+      for (let i = 0; i < 6; i++) z.push((await reg(API, '1.1.1.1', `z${i}`, { 'x-hub-client-ip': `192.0.2.${i + 1}` })).status);
+      expect(z[5] === 429, `header giả không secret được tin: ${z.join(',')}`);
+      console.log(`  R-2: X=${x.join(',')} · Y=${y.status} · thẳng API giả IP=${z.join(',')}`);
+    });
+  }
+
   await redis.quit();
   process.exit(run.finish());
 }
