@@ -47,11 +47,11 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     const b = await mk('order.b', ago(10));
     const c = await mk('order.c', ago(10));
     const all = await repo().pollEvents({ after: 0n, limit: 1000 });
-    const seqOf = (id: string) => all.find((r) => r.id === id)!.seq;
+    const seqOf = (id: string) => all.find((r) => r.id === id)!.cursor;
     const rows = await repo().pollEvents({ after: seqOf(a.id), limit: 100 });
     expect(rows.map((r) => r.id)).toEqual([b.id, c.id]);
-    expect(rows.map((r) => r.seq)).toEqual([...rows.map((r) => r.seq)].sort((x, y) => (x < y ? -1 : 1)));
-    expect(typeof rows[0].seq).toBe('bigint');
+    expect(rows.map((r) => r.cursor)).toEqual([...rows.map((r) => r.cursor)].sort((x, y) => (x < y ? -1 : 1)));
+    expect(typeof rows[0].cursor).toBe('bigint');
     expect((await repo().pollEvents({ after: seqOf(c.id), limit: 100 })).map((r) => r.id)).not.toContain(c.id);
   });
 
@@ -98,7 +98,7 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
 
   it('[MS:U26] wait=3, rỗng, sau 1.5s chèn event (created_at lùi 5s) -> trả trong 1.5–3s, có event đó', async () => {
     const start = await repo().pollEvents({ after: 0n, limit: 1000 });
-    const after = start.length ? start[start.length - 1].seq : 0n;
+    const after = start.length ? start[start.length - 1].cursor : 0n;
     const t0 = Date.now();
     let inserted = '';
     setTimeout(() => void mk('order.late', ago(5)).then((e) => (inserted = e.id)), 1500);

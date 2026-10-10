@@ -23,10 +23,12 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
     return { call, pollEvents };
   }
 
-  it('[MS:U25] (phần b) seq ra JSON là CHUỖI, nextCursor = seq cuối; rỗng -> giữ nguyên after', async () => {
-    const { call } = setup([{ id: 'e2', seq: 2n }, { id: 'e3', seq: 3n }]);
+  it('[MS:U25] (phần b) cursor ra JSON là CHUỖI, nextCursor = cursor cuối; rỗng -> giữ nguyên after', async () => {
+    // R2-3 (ADR-099): trường là `cursor` (poll_seq, thứ tự COMMIT) — KHÔNG phải `seq` (events.seq của dashboard)
+    const { call } = setup([{ id: 'e2', cursor: 2n }, { id: 'e3', cursor: 3n }]);
     const r = await call({ after: '1' });
-    expect(r.body).toEqual({ events: [{ id: 'e2', seq: '2' }, { id: 'e3', seq: '3' }], nextCursor: '3' });
+    expect(r.body).toEqual({ events: [{ id: 'e2', cursor: '2' }, { id: 'e3', cursor: '3' }], nextCursor: '3' });
+    expect(r.body.events[0]).not.toHaveProperty('seq');
     expect((await setup([]).call({ after: '42' })).body).toEqual({ events: [], nextCursor: '42' });
     expect((await setup([]).call({})).body).toEqual({ events: [], nextCursor: '0' });
   });

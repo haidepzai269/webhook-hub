@@ -45,7 +45,7 @@ describeDb('Polling — cursor theo thứ tự COMMIT (R-3)', () => {
 
     const first = await repo().pollEvents({ after: 0n, limit: 100 });
     expect(first.map((e) => e.id)).toEqual([b.id]);
-    const cursor = first[first.length - 1].seq;
+    const cursor = first[first.length - 1].cursor;
 
     await new Promise((r) => setTimeout(r, 4000));
     release();
@@ -53,6 +53,6 @@ describeDb('Polling — cursor theo thứ tự COMMIT (R-3)', () => {
 
     const next = await repo().pollEvents({ after: cursor, limit: 100 });
     expect(next.map((e) => e.id)).toEqual([`co_${run}_A`]);
-    expect((await repo().pollEvents({ after: next[0].seq, limit: 100 })).length).toBe(0);
+    expect((await repo().pollEvents({ after: next[0].cursor, limit: 100 })).length).toBe(0);
   }, 60_000);
 });

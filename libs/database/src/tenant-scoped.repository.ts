@@ -227,7 +227,7 @@ export class TenantScopedRepository {
    * một transaction ngắn giữ `pg_advisory_xact_lock` theo tenant, UPDATE gán `poll_seq` cho các dòng ĐÃ COMMIT còn
    * NULL (READ COMMITTED: dòng của transaction đang mở không thấy -> chưa được gán). Các lần gán nối tiếp nhau nên giá
    * trị gán sau luôn lớn hơn mọi giá trị đã thấy: transaction commit muộn nhận poll_seq MỚI, không bao giờ bị cursor
-   * vượt qua. Bước 2: đọc `poll_seq > after`. Không có độ trễ 2s, 0 lệnh Redis. API vẫn gọi trường này là `seq`.
+   * vượt qua. Bước 2: đọc `poll_seq > after`. Không có độ trễ 2s, 0 lệnh Redis. API gọi trường này là `cursor` (R2-3).
    * `types` và `readTypes` (mẫu wildcard) là hai điều kiện AND. `failedOnly`: có delivery DEAD/RETRYING ở generation
    * MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có].
    */
@@ -242,7 +242,7 @@ export class TenantScopedRepository {
                           AND d2.subscription_id = d.subscription_id AND d2.attempt_generation > d.attempt_generation))`
       : Prisma.empty;
     return this.prisma.$queryRaw<PolledEvent[]>`
-      SELECT e.id, e.poll_seq AS seq, e.type, e.source, e.source_id AS "sourceId", e.subject, e.data, e.normalized,
+      SELECT e.id, e.poll_seq AS cursor, e.type, e.source, e.source_id AS "sourceId", e.subject, e.data, e.normalized,
              e.correlation_id AS "correlationId", e.occurred_at AS "occurredAt", e.received_at AS "receivedAt"
       FROM "hub"."events" e
       WHERE e.tenant_id = ${this.tenantId}::uuid
@@ -775,7 +775,8 @@ export interface PollEventsOptions {
 
 export interface PolledEvent {
   id: string;
-  seq: bigint;
+  /** R2-3 (ADR-099): poll_seq — cursor polling theo thứ tự COMMIT. KHÔNG phải events.seq (thứ tự INSERT, dashboard). */
+  cursor: bigint;
   type: string;
   source: string;
   sourceId: string | null;

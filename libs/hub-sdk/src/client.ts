@@ -50,7 +50,8 @@ export interface PollOptions {
 }
 export interface HubEvent {
   id: string;
-  seq: string;
+  /** Cursor polling (thứ tự COMMIT) — truyền lại làm `after`. Không phải `seq` của dashboard (R2-3). */
+  cursor: string;
   type: string;
   source: string;
   sourceId: string | null;
@@ -131,7 +132,7 @@ export class HubClient {
     });
   }
 
-  /** Polling (A): `after` là cursor CHUỖI (seq). Rỗng -> `nextCursor` giữ nguyên `after`. */
+  /** Polling (A): `after` = `nextCursor` (hoặc `event.cursor`) lần trước, CHUỖI. Rỗng -> `nextCursor` giữ nguyên `after`. */
   poll(opts: PollOptions = {}): Promise<{ events: HubEvent[]; nextCursor: string }> {
     const q = new URLSearchParams();
     if (opts.after !== undefined) q.set('after', String(opts.after));

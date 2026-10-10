@@ -105,6 +105,12 @@ Không chép email của author vào phần chung (dữ liệu cá nhân); email
 - Template: `{{data.amount}} {{data.currency}}`, `{{data.memo}}`, `{{data.reference}}` đúng cho **mọi** nguồn
   thanh toán; `{{data.repo.fullName}}`, `{{data.actor.login}}` cho `repo.*`.
 
+## 5a. Polling (A): `cursor`, không phải `seq` (R2-3, ADR-099)
+
+`GET /v1/p/:project/events?after=<cursor>` trả `{ events: [{ id, cursor, type, … }], nextCursor }`. `cursor` là thứ tự
+**COMMIT** (poll_seq) — dùng đúng giá trị `nextCursor` / `cursor` làm `after` lần sau. **Không** dùng `seq` thấy trên
+dashboard (`/api/v1/events?after=<seq>` là thứ tự INSERT, chỉ để xem) — hai dãy số khác nhau.
+
 ## 5b. Service tự phát và nguồn tuỳ chỉnh (đa service)
 
 - **`POST /v1/p/:project/events`** (ADR-074): `type` thuộc không gian dành riêng (`payment.*`, `repo.*`) phải đúng khuôn catalog — sai → **422** `{"error":"schema_mismatch","field":"<tên trường>"}` NGAY lúc gọi, trước khi ghi. Kiểu riêng của service (vd `order.created`) là hợp đồng của chính service: `normalized: true`, `data` giữ nguyên.

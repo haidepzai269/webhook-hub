@@ -397,8 +397,9 @@ export class ServiceResourcesController {
       ...(q.status === 'failed' ? { failedOnly: true, endpointId: q.endpointId } : {}),
     };
     const rows = await longPoll(() => repo.pollEvents(opts), wait, () => closed);
-    const events = rows.map((r) => ({ ...r, seq: r.seq.toString() }));
-    return { events, nextCursor: events.length ? events[events.length - 1].seq : after };
+    // R2-3 (ADR-099): `cursor` (poll_seq, thứ tự COMMIT) — cố ý KHÔNG gọi là `seq` để không lẫn với events.seq.
+    const events = rows.map((r) => ({ ...r, cursor: r.cursor.toString() }));
+    return { events, nextCursor: events.length ? events[events.length - 1].cursor : after };
   }
 
   /**
