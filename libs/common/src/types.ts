@@ -2,7 +2,7 @@ export type ProviderType = 'payos' | 'sepay' | 'github' | 'stripe' | 'generic' |
 
 export type RawEventStatus = 'ACCEPTED' | 'REJECTED' | 'DUPLICATE';
 
-export type EventOrigin = 'webhook' | 'reconciliation' | 'replay' | 'derived';
+export type EventOrigin = 'webhook' | 'api' | 'reconciliation' | 'replay' | 'derived';
 
 export type DestinationType = 'webhook' | 'telegram' | 'discord';
 

@@ -30,4 +30,10 @@ describe('ApiAdapter (S4)', () => {
   it('đăng ký trong registry dưới provider "api"', () => {
     expect(ProviderRegistry.get('api')).toBeInstanceOf(ApiAdapter);
   });
+
+  it('MS-R6: event do service tự phát mang origin "api" (không phải webhook)', () => {
+    const r: any = { provider: 'api', sourceKey: 'k', headers: {}, rawBody: Buffer.from('{}'), body: { type: 'order.created', data: {}, idempotencyKey: 'x' } };
+    const [e] = new ApiAdapter().normalize(r, { tenantId: 't', sourceId: 's', correlationId: 'c', rawEventId: 'r' });
+    expect(e.origin).toBe('api');
+  });
 });

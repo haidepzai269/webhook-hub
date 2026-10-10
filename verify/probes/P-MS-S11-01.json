@@ -1,0 +1,9 @@
+{
+  "id": "P-MS-S11-01",
+  "claim": "SDK không bao giờ để key thô lọt ra console.log / JSON.stringify của client",
+  "file": "libs/hub-sdk/src/client.ts",
+  "find": "apiKey: maskKey(this.#key) };",
+  "replace": "apiKey: this.#key };",
+  "expectRed": ["[MS:U32]"],
+  "layer": "L0"
+}

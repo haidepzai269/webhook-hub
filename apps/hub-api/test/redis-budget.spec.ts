@@ -253,6 +253,8 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     });
     expect(res.status).toBe(202);
     expect(take()).toEqual(['eval', 'get', 'set']);
+    // MS-R6: raw_event của /events mang origin 'api'
+    expect(tx.rawEvent.create.mock.calls[0][0].data.origin).toBe('api');
     // gửi lại: Redis trúng -> 200 duplicate, 2 lệnh, không transaction
     const again = await svc.publishFromService(TENANT, 'src-api', {
       provider: 'api', sourceKey: 'api_k', headers: {}, rawBody: Buffer.from(JSON.stringify(body)), body,

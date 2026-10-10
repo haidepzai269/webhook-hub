@@ -72,6 +72,7 @@ export class IngestService {
       const r = await this.persistAccepted(source, req, idempotencyKey, trace.correlationId, {
         headers: redactHeaders(req.headers as Record<string, unknown>) as Record<string, unknown>,
         signatureHeader: null,
+        origin: 'api',
       });
       return this.ackFor(adapter, r, idempotencyKey, trace);
     });
@@ -116,7 +117,7 @@ export class IngestService {
     req: RawWebhookRequest,
     idempotencyKey: string,
     correlationId: string,
-    stored: { headers: Record<string, unknown>; signatureHeader: string | null },
+    stored: { headers: Record<string, unknown>; signatureHeader: string | null; origin?: 'webhook' | 'api' },
   ): Promise<PersistResult> {
     const log = logger.child({ correlationId, provider: req.provider, sourceId: source.id });
     const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
@@ -139,7 +140,7 @@ export class IngestService {
             signatureHeader: stored.signatureHeader,
             signatureValid: true,
             status: 'ACCEPTED',
-            origin: 'webhook',
+            origin: stored.origin ?? 'webhook', // MS-R6: /events = 'api'
           },
         });
         // Transactional outbox trong CÙNG transaction

@@ -1,0 +1,9 @@
+{
+  "id": "P-MS-S8-01",
+  "claim": "Thiếu khoá chống trùng thì GenericAdapter phải từ chối (422 + REJECTED), không được tự sinh khoá (gửi lại = 2 sự kiện, phá BB-2)",
+  "file": "libs/providers/src/generic.adapter.ts",
+  "find": "throw new IdempotencyKeyMissingError('header' in id ?",
+  "replace": "return 'generic:fallback-' + String('header' in id ?",
+  "expectRed": ["[MS:U12]", "[MS:T9] (phần d)"],
+  "layer": "L0"
+}

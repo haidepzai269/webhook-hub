@@ -12,12 +12,7 @@ Seed tự chạy khi hub-api khởi động (`RUN_SEED=true`), idempotent theo s
 | `cafe` | test | SePay `src_sepay_cafe`, Apikey `demo_sepay_cafe_key_local_only` | `cafe-be`, đủ 4 scope, tiền tố `hk_test_` | `cafe-endpoint` | `payment.*` |
 | `bookstore` | live | PayOS `src_payos_bookstore`, checksum `demo_payos_bookstore_checksum_local_only` | `bookstore-be`, đủ 4 scope, tiền tố `hk_live_` | `bookstore-endpoint` | `payment.*` |
 
-- Key và `signingSecret` của endpoint được in ra log **đúng một lần**, lúc tạo:
-  ```bash
-  docker compose logs hub-api | grep -A2 'Demo project'                      # stack local
-  docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify logs hub-api | grep -A2 'Demo project'
-  ```
-  Mất key thì tạo key mới qua console: `POST /api/v1/projects/:projectId/keys`.
+- Seed **không bao giờ in key ra log** (MS-R6, ADR-087) — chỉ prefix. Muốn key cố định thì đặt trước `SEED_CAFE_API_KEY` / `SEED_BOOKSTORE_API_KEY`; không thì tạo key mới qua console `POST /api/v1/projects/:projectId/keys` (script demo tự làm việc này).
 - Endpoint trỏ vào mock của chính stack: `${MOCK_BASE_URL}/mock/echo/<slug>` (local) hoặc `http://sink:4100/<slug>` (hubv, `DEMO_ENDPOINT_BASE_URL`, đọc lại payload ở `http://localhost:14100/_requests`).
 - Mỗi key có `publish:events` đi kèm một source `api` (`api_<keyId>`, ADR-074).
 - Secret mock là giá trị cố định **chỉ cho local**. Seed không chạy ở production.
@@ -25,11 +20,11 @@ Seed tự chạy khi hub-api khởi động (`RUN_SEED=true`), idempotent theo s
 ## 2. Chạy
 
 ```bash
-# hubv (mặc định)
-KA=hk_test_… KB=hk_live_… bash scripts/demo-multi-project.sh
+# hubv (mặc định) — script tự tạo key cho cafe/bookstore qua console admin
+bash scripts/demo-multi-project.sh
 # stack local
 API=http://localhost:4000 SINK= ADMIN_PASSWORD=<mật khẩu> PG_CONTAINER=webhook-hub-postgres \
-  KA=hk_test_… KB=hk_live_… bash scripts/demo-multi-project.sh
+  bash scripts/demo-multi-project.sh
 ```
 
 Script không bắn gì vào Telegram hay Discord: chỉ dùng source của `cafe`/`bookstore`, và subscription của hai project này chỉ trỏ endpoint mock.

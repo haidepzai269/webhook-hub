@@ -3,10 +3,10 @@ import * as path from 'path';
 import { PrismaClient, ProviderEnum, DestinationType } from '@prisma/client';
 import { aesGcmEncrypt, aesGcmDecrypt, generateWhsecSecret } from '@hub/crypto';
 import { randomUUID } from 'crypto';
-import { API_KEY_RE, apiKeyPrefix, buildConnectionString, generateApiKey, hashApiKey } from '@hub/common';
+import { API_KEY_RE, apiKeyPrefix, generateApiKey, hashApiKey } from '@hub/common';
 import { DEFAULT_TENANT_ID, getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';
-import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, seedTelegramActive } from './seed-env';
+import { ALLOW_DEFAULTS_FLAG, checkSyncDestinationsEnv, keyCreatedLogLine, seedTelegramActive } from './seed-env';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -126,7 +126,7 @@ export async function ensureShopKey(env: NodeJS.ProcessEnv = process.env): Promi
   });
   await repo.createAuditLog({ action: 'api_key.created', entityType: 'api_key', entityId: created.id, actor: 'seed', metadata: { serviceName: 'shop', keyPrefix: created.keyPrefix } });
   const publicUrl = (env.HUB_PUBLIC_URL && env.HUB_PUBLIC_URL.trim()) || 'http://localhost:4000';
-  console.log(`Đã tạo API key "shop" (${created.keyPrefix}…). HUB_URL=${buildConnectionString(publicUrl, key, 'default')}`);
+  console.log(keyCreatedLogLine('shop', key, publicUrl, 'default', 'SEED_SHOP_API_KEY'));
   return key;
 }
 
@@ -152,7 +152,10 @@ export async function seedDemoProjects(env: NodeJS.ProcessEnv = process.env): Pr
   for (const p of DEMO_PROJECTS) {
     if (await prisma.project.findUnique({ where: { slug: p.slug } })) continue;
     const projectId = randomUUID();
-    const key = generateApiKey(p.environment);
+    // MS-R6: key không bao giờ in ra log -> cho phép đặt trước qua env (vd .env.verify), không thì tạo key mới ở console.
+    const given = env[`SEED_${p.slug.toUpperCase()}_API_KEY`]?.trim();
+    if (given && !API_KEY_RE.test(given)) throw new Error(`SEED_${p.slug.toUpperCase()}_API_KEY sai định dạng`);
+    const key = given || generateApiKey(p.environment);
     const signingSecret = generateWhsecSecret();
     await prisma.$transaction(async (tx) => {
       await tx.project.create({ data: { id: projectId, slug: p.slug, name: p.name, environment: p.environment } });
@@ -189,12 +192,8 @@ export async function seedDemoProjects(env: NodeJS.ProcessEnv = process.env): Pr
       await repo.createAuditLog({ action: 'api_key.created', entityType: 'api_key', entityId: k.id, actor: 'seed', metadata: { serviceName: k.serviceName, keyPrefix: k.keyPrefix } });
     });
     created.push(p.slug);
-    console.log(
-      `Demo project "${p.slug}": source ${p.provider} /hooks/${p.provider}/${p.sourceKey} · endpoint ${endpointBase}/${p.slug}
-` +
-        `  HUB_URL=${buildConnectionString(publicUrl, key, p.slug)}
-  signingSecret=${signingSecret}`,
-    );
+    console.log(`Demo project "${p.slug}": source ${p.provider} /hooks/${p.provider}/${p.sourceKey} · endpoint ${endpointBase}/${p.slug}`);
+    console.log(`  ${keyCreatedLogLine(`${p.slug}-be`, key, publicUrl, p.slug, `SEED_${p.slug.toUpperCase()}_API_KEY`)}`);
   }
   return created;
 }

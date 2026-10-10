@@ -76,4 +76,12 @@ describeDb('S1 schema đa service (Postgres)', () => {
     expect(list[0]).not.toHaveProperty('keyHash');
     expect(await new TenantScopedRepository(raw, tA).findApiKeys()).toEqual([]);
   });
+
+  it('MS-R6: api_keys.scopes NOT NULL (dữ liệu tay NULL làm key.scopes.includes ném 500) — DB từ chối, mặc định mảng rỗng', async () => {
+    await expect(
+      raw.$executeRawUnsafe(`INSERT INTO hub.api_keys (id, tenant_id, service_name, key_hash, key_prefix, scopes) VALUES (gen_random_uuid(), '${tA}', 'x', md5(random()::text) || md5(random()::text), 'hk_test_xxxx', NULL)`),
+    ).rejects.toThrow(/23502/); // not_null_violation
+    const r: any[] = await raw.$queryRawUnsafe(`SELECT column_default FROM information_schema.columns WHERE table_schema='hub' AND table_name='api_keys' AND column_name='scopes'`);
+    expect(String(r[0].column_default)).toMatch(/ARRAY\[\]/);
+  });
 });

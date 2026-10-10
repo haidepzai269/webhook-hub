@@ -34,14 +34,13 @@ export class ApiAdapter implements ProviderAdapter {
 
   normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
     const body = req.body || {};
-    return [
-      envelope('api', context, {
-        type: String(body.type),
-        subject: typeof body.subject === 'string' ? body.subject : undefined,
-        data: body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : {},
-        normalized: true,
-      }),
-    ];
+    const e = envelope('api', context, {
+      type: String(body.type),
+      subject: typeof body.subject === 'string' ? body.subject : undefined,
+      data: body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : {},
+      normalized: true,
+    });
+    return [{ ...e, origin: 'api' }]; // MS-R6: service tự phát, không phải webhook bên thứ ba
   }
 
   buildAck(result: IngestResult): { status: number; body: unknown } {

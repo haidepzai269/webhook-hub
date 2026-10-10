@@ -1,4 +1,4 @@
-import { checkSyncDestinationsEnv } from '../src/seed-env';
+import { checkSyncDestinationsEnv, keyCreatedLogLine } from '../src/seed-env';
 
 /**
  * Review SPEC-1 (thấp): `seed --sync-destinations` thiếu env thì ghi đè đích bằng mock/secret mặc
@@ -61,3 +61,15 @@ describe('seedTelegramActive (review #7, ADR-066)', () => {
     expect(yml).toContain('RUN_SEED=${RUN_SEED:-true}');
   });
 });
+
+describe('MS-R6: seed không in key đầy đủ ra log', () => {
+  it('chỉ prefix + cách lấy key, không bao giờ key thô', () => {
+    const key = 'hk_test_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
+    const line = keyCreatedLogLine('shop', key, 'http://localhost:4000', 'default', 'SEED_SHOP_API_KEY');
+    expect(line).not.toContain(key);
+    expect(line).toContain('hk_test_abcd');
+    expect(line).toContain('hub://<key>@localhost:4000/default');
+    expect(line).toContain('SEED_SHOP_API_KEY');
+  });
+});
+

@@ -38,3 +38,15 @@ export function seedTelegramActive(env: NodeJS.ProcessEnv | Record<string, strin
   const chat = (env.TELEGRAM_CHAT_ID ?? '').trim();
   return !!token && !token.includes('mock') && !!chat;
 }
+
+/**
+ * MS-R6 (ADR-087): dòng log khi seed tạo API key — CHỈ prefix (12 ký tự) và cách lấy key, KHÔNG BAO GIỜ key thô
+ * (log container đi vào hệ thống log tập trung). Key lấy từ biến env `envVar` nếu đặt, không thì tạo key mới qua console.
+ */
+export function keyCreatedLogLine(name: string, key: string, publicUrl: string, slug: string, envVar: string): string {
+  const host = new URL(publicUrl).host;
+  return (
+    `Đã tạo API key "${name}" (${key.slice(0, 12)}…). Connection string: hub://<key>@${host}/${slug} — ` +
+    `<key> = giá trị ${envVar} nếu đã đặt, không thì tạo key mới: POST /api/v1/projects/:projectId/keys`
+  );
+}

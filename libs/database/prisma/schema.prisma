@@ -48,6 +48,7 @@ enum RawStatus {
 
 enum EventOrigin {
   webhook
+  api // MS-R6: service tự phát qua POST /v1/p/:project/events
   reconciliation
   replay
   derived
@@ -106,7 +107,7 @@ model ApiKey {
   serviceName String    @map("service_name") @db.VarChar(128)
   keyPrefix   String    @map("key_prefix") @db.VarChar(16)
   keyHash     String    @unique @map("key_hash") @db.Char(64)
-  scopes      String[]
+  scopes      String[]  @default([])
   readTypes   String[]  @default([]) @map("read_types")
   sourceId    String?   @unique @map("source_id") @db.Uuid
   lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(6)

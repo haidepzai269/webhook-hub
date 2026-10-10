@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Kịch bản demo đa project (SPEC đa service §7.3, docs/DEMO-MULTI-PROJECT.md) — chạy được nhiều lần.
 #
-#   KA=hk_test_… KB=hk_live_… bash scripts/demo-multi-project.sh
+#   bash scripts/demo-multi-project.sh            # tự tạo key cho cafe/bookstore qua console admin
+#   KA=hk_test_… KB=hk_live_… bash scripts/…      # hoặc dùng key có sẵn
 #
-# KA / KB = key của project `cafe` / `bookstore` (seed in ra log hub-api ĐÚNG MỘT LẦN: `docker compose logs hub-api |
-# grep HUB_URL=`). Mặc định chạy trên hubv (API 14000, sink 14100, admin VERIFY_ONLY_admin_password). Stack dev:
+# Seed không bao giờ in key ra log (MS-R6). Mặc định chạy trên hubv (API 14000, sink 14100, admin VERIFY_ONLY_admin_password). Stack dev:
 #   API=http://localhost:4000 SINK= ADMIN_PASSWORD=<mật khẩu admin> PG_CONTAINER=webhook-hub-postgres …
 # Không bắn gì vào Telegram/Discord (chỉ source của cafe/bookstore; subscription của chúng trỏ endpoint mock).
 set -u
@@ -15,7 +15,6 @@ ADMIN_PASSWORD=${ADMIN_PASSWORD:-VERIFY_ONLY_admin_password}
 PG_CONTAINER=${PG_CONTAINER:-$(docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify ps -q postgres 2>/dev/null)}
 SEPAY_KEY=${SEPAY_KEY:-demo_sepay_cafe_key_local_only}
 PAYOS_KEY=${PAYOS_KEY:-demo_payos_bookstore_checksum_local_only}
-: "${KA:?đặt KA=<key cafe>}" "${KB:?đặt KB=<key bookstore>}"
 RUN=$(date +%s)
 CT='content-type: application/json'
 jget() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);const v=eval("o"+process.argv[1]);console.log(typeof v==="object"?JSON.stringify(v):v)})' "$1"; }
@@ -29,6 +28,11 @@ sepay() { # sepay <id> <amount> <content>
 }
 JWT=$(curl -s "$API/auth/login" -H "$CT" -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" | jget .accessToken)
 H="Authorization: Bearer $JWT"
+newkey() { # newkey <slug> -> key đủ 4 scope (đi kèm source api)
+  local P; P=$(curl -s "$API/api/v1/projects" -H "$H" | jget ".find(p=>p.slug===\"$1\").id")
+  curl -s -X POST "$API/api/v1/projects/$P/keys" -H "$H" -H "$CT"     -d "{\"serviceName\":\"$1-demo-$RUN\",\"scopes\":[\"publish:events\",\"read:events\",\"manage:endpoints\",\"manage:sources\"]}" | jget .key
+}
+KA=${KA:-$(newkey cafe)}; KB=${KB:-$(newkey bookstore)}
 EP_CAFE=$(curl -s "$API/v1/p/cafe/endpoints" -H "Authorization: Bearer $KA" | jget '.find(e=>e.name==="cafe-endpoint").id')
 
 step "1. SePay vào source của cafe: cafe sáng lên, bookstore im lặng"
