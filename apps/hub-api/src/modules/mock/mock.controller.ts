@@ -1,4 +1,4 @@
-import { Controller, Post, Res, Body, Param, All, Query } from '@nestjs/common';
+import { Controller, Post, Res, Req, Body, Param, All, Query } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { logger } from '@hub/common';
 
@@ -21,6 +21,19 @@ export class MockController {
     const code = Number.isInteger(n) && n >= 200 && n <= 599 ? n : 500;
     logger.info({ status: code }, '[MOCK FAIL] trả mã theo yêu cầu');
     return res.status(code).json({ mock: 'fail', status: code });
+  }
+
+  /**
+   * S12: endpoint mock của project demo (`cafe`, `bookstore`) trên stack dev — trả lại challenge (S6) và 200 cho
+   * sự kiện. KHÔNG verify chữ ký (mock); hubv dùng sink riêng (DEMO_ENDPOINT_BASE_URL). Chỉ log type + webhook-id.
+   */
+  @Post('echo/:name')
+  mockEcho(@Param('name') name: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (body?.type === 'endpoint.verification' && typeof body?.challenge === 'string') {
+      return res.status(200).json({ challenge: body.challenge });
+    }
+    logger.info({ endpoint: name, type: body?.type, webhookId: req.headers['webhook-id'] }, '[MOCK ECHO] nhận sự kiện');
+    return res.status(200).json({ ok: true });
   }
 
   @Post('discord')

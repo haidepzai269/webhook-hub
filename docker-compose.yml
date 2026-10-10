@@ -155,6 +155,10 @@ services:
       # RUN_SEED=false để tắt. Subscription Telegram seed mặc định TẮT trên local — bật bằng SEED_TELEGRAM_ACTIVE=true.
       - RUN_SEED=${RUN_SEED:-true}
       - SEED_TELEGRAM_ACTIVE=${SEED_TELEGRAM_ACTIVE:-false}
+      # S12 (ADR-082): project demo cafe/bookstore (source mock + key + endpoint mock). Endpoint mặc định
+      # ${MOCK_BASE_URL}/mock/echo/<slug>; hubv trỏ sink (DEMO_ENDPOINT_BASE_URL trong .env.verify).
+      - SEED_DEMO_PROJECTS=${SEED_DEMO_PROJECTS:-true}
+      - DEMO_ENDPOINT_BASE_URL=${DEMO_ENDPOINT_BASE_URL:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
       - SHOP_WEBHOOK_URL=http://shop:4001/hub-webhook
       # Seed chạy TRONG container: mock Discord/Telegram phải trỏ tên service, không phải localhost

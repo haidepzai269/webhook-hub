@@ -1,7 +1,8 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { PrismaClient, ProviderEnum, DestinationType } from '@prisma/client';
-import { aesGcmEncrypt, aesGcmDecrypt } from '@hub/crypto';
+import { aesGcmEncrypt, aesGcmDecrypt, generateWhsecSecret } from '@hub/crypto';
+import { randomUUID } from 'crypto';
 import { API_KEY_RE, apiKeyPrefix, buildConnectionString, generateApiKey, hashApiKey } from '@hub/common';
 import { DEFAULT_TENANT_ID, getMasterKey } from './constants';
 import { TenantScopedRepository } from './tenant-scoped.repository';
@@ -12,6 +13,11 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config();
 
 const prisma = new PrismaClient();
+
+/** Test L1 gọi seed trực tiếp — đóng kết nối của client seed khi xong. */
+export function disconnectSeedClient(): Promise<void> {
+  return prisma.$disconnect();
+}
 
 /** Tên các đích do seed tạo — `--sync-destinations` chỉ đụng đúng những đích này. */
 export const SEED_DESTINATION_NAMES = {
@@ -124,6 +130,75 @@ export async function ensureShopKey(env: NodeJS.ProcessEnv = process.env): Promi
   return key;
 }
 
+/**
+ * S12 (SPEC §5, X5): "thế giới" demo đa project cho màn bảo vệ (docs/DEMO-MULTI-PROJECT.md): `cafe` (test, SePay mock)
+ * và `bookstore` (live, PayOS mock), mỗi project MỘT source, MỘT key (đủ 4 scope), MỘT endpoint mock + subscription
+ * `payment.*`. Idempotent theo slug (đã có thì bỏ qua cả project). Key + signing secret in ra log ĐÚNG MỘT LẦN.
+ * Secret source là giá trị demo CỐ ĐỊNH, chỉ cho local (seed không chạy ở production) — để bắn mock bằng curl.
+ * Endpoint do seed (operator) tạo nên ghi thẳng VERIFIED: url là mock của chính stack (`/mock/echo` hoặc sink hubv).
+ */
+export const DEMO_PROJECTS = [
+  { slug: 'cafe', name: 'Cafe', environment: 'test' as const, provider: ProviderEnum.sepay, sourceKey: 'src_sepay_cafe', sourceName: 'SePay (Cafe, mock)', secret: 'demo_sepay_cafe_key_local_only' },
+  { slug: 'bookstore', name: 'Bookstore', environment: 'live' as const, provider: ProviderEnum.payos, sourceKey: 'src_payos_bookstore', sourceName: 'PayOS (Bookstore, mock)', secret: 'demo_payos_bookstore_checksum_local_only' },
+];
+
+export async function seedDemoProjects(env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+  if (env.SEED_DEMO_PROJECTS === 'false') return [];
+  const masterKey = getMasterKey();
+  const publicUrl = (env.HUB_PUBLIC_URL && env.HUB_PUBLIC_URL.trim()) || 'http://localhost:4000';
+  const mockBase = ((env.MOCK_BASE_URL && env.MOCK_BASE_URL.trim()) || 'http://localhost:4000').replace(/\/$/, '');
+  const endpointBase = ((env.DEMO_ENDPOINT_BASE_URL && env.DEMO_ENDPOINT_BASE_URL.trim()) || `${mockBase}/mock/echo`).replace(/\/$/, '');
+  const created: string[] = [];
+  for (const p of DEMO_PROJECTS) {
+    if (await prisma.project.findUnique({ where: { slug: p.slug } })) continue;
+    const projectId = randomUUID();
+    const key = generateApiKey(p.environment);
+    const signingSecret = generateWhsecSecret();
+    await prisma.$transaction(async (tx) => {
+      await tx.project.create({ data: { id: projectId, slug: p.slug, name: p.name, environment: p.environment } });
+      const repo = new TenantScopedRepository(tx as any, projectId);
+      await repo.createSource({
+        provider: p.provider,
+        name: p.sourceName,
+        sourceKey: p.sourceKey,
+        isActive: true,
+        secrets: { create: { secretEncrypted: aesGcmEncrypt(p.secret, masterKey), version: 1 } },
+      } as any);
+      // S4 (ADR-074): key có publish:events đi kèm source `api` (`api_<keyId>`) — như console tạo key.
+      const keyId = randomUUID();
+      const apiSource = await repo.createSource({ provider: ProviderEnum.api, name: `${p.slug}-be`, sourceKey: `api_${keyId}`, isActive: true });
+      const k = await repo.createApiKey({
+        id: keyId,
+        sourceId: apiSource.id,
+        serviceName: `${p.slug}-be`,
+        keyHash: hashApiKey(key),
+        keyPrefix: apiKeyPrefix(key),
+        scopes: ['publish:events', 'read:events', 'manage:endpoints', 'manage:sources'],
+        readTypes: [],
+      });
+      const dest = await repo.createDestination({
+        name: `${p.slug}-endpoint`,
+        type: DestinationType.webhook,
+        configEncrypted: aesGcmEncrypt(JSON.stringify({ url: `${endpointBase}/${p.slug}` }), masterKey),
+        signingSecretEncrypted: aesGcmEncrypt(signingSecret, masterKey),
+        verification: 'VERIFIED',
+        verifiedAt: new Date(),
+      });
+      await repo.createSubscription({ destinationId: dest.id, name: `${p.slug}: mọi thanh toán`, eventTypes: ['payment.*'], isActive: true });
+      await repo.createAuditLog({ action: 'project.created', entityType: 'project', entityId: projectId, actor: 'seed', metadata: { slug: p.slug } });
+      await repo.createAuditLog({ action: 'api_key.created', entityType: 'api_key', entityId: k.id, actor: 'seed', metadata: { serviceName: k.serviceName, keyPrefix: k.keyPrefix } });
+    });
+    created.push(p.slug);
+    console.log(
+      `Demo project "${p.slug}": source ${p.provider} /hooks/${p.provider}/${p.sourceKey} · endpoint ${endpointBase}/${p.slug}
+` +
+        `  HUB_URL=${buildConnectionString(publicUrl, key, p.slug)}
+  signingSecret=${signingSecret}`,
+    );
+  }
+  return created;
+}
+
 async function seed() {
   console.log('--- Bắt đầu gieo dữ liệu ban đầu (Seed Database) ---');
 
@@ -131,6 +206,7 @@ async function seed() {
   // (migration 20261011000000 cũng chèn dòng này cho DB cũ).
   await ensureDefaultProject();
   await ensureShopKey();
+  await seedDemoProjects();
 
   // An toàn / idempotent (BB-2: Postgres là trọng tài duy nhất, không được tự xoá dữ liệu).
   // Chỉ seed khi CHƯA có dữ liệu — không bao giờ xoá dữ liệu đang có.

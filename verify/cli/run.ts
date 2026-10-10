@@ -16,7 +16,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
-import { hostUrls, ROOT } from '../lib/compose';
+import { hostUrls, loadVerifyEnv, ROOT } from '../lib/compose';
 import { analyzeMap, declaredCodes, MapResult, scanTags, SourcesConfig } from '../lib/map';
 import { layerVerdict, ratchet, relFile, Summary, summarizeJest, unreachableSummary } from '../lib/results';
 
@@ -114,6 +114,9 @@ async function runLayer(layer: Layer): Promise<{ summary: Summary; ms: number }>
     DIRECT_URL: dbUrl,
     REDIS_URL: redisUrl,
     VERIFY_DB_OWNER_URL: process.env.VERIFY_DB_OWNER_URL || dbUrl,
+    // S12 (ADR-082): dữ liệu mã hoá mà L1 ghi vào DB hubv phải đọc được bởi hub-api hubv (và ngược lại) -> cùng
+    // MASTER_KEY của .env.verify. Không đặt thì seed.ts (dotenv) lấy MASTER_KEY của .env DEV -> lệch khoá.
+    MASTER_KEY: process.env.VERIFY_MASTER_KEY || loadVerifyEnv().MASTER_KEY,
   });
   const [pgOk, redisOk] = await Promise.all([tcpReachable(dbUrl), tcpReachable(redisUrl)]);
   if (!pgOk || !redisOk) {

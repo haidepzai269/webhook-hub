@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T12:56:33.677Z, commit 50651b4).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T13:13:37.016Z, commit bb70d92).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 198 mã khai báo · 95 mã có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 198 mã khai báo · 96 mã có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -54,6 +54,7 @@ Tổng: 198 mã khai báo · 95 mã có test · 0 mồ côi · 10 mồ côi có 
 | `MS:T9` | SPEC-hub-multi-service.md · S8 | L0 | apps/hub-api/test/ingest-generic.spec.ts:31<br>apps/hub-api/test/ingest-generic.spec.ts:38<br>apps/hub-api/test/service-sources.spec.ts:42<br>apps/hub-api/test/service-sources.spec.ts:56<br>apps/hub-api/test/service-sources.spec.ts:96 | ✅ pass |
 | `MS:T10` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-timeout.spec.ts:29 | ✅ pass |
 | `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:71<br>libs/database/test/retention-db.spec.ts:49 | ✅ pass |
+| `MS:T14` | SPEC-hub-multi-service.md · S12 | L1 | libs/database/test/seed-demo-db.spec.ts:16 | ✅ pass |
 | `MS:U1` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:16 | ✅ pass |
 | `MS:U2` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:20 | ✅ pass |
 | `MS:U3` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:25 | ✅ pass |
@@ -114,6 +115,6 @@ Tổng: 198 mã khai báo · 95 mã có test · 0 mồ côi · 10 mồ côi có 
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (80 file, 457 khai báo it/test)
+## File test (81 file, 458 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.
