@@ -384,8 +384,18 @@ ${r.stderr}`;
   const WEB = process.env.VERIFY_WEB_URL || 'http://localhost:13000';
   const webUp = await fetch(`${WEB}/login`, { redirect: 'manual' }).then((r) => r.status < 500).catch(() => false);
   if (!webUp) {
-    console.log(`∅ R-2 (phần c) bỏ qua: web hubv chưa chạy ở ${WEB} (COMPOSE_PROFILES=web npm run verify:up)`);
+    console.log(`∅ R-2 (phần c), R-5 bỏ qua: web hubv chưa chạy ở ${WEB} (COMPOSE_PROFILES=web npm run verify:up)`);
   } else {
+    await run.scenario('[AR:R-5] link trong mail trỏ vào trang có thật: /forgot-password, /reset-password, /invite trả 200 (trước: 404), có Referrer-Policy no-referrer cho trang token', async () => {
+      const out: string[] = [];
+      for (const p of ['/forgot-password', '/reset-password?token=x', '/invite?token=x']) {
+        const r = await fetch(`${WEB}${p}`, { redirect: 'manual' });
+        out.push(`${p}=${r.status}`);
+        expect(r.status === 200, `${p} → ${r.status}`);
+        if (p !== '/forgot-password') expect(r.headers.get('referrer-policy') === 'no-referrer', `${p} thiếu Referrer-Policy: no-referrer`);
+      }
+      console.log(`  R-5: ${out.join(' · ')}`);
+    });
     await run.scenario('[AR:R-2] (phần c) qua proxy web: client X đăng ký 6 lần -> lần 6 bị 429; client Y (IP khác, cùng proxy) vẫn 201; header IP giả gửi THẲNG API (không secret) bị bỏ qua', async () => {
       await flushRateLimits();
       const reg = (base: string, ip: string, i: string, extra: Record<string, string> = {}) =>

@@ -11,16 +11,22 @@ interface AuthShellProps {
   footerText: string;
   footerLinkLabel: string;
   footerHref: string;
+  /** Trang token (đặt lại mật khẩu, lời mời) không cần nút GitHub. */
+  social?: boolean;
 }
 
-export function AuthShell({ title, children, footerText, footerLinkLabel, footerHref }: AuthShellProps) {
+export function AuthShell({ title, children, footerText, footerLinkLabel, footerHref, social = true }: AuthShellProps) {
   return (
     <main className={styles.page}>
       <div className={styles.container}>
         <h1 className={styles.title}>{title}</h1>
         {children}
-        <div className={styles.divider}>HOẶC</div>
-        <SocialLogin />
+        {social && (
+          <>
+            <div className={styles.divider}>HOẶC</div>
+            <SocialLogin />
+          </>
+        )}
         <p className={styles.footer}>
           {footerText} <Link href={footerHref}>{footerLinkLabel}</Link>
         </p>

@@ -1182,3 +1182,9 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** body parser mặc định của Nest nhận form urlencoded; login/register không đòi CSRF (chưa có phiên). Review: form POST từ `Origin: https://evil.example` → 200 + 3 cookie — trang lạ đăng nhập nạn nhân vào tài khoản kẻ tấn công (login CSRF), nạn nhân cấu hình đích webhook vào đó.
 **Chọn:** `requireJsonBody` trong controller: Content-Type (bỏ tham số) khác `application/json` → 415 `unsupported_media_type`. Request JSON cross-origin không phải "simple request" nên trình duyệt buộc preflight, mà CORS đã khoá origin (MS-P2-6).
 **Đánh đổi:** client nào gửi login bằng form (curl `-d` không kèm header) giờ nhận 415 — web, e2e, script demo đều đã gửi JSON. Không kiểm `Origin` (thêm một lớp nữa nhưng lệch giữa local/proxy/deployed).
+
+## ADR-115 — Review AU R-5: trang trần `/forgot-password`, `/reset-password`, `/invite`; user GitHub mới về `/dashboard`; `?next=` chỉ đường nội bộ (2026-10-11)
+
+**Vấn đề:** link trong mail (quên/đặt lại mật khẩu, lời mời, "có người thử đăng ký") và redirect `/onboarding` của GitHub dẫn tới 404 — không tự cứu tài khoản qua giao diện được, demo hỏng.
+**Chọn:** ba trang tối thiểu dùng `AuthShell`/`AuthField` sẵn có + icon Lucide (thêm prop `social={false}`). Trang token đọc token rồi `replaceState` (không còn trên URL, `no-referrer` đã có ở next.config); `/invite` giữ token trong `sessionStorage` để sống qua `/login?next=/invite`. `login-form` theo `?next=` qua `safeNext` (chỉ chấp nhận đường bắt đầu bằng một `/`, chặn `//host`, `/\host` — open redirect). GitHub user mới → `/dashboard` (chưa có trang onboarding).
+**Đánh đổi:** giao diện trần, bản đầy đủ vẫn là việc của phiên UI. Token lời mời nằm trong `sessionStorage` của tab tới khi nhận (cùng mức lộ với URL ban đầu, nhưng không vào lịch sử/Referer).

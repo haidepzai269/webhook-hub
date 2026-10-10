@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +13,7 @@ import { z } from "zod";
 
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
+import { safeNext } from "../_components/next-path";
 
 const formSchema = z.object({
   email: z.string().trim().min(1, { message: "Nhập email." }).email({ message: "Email không hợp lệ." }),
@@ -33,7 +35,7 @@ export function LoginForm() {
   useEffect(() => {
     if (params.get("expired")) return;
     fetch("/auth/me", { credentials: "include" })
-      .then((r) => r.ok && router.replace("/dashboard/flow"))
+      .then((r) => r.ok && router.replace(safeNext(params.get("next"))))
       .catch(() => undefined);
   }, [params, router]);
 
@@ -60,7 +62,7 @@ export function LoginForm() {
         setServerError(data.message ?? `Đăng nhập thất bại (HTTP ${res.status}).`);
         return;
       }
-      router.replace("/dashboard/flow");
+      router.replace(safeNext(params.get("next")));
     } catch (e) {
       setServerError(`Không kết nối được hub-api: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -107,6 +109,9 @@ export function LoginForm() {
       <button className={styles.button} type="submit" disabled={form.formState.isSubmitting}>
         {form.formState.isSubmitting ? "ĐANG ĐĂNG NHẬP…" : "ĐĂNG NHẬP"}
       </button>
+      <p className={styles.footer}>
+        <Link href="/forgot-password">Quên mật khẩu?</Link>
+      </p>
     </form>
   );
 }

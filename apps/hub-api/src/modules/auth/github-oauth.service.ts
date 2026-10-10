@@ -148,7 +148,7 @@ export class GithubOAuthService {
       { email: profile.email, name: profile.name, passwordHash: null, emailVerifiedAt: new Date(), githubId: profile.id },
       ctx,
     );
-    return { redirect: this.web('/onboarding'), session: await this.login(created.userId, ctx) };
+    return { redirect: this.web('/dashboard'), session: await this.login(created.userId, ctx) };
   }
 
   /** `POST /auth/github/unlink`: chỉ khi còn mật khẩu (không tự khoá mình ra ngoài) -> 409 last_login_method. */

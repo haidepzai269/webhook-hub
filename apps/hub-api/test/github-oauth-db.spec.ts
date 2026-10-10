@@ -116,11 +116,11 @@ describeDb('Đăng nhập GitHub (Postgres + fetch giả, AU5)', () => {
     expect(JSON.stringify(row)).not.toContain('gho_FAKE');
   });
 
-  it('email mới -> tạo user đã xác minh (không mật khẩu) + project đầu tiên -> /onboarding; lần sau theo githubId -> /dashboard', async () => {
+  it('email mới -> tạo user đã xác minh (không mật khẩu) + project đầu tiên -> /dashboard (R-5: /onboarding là 404); lần sau theo githubId -> /dashboard', async () => {
     const email = `moi-${run}@gh.test`;
     createdEmails.push(email);
     const r: any = await roundTrip(email, { id: 77001 });
-    expect(r.redirect).toBe('http://web.test/onboarding');
+    expect(r.redirect).toBe('http://web.test/dashboard');
     expect(r.session?.accessToken).toBeTruthy();
     const u = await raw.user.findUniqueOrThrow({ where: { email } });
     expect(u).toMatchObject({ githubId: '77001', passwordHash: null });
