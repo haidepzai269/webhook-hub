@@ -2,7 +2,8 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { randomInt } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { swVerify, timingSafeCompare } from '@hub/crypto';
+import { timingSafeCompare } from '@hub/crypto';
+import { createHubClient, challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
 import { applyPayment, EXPIRE_AFTER_MS, readPayment } from './payment';
@@ -11,7 +12,15 @@ const expressFactory = typeof express === 'function' ? express : (express as any
 const app = expressFactory();
 const prisma = new PrismaClient();
 const PORT = process.env.SHOP_PORT || 4001;
-const SIGNING_SECRET = process.env.HUB_SIGNING_SECRET || 'hub_outbound_signing_secret_999';
+// S11 (§4.12): KHÔNG còn secret gắn cứng — thiếu thì Shop không khởi động (lỗi rõ ràng).
+const SIGNING_SECRET = process.env.HUB_SIGNING_SECRET || '';
+if (!SIGNING_SECRET) {
+  logger.error('[Shop] Thiếu HUB_SIGNING_SECRET (secret ký Standard Webhooks của endpoint Shop) -> dừng');
+  process.exit(1);
+}
+// Shop là SERVICE dùng hub: connection string chứa API key `shop` (manage:endpoints, read:events).
+const hub = process.env.HUB_URL ? createHubClient(process.env.HUB_URL) : null;
+const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
 
 app.use(cors());
@@ -104,12 +113,14 @@ app.get('/orders/:code', async (req: Request, res: Response) => {
 
 // 4. POST /hub-webhook — Nhận outbound webhook từ Webhook Hub
 app.post('/hub-webhook', async (req: any, res: Response) => {
-  // 4.1. Standard Webhooks (ADR-040): chữ ký trên bytes gốc + timestamp lệch ≤ 300s (chống replay) — hub ký,
-  // shop chỉ verify bằng lib dùng chung. `webhook-id` = event id, giữ nguyên qua retry -> khoá chống trùng.
+  // 4.1. Standard Webhooks (ADR-040) qua SDK: chữ ký trên bytes gốc + timestamp lệch ≤ 300s (chống replay).
+  // Request challenge CŨNG phải qua bước này. `webhook-id` = event id, giữ nguyên qua retry -> khoá chống trùng.
   const eventId = req.headers['webhook-id'] as string;
-  if (!swVerify(SIGNING_SECRET, req.headers, req.rawBody ?? Buffer.alloc(0))) {
+  if (!verifyWebhook(req.rawBody ?? Buffer.alloc(0), req.headers, SIGNING_SECRET)) {
     return res.status(401).json({ error: 'Chữ ký Standard Webhooks không hợp lệ hoặc quá hạn' });
   }
+  const challenge = challengeResponse(req.body);
+  if (challenge) return res.status(200).json(challenge);
 
   // 4.3. Chỉ nhận kiểu chuẩn `payment.received` (VND); mã đơn DH\d+ trong data.memo rồi data.reference
   const p = readPayment(req.body);
@@ -187,6 +198,20 @@ if (RECONCILE_INTERVAL_MS > 0) {
   setInterval(() => expireStaleOrders().catch((e) => logger.error({ err: e?.message }, '[Shop] Reconcile lỗi')), RECONCILE_INTERVAL_MS);
 }
 
+// S11 (§4.12): Shop TỰ đăng ký endpoint + subscription `payment.received` bằng SDK (seed không tạo nữa). Idempotent;
+// lỗi -> thử lại sau 10s, tối đa 6 lần. Shop vẫn phục vụ trong lúc chờ.
+async function registerWithHub(attempt = 1): Promise<void> {
+  if (!hub) return logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
+  try {
+    const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET });
+    logger.info({ endpointId: r.endpoint.id, created: r.created, hub }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
+  } catch (e: any) {
+    logger.warn({ err: e?.message, code: e?.code, attempt }, '[Shop] Đăng ký endpoint với hub lỗi');
+    if (attempt < 6) setTimeout(() => void registerWithHub(attempt + 1), 10_000);
+  }
+}
+
 app.listen(PORT, () => {
   logger.info(`🛒 Demo Shop API đang chạy trên cổng ${PORT} (trần ~300 dòng)`);
+  void registerWithHub();
 });

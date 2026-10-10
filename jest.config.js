@@ -18,5 +18,6 @@ module.exports = {
     '^@hub/messaging(.*)$': '<rootDir>/libs/messaging/src$1',
     '^@hub/database(.*)$': '<rootDir>/libs/database/src$1',
     '^@hub/providers(.*)$': '<rootDir>/libs/providers/src$1',
+    '^@hub/sdk(.*)$': '<rootDir>/libs/hub-sdk/src$1',
   },
 };

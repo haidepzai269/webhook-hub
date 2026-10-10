@@ -13,6 +13,7 @@ COPY libs/crypto/package.json ./libs/crypto/
 COPY libs/database/package.json ./libs/database/
 COPY libs/messaging/package.json ./libs/messaging/
 COPY libs/providers/package.json ./libs/providers/
+COPY libs/hub-sdk/package.json ./libs/hub-sdk/
 
 # Install dependencies
 RUN npm install

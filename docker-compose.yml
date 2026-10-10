@@ -238,6 +238,10 @@ services:
       - DATABASE_URL=postgresql://shop_user:${SHOP_DB_PASSWORD:-shop_password}@postgres:5432/webhook_hub?schema=shop
       - DIRECT_URL=postgresql://shop_user:${SHOP_DB_PASSWORD:-shop_password}@postgres:5432/webhook_hub?schema=shop
       - HUB_SIGNING_SECRET=${HUB_SIGNING_SECRET:-hub_outbound_signing_secret_999}
+      # S11 (§4.12, X6): Shop là service dùng hub — connection string của key `shop` (CÙNG giá trị seed băm ở
+      # hub-api) và URL công khai để tự đăng ký endpoint. Mặc định CHỈ cho local.
+      - HUB_URL=hub://${SEED_SHOP_API_KEY:-hk_test_dev_local_only_shop_key_0000000000000000000}@hub-api:4000/default
+      - SHOP_PUBLIC_URL=http://shop:4001
       - NODE_ENV=development
       - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
       - PAYOS_API_KEY=${PAYOS_API_KEY}

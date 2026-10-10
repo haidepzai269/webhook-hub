@@ -1,0 +1,14 @@
+{
+  "name": "@hub/sdk",
+  "version": "1.0.0",
+  "description": "SDK Node cho Webhook Hub: connection string, publish, poll, endpoints.ensure, verifyWebhook (Standard Webhooks). Không phụ thuộc runtime.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@hub/common": "*",
+    "typescript": "^5.7.3"
+  }
+}

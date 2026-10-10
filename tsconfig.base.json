@@ -28,7 +28,9 @@
       "@hub/database": ["libs/database/src"],
       "@hub/database/*": ["libs/database/src/*"],
       "@hub/providers": ["libs/providers/src"],
-      "@hub/providers/*": ["libs/providers/src/*"]
+      "@hub/providers/*": ["libs/providers/src/*"],
+      "@hub/sdk": ["libs/hub-sdk/src"],
+      "@hub/sdk/*": ["libs/hub-sdk/src/*"]
     }
   },
   "exclude": ["node_modules", "dist"]

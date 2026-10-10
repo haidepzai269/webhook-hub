@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "build:libs": "npm run build --workspace=libs/common --workspace=libs/crypto --workspace=libs/messaging --workspace=libs/database --workspace=libs/providers --if-present",
+    "build:libs": "npm run build --workspace=libs/common --workspace=libs/crypto --workspace=libs/messaging --workspace=libs/database --workspace=libs/providers --workspace=libs/hub-sdk --if-present",
     "start:api": "npm run start:dev --workspace=apps/hub-api",
     "start:worker": "npm run start:dev --workspace=apps/hub-worker",
     "start:shop": "npm run start:dev --workspace=apps/shop",

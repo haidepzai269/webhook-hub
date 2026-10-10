@@ -226,18 +226,9 @@ async function seed() {
     },
   });
 
-  const shopDest = await prisma.destination.create({
-    data: {
-      tenantId: DEFAULT_TENANT_ID,
-      name: SEED_DESTINATION_NAMES.shop,
-      type: DestinationType.webhook,
-      configEncrypted: aesGcmEncrypt(JSON.stringify(destCfg.shop), masterKey),
-      signingSecretEncrypted: aesGcmEncrypt(destCfg.shopSigningSecret, masterKey),
-      rateLimitRps: 20,
-    },
-  });
-
-  console.log(`Đã tạo 3 destinations: Discord (${discordDest.id}), Telegram (${telegramDest.id}), Shop (${shopDest.id})`);
+  // S11 (X6, §4.12): Shop là SERVICE thật — tự đăng ký endpoint + subscription `payment.received` bằng SDK lúc khởi
+  // động (key `shop` ở ensureShopKey). Seed KHÔNG tạo đích Shop nữa (kể cả verify:seed).
+  console.log(`Đã tạo 2 destinations: Discord (${discordDest.id}), Telegram (${telegramDest.id}); Shop tự đăng ký qua SDK`);
 
   // 3. Tạo Subscriptions
   await prisma.subscription.create({
@@ -269,17 +260,7 @@ async function seed() {
     },
   });
 
-  await prisma.subscription.create({
-    data: {
-      tenantId: DEFAULT_TENANT_ID,
-      destinationId: shopDest.id,
-      name: 'Chuyển webhook thanh toán về Demo Shop',
-      eventTypes: ['payment.received'],
-      isActive: true,
-    },
-  });
-
-  console.log('Đã tạo 3 subscriptions.');
+  console.log('Đã tạo 2 subscriptions.');
   console.log('--- Hoàn tất Seed Database thành công! ---');
 }
 
