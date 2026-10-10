@@ -15,7 +15,7 @@ export type Counterparty = { name: string | null; accountNumber: string | null; 
 export type PaymentAccount = { number: string | null; bank: string | null };
 
 export interface PaymentCore {
-  /** Số nguyên > 0, ĐƠN VỊ NHỎ NHẤT của ISO 4217 (VND = đồng, USD = cent). */
+  /** Số nguyên, ĐƠN VỊ NHỎ NHẤT của ISO 4217 (VND = đồng, USD = cent). > 0; riêng `payment.failed` cho phép 0. */
   amount: number;
   /** ^[A-Z]{3}$ */
   currency: string;
@@ -67,7 +67,9 @@ export function validatePayment(type: string, data: unknown): CanonicalResult {
   const shape = checkExactKeys(d, keys);
   if (shape) return shape;
 
-  if (typeof d.amount !== 'number' || !Number.isInteger(d.amount) || d.amount <= 0) return FAIL('amount');
+  // Review SPEC-3 #5: giao dịch THẤT BẠI có thể không có tiền (PayOS code≠00 gửi amount=0) -> cho phép 0.
+  const minAmount = type === 'payment.failed' ? 0 : 1;
+  if (typeof d.amount !== 'number' || !Number.isInteger(d.amount) || d.amount < minAmount) return FAIL('amount');
   if (typeof d.currency !== 'string' || !/^[A-Z]{3}$/.test(d.currency)) return FAIL('currency');
   if (!PAYMENT_METHODS.includes(d.method as PaymentMethod)) return FAIL('method');
   if (!isNullableString(d.reference)) return FAIL('reference');

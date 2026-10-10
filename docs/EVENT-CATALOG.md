@@ -37,7 +37,7 @@ Body hub gửi tới đích webhook (`apps/hub-worker/src/senders/webhook.sender
 5. **Hình dạng ổn định:** mọi khoá dưới đây **luôn có mặt** (thiếu dữ liệu → `null`). Validator từ chối cả
    khoá thiếu lẫn khoá lạ. Catalog chỉ được **thêm** trường tuỳ chọn; đổi hay bỏ trường = kiểu mới
    (`payment.received.v2`).
-6. **Số tiền:** số nguyên > 0, đơn vị nhỏ nhất ISO 4217 (VND = đồng, USD = cent). `currency` 3 chữ in hoa.
+6. **Số tiền:** số nguyên > 0, đơn vị nhỏ nhất ISO 4217 (VND = đồng, USD = cent); riêng `payment.failed` cho phép `0` (giao dịch lỗi có thể không kèm số tiền). `currency` 3 chữ in hoa.
 7. **Thời gian:** ISO 8601 có múi giờ. Chuỗi `YYYY-MM-DD HH:mm:ss` không múi giờ của PayOS/SePay được hiểu
    là giờ Việt Nam (+07:00) — `parseProviderTime`. Unix giây (Stripe) → ISO.
    Provider không gửi thời gian giao dịch → dùng thời điểm hub **nhận** raw event (`raw_events.received_at`), nên chuẩn hoá lại vẫn ra cùng giá trị.
@@ -58,7 +58,7 @@ Phần lõi chung (`PaymentCore`):
 
 | Khoá | Kiểu | PayOS (`body.data.*`) | SePay (`body.*`) | Stripe (`body.data.object.*`) |
 |---|---|---|---|---|
-| `amount` | int > 0 | `amount` | `transferAmount` | `amount_received` / `amount` (failed) / `amount_refunded` |
+| `amount` | int > 0 (`payment.failed`: ≥ 0) | `amount` | `transferAmount` | `amount_received` / `amount` (failed) / `amount_refunded` |
 | `currency` | `^[A-Z]{3}$` | `currency ?? "VND"` | `"VND"` | `currency.toUpperCase()` |
 | `method` | enum | `"payment_link"` | `"bank_transfer"` | `payment_method_types[0]` (hoặc `payment_method_details.type` của charge) `=== "card"` ? `"card"` : `"other"` |
 | `reference` | string \| null | `reference` | `referenceCode` | `id` |

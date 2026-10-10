@@ -12,6 +12,8 @@ describe('U50 hợp đồng catalog', () => {
   const all: [string, NormalizedEvent[]][] = [
     ['payos success', new PayosAdapter().normalize(f.req('payos', f.payosSuccess()), f.ctx)],
     ['payos failed', new PayosAdapter().normalize(f.req('payos', f.payosFailed()), f.ctx)],
+    // Review #5: PayOS code≠00 gửi amount=0 -> vẫn là payment.failed hợp lệ
+    ['payos failed amount 0', new PayosAdapter().normalize(f.req('payos', { ...f.payosFailed(), data: { ...f.payosFailed().data, amount: 0 } }), f.ctx)],
     ['sepay in', new SepayAdapter().normalize(f.req('sepay', f.sepayTx()), f.ctx)],
     ['sepay out', new SepayAdapter().normalize(f.req('sepay', f.sepayTx({ transferType: 'out' })), f.ctx)],
     ['stripe pi ok', new StripeAdapter().normalize(f.req('stripe', f.stripePiSucceeded()), f.ctx)],

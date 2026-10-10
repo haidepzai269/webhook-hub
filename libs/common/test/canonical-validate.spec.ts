@@ -41,6 +41,15 @@ describe('U44 validateCanonical payment.received', () => {
     expect(validateCanonical('payment.received', { ...good(), providerTxnId: '' })).toEqual({ ok: false, field: 'providerTxnId' });
   });
 
+  it('review #5: payment.failed cho phép amount 0; âm / thập phân vẫn sai; payment.received 0 vẫn sai', () => {
+    const { paidAt, ...core } = good();
+    const failed = (amount: unknown) => validateCanonical('payment.failed', { ...core, amount, failedAt: paidAt, reason: 'x' });
+    expect(failed(0)).toEqual({ ok: true });
+    expect(failed(-1)).toEqual({ ok: false, field: 'amount' });
+    expect(failed(0.5)).toEqual({ ok: false, field: 'amount' });
+    expect(validateCanonical('payment.received', { ...good(), amount: 0 })).toEqual({ ok: false, field: 'amount' });
+  });
+
   it('payment.failed cần failedAt + reason', () => {
     const { paidAt, ...core } = good();
     expect(validateCanonical('payment.failed', { ...core, failedAt: paidAt, reason: null })).toEqual({ ok: true });
