@@ -205,14 +205,21 @@ async function seed() {
   // (migration 20261011000000 cũng chèn dòng này cho DB cũ).
   await ensureDefaultProject();
   await ensureShopKey();
+  await seedDefaultWorld();
+  // MS-P2-2 (ADR-088): demo SAU thế giới default — và "đã seed" của default xét theo dữ liệu CỦA default, không toàn DB.
   await seedDemoProjects();
+  console.log('--- Hoàn tất Seed Database thành công! ---');
+}
 
+/** Thế giới của project default (3 source, Discord + Telegram, 2 subscription). Idempotent theo dữ liệu của default. */
+async function seedDefaultWorld() {
   // An toàn / idempotent (BB-2: Postgres là trọng tài duy nhất, không được tự xoá dữ liệu).
-  // Chỉ seed khi CHƯA có dữ liệu — không bao giờ xoá dữ liệu đang có.
-  const existingSourceCount = await prisma.source.count();
+  // Chỉ seed khi project default CHƯA có source — không bao giờ xoá dữ liệu đang có. (Trước MS-P2-2 đếm source
+  // TOÀN DB: project demo / source `api` tạo trước làm default bị bỏ trống.)
+  const existingSourceCount = await prisma.source.count({ where: { tenantId: DEFAULT_TENANT_ID } });
   if (existingSourceCount > 0) {
     console.log(
-      `--- Đã có ${existingSourceCount} source(s) trong DB, bỏ qua seed (idempotent, không xoá dữ liệu). ---`,
+      `--- Project default đã có ${existingSourceCount} source(s), bỏ qua seed default (idempotent, không xoá dữ liệu). ---`,
     );
     return;
   }
@@ -336,7 +343,6 @@ async function seed() {
   });
 
   console.log('Đã tạo 2 subscriptions.');
-  console.log('--- Hoàn tất Seed Database thành công! ---');
 }
 
 export { seed };

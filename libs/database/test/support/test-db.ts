@@ -21,7 +21,7 @@ export function testDbUrl(role: TestDbRole): string | undefined {
   return process.env.DATABASE_URL;
 }
 
-export function newTestPrisma(role: TestDbRole = 'app'): PrismaClient {
-  const url = testDbUrl(role);
+export function newTestPrisma(role: TestDbRole = 'app', urlOverride?: string): PrismaClient {
+  const url = urlOverride ?? testDbUrl(role);
   return new PrismaClient(url ? { datasources: { db: { url } } } : undefined);
 }
