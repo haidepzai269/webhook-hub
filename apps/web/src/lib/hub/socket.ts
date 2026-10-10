@@ -103,6 +103,28 @@ function createInvalidator(qc: QueryClient) {
 }
 
 /**
+ * R-5: project mà realtime đang theo. Chỉ màn Event Flow đặt (khi mount, qua `useRealtimeProject`) và trả về
+ * null khi rời màn — các trang khác của dashboard luôn theo tenant của JWT như trước.
+ */
+const realtimeProject = { current: null as string | null };
+function realtimeProjectId() {
+  return realtimeProject.current;
+}
+
+export function useRealtimeProject(projectId: string | null) {
+  useEffect(() => {
+    if (realtimeProject.current === projectId) return;
+    realtimeProject.current = projectId;
+    // Handshake chỉ chạy lúc (re)connect → nối lại để vào đúng room (cùng MỘT socket, không mở kết nối thứ hai).
+    if (socket?.connected) socket.disconnect().connect();
+    return () => {
+      realtimeProject.current = null;
+      if (projectId && socket?.connected) socket.disconnect().connect();
+    };
+  }, [projectId]);
+}
+
+/**
  * Một kết nối Socket.IO dùng chung cho toàn admin (ref-count, mount ở layout dashboard).
  * Nhận sự kiện → invalidate query tương ứng, KHÔNG tự vá state bằng tay (nguồn sự thật là API).
  */
@@ -115,7 +137,15 @@ export function useHubRealtime() {
       // auth dạng callback: mỗi lần (re)connect đọc token MỚI NHẤT (đăng nhập lại không cần reload).
       // Hub từ chối handshake thiếu/sai JWT (connect_error "UNAUTHORIZED") -> badge Socket tắt;
       // việc đưa về /auth/login do hubFetch xử lý khi API trả 401.
-      socket = io(HUB_API_URL, { transports: ["websocket"], auth: (cb) => cb({ token: getToken() }) });
+      // R-5: màn Event Flow đang xem project khác → gửi `projectId` trong handshake; server kiểm bằng CÙNG luật
+      // ProjectScopeGuard rồi cho socket vào room của project đó. Không có → room tenant của JWT như cũ.
+      socket = io(HUB_API_URL, {
+        transports: ["websocket"],
+        auth: (cb) => {
+          const projectId = realtimeProjectId();
+          cb(projectId ? { token: getToken(), projectId } : { token: getToken() });
+        },
+      });
     }
     const s = socket;
     const { invalidate, cancel } = createInvalidator(qc);
@@ -123,16 +153,24 @@ export function useHubRealtime() {
     const onConnect = () => useRealtimeStore.setState({ connected: true });
     const onDisconnect = () => useRealtimeStore.setState({ connected: false });
     // "flow" (SPEC-event-flow-ui): hành trình/danh sách/bản đồ gọi lại API — không tự ghép trạng thái.
+    // R-5: phòng thủ phía client — payload của tenant khác project đang xem thì bỏ (không chấm chạy, không refetch).
+    const foreign = (n: { tenantId?: string }) => {
+      const p = realtimeProjectId();
+      return Boolean(p && n.tenantId && n.tenantId !== p);
+    };
     const onEvent = (n: EventReceivedNotice) => {
+      if (foreign(n)) return;
       emitLocal("event.received", n);
       invalidate("overview", "events", "timeseries", "flow");
     };
     // delivery.attempt (thay delivery.updated, S2-2): prefix "event" phủ cả sheet "Dấu vết" của đúng eventId.
     const onDelivery = (n: DeliveryAttemptNotice) => {
+      if (foreign(n)) return;
       emitLocal("delivery.attempt", n);
       invalidate("overview", "deliveries", "dlq", "timeseries", "event", "events", "flow");
     };
     const onCircuit = (n: CircuitChangedNotice) => {
+      if (foreign(n)) return;
       emitLocal("circuit.changed", n);
       invalidate("destinations", "flow");
     };

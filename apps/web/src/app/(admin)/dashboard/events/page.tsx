@@ -18,10 +18,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/hub/format";
 import type { ExecutionFilters } from "@/lib/hub/flow-types";
-import { useDestinations, useExecutions, useSources } from "@/lib/hub/queries";
+import { useDestinations, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
 
 import { EventSheet } from "./_components/event-sheet";
 import { OrphanBanner } from "./_components/orphan-banner";
+import { useRealtimeProject } from "@/lib/hub/socket";
 
 const TABS: { id: ExecutionStatus | "all"; label: string }[] = [
   { id: "all", label: "Tất cả" },
@@ -59,8 +60,18 @@ function ExecutionsView() {
     [status, source, destination, type],
   );
   const q = useExecutions(filters, { paused });
-  const sources = useSources();
-  const destinations = useDestinations();
+  useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
+  // R-4: danh sách lọc theo ĐÚNG project đang xem; đổi project thì bỏ lọc source/đích cũ (id của project khác).
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  const sources = useSources(projectId);
+  const destinations = useDestinations(projectId);
+  const lastProject = useRef(projectId);
+  useEffect(() => {
+    if (lastProject.current === projectId) return;
+    lastProject.current = projectId;
+    setSource("");
+    setDestination("");
+  }, [projectId]);
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
 
   // Cuộn vô hạn theo cursor.

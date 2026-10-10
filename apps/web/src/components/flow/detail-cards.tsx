@@ -83,7 +83,7 @@ export function PayloadCard({ data, raw, rawTruncated, dataTruncated }: { data: 
   );
 }
 
-const SENSITIVE = /^(authorization|cookie|set-cookie|x-api-key|apikey|x-.*-signature|.*token.*|.*secret.*)$/i;
+const SENSITIVE = /^(authorization|cookie|set-cookie|x-api-key|apikey|x-.*-signature|webhook-signature|.*token.*|.*secret.*)$/i;
 
 /** Card Headers: khoá–giá trị; header nhạy cảm (đã che ở server, ADR-051) hiện `***`. */
 export function HeadersCard({ headers }: { headers: Record<string, unknown> | null | undefined }) {
@@ -148,10 +148,19 @@ function AttemptRow({ attempt }: { attempt: StageView }) {
             <pre className="max-h-60 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11.5px]">
               {String(d.response ?? d.error ?? "(trống)")}
             </pre>
-          ) : d.request !== null && d.request !== undefined ? (
-            <JsonViewer value={d.request} maxHeight="16rem" />
           ) : (
-            <p className="text-muted-foreground text-xs">Không lưu body đã gửi cho lần này.</p>
+            <div className="space-y-1.5">
+              {d.request !== null && d.request !== undefined ? (
+                <JsonViewer value={d.request} maxHeight="16rem" />
+              ) : (
+                <p className="text-muted-foreground text-xs">Không lưu body đã gửi cho lần này.</p>
+              )}
+              {/* §6A "header gửi đi": delivery_attempts chỉ lưu body đã gửi, KHÔNG lưu header — không bịa lại. */}
+              <p className="text-muted-foreground text-[11px]">
+                Header gửi đi (Standard Webhooks: webhook-id · webhook-timestamp · webhook-signature) không được lưu
+                theo từng lần thử — chỉ có body.
+              </p>
+            </div>
           )}
         </div>
       )}

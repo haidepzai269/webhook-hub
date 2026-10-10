@@ -13,11 +13,9 @@ type PrismaClientOrTx = PrismaClient | Prisma.TransactionClient;
  * raw_events, bảng không có cột tenant). Lúc merge có thể chuyển nguyên các hàm này vào repo gốc.
  */
 export class FlowScopedRepository extends TenantScopedRepository {
-  constructor(
-    private readonly db: PrismaClientOrTx,
-    tenantId: string,
-  ) {
-    super(db, tenantId);
+  /** Client của repo cha (protected, R-9) — cùng tenant, không mở kết nối mới. */
+  private get db(): PrismaClientOrTx {
+    return this.prisma;
   }
 
   /** Raw event theo id, scope qua source.tenantId. KHÔNG nạp `body_raw` (chỉ độ dài). */
@@ -265,23 +263,19 @@ export class FlowScopedRepository extends TenantScopedRepository {
    * qua và vì sao. CHỖ DUY NHẤT phải sửa khi đa service thêm `source_ids` / `destinations.verification`
    * (F7): thêm hai trường đó vào select dưới đây.
    */
-  async findSubscriptionsMatching(eventType: string) {
+  async findSubscriptionsMatching(eventType: string, existedAt: Date) {
     return this.db.subscription.findMany({
-      where: { tenantId: this.tenantId, eventTypes: { hasSome: eventTypeCandidates(eventType) } },
+      // R-6: chỉ subscription ĐÃ TỒN TẠI lúc event được tạo — cái tạo sau không thể là lý do bỏ qua event này.
+      where: { tenantId: this.tenantId, eventTypes: { hasSome: eventTypeCandidates(eventType) }, createdAt: { lte: existedAt } },
       // F7 (§6A): source_ids + destinations.verification của đợt đa service.
       select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, destination: { select: { verification: true } } },
     });
   }
 }
 
-/**
- * Dựng repo flow từ `PrismaService`. `PrismaService.client` là private (BB-5: không ai gọi model trần),
- * nên lấy client mà `forTenant()` đã bọc — đúng client đó, không mở kết nối mới. Hết cần khi các hàm
- * trên được chuyển vào `TenantScopedRepository` lúc merge (ADR nháp EF-2).
- */
+/** Dựng repo flow qua lối có tên `TenantScopedRepository.extend` (R-9) — không ép kiểu vào field nào. */
 export function flowRepoFor(svc: { forTenant(tenantId: string): TenantScopedRepository }, tenantId: string): FlowScopedRepository {
-  const base = svc.forTenant(tenantId) as unknown as { prisma: PrismaClientOrTx };
-  return new FlowScopedRepository(base.prisma, tenantId);
+  return svc.forTenant(tenantId).extend(FlowScopedRepository);
 }
 
 export interface ExecutionFilter {

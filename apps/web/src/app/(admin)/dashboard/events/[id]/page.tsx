@@ -30,6 +30,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
+import { useRealtimeProject } from "@/lib/hub/socket";
+import { useFlowProjectStore } from "@/lib/hub/flow-project";
 
 
 
@@ -55,6 +57,7 @@ export default function EventJourneyPage() {
   useEffect(() => restoreFlowProject(), []);
   const router = useRouter();
   const { data, isLoading, error } = useEventFlow(id ? decodeURIComponent(id) : null);
+  useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
   const [selected, setSelected] = useState<{ stage: StageView; branch?: FlowBranch } | null>(null);
   const replay = useFlowReplayDelivery();
   const renormalize = useFlowRenormalize();

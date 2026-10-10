@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTopology } from "@/lib/hub/queries";
+import { useRealtimeProject } from "@/lib/hub/socket";
+import { useFlowProjectStore } from "@/lib/hub/flow-project";
 
 const WINDOW_BTN: Record<TopologyWindow, string> = { "15m": "15M", "1h": "1H", "24h": "24H" };
 
@@ -41,6 +43,7 @@ export default function FlowMapPage() {
   const [showSubscriptions, setShowSubscriptions] = useState(false);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const { data, error, isLoading } = useTopology(window);
+  useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
 
   const sources = data?.nodes.filter((n) => n.kind === "source") ?? [];
   const counts = { crashed: 0, warning: 0, healthy: 0, idle: 0 };

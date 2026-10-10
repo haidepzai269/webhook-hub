@@ -207,7 +207,8 @@ export class FlowService {
     }
     if (!raw && !event) throw new NotFoundException('Hành trình không tồn tại');
 
-    const candidates = event ? await repo.findSubscriptionsMatching(event.type) : [];
+    // events.created_at = lúc INSERT (normalize + route cùng transaction) — mốc định tuyến thật (S7, R-6).
+    const candidates = event ? await repo.findSubscriptionsMatching(event.type, event.createdAt ?? event.receivedAt) : [];
     const skipped = classifySkippedSubscriptions(
       candidates.map((c) => ({ ...c, destinationVerification: c.destination?.verification ?? null })),
       (event?.deliveries ?? []).map((d) => d.subscriptionId),
