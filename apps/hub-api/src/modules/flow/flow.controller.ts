@@ -1,12 +1,12 @@
-import { Controller, Get, Param, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CurrentTenant } from '../auth/current-tenant.decorator';
+import { FlowScope } from './flow-scope';
 import { RedactSecretsInterceptor } from '../api/redact-secrets.interceptor';
-import { FlowService } from './flow.service';
+import { ExecutionQuery, FlowService } from './flow.service';
 
 /**
  * Event Flow (SPEC-event-flow-ui §3) — CHỈ ĐỌC. Guard + interceptor y hệt `ApiController`: JWT,
- * tenant từ token (`@CurrentTenant()`), không trả ciphertext. AU3 thêm `@RequireScope('read:project')`
+ * tenant từ token (`@FlowScope()`), không trả ciphertext. AU3 thêm `@RequireScope('read:project')`
  * một lần ở đây cho cả module.
  */
 @Controller('api/v1/flow')
@@ -15,8 +15,18 @@ import { FlowService } from './flow.service';
 export class FlowController {
   constructor(private readonly flow: FlowService) {}
 
+  @Get('executions')
+  listExecutions(@FlowScope() tenantId: string, @Query() q: ExecutionQuery) {
+    return this.flow.listExecutions(tenantId, q);
+  }
+
+  @Get('topology')
+  getTopology(@FlowScope() tenantId: string, @Query('window') window?: string) {
+    return this.flow.getTopology(tenantId, window);
+  }
+
   @Get('events/:id')
-  getEventFlow(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+  getEventFlow(@FlowScope() tenantId: string, @Param('id') id: string) {
     return this.flow.getEventFlow(tenantId, id);
   }
 }

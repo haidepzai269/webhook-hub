@@ -192,6 +192,75 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     await expect(controller.getEventFlow(tenant, "x'; drop table--")).rejects.toThrow('Hành trình không tồn tại');
   });
 
+  it('[UI:F4-01] executions: mỗi hành trình một dòng, summary 6 chấm, "Hỏng ở" có đích + lần thử', async () => {
+    const res: any = await controller.listExecutions(tenant, {});
+    const byId = new Map(res.items.map((i: any) => [i.id, i]));
+    expect(res.items).toHaveLength(3);
+    const ok: any = byId.get(ids.event);
+    expect(ok.status).toBe('in_progress');
+    expect(ok.summary).toHaveLength(6);
+    expect(ok.summary[5]).toMatchObject({ okCount: 1, total: 2 });
+    expect(ok.failedAt).toMatchObject({ stage: 'delivering', destinationName: `Discord-${run}`, attemptNo: 3 });
+    expect((byId.get(ids.rawRejected) as any).status).toBe('rejected');
+    expect((byId.get(ids.rawOrphan) as any).status).toBe('failed');
+  });
+
+  it('[UI:F4-02] bộ lọc status ở SQL khớp đúng executionStatus của buildEventFlow; lọc type/destination/source', async () => {
+    const all: any = await controller.listExecutions(tenant, {});
+    for (const st of ['failed', 'in_progress', 'succeeded', 'rejected']) {
+      const filtered: any = await controller.listExecutions(tenant, { status: st });
+      const expected = all.items.filter((i: any) => i.status === st).map((i: any) => i.id).sort();
+      expect(filtered.items.map((i: any) => i.id).sort()).toEqual(expected);
+    }
+    expect((await controller.listExecutions(tenant, { type: 'payment.*' }) as any).items.map((i: any) => i.id)).toEqual([ids.event]);
+    expect((await controller.listExecutions(tenant, { type: 'repo.*' }) as any).items).toHaveLength(0);
+    expect((await controller.listExecutions(tenant, { destination: ids.destOk }) as any).items.map((i: any) => i.id)).toEqual([ids.event]);
+    expect((await controller.listExecutions(tenant, { source: ids.source }) as any).items).toHaveLength(3);
+    await expect(controller.listExecutions(tenant, { status: 'weird' })).rejects.toThrow();
+  });
+
+  it('[UI:F4-03] cursor: trang 1 + trang 2 = toàn bộ, không trùng, không sót', async () => {
+    const p1: any = await controller.listExecutions(tenant, { limit: '2' });
+    expect(p1.items).toHaveLength(2);
+    expect(p1.nextCursor).toBeTruthy();
+    const p2: any = await controller.listExecutions(tenant, { limit: '2', cursor: p1.nextCursor });
+    expect(p2.items).toHaveLength(1);
+    expect(p2.nextCursor).toBeNull();
+    const ids3 = [...p1.items, ...p2.items].map((i: any) => i.id);
+    expect(new Set(ids3).size).toBe(3);
+    await expect(controller.listExecutions(tenant, { cursor: 'rác' })).rejects.toThrow('cursor');
+  });
+
+  it('[UI:F4-04][BB:5] executions cô lập tenant: tenant khác không thấy dòng nào', async () => {
+    const res: any = await controller.listExecutions(other, {});
+    expect(res.items).toHaveLength(0);
+  });
+
+  it('[UI:F5-01] topology: node source/gate/normalize/subscription/destination có số + health do server tính', async () => {
+    const topo: any = await controller.getTopology(tenant, '1h');
+    const node = (id: string) => topo.nodes.find((n: any) => n.id === id);
+    const src = node(`src:${ids.source}`);
+    expect(src).toMatchObject({ accepted: 2, rejected: 1, kind: 'source' });
+    expect(node('normalize')).toMatchObject({ events: 1, orphans: 1 });
+    const dFail = node(`dst:${ids.destFail}`);
+    expect(dFail).toMatchObject({ circuitState: 'OPEN', retrying: 1, health: 'crashed' });
+    const dOk = node(`dst:${ids.destOk}`);
+    expect(dOk).toMatchObject({ succeeded: 1, successPct: 100, health: 'healthy', p95Ms: 84 });
+    expect(node(`sub:${ids.subOff}`).health).toBe('idle');
+    for (const n of topo.nodes) expect(['healthy', 'warning', 'crashed', 'idle']).toContain(n.health);
+    for (const e of topo.edges) expect(['healthy', 'warning', 'crashed', 'idle']).toContain(e.health);
+    expect(topo.edges.find((e: any) => e.id === `e:sub:${ids.subFail}`)).toMatchObject({ count: 2, retrying: 1, health: "crashed" }); // gen 1 + gen 2 (replay) đều là lưu lượng
+  });
+
+  it('[UI:F5-02][BB:5] topology cô lập tenant + không lộ secret', async () => {
+    const topo: any = await controller.getTopology(other, '24h');
+    expect(topo.nodes.filter((n: any) => n.kind !== 'gate' && n.kind !== 'normalize')).toHaveLength(0);
+    const text = JSON.stringify(await controller.getTopology(tenant, '24h'));
+    for (const m of SECRET_MARKERS) expect(text).not.toContain(m);
+    expect(text).not.toMatch(/Encrypted|signingSecret|secret/i);
+    await expect(controller.getTopology(tenant, '7d')).rejects.toThrow();
+  });
+
   it('[UI:F2-06] che bí mật: không ciphertext, signingSecret, token hay authorization thô trong response', async () => {
     for (const id of [ids.event, ids.rawRejected]) {
       const text = JSON.stringify(await controller.getEventFlow(tenant, id));

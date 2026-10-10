@@ -1,6 +1,7 @@
 import {
   attemptReason,
   buildEventFlow,
+  classifySkippedSubscriptions,
   EventFlowInput,
   FlowDeliveryInput,
   FlowRawInput,
@@ -289,6 +290,38 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
         if (s.reason) expect(Object.keys(REASON_CODES)).toContain(s.reason.code);
       }
     }
+  });
+
+  it('[UI:F1-25] routed tính lúc đọc (§6A): khớp type mà không có delivery → lý do tắt / chưa xác minh / lọc source', () => {
+    const candidates = [
+      { id: 'delivered', name: 'đã gửi', eventTypes: ['payment.*'], isActive: true },
+      { id: 'off', name: 'tắt', eventTypes: ['payment.*'], isActive: false, destinationVerification: 'PENDING' as const },
+      { id: 'unverified', name: 'chưa xác minh', eventTypes: ['payment.*'], isActive: true, destinationVerification: 'FAILED' as const },
+      { id: 'filtered', name: 'lọc', eventTypes: ['*'], isActive: true, sourceIds: ['src-other'], destinationVerification: 'VERIFIED' as const },
+      { id: 'mine', name: 'đúng source', eventTypes: ['*'], isActive: true, sourceIds: ['src-1'] },
+      { id: 'legacy', name: 'chưa có cột đa service', eventTypes: ['*'], isActive: true },
+    ];
+    const skipped = classifySkippedSubscriptions(candidates, ['delivered'], 'src-1');
+    expect(skipped.map((s) => [s.id, s.reason])).toEqual([
+      ['off', 'subscription_inactive'],
+      ['unverified', 'endpoint_unverified'],
+      ['filtered', 'source_filtered'],
+    ]);
+    const f = flow({ deliveries: [], skippedSubscriptions: skipped });
+    const r = f.stages.find((s) => s.key === 'routed')!;
+    expect(r.status).toBe('skipped');
+    expect(r.detail?.skippedBasis).toBe('trạng thái hiện tại');
+    expect((r.detail?.skipped as { reason: { code: string } }[]).map((s) => s.reason.code)).toEqual([
+      'subscription_inactive',
+      'endpoint_unverified',
+      'source_filtered',
+    ]);
+  });
+
+  it('[UI:F1-26] nguồn api (đa service) xác thực bằng API key — tiêu đề không ghi "chữ ký"', () => {
+    const f = flow({ raw: raw({ provider: 'api' }) });
+    expect(f.stages[1].title).toBe('API key API hợp lệ');
+    expect(flow({}).stages[1].title).toBe('Chữ ký PayOS hợp lệ');
   });
 
   it('[UI:F1-19] event không có raw (origin khác webhook): vẫn dựng normalize → routed', () => {

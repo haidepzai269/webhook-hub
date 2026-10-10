@@ -95,6 +95,44 @@ export interface FlowSkippedSubscriptionInput {
   reason: Extract<ReasonCode, 'subscription_inactive' | 'endpoint_unverified' | 'source_filtered'>;
 }
 
+/**
+ * Subscription KHỚP kiểu sự kiện (đọc lúc xem). Trường tuỳ chọn = cột của đợt đa service (SPEC §6A):
+ * khi chưa có cột thì để `undefined` và nhánh lý do tương ứng không chạy.
+ */
+export interface FlowCandidateSubscriptionInput {
+  id: string;
+  name: string;
+  eventTypes: string[];
+  isActive: boolean;
+  /** `subscriptions.source_ids` (đa service). Rỗng/undefined = nhận mọi source. */
+  sourceIds?: string[] | null;
+  /** `destinations.verification` (đa service). undefined = chưa có cột → coi như đã xác minh. */
+  destinationVerification?: 'PENDING' | 'VERIFIED' | 'FAILED' | null;
+}
+
+/**
+ * Chặng `routed` tự tính lúc đọc (SPEC §6A): subscription khớp type mà KHÔNG có delivery → bỏ qua kèm
+ * lý do theo TRẠNG THÁI HIỆN TẠI của cấu hình (không phải trạng thái lúc event tới — UI ghi rõ nhãn này).
+ * Thứ tự ưu tiên: tắt → endpoint chưa xác minh → lọc theo source.
+ */
+export function classifySkippedSubscriptions(
+  candidates: FlowCandidateSubscriptionInput[],
+  deliveredSubscriptionIds: Iterable<string>,
+  eventSourceId: string | null | undefined,
+): FlowSkippedSubscriptionInput[] {
+  const delivered = new Set(deliveredSubscriptionIds);
+  const out: FlowSkippedSubscriptionInput[] = [];
+  for (const c of candidates) {
+    if (delivered.has(c.id)) continue;
+    let r: FlowSkippedSubscriptionInput['reason'] | null = null;
+    if (!c.isActive) r = 'subscription_inactive';
+    else if (c.destinationVerification && c.destinationVerification !== 'VERIFIED') r = 'endpoint_unverified';
+    else if (c.sourceIds && c.sourceIds.length > 0 && eventSourceId && !c.sourceIds.includes(eventSourceId)) r = 'source_filtered';
+    if (r) out.push({ id: c.id, name: c.name, eventTypes: c.eventTypes, reason: r });
+  }
+  return out;
+}
+
 export interface EventFlowInput {
   raw: FlowRawInput | null;
   event: FlowEventInput | null;
@@ -114,7 +152,19 @@ export interface EventFlow {
   failedAt: FlowFailedAt | null;
 }
 
-const PROVIDER_LABELS: Record<string, string> = { payos: 'PayOS', sepay: 'SePay', github: 'GitHub', stripe: 'Stripe' };
+const PROVIDER_LABELS: Record<string, string> = {
+  payos: 'PayOS',
+  sepay: 'SePay',
+  github: 'GitHub',
+  stripe: 'Stripe',
+  api: 'API',
+  generic: 'Generic',
+};
+
+/** Nguồn `api` (service tự publish, đa service) xác thực bằng API key, không phải chữ ký webhook. */
+function credentialLabel(provider: string): string {
+  return provider === 'api' ? 'API key' : 'Chữ ký';
+}
 
 export function providerLabel(p: string): string {
   return PROVIDER_LABELS[p] ?? p;
@@ -453,7 +503,7 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
         startedAt: at,
         endedAt: at,
         durationMs: 0,
-        title: `Chữ ký ${prov} KHÔNG hợp lệ`,
+        title: `${credentialLabel(raw.provider)} ${prov} KHÔNG hợp lệ`,
         subtitle: 'hub trả 401',
         reason: reason('signature_invalid'),
         actions: ['open_config'],
@@ -468,7 +518,7 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
         startedAt: at,
         endedAt: at,
         durationMs: 0,
-        title: `Chữ ký ${prov} hợp lệ`,
+        title: `${credentialLabel(raw.provider)} ${prov} hợp lệ`,
         detail: { signatureValid: true },
       });
       if (raw.status === 'DUPLICATE') {
@@ -600,6 +650,8 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
       detail: {
         matched: branches.map((b) => ({ subscription: b.subscription, destination: b.destination })),
         skipped: skipped.map((s) => ({ id: s.id, name: s.name, eventTypes: s.eventTypes, reason: reason(s.reason) })),
+        // Lý do bỏ qua tính từ cấu hình LÚC XEM (SPEC §6A) — có thể khác lúc event tới.
+        skippedBasis: skipped.length ? 'trạng thái hiện tại' : undefined,
       },
     });
     if (matched === 0) terminal = true;
