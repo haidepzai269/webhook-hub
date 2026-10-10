@@ -50,5 +50,5 @@ describe('DELIVERY_TIMEOUT_MS (S10)', () => {
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
-  });
+  }, 20_000); // nạp lại module trong isolateModules + server ngủ 3s: dưới tải L0 song song vượt mặc định 5s
 });
