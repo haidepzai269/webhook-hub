@@ -38,3 +38,16 @@ một đích mock (`http://hub-api:4000/mock/discord`).
 - Grafana `http://localhost:3001` (admin/admin) → thư mục **Webhook Hub** → dashboard **Webhook Hub**: RPS theo provider,
   p50/p95/p99 ingest, ACCEPTED/REJECTED/DUPLICATE, delivery theo trạng thái, outbox lag, circuit.
 - Thô: `curl -s localhost:4000/metrics | grep hub_ingest`.
+
+## Đường giao (R-4, ADR-119)
+
+```bash
+# stack hubv (npm run verify:up), k6 trên máy (bắn localhost — không qua tunnel):
+HUB_URL=http://localhost:14000 RPS=30 DURATION_S=60 k6 run k6/delivery-e2e.js   # in RUN=<id> ở cuối
+bash scripts/delivery-latency.sh <RUN>                                           # p50/p95/p99 event → SUCCEEDED (Postgres hubv)
+# Thời gian worker xử lý một message (histogram trong bộ nhớ, đọc trong mạng compose):
+docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify exec -T hub-worker \
+  node -e 'fetch("http://127.0.0.1:9101/metrics").then(r=>r.text()).then(t=>console.log(t.split("\n").filter(l=>l.startsWith("hub_delivery_handle_seconds_")).join("\n")))'
+```
+
+So sánh chế độ: khởi động lại hub-worker (xoá histogram) với `RLS_HOT_BATCH=0` (transaction tương tác) hoặc mặc định (batch).

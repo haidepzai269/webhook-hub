@@ -1206,3 +1206,18 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** user chưa xác minh tạo 20 project test liên tiếp đều thành công — đăng ký hàng loạt rồi tạo vô hạn project (mỗi project kèm source/endpoint/key) trên free tier Neon.
 **Chọn:** `POST /api/v1/projects` đếm project user đang là owner, sau `pg_advisory_xact_lock` theo user trong cùng transaction (song song không vượt trần); vượt → 403 `project_limit` kèm `limit`. Trần là hằng số trong `projects.controller.ts`. Project tạo lúc đăng ký/GitHub/seed không đi qua đây (luôn là project đầu tiên).
 **Đánh đổi:** project được mời vào (không phải owner) không tính. Hằng số cứng — đổi cần deploy; đủ cho đồ án. Không phải rate limit theo thời gian (giữ 0 lệnh Redis).
+
+## ADR-119 — Review AU R-4: đo đường giao bằng k6 sau RLS; ba truy vấn nóng của delivery consumer chạy batch transaction (2026-10-11)
+
+**Vấn đề:** AU6 bọc MỖI lời gọi repo trên client gốc thành một transaction tương tác (BEGIN, `set_config`, truy vấn, COMMIT). Dev chỉ đo ingest (+7,6%); đường giao chưa đo. Review ước tính +5–7 ms mỗi delivery ở local.
+**Đo (hubv local, k6 `k6/delivery-e2e.js`: 30 event/s × 60 s publish qua `/v1/p/cafe/events` → endpoint sink trả 200; mỗi chế độ 2 lượt, ~1 790 delivery/lượt):**
+
+| Chế độ | worker xử lý 1 message (`hub_delivery_handle_seconds`, trung bình) | event vào hub → SUCCEEDED p50 / p95 | delivery tạo → SUCCEEDED p50 / p95 |
+|---|---|---|---|
+| C. giả lập trước AU6 (superuser, repo không bọc tx; bản build tạm, không commit) | 110,9 ms | 940 / 1 227 ms | 579 / 695 ms |
+| A. AU6 hiện tại (transaction tương tác mỗi lời gọi) | 147,6 ms (**+33 %**) | 965 / 1 252 ms (+2,7 %) | 577 / 705 ms |
+| B. AU6 + batch 3 truy vấn nóng (bản commit) | 129,5 ms (**+16,8 %**) | 953 / 1 238 ms (+1,4 %) | 580 / 688 ms |
+
+Độ trễ người dùng thấy (event → SUCCEEDED) bị chi phối bởi chu kỳ outbox (~0,5 s) nên RLS chỉ thêm 1–3 %; nhưng thời gian xử lý của worker tăng 33 % (vượt trần 15 % của spec §5.12.7) vì transaction tương tác giữ connection lâu hơn, pool 10 connection của worker thành hàng đợi khi tải.
+**Chọn:** `findDeliveryForSend`, `claimForSend`, `getDeliveryLeaseState` thành phương thức trả `PrismaPromise` (không `async`); proxy của `TenantScopedRepository` chạy chúng bằng batch transaction `[set_config('app.project_id'), truy vấn]` như tra source lúc ingest (ADR-108). Ghi kết quả (`tenantTx`, nhiều câu ghi) giữ transaction tương tác. Thêm histogram `hub_delivery_handle_seconds` (bộ nhớ, 0 lệnh Redis). `RLS_HOT_BATCH=0` quay về chế độ A để đo lại. Cách đo: `k6/README.md`.
+**Đánh đổi:** còn +16,8 % thời gian xử lý của worker so với trước AU6 (hơi trên trần 15 %; độ trễ đầu-cuối chỉ +1,4 %) — phần còn lại là `set_config` của `tenantTx` và BEGIN/COMMIT của batch. Gộp thêm (vd claim + ghi kết quả) phải đổi luồng lease, không làm ở đây. Số đo ở local (Neon có round-trip lớn hơn nên chênh tuyệt đối sẽ lớn hơn — lý do thêm để giữ batch). Baseline C là bản build tạm (bỏ proxy, chạy bằng owner) — mã đó không nằm trong repo.

@@ -11,6 +11,14 @@ type PrismaClientOrTx = PrismaClient | Prisma.TransactionClient;
 /** Phương thức đồng bộ — KHÔNG bọc transaction (trả về ngay). Mọi phương thức khác của repo là async. */
 const SYNC_METHODS = new Set(['constructor', 'extend']);
 
+/**
+ * R-4 (review AU, ADR-119): phương thức NÓNG của đường giao, mỗi cái là MỘT câu truy vấn trả `PrismaPromise` (lười, KHÔNG
+ * `async`). Trên client gốc chạy bằng batch transaction `[set_config, truy vấn]` — một lần gửi thay vì transaction tương
+ * tác (BEGIN, set_config, truy vấn, COMMIT là 4 lượt) — giống tra source lúc ingest (ADR-108).
+ */
+const BATCH_METHODS = new Set(['findDeliveryForSend', 'claimForSend', 'getDeliveryLeaseState']);
+const batchEnabled = () => process.env.RLS_HOT_BATCH !== '0';
+
 /** Transaction nào đã đặt `app.project_id` cho tenant nào (đặt lại nếu cùng tx đổi tenant — vô hại, set_config ghi đè). */
 const txTenant = new WeakMap<object, string>();
 
@@ -41,6 +49,14 @@ function scopeToTenant<T extends TenantScopedRepository>(repo: T): T {
       }
       const client = (target as unknown as { prisma: PrismaClientOrTx }).prisma;
       const tenantId = target.tenantId;
+      if (isRootClient(client) && BATCH_METHODS.has(prop) && batchEnabled() && typeof client.$executeRaw === 'function') {
+        return (...args: unknown[]) => {
+          const query = (value as (...a: unknown[]) => Prisma.PrismaPromise<unknown>).apply(target, args);
+          return client
+            .$transaction([client.$executeRaw`SELECT set_config('app.project_id', ${tenantId}, true)`, query])
+            .then((r) => r[1]);
+        };
+      }
       if (isRootClient(client)) {
         return (...args: unknown[]) =>
           client.$transaction(async (tx) => {
@@ -465,7 +481,7 @@ export class TenantScopedRepository {
    * (template) + destination (cấu hình mã hoá). Cả subscription lẫn destination đều lọc theo
    * tenant — không bao giờ gửi tới đích của tenant khác dù dữ liệu có lẫn.
    */
-  async findDeliveryForSend(id: string) {
+  findDeliveryForSend(id: string) {
     return this.prisma.delivery.findFirst({
       where: {
         id,
@@ -485,12 +501,12 @@ export class TenantScopedRepository {
    * (worker trước chết giữa chừng). Lease phải > timeout gửi (5s) + thời gian ghi DB.
    * Trả số dòng đã nhận: 0 = worker khác đang/đã xử lý lần gửi này.
    */
-  async claimForSend(
+  claimForSend(
     id: string,
     attemptGeneration: number,
     attemptCount: number,
     leaseSeconds = DELIVERY_LEASE_SECONDS,
-  ): Promise<number> {
+  ): Prisma.PrismaPromise<number> {
     return this.prisma.$executeRaw(Prisma.sql`
       UPDATE hub.deliveries SET status = 'DELIVERING', updated_at = now()
       WHERE id = ${id}::uuid AND tenant_id = ${this.tenantId}::uuid
@@ -513,7 +529,7 @@ export class TenantScopedRepository {
   }
 
   /** Trạng thái lease hiện tại (sau khi claim thua) — để phân biệt "đang có worker gửi" với "đã xong". */
-  async getDeliveryLeaseState(id: string) {
+  getDeliveryLeaseState(id: string) {
     return this.prisma.delivery.findFirst({
       where: { id, tenantId: this.tenantId },
       select: { status: true, attemptGeneration: true, attemptCount: true },

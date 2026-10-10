@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { deliveriesTotal, deliveryDuration } from '../metrics';
+import { deliveriesTotal, deliveryDuration, deliveryHandleDuration } from '../metrics';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { Prisma } from '@prisma/client';
 import { CIRCUIT_OPEN_MS, CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
@@ -102,6 +102,15 @@ export class DeliveryConsumer {
   }
 
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
+    const end = deliveryHandleDuration.startTimer(); // R-4: 0 lệnh Redis, đếm trong bộ nhớ
+    try {
+      await this.handle(msg, channel);
+    } finally {
+      end();
+    }
+  }
+
+  private async handle(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
     const correlationHeader = msg.properties.headers?.['x-correlation-id'] || 'unknown';
     let deliveryMsg: DeliveryMessage;
 

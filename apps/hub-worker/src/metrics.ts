@@ -33,6 +33,17 @@ export const deliveryDuration = new Histogram({
   registers: [workerRegistry],
 });
 
+/**
+ * R-4 (ADR-119): trọn thời gian xử lý MỘT message delivery ở worker (đọc DB, claim, gọi đích, ghi kết quả, ack) —
+ * đo chi phí transaction theo RLS trên đường giao; bucket mịn ở dải vài ms.
+ */
+export const deliveryHandleDuration = new Histogram({
+  name: 'hub_delivery_handle_seconds',
+  help: 'Thời gian worker xử lý một message delivery (DB + gọi đích + ghi kết quả)',
+  buckets: [0.005, 0.01, 0.015, 0.02, 0.03, 0.05, 0.075, 0.1, 0.25, 0.5, 1, 5],
+  registers: [workerRegistry],
+});
+
 /** Chỉ đếm lần đổi trạng thái mà worker này ghi được vào DB (UPDATE có điều kiện) — không đếm trùng giữa nhiều worker. */
 export const circuitTransitions = new Counter({
   name: 'hub_circuit_transitions_total',
