@@ -142,6 +142,15 @@ export class IdentityRepository {
     };
   }
 
+  /**
+   * R-14 (ADR-118): đếm project user đang là owner, sau khi khoá theo user trong transaction hiện tại (advisory xact
+   * lock) — hai request tạo project song song không vượt trần.
+   */
+  async lockAndCountOwnedProjects(userId: string): Promise<number> {
+    await this.db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'project-create:' + userId}, 0))`;
+    return this.db.projectMember.count({ where: { userId, role: 'owner' } });
+  }
+
   async findMembershipRole(userId: string, projectId: string): Promise<MemberRole | null> {
     const m = await this.db.projectMember.findUnique({ where: { tenantId_userId: { tenantId: projectId, userId } }, select: { role: true } });
     return m?.role ?? null;

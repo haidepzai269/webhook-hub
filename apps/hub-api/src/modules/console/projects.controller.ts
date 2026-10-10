@@ -37,6 +37,9 @@ import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
 const me = (req: RequestWithPrincipal) => req.principal as UserPrincipal;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** R-14 (ADR-118): trần project mỗi user — chống tạo hàng loạt bằng tài khoản chưa xác minh. */
+export const PROJECT_LIMIT_UNVERIFIED = 3;
+export const PROJECT_LIMIT_VERIFIED = 10;
 
 /** 422 có tên trường (SPEC bảng lỗi): body `{error:'validation_failed', field, message}`. */
 export function invalid(field: string, message: string): never {
@@ -125,6 +128,17 @@ export class ProjectsController {
     const id = randomUUID();
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // R-14 (ADR-118): trần số project mỗi user (chưa xác minh 3, đã xác minh 10, operator không giới hạn).
+        const user = me(req);
+        if (!user.isOperator) {
+          const limit = user.emailVerified ? PROJECT_LIMIT_VERIFIED : PROJECT_LIMIT_UNVERIFIED;
+          if ((await this.prisma.identity(tx).lockAndCountOwnedProjects(user.id)) >= limit) {
+            throw new HttpException(
+              { error: 'project_limit', message: `Đã đạt tối đa ${limit} project${user.emailVerified ? '' : ' (xác minh email để tạo thêm)'}`, limit },
+              HttpStatus.FORBIDDEN,
+            );
+          }
+        }
         const project = await this.prisma.identity(tx).createProject({ id, slug, name, environment });
         await this.prisma.identity(tx).ensureMembership(me(req).id, id, 'owner');
         await new TenantScopedRepository(tx, id).createAuditLog({

@@ -82,6 +82,18 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
 
   });
 
+  it('[AR:R-14] trần project: user CHƯA xác minh tạo 5 project SONG SONG -> đúng 3 thành công, còn lại 403 project_limit; operator không giới hạn', async () => {
+    const u = await raw.user.create({ data: { email: `dave-${run}@t.vn`, name: 'dave' } });
+    users.push(u.id);
+    const dave = { ...principal(u.id), emailVerified: false };
+    const rs = await Promise.allSettled(Array.from({ length: 5 }, (_, i) => ctrl.create(req(dave), dave.id, { slug: `dave${i}-${run}`, name: `D${i}` })));
+    for (const r of rs) if (r.status === 'fulfilled') created.push((r.value as any).id);
+    expect(rs.filter((r) => r.status === 'fulfilled')).toHaveLength(3);
+    for (const r of rs) if (r.status === 'rejected') expect(r.reason).toMatchObject({ status: 403, response: expect.objectContaining({ error: 'project_limit', limit: 3 }) });
+    const opRs = await Promise.all(Array.from({ length: 4 }, (_, i) => ctrl.create(req(op), op.id, { slug: `opx${i}-${run}`, name: `O${i}` })));
+    created.push(...opRs.map((p: any) => p.id));
+  });
+
   it('[AU:UA28] user CHƯA xác minh email: tạo project live / key hk_live_ -> 403 email_not_verified; hk_test_ thì được ngay', async () => {
     const carol = principal(users[0]);
     carol.emailVerified = false;

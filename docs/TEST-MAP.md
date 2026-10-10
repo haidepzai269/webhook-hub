@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T22:04:15.442Z, commit 8c61554).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T22:07:23.252Z, commit e8a6594).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 227 mã khai báo · 148 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 227 mã khai báo · 149 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -55,6 +55,7 @@ Tổng: 227 mã khai báo · 148 mã có test · 0 mồ côi · 12 mồ côi có
 | `AR:R-10` | REVIEW-AUTH-2026-10-11.md | L0 | apps/hub-api/test/auth-review.spec.ts:113 | ✅ pass |
 | `AR:R-12` | REVIEW-AUTH-2026-10-11.md | L1 | apps/hub-api/test/github-oauth-db.spec.ts:163<br>apps/hub-api/test/github-oauth-db.spec.ts:172 | ✅ pass |
 | `AR:R-13` | REVIEW-AUTH-2026-10-11.md | L0,L1 | apps/hub-api/test/auth-review.spec.ts:126<br>apps/hub-api/test/members-db.spec.ts:127<br>apps/hub-api/test/realtime-project.spec.ts:89 | ✅ pass |
+| `AR:R-14` | REVIEW-AUTH-2026-10-11.md | L1 | apps/hub-api/test/console-projects-db.spec.ts:85 | ✅ pass |
 | `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:75 | chưa chạy |
 | `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:192 | chưa chạy |
 | `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:104 | chưa chạy |
@@ -97,7 +98,7 @@ Tổng: 227 mã khai báo · 148 mã có test · 0 mồ côi · 12 mồ côi có
 | `AU:UA25` | SPEC-auth.md · AU5 | L1 | apps/hub-api/test/github-oauth-db.spec.ts:151 | ✅ pass |
 | `AU:UA26` | SPEC-auth.md · AU4 | L1 | apps/hub-api/test/members-db.spec.ts:71 | ✅ pass |
 | `AU:UA27` | SPEC-auth.md · AU4 | L1 | apps/hub-api/test/members-db.spec.ts:81 | ✅ pass |
-| `AU:UA28` | SPEC-auth.md · AU3 | L1 | apps/hub-api/test/console-projects-db.spec.ts:85 | ✅ pass |
+| `AU:UA28` | SPEC-auth.md · AU3 | L1 | apps/hub-api/test/console-projects-db.spec.ts:97 | ✅ pass |
 | `AU:UA29` | SPEC-auth.md · AU3 | L0 | apps/hub-api/test/realtime-project.spec.ts:62 | ✅ pass |
 | `AU:UA30` | SPEC-auth.md · AU6 | L0 | libs/database/test/rls-guard.spec.ts:20 | ✅ pass |
 | `AU:UA31` | SPEC-auth.md · AU6 | L0 | libs/database/test/rls-guard.spec.ts:36 | ✅ pass |
@@ -169,6 +170,6 @@ Tổng: 227 mã khai báo · 148 mã có test · 0 mồ côi · 12 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (107 file, 623 khai báo it/test)
+## File test (107 file, 624 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.
