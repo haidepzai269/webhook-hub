@@ -109,7 +109,7 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(raw).not.toMatch(/config|secret/i);
   });
 
-  it('[AF:#16] S1-2: mỗi delivery có 1 dòng outbox delivery.requested trong CÙNG transaction, KHÔNG gọi channel.publish', async () => {
+  it('[AF:#16][MS:U29] S1-2: mỗi delivery có 1 dòng outbox delivery.requested trong CÙNG transaction, KHÔNG gọi channel.publish', async () => {
     const { prisma, outboxRows } = buildFakePrisma({ subs: 2 });
     const consumer = new NormalizeConsumer(prisma);
     const channel = buildChannel();

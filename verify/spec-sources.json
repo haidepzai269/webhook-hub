@@ -38,7 +38,19 @@
       "pattern": "^\\|\\s*(U\\d+)\\s*\\|",
       "done": {
         "checklist": "\\[x\\] (S\\d+)",
-        "groups": { "S14": "U34-U50" }
+        "groups": {
+          "S0": "U29",
+          "S3": "U20-U23",
+          "S4": "U16,U49",
+          "S5": "U17-U19",
+          "S6": "U1-U6,U30",
+          "S7": "U24-U27",
+          "S8": "U7-U14,U46-U48",
+          "S9": "U15",
+          "S10": "U28",
+          "S11": "U31-U33",
+          "S14": "U34-U45,U50"
+        }
       },
       "note": "Agent đa service: thêm nhóm story -> mã (vd \"S6\": \"U1-U6\") NGAY ở story đầu tiên để `verify:map --story Sx` biết mã nào bắt buộc."
     },
@@ -48,7 +60,19 @@
       "pattern": "^\\*\\*(T\\d+) — ",
       "done": {
         "checklist": "\\[x\\] (S\\d+)",
-        "groups": { "S14": "T15" }
+        "groups": {
+          "S2": "T1,T12",
+          "S3": "T2,T3",
+          "S4": "T6",
+          "S5": "T5",
+          "S6": "T4,T7",
+          "S7": "T8,T13",
+          "S8": "T9",
+          "S10": "T10",
+          "S11": "T11",
+          "S12": "T14",
+          "S14": "T15"
+        }
       }
     },
     {

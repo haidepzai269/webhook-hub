@@ -1,4 +1,4 @@
-export type ProviderType = 'payos' | 'sepay' | 'github' | 'stripe';
+export type ProviderType = 'payos' | 'sepay' | 'github' | 'stripe' | 'generic' | 'api';
 
 export type RawEventStatus = 'ACCEPTED' | 'REJECTED' | 'DUPLICATE';
 

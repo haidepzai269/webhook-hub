@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { logger, testOnlyConfigProblems } from '@hub/common';
+import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
 import { assertDatabaseLib } from '@hub/database';
 
 function assertMasterKeyConfigured(): void {
@@ -41,6 +41,7 @@ function assertNoTestOnlyConfig(): void {
 }
 
 async function bootstrap() {
+  installBigIntJson(); // S1: events.seq / audit_logs.id là BIGINT -> JSON là chuỗi
   assertNoTestOnlyConfig();
   // S1-6: bản build lệch (dist cũ của @hub/database) phải chết ngay lúc khởi động.
   assertDatabaseLib();

@@ -110,6 +110,38 @@ export class PrismaService {
     });
   }
 
+  // ================== Project + API key (S1, ADR-038) ==================
+  // `projects` là bảng GỐC (id = tenant_id), không mang tenant_id -> không đi qua repo được.
+  // `api_keys` có tenant_id: CRUD theo project đi qua `forTenant(...)`; riêng tra theo hash là bước
+  // XÁC ĐỊNH project của request (chưa biết tenant) nên là escape hatch, như `findSourceBySourceKeyForIngest`.
+
+  /** Console admin (operator, ADR-056): danh sách mọi project. */
+  public listProjects() {
+    return this.client.project.findMany({ orderBy: { createdAt: 'asc' } });
+  }
+
+  public findProjectById(id: string) {
+    return this.client.project.findUnique({ where: { id } });
+  }
+
+  /** Dùng ở `/v1/p/:project/*` — path mang slug. */
+  public findProjectBySlug(slug: string) {
+    return this.client.project.findUnique({ where: { slug } });
+  }
+
+  /** Trùng slug -> Prisma P2002 (controller trả 409). */
+  public createProject(data: { id: string; slug: string; name: string; environment: 'test' | 'live' }) {
+    return this.client.project.create({ data });
+  }
+
+  /**
+   * Escape hatch DUY NHẤT tra API key không scope: `ApiKeyGuard` chỉ có key thô (-> sha256) và chưa biết
+   * project. Kèm project để so slug trên path trong cùng một truy vấn. KHÔNG dùng ở nơi khác.
+   */
+  public findApiKeyByHash(keyHash: string) {
+    return this.client.apiKey.findUnique({ where: { keyHash }, include: { project: true } });
+  }
+
   /**
    * Tạo repository được bảo vệ theo Tenant (BB-5). `client` mặc định là
    * PrismaClient gốc, nhưng có thể truyền `tx` (Prisma.TransactionClient) khi

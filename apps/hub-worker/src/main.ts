@@ -9,7 +9,7 @@ import { CleanupJob } from './scheduler/cleanup.job';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 import { InFlightTracker } from './consumers/in-flight';
-import { logger, testOnlyConfigProblems } from '@hub/common';
+import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
 import * as amqp from 'amqplib';
 
 function assertMasterKeyConfigured(): void {
@@ -53,6 +53,7 @@ async function connectAmqpWithRetry(url: string): Promise<amqp.ChannelModel> {
 }
 
 async function bootstrap() {
+  installBigIntJson(); // S1: events.seq / audit_logs.id là BIGINT -> JSON là chuỗi
   // S1-6: bản build lệch (dist cũ) phải chết NGAY lúc khởi động, không đợi message đầu tiên vào DLQ.
   assertDatabaseLib();
   assertMasterKeyConfigured();

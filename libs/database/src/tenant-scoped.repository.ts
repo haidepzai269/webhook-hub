@@ -432,6 +432,36 @@ export class TenantScopedRepository {
     return { items, total: Number(countRow?.n ?? 0) };
   }
 
+  // --- API keys (S1/S2, ADR-038): mọi thao tác theo project đi qua repo; chỉ tra theo hash là escape hatch ---
+  async createApiKey(data: Omit<Prisma.ApiKeyUncheckedCreateInput, 'tenantId'>) {
+    return this.prisma.apiKey.create({ data: { ...data, tenantId: this.tenantId } });
+  }
+
+  /** Danh sách key của project — KHÔNG BAO GIỜ trả `keyHash`. */
+  async findApiKeys() {
+    return this.prisma.apiKey.findMany({
+      where: { tenantId: this.tenantId },
+      orderBy: { createdAt: 'asc' },
+      select: API_KEY_PUBLIC_SELECT,
+    });
+  }
+
+  async findApiKeyById(id: string) {
+    return this.prisma.apiKey.findFirst({ where: { id, tenantId: this.tenantId }, select: API_KEY_PUBLIC_SELECT });
+  }
+
+  /** Revoke idempotent: đặt `revokedAt` nếu chưa có. Trả số dòng đổi (0 = đã revoke trước đó hoặc không thuộc project). */
+  async revokeApiKey(id: string): Promise<number> {
+    const r = await this.prisma.apiKey.updateMany({ where: { id, tenantId: this.tenantId, revokedAt: null }, data: { revokedAt: new Date() } });
+    return r.count;
+  }
+
+  /** `lastUsedAt` (ApiKeyGuard gọi tối đa 1 lần/phút/key, không chặn request). */
+  async touchApiKeyLastUsed(id: string, at: Date): Promise<number> {
+    const r = await this.prisma.apiKey.updateMany({ where: { id, tenantId: this.tenantId }, data: { lastUsedAt: at } });
+    return r.count;
+  }
+
   // --- Audit log (S2-3) ---
   /** Gọi bằng repo dựng trên `tx` để audit nằm CÙNG transaction với hành động. */
   async createAuditLog(input: AuditLogInput) {
@@ -529,6 +559,20 @@ const notSuperseded = Prisma.sql`NOT EXISTS (
   WHERE n.tenant_id = d.tenant_id AND n.event_id = d.event_id
     AND n.subscription_id = d.subscription_id AND n.attempt_generation > d.attempt_generation
 )`;
+
+/** Trường của api_keys được phép rời DB (không có keyHash). */
+export const API_KEY_PUBLIC_SELECT = {
+  id: true,
+  tenantId: true,
+  serviceName: true,
+  keyPrefix: true,
+  scopes: true,
+  readTypes: true,
+  sourceId: true,
+  lastUsedAt: true,
+  revokedAt: true,
+  createdAt: true,
+} as const;
 
 /** Lease DELIVERING (S1-2): > timeout gửi 5s + ghi DB, đủ rộng để không nhận trùng lần gửi đang chạy. */
 export const DELIVERY_LEASE_SECONDS = 60;
