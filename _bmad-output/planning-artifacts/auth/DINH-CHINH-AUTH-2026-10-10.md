@@ -91,6 +91,18 @@ Riêng `/register` và `/verify-email` được làm một **form trần** nếu
 
 | Chặng | Phát hiện | Mức | Trạng thái |
 |---|---|---|---|
+| AU1 | R-1 khoá email bị phá bằng request song song (17/18 lượt lọt) | Trung bình | đã sửa `275abbd` (ADR-109) |
+| AU1 | R-2 rate limit theo IP sau proxy web thành giới hạn chung | Cao* | đã sửa `d237654` (ADR-110) |
+| AU1 | R-6 register dò email qua Set-Cookie | Trung bình | đã sửa `3714d44` (ADR-120, §9 #1) |
+| AU1 | R-10 login CSRF bằng form urlencoded | Thấp | đã sửa `1eb26a2` (ADR-114) |
+| AU3 | R-3 socket không bị cắt khi bị xoá thành viên / logout-all | Trung bình | đã sửa `e43a60d` (ADR-112) |
+| AU3 | R-8 guard mở mặc định, UA20 danh sách cứng | Trung bình | đã sửa `3dbb7cd` (ADR-113) |
+| AU5 | R-12 GitHub: tài khoản đã gắn GitHub khác; P2002 → 500 | Thấp | đã sửa `8c61554` (ADR-116) |
+| AU6 | R-4 per-call tx trên đường giao | Trung bình | đã đo + batch `4609265` (ADR-119): worker +33 % → +16,8 %, đầu-cuối +1,4 % |
+| AU6 | R-7 migration dữ liệu trên Neon bị FORCE RLS chặn | Cao (vận hành) | đã sửa `c05299f` (gate + ADR-111); A1 vẫn là việc Admin |
+| AU6 | R-9 `api_keys` không bật RLS | Thấp | hoãn — CAN-ADMIN-QUYET A7 |
+| UI | R-5 link mail và `/onboarding` → 404 | Trung bình | đã sửa `81f6e2f` (ADR-115) |
+| — | R-11 demo bước 3 · R-13 lệch nhỏ · R-14 trần project | Thấp | đã sửa `baadc21` · `e8a6594` (ADR-117) · `4244c64` (ADR-118) |
 
 ## 8. Xung đột SPEC-verification × SPEC đa service: Admin chốt (10/10, chuyển qua phiên webhook-hub-54)
 
