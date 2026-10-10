@@ -880,3 +880,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** `isPrivateIp` chỉ so chuỗi `::1`/`fc`/`fd`/`fe8x`: `http://[::ffff:127.0.0.1]`, `[::ffff:7f00:1]`, `[::]`, `[64:ff9b::7f00:1]` lọt ở production; `new URL().hostname` của IPv6 còn ngoặc `[…]` nên `net.isIP` sai và rơi sang DNS. Từ S5/S6, key service (`manage:endpoints`) điều khiển được URL của challenge và đọc lại `http_<status>` / `timeout` / `unreachable` → dò cổng nội bộ, gọi `/verify` lặp vô hạn.
 **Chọn:** Bỏ ngoặc ở hostname; `expandIpv6` mở thành 8 hextet (cả đuôi `a.b.c.d`); `::ffff:0:0/96` → kiểm như IPv4; chặn `::`, `::1`, `::a.b.c.d` (IPv4-compatible), `64:ff9b::/96`, `fc00::/7`, `fe80::/10`; IPv4 thêm `100.64/10` (CGNAT); không phân tích được → chặn. `isLinkLocalIp` dùng cùng bộ mở. `/v1/p/:project/endpoints/:id/verify`: `WindowLimiter` 5 lần/60s/endpoint trong bộ nhớ (0 lệnh Redis) → 429 `rate_limited`. Test từng dạng ở `NODE_ENV=production`.
 **Đánh đổi:** Giới hạn theo instance (N instance → 5N/phút). Tạo endpoint mới vẫn chạy challenge (giới hạn bởi rate limit chung của hub-api); lý do FAILED vẫn phân biệt `timeout`/`unreachable` — giữ vì dev cần biết vì sao endpoint hỏng, rủi ro dò cổng đã bị chặn ở tầng IP.
+
+---
+
+## ADR-084 — Shop chỉ tin `payment.received` từ source thanh toán thật (`payos`, `sepay`) (MS-R2, 2026-10-11)
+
+**Vấn đề:** Từ khi có `POST /v1/p/:project/events` và GenericAdapter, MỘT key `publish:events` bất kỳ trong project `default` gửi được `payment.received` đúng khuôn (qua validator) có `memo:"DH…"` → đơn Shop thành PAID mà không có tiền.
+**Chọn:** `readPayment(body, allowed = SHOP_PAYMENT_SOURCES ?? ['payos','sepay'])` bỏ qua (IGNORED) mọi event có `source` ngoài danh sách. `source` do adapter của hub đặt — đường `/events` luôn là `api`, nguồn tuỳ chỉnh là `generic` — nên publisher không giả được. Không dùng `sourceIds` trong `ensure` vì key `shop` không có `manage:sources` (không liệt kê được id source) và id khác nhau giữa các stack.
+**Đánh đổi:** Shop phải đổi env khi thêm cổng thanh toán (vd ngân hàng qua GenericAdapter có mapping). Hub vẫn cho service publish kiểu `payment.*` hợp lệ — bên nhận nào xử lý tiền phải tự kiểm `source` (ghi ở EVENT-CATALOG §5b).

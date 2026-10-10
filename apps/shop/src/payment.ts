@@ -32,13 +32,19 @@ export function isExpired(order: { status: string; createdAt: Date }, now = new 
 }
 
 /**
+ * MS-R2 (ADR-084): tiền THẬT chỉ đến từ cổng thanh toán. `source` do adapter của hub đặt (service publish qua
+ * `/events` luôn là `api`, nguồn tuỳ chỉnh là `generic`) nên không giả được. Đổi bằng `SHOP_PAYMENT_SOURCES`.
+ */
+export const PAYMENT_SOURCES: readonly string[] = (process.env.SHOP_PAYMENT_SOURCES || 'payos,sepay').split(',').map((x) => x.trim()).filter(Boolean);
+
+/**
  * Đọc khoản tiền từ webhook của hub (S3-2, ADR-053): Shop chỉ nói MỘT ngôn ngữ — kiểu chuẩn
  * `payment.received` (`data.amount` số nguyên đơn vị nhỏ nhất, `data.currency`). Không còn `if`
  * theo provider (trường riêng của SePay/PayOS chỉ còn trong `data.raw`). Mã đơn tìm trong `memo`, rồi `reference`.
  */
-export function readPayment(body: any): { orderCode: string; amount: number } | { skip: 'IGNORED' | 'UNMATCHED' } {
+export function readPayment(body: any, allowed: readonly string[] = PAYMENT_SOURCES): { orderCode: string; amount: number } | { skip: 'IGNORED' | 'UNMATCHED' } {
   const d = body?.data || {};
-  if (body?.type !== 'payment.received' || d.currency !== 'VND') return { skip: 'IGNORED' };
+  if (body?.type !== 'payment.received' || d.currency !== 'VND' || !allowed.includes(body?.source)) return { skip: 'IGNORED' };
   const match = `${d.memo ?? ''}`.match(/DH\d+/) ?? `${d.reference ?? ''}`.match(/DH\d+/);
   if (!match) return { skip: 'UNMATCHED' };
   const amount = Number(d.amount);
