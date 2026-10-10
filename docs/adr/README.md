@@ -1146,3 +1146,9 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Test giả không có `$executeRaw` bị bỏ qua `set_config` (Prisma thật luôn có).
 - Migration dữ liệu chạy bằng owner trên Neon về sau phải tự `SET LOCAL app.rls_system = 'on'`.
 - Probe P-BB5-01 của spec ghi `expectRed` nhưng claim là "RLS vẫn chặn"; đã chạy dưới dạng probe SỐNG SÓT (test phải còn xanh), probe đỏ tương ứng là P-BB5-02.
+
+## ADR-109 — Review AU R-1: khoá theo email đếm TRƯỚC khi so mật khẩu (INCR nguyên tử), đúng mật khẩu thì trả lượt (2026-10-11)
+
+**Vấn đề:** `login` đọc bộ đếm (`peek`) rồi mới tăng (`hit`) sau khi bcrypt báo sai. N request song song cùng đọc được count < 5 → review đo 18 lần sai song song: 17×401, 1×429 (spec §5.5 hứa tối đa 5).
+**Chọn:** `hit` (một `EVAL` INCR+EXPIRE) chạy TRƯỚC bcrypt; Redis đơn luồng cấp số thứ tự 1..N nên chỉ 5 lượt đầu tới bcrypt. Đăng nhập đúng gọi `release` (EVAL `DECR` nếu khoá còn tồn tại, không tạo khoá không TTL). Test UA12(b): 18 lượt song song → đúng 5×401 + 13×429.
+**Đánh đổi:** đăng nhập đúng tốn thêm 1 lệnh Redis (đường console, không thuộc ngân sách R1). Khi đang có 5 lượt sai "đang bay", một lượt đúng đồng thời cũng bị 429 — chấp nhận (người dùng thử lại sau). Ai cũng khoá được email người khác bằng 5 request/15 phút — giữ nguyên như spec.

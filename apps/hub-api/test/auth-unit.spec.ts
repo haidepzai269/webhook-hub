@@ -67,7 +67,7 @@ describe('rate limit auth (SPEC-auth §5.5)', () => {
     };
   }
 
-  it('[AU:UA12] 5 lần sai cho một email → lần 6 bị 429 kèm Retry-After, kể cả email không tồn tại', async () => {
+  it('[AU:UA12] (phần a) 5 lần sai cho một email → lần 6 bị 429 kèm Retry-After, kể cả email không tồn tại', async () => {
     const clock = { now: 1_000_000 };
     const rl = new AuthRateLimiter(fakeRedis(clock), () => clock.now);
     const key = 'rl:login:em:khong-ton-tai';
@@ -171,6 +171,23 @@ describe('AuthService — đăng ký / đăng nhập (store giả, không DB)', 
       expect(r).toEqual({ status: 422, body: expect.objectContaining({ error: 'password_weak' }) });
     }
   });
+
+  it('[AU:UA12] (phần b) R-1: 18 lần sai SONG SONG cho một email -> đúng 5 lượt tới bcrypt (401), 13 lượt 429 — đếm trước khi so', async () => {
+    const counts = new Map<string, number>();
+    const atomic: RateLimitRedis = {
+      // Redis đơn luồng: INCR nguyên tử. Fake này cũng nguyên tử (JS đơn luồng, tăng ngay khi gọi).
+      eval: async (script: string, _n: number, key: string) => {
+        if (script.includes('DECR')) counts.set(String(key), Math.max(0, (counts.get(String(key)) ?? 0) - 1));
+        else if (script.includes('INCR')) counts.set(String(key), (counts.get(String(key)) ?? 0) + 1);
+        return [counts.get(String(key)) ?? 0, 900];
+      },
+    };
+    const store: any = { identity: () => ({ findUserByEmail: async () => null, recordAuthAudit: async () => undefined }) };
+    const svc = new AuthService(store, jwt, cfg, new AuthRateLimiter(atomic));
+    const results = await Promise.all(Array.from({ length: 18 }, () => status(svc.login({ email: 'nannhan@b.vn', password: 'doan-mo-2026' }, { ip: null, userAgent: null }))));
+    const by = results.reduce<Record<number, number>>((m, r) => ((m[r.status] = (m[r.status] ?? 0) + 1), m), {});
+    expect(by).toEqual({ 401: 5, 429: 13 });
+  }, 30_000);
 
   it('[AU:UA4] login email không tồn tại → 401 CÙNG body với sai mật khẩu; bcrypt.compare vẫn được gọi', async () => {
     const hash = await hashPassword('dung-mat-khau-2026');

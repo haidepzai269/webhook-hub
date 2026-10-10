@@ -154,7 +154,9 @@ export class AuthService {
     const emailKey = `rl:login:em:${sha256Hex(email)}`;
 
     await this.limit('loginIp', `rl:login:ip:${ctx.ip ?? 'unknown'}`, email);
-    const lock = await this.limiter.peek(emailKey, LIMITS.loginEmailFailures.limit);
+    // R-1 (review AU, ADR-109): ĐẾM TRƯỚC khi so mật khẩu bằng một INCR nguyên tử — N request song song nhận số thứ tự
+    // 1..N, chỉ 5 lượt đầu tới bcrypt. (Trước: đọc rồi mới tăng sau khi sai -> 18 request song song lọt cả 18.)
+    const lock = await this.limiter.hit(emailKey, LIMITS.loginEmailFailures.limit, LIMITS.loginEmailFailures.windowS);
     if (!lock.allowed) {
       await this.audit(null, 'auth.rate_limited', ctx.ip, { scope: 'login_email', emailHash: sha256Hex(email) });
       throw new TooManyAttempts(lock.retryAfterS);
@@ -164,10 +166,10 @@ export class AuthService {
     // Luôn chạy bcrypt.compare (hash giả khi không có user / user chỉ có GitHub) — cùng thời gian, cùng body.
     const ok = await verifyPassword(password, user?.passwordHash ?? null);
     if (!user || !ok) {
-      await this.limiter.hit(emailKey, LIMITS.loginEmailFailures.limit, LIMITS.loginEmailFailures.windowS);
       await this.audit(user?.id ?? null, 'auth.login_failed', ctx.ip, { emailHash: sha256Hex(email) });
       throw authError(HttpStatus.UNAUTHORIZED, 'invalid_credentials');
     }
+    await this.limiter.release(emailKey); // đúng mật khẩu: lượt này không phải "lần sai"
 
     const session = await this.issueSession(user.id, null, null, ctx);
     await this.audit(user.id, 'auth.login_succeeded', ctx.ip);

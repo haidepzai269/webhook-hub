@@ -1,6 +1,6 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T20:35:21.505Z, commit 020396f).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T21:04:47.116Z, commit 30d7338).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
@@ -65,7 +65,7 @@ Tổng: 213 mã khai báo · 140 mã có test · 0 mồ côi · 12 mồ côi có
 | `AU:UA1` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:40 | ✅ pass |
 | `AU:UA2` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:163 | ✅ pass |
 | `AU:UA3` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:168 | ✅ pass |
-| `AU:UA4` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:175 | ✅ pass |
+| `AU:UA4` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:192 | ✅ pass |
 | `AU:UA5` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:87 | ✅ pass |
 | `AU:UA6` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:118 | ✅ pass |
 | `AU:UA7` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:65 | ✅ pass |
@@ -73,7 +73,7 @@ Tổng: 213 mã khai báo · 140 mã có test · 0 mồ côi · 12 mồ côi có
 | `AU:UA9` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:92 | ✅ pass |
 | `AU:UA10` | SPEC-auth.md · AU1 | L1 | apps/hub-api/test/auth-session-db.spec.ts:102 | ✅ pass |
 | `AU:UA11` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:132 | ✅ pass |
-| `AU:UA12` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:70 | ✅ pass |
+| `AU:UA12` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:70<br>apps/hub-api/test/auth-unit.spec.ts:175 | ✅ pass |
 | `AU:UA13` | SPEC-auth.md · AU1 | L0 | apps/hub-api/test/auth-unit.spec.ts:86 | ✅ pass |
 | `AU:UA14` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:101 | ✅ pass |
 | `AU:UA15` | SPEC-auth.md · AU2 | L1 | apps/hub-api/test/auth-mail-db.spec.ts:123 | ✅ pass |
@@ -161,6 +161,6 @@ Tổng: 213 mã khai báo · 140 mã có test · 0 mồ côi · 12 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (106 file, 607 khai báo it/test)
+## File test (106 file, 608 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

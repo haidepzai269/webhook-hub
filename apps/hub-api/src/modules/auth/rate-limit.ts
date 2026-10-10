@@ -11,6 +11,13 @@ export const LUA_HIT = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 return {n, redis.call('TTL', KEYS[1])}`;
 
+/** Trả lại một lượt (đăng nhập ĐÚNG không tính là lần sai). Khoá không tồn tại -> không tạo khoá không TTL. */
+export const LUA_RELEASE = `if redis.call('EXISTS', KEYS[1]) == 1 then
+  local n = redis.call('DECR', KEYS[1])
+  return {n, redis.call('TTL', KEYS[1])}
+end
+return {0, -2}`;
+
 export const LUA_PEEK = `return {tonumber(redis.call('GET', KEYS[1]) or '0'), redis.call('TTL', KEYS[1])}`;
 
 export interface RateLimitRedis {
@@ -37,6 +44,15 @@ export class AuthRateLimiter {
     const r = await this.viaRedis(LUA_HIT, key, windowS);
     const [count, ttl] = r ?? this.memoryHit(key, windowS);
     return { allowed: count <= limit, count, retryAfterS: Math.max(ttl, 1) };
+  }
+
+  /** Trả lại một lượt đã `hit` (R-1: đếm TRƯỚC khi so mật khẩu, đúng thì trả lại). */
+  async release(key: string): Promise<void> {
+    const r = await this.viaRedis(LUA_RELEASE, key);
+    if (!r) {
+      const cur = this.memory.get(key);
+      if (cur && cur.count > 0) cur.count -= 1;
+    }
   }
 
   /** Xem bộ đếm mà không tăng (khoá email sau N lần SAI): `allowed = count < limit`. */
