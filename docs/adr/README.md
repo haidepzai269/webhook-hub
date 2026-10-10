@@ -1008,3 +1008,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** Từ ADR-095 response polling trả `poll_seq` dưới tên `seq`, trong khi dashboard (`/api/v1/events?after=<seq>`, UI) dùng `events.seq` (thứ tự INSERT). Trên DB mới hai dãy lệch xa (poll 15–18 so với seq ≈ 10037) → dev lấy "seq" từ dashboard làm cursor sẽ bỏ sót hoặc nhận lại.
 **Chọn:** Response `events[].cursor` (chuỗi) + `nextCursor`; KHÔNG còn `seq` trong response polling (chưa có consumer ngoài — SDK và tài liệu đổi cùng commit). Repo `PolledEvent.cursor`, SDK `HubEvent.cursor`. EVENT-CATALOG §5a và ARCHITECTURE §8.1 ghi rõ hai dãy số khác nhau.
 **Đánh đổi:** Phá tương thích với client đọc `event.seq` của polling (chỉ có code trong repo này, đã sửa). Dashboard giữ `seq` (thứ tự INSERT) vì là màn xem.
+
+---
+
+## ADR-100 — Gate `repo-subclass`: lớp con của `TenantScopedRepository` chỉ ở danh sách cho phép (R2-5, 2026-10-11)
+
+**Vấn đề:** R-9 đổi `prisma` của `TenantScopedRepository` thành `protected` + `extend(Sub)` để `FlowScopedRepository` viết SQL đọc hành trình — mọi lớp con đều có client trần, viết được truy vấn không lọc `tenant_id` mà gate BB-5 (`prisma.<model>.` ngoài libs/database) không bắt.
+**Chọn:** Luật gate mới `repo-subclass` (`verify/lib/gates.ts`): `class X extends TenantScopedRepository` chỉ được ở `REPO_SUBCLASS_ALLOWED` (hiện: `apps/hub-api/src/modules/flow/flow.repository.ts`, kèm lý do). Thêm lớp con = thêm file vào danh sách kèm lý do và review từng câu SQL lọc tenant (giống luật `rls-system`). Test `verify/test/gates.spec.ts` (lớp con ngoài danh sách → đỏ).
+**Đánh đổi:** Gate dựa trên grep (một lớp con gián tiếp qua lớp trung gian sẽ lọt) — đủ cho quy mô repo; khi AU6 bật RLS thì DB là lưới cuối.

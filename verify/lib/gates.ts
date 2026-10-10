@@ -63,6 +63,11 @@ const NO_VERIFY = '--no-' + 'verify|--passWith' + 'NoTests';
 const RLS_SYSTEM = 'app\\.rls' + '_system';
 const OWNER_URL = 'VERIFY_DB_' + 'OWNER_URL|MAIL_DRIVER.*capt' + 'ure';
 
+/** R2-5: lớp con được phép của TenantScopedRepository — mọi câu SQL của nó phải lọc tenant_id (review từng câu). */
+export const REPO_SUBCLASS_ALLOWED: readonly string[] = [
+  'apps/hub-api/src/modules/flow/flow.repository.ts', // FlowScopedRepository (ADR nháp EF-2, R-9): SQL đọc hành trình, lọc tenant_id
+];
+
 export const GATES: Gate[] = [
   {
     id: 'bb1',
@@ -112,6 +117,15 @@ export const GATES: Gate[] = [
     source: 'SPEC-auth §5.12',
     include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts',
     check: grepLines(new RegExp(RLS_SYSTEM)),
+  },
+  {
+    id: 'repo-subclass',
+    rule: 'BB-5: `extends TenantScopedRepository` chỉ ở file trong danh sách cho phép (lớp con có client trần qua `prisma` protected)',
+    source: 'Review vòng 2 R2-5, ADR-100',
+    // Thêm lớp con = thêm file vào đây kèm lý do + review mọi truy vấn của nó đều lọc tenant_id.
+    include: (f) => isSrc(f) && !REPO_SUBCLASS_ALLOWED.includes(f),
+    // Chỉ khai báo lớp (không bắt ràng buộc generic `<T extends TenantScopedRepository>` của chính repo).
+    check: grepLines(/\bclass\s+\w+\s+extends\s+TenantScopedRepository\b/),
   },
   {
     id: 'sig-compare',

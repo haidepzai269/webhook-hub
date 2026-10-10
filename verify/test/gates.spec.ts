@@ -51,6 +51,16 @@ describe('grep gác cổng §7.3', () => {
     expect(r.map((g) => g.violations.length)).toEqual([1, 1]);
   });
 
+  it('R2-5: lớp con của TenantScopedRepository chỉ ở danh sách cho phép (FlowScopedRepository) — lớp con mới -> đỏ', () => {
+    const EXT = 'extends ' + 'TenantScopedRepository';
+    const f = files({
+      'apps/hub-api/src/modules/flow/flow.repository.ts': `export class FlowScopedRepository ${EXT} {}`,
+      'apps/hub-api/src/modules/x/x.repository.ts': `export class Lach ${EXT} {}`,
+    });
+    const r = runGates([byId('repo-subclass')], f.list, f.read);
+    expect(r[0].violations.map((v) => v.file)).toEqual(['apps/hub-api/src/modules/x/x.repository.ts']);
+  });
+
   it('Shop ≤ 300 dòng', () => {
     const f = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(301) });
     expect(runGates([byId('shop-size')], f.list, f.read)[0].violations).toHaveLength(1);
