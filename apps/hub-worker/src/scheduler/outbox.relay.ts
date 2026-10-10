@@ -11,6 +11,11 @@ import * as amqp from 'amqplib';
 // giữ connection/lock vô thời hạn nếu channel treo.
 const RELAY_TX_TIMEOUT_MS = 15_000;
 const RELAY_TX_MAX_WAIT_MS = 5_000;
+/**
+ * Review SPEC-3 #3: số dòng mỗi lượt. Lượt lấy ĐẦY lô thì chạy lượt kế ngay (không ngủ 500ms) —
+ * backlog xả theo tốc độ broker/DB, không theo nhịp poll. Lô rỗng/lẻ thì quay về nhịp ~500ms.
+ */
+export const RELAY_BATCH = 200;
 
 /**
  * Định tuyến outbox theo topic (S1-2) — một bảng, không thêm `if`. Chặng ingest → normalize đi
@@ -63,11 +68,11 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private scheduleNext() {
+  private scheduleNext(immediate = false) {
     if (!this.isRunning) return;
-    // Jitter ±20% quanh 500ms
+    // Jitter ±20% quanh 500ms; lô vừa rồi đầy -> chạy ngay (vẫn qua setTimeout 0 để không đệ quy sâu).
     const jitter = Math.floor(Math.random() * 200) - 100;
-    const interval = Math.max(200, 500 + jitter);
+    const interval = immediate ? 0 : Math.max(200, 500 + jitter);
     // Luôn giữ đúng MỘT timer: lỡ có ai gọi trùng thì timer cũ bị huỷ, không sinh vòng lặp song song.
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.pollAndPublish(), interval);
@@ -75,6 +80,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
 
   private async pollAndPublish() {
     if (!this.isRunning) return;
+    let full = false;
 
     try {
       // Chưa có channel (đang thử kết nối AMQP): chỉ return — `finally` bên dưới lên lịch vòng sau.
@@ -83,85 +89,67 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       if (!this.channel) {
         return;
       }
-
-      // BB-3/BB-4 an toàn nhiều instance: SELECT FOR UPDATE SKIP LOCKED, publish, và
-      // UPDATE published_at PHẢI nằm trong CÙNG một interactive transaction. Khoá row
-      // (FOR UPDATE) chỉ tồn tại tới khi transaction chứa nó COMMIT/ROLLBACK — nếu SELECT
-      // chạy như một statement rời (transaction ngầm), khoá nhả ngay sau SELECT và một
-      // instance hub-worker khác chạy song song có thể SELECT trúng cùng batch chưa
-      // publish, dẫn tới publish trùng lặp thật trên RabbitMQ. Không tách 3 bước này ra.
-      const publishedCount = await this.prisma.$transaction(
-        async (tx) => {
-          // Đọc outbox với FOR UPDATE SKIP LOCKED
-          // Dùng raw query để đảm bảo chính xác ngữ nghĩa SKIP LOCKED của PostgreSQL
-          const unpulished: Array<{ id: bigint; topic: string; payload: any; age_s: number }> =
-            await tx.$queryRawUnsafe(`
-              SELECT id, topic, payload, EXTRACT(EPOCH FROM (now() - created_at))::float8 AS age_s
-              FROM hub.outbox
-              WHERE published_at IS NULL
-              ORDER BY id ASC
-              LIMIT 50
-              FOR UPDATE SKIP LOCKED;
-            `);
-
-          // S3-4: lag = tuổi dòng chưa publish cũ nhất trong lượt này (ORDER BY id ~ thứ tự tạo). 0 khi rỗng.
-          outboxLag.set(unpulished.length === 0 ? 0 : Math.max(0, Number(unpulished[0].age_s) || 0));
-          if (unpulished.length === 0) {
-            return 0;
-          }
-
-          logger.debug({ count: unpulished.length }, 'Outbox Relay tìm thấy messages cần publish');
-
-          for (const item of unpulished) {
-            const payloadBuffer = Buffer.from(JSON.stringify(item.payload));
-            const { exchange: targetExchange, routingKey: targetRoutingKey } = routeForTopic(item.topic);
-
-            // Nếu publish throw (nack/return từ publisher confirm, hoặc lỗi channel),
-            // để lỗi propagate ra ngoài callback này — Prisma sẽ tự ROLLBACK, khoá nhả,
-            // và row outbox đó được publish lại ở lần poll sau (at-least-once, chấp nhận
-            // được). KHÔNG catch rồi vẫn UPDATE published_at — đó là ACK giả cho publish
-            // đã thất bại.
-            await new Promise<void>((resolve, reject) => {
-              this.channel!.publish(
-                targetExchange,
-                targetRoutingKey,
-                payloadBuffer,
-                {
-                  persistent: true,
-                  headers: {
-                    'x-correlation-id': item.payload.correlationId,
-                  },
-                },
-                (err) => {
-                  if (err) reject(err);
-                  else resolve();
-                },
-              );
-            });
-
-            // Đánh dấu published_at = now() — vẫn trong transaction tx, khoá row còn giữ
-            await tx.$executeRaw`
-              UPDATE hub.outbox
-              SET published_at = now()
-              WHERE id = ${item.id};
-            `;
-          }
-
-          return unpulished.length;
-        },
-        {
-          timeout: RELAY_TX_TIMEOUT_MS,
-          maxWait: RELAY_TX_MAX_WAIT_MS,
-        },
-      );
-
+      const publishedCount = await this.relayBatch(this.channel);
+      full = publishedCount >= RELAY_BATCH;
       if (publishedCount > 0) {
-        logger.debug({ count: publishedCount }, 'Outbox Relay đã publish xong batch');
+        logger.debug({ count: publishedCount, full }, 'Outbox Relay đã publish xong batch');
       }
     } catch (err: any) {
       logger.error({ err: err.message }, 'Lỗi trong chu kỳ Outbox Relay');
     } finally {
-      this.scheduleNext();
+      this.scheduleNext(full);
     }
+  }
+
+  /**
+   * MỘT lượt relay (review SPEC-3 #3). BB-3/BB-4 an toàn nhiều instance: SELECT FOR UPDATE SKIP LOCKED,
+   * publish và UPDATE published_at nằm trong CÙNG một interactive transaction — khoá dòng giữ tới khi
+   * COMMIT, instance khác bỏ qua các dòng này. Khác bản cũ:
+   * - publish cả lô KHÔNG chờ từng confirm, rồi chờ confirm THEO LÔ (Promise.all các callback);
+   * - một câu UPDATE `id = ANY($1)` thay cho N câu.
+   * Bất kỳ publish nào bị nack/lỗi -> ném -> ROLLBACK cả lô -> lượt sau publish lại (at-least-once như cũ,
+   * consumer chống trùng bằng processed_messages). KHÔNG đánh dấu published_at cho lô chưa confirm đủ.
+   * Trả số dòng đã publish.
+   */
+  async relayBatch(channel: amqp.ConfirmChannel): Promise<number> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const rows: Array<{ id: bigint; topic: string; payload: any; age_s: number }> = await tx.$queryRawUnsafe(`
+          SELECT id, topic, payload, EXTRACT(EPOCH FROM (now() - created_at))::float8 AS age_s
+          FROM hub.outbox
+          WHERE published_at IS NULL
+          ORDER BY id ASC
+          LIMIT ${RELAY_BATCH}
+          FOR UPDATE SKIP LOCKED;
+        `);
+
+        // S3-4: lag = tuổi dòng chưa publish cũ nhất trong lượt này (ORDER BY id ~ thứ tự tạo). 0 khi rỗng.
+        outboxLag.set(rows.length === 0 ? 0 : Math.max(0, Number(rows[0].age_s) || 0));
+        if (rows.length === 0) return 0;
+
+        const confirms = rows.map((item) => {
+          const { exchange, routingKey } = routeForTopic(item.topic);
+          return new Promise<void>((resolve, reject) => {
+            channel.publish(
+              exchange,
+              routingKey,
+              Buffer.from(JSON.stringify(item.payload)),
+              { persistent: true, headers: { 'x-correlation-id': item.payload?.correlationId } },
+              (err) => (err ? reject(err) : resolve()),
+            );
+          });
+        });
+        // Chờ broker xác nhận CẢ LÔ trước khi đánh dấu — lỗi một message là rollback cả lô.
+        await Promise.all(confirms);
+
+        const ids = rows.map((r) => r.id.toString());
+        await tx.$executeRaw`UPDATE hub.outbox SET published_at = now() WHERE id = ANY(${ids}::bigint[])`;
+        return rows.length;
+      },
+      {
+        timeout: RELAY_TX_TIMEOUT_MS,
+        maxWait: RELAY_TX_MAX_WAIT_MS,
+      },
+    );
   }
 }

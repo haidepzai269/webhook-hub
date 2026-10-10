@@ -95,7 +95,7 @@ Công cụ đo đã có từ S3-4: `GET /metrics` (hub-api, hub-worker), Grafana
 |---|---|---|
 | p95 ingest (k6, 10→50→100 RPS, mỗi bậc 20s, 2299 request) | **23,6 ms**, lỗi 0% | `k6/README.md` |
 | p95 ingest theo Prometheus | ≈ 24 ms | `histogram_quantile(0.95, …hub_ingest_duration_seconds_bucket…)` |
-| Outbox lag lớn nhất ở bậc 100 RPS | ≈ 21 s (xả hết sau ~30 s) | `max(hub_outbox_lag_seconds)` |
+| Outbox lag lớn nhất ở bậc 100 RPS (2299 request, 1 đích mock → 4598 dòng outbox) | trước review #3: **43,2 s** (p95 trễ publish 41,4 s); sau review #3: **0,65 s** (p95 0,55 s) | `max_over_time(hub_outbox_lag_seconds[…])` + SQL `published_at - created_at` |
 | Lệnh Redis / sự kiện | ingest 3 + normalize 1 + 2/đích → 1 đích = 6, 2 đích = 8, **kể cả đích có throttle** (MONITOR docker: 2 đích có `rate_limit_rps` = 8 lệnh client; trước review #2 là 10) | `redis-budget.spec.ts`, ADR-062, ADR-064 |
 
-> Câu trong phụ lục kiểu "≤ 4 lệnh Redis mỗi sự kiện" phải đổi thành "≤ 4 lệnh cố định mỗi sự kiện + ≤ 2 lệnh mỗi đích" (R1). Số này đếm một `EVAL` là một lệnh — **chưa xác nhận** Upstash tính như vậy (DEPLOYMENT §5.2). Số p95 nên chạy lại k6 đủ 60s/bậc trước khi ghi vào báo cáo chính thức; outbox lag ở 100 RPS là điểm yếu thật, nên ghi trung thực.
+> Câu trong phụ lục kiểu "≤ 4 lệnh Redis mỗi sự kiện" phải đổi thành "≤ 4 lệnh cố định mỗi sự kiện + ≤ 2 lệnh mỗi đích" (R1). Số này đếm một `EVAL` là một lệnh — **chưa xác nhận** Upstash tính như vậy (DEPLOYMENT §5.2). Số p95 nên chạy lại k6 đủ 60s/bậc trước khi ghi vào báo cáo chính thức; outbox lag ở 100 RPS từng là điểm yếu thật (43 s), đã sửa bằng relay theo lô (ADR-065) — nên ghi cả số trước/sau.

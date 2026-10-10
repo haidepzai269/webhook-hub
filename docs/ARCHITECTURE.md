@@ -215,11 +215,11 @@ Có **hai** chặng qua outbox: ingest (`raw_events` + `outbox(event.received)` 
 SELECT * FROM hub.outbox
 WHERE published_at IS NULL
 ORDER BY id
-LIMIT 50
+LIMIT 200
 FOR UPDATE SKIP LOCKED;
 ```
 
-→ publish với publisher confirms → `UPDATE published_at = now()`.
+→ publish **cả lô** (không chờ từng confirm) → chờ publisher confirms **theo lô** → **một** `UPDATE … WHERE id = ANY($ids)` — tất cả trong một transaction; một message bị nack là rollback cả lô (at-least-once). Lô đầy (200) thì chạy lượt kế **ngay**, lô lẻ quay về nhịp ~500ms (review #3, ADR-065).
 
 `SKIP LOCKED` khiến relay **an toàn với nhiều instance** — nên **không cần Redis lock** cho relay (bản gốc nói cả hai, dư thừa), và đó chính là lý do relay chạy được trong mọi worker thay vì cần một tiến trình `scheduler` riêng. Thêm **jitter** vào chu kỳ poll để N worker không cùng đập vào bảng `outbox` một nhịp. Redis lock chỉ dùng cho job `cleanup`.
 
