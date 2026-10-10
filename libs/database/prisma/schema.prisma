@@ -183,6 +183,8 @@ model Event {
   tenantId       String      @map("tenant_id") @db.Uuid
   /// S7: cursor polling (A) — tăng dần theo thứ tự INSERT. Không dùng ULID (nhiều worker cùng ms không có thứ tự).
   seq            BigInt      @unique @default(autoincrement())
+  /// R-3 (ADR-095): cursor polling theo thứ tự COMMIT — cấp lúc poll cho dòng đã commit (advisory lock theo tenant).
+  pollSeq        BigInt?     @unique @map("poll_seq")
   /// S5: source sinh ra event (lọc subscription theo sourceIds). Null với event cũ không còn raw_event.
   sourceId       String?     @map("source_id") @db.Uuid
   rawEventId     String?     @unique @map("raw_event_id") @db.Uuid
@@ -206,6 +208,7 @@ model Event {
 
   @@index([tenantId, receivedAt(sort: Desc)])
   @@index([tenantId, seq])
+  @@index([tenantId, pollSeq])
   @@index([correlationId])
   @@index([type])
   @@map("events")

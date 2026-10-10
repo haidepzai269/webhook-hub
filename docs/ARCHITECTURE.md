@@ -551,8 +551,8 @@ GET /v1/p/:project/events?after=<seq>&limit=50&types=payment.*,repo.push&status=
 → { events: [...], nextCursor: "<seq>" }          (scope read:events; seq là CHUỖI)
 ```
 
-- Cursor = `events.seq` (BIGSERIAL), **không** ULID (nhiều worker cùng mili giây không có thứ tự).
-- **Cửa sổ lắng 2s** theo `events.created_at` (= `clock_timestamp()` lúc INSERT): transaction có seq nhỏ có thể COMMIT sau transaction có seq lớn — đọc ngay thì cursor vượt qua và mất vĩnh viễn sự kiện đó.
+- Cursor = `events.poll_seq`, **không** ULID và **không** `seq` lúc INSERT (R-3, ADR-095): transaction có seq nhỏ có thể COMMIT sau transaction có seq lớn — cursor theo seq sẽ vượt qua và mất vĩnh viễn sự kiện đó.
+- `poll_seq` cấp **lúc poll** cho dòng **đã commit**, dưới `pg_advisory_xact_lock` theo tenant → các lần cấp nối tiếp, giá trị sau luôn lớn hơn mọi giá trị đã thấy. Không cần cửa sổ lắng (bỏ 2s của ADR-077).
 - `types` giao với `readTypes` của key; `status=failed` = có delivery DEAD/RETRYING ở generation mới nhất (tới `endpointId`); long-poll `wait` truy vấn lại mỗi 1s, 0 lệnh Redis.
 - Dashboard `GET /api/v1/events`: `before=<id>` (cũ hơn, giảm dần), `after=<seq>` (mới hơn, tăng dần).
 - Lấy lại được trong `EVENT_RETENTION_DAYS` ngày; raw ACCEPTED giữ vô hạn (ADR-045).

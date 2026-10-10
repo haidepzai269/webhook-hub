@@ -213,14 +213,16 @@ export class TenantScopedRepository {
   }
 
   /**
-   * S7 (SPEC §4.5, ADR-077): polling (A). `seq > after` tăng dần, chỉ event đã LẮNG `settleSeconds` (mặc định 2s)
-   * tính theo `created_at` = lúc INSERT (clock_timestamp): seq cấp lúc INSERT, transaction seq nhỏ có thể COMMIT
-   * sau transaction seq lớn — đọc ngay thì cursor vượt qua và mất vĩnh viễn sự kiện đó.
-   * `types` và `readTypes` (mẫu wildcard như subscription) là hai điều kiện AND. `failedOnly`: có delivery
-   * DEAD/RETRYING ở generation MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có].
+   * R-3 (ADR-095, thay cửa sổ lắng ADR-077): cursor = `poll_seq`, cấp theo THỨ TỰ COMMIT. Bước 1 (`assignPollSeq`):
+   * một transaction ngắn giữ `pg_advisory_xact_lock` theo tenant, UPDATE gán `poll_seq` cho các dòng ĐÃ COMMIT còn
+   * NULL (READ COMMITTED: dòng của transaction đang mở không thấy -> chưa được gán). Các lần gán nối tiếp nhau nên giá
+   * trị gán sau luôn lớn hơn mọi giá trị đã thấy: transaction commit muộn nhận poll_seq MỚI, không bao giờ bị cursor
+   * vượt qua. Bước 2: đọc `poll_seq > after`. Không có độ trễ 2s, 0 lệnh Redis. API vẫn gọi trường này là `seq`.
+   * `types` và `readTypes` (mẫu wildcard) là hai điều kiện AND. `failedOnly`: có delivery DEAD/RETRYING ở generation
+   * MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có].
    */
   async pollEvents(o: PollEventsOptions): Promise<PolledEvent[]> {
-    const settle = o.settleSeconds ?? 2;
+    await this.assignPollSeq();
     const failed = o.failedOnly
       ? Prisma.sql`AND EXISTS (
           SELECT 1 FROM "hub"."deliveries" d JOIN "hub"."subscriptions" s ON s.id = d.subscription_id
@@ -230,16 +232,35 @@ export class TenantScopedRepository {
                           AND d2.subscription_id = d.subscription_id AND d2.attempt_generation > d.attempt_generation))`
       : Prisma.empty;
     return this.prisma.$queryRaw<PolledEvent[]>`
-      SELECT e.id, e.seq, e.type, e.source, e.source_id AS "sourceId", e.subject, e.data, e.normalized,
+      SELECT e.id, e.poll_seq AS seq, e.type, e.source, e.source_id AS "sourceId", e.subject, e.data, e.normalized,
              e.correlation_id AS "correlationId", e.occurred_at AS "occurredAt", e.received_at AS "receivedAt"
       FROM "hub"."events" e
       WHERE e.tenant_id = ${this.tenantId}::uuid
-        AND e.seq > ${o.after}
-        AND e.created_at <= clock_timestamp() - ${settle} * interval '1 second'
+        AND e.poll_seq > ${o.after}
         AND ${typeFilterSql(o.types)} AND ${typeFilterSql(o.readTypes)}
         ${failed}
-      ORDER BY e.seq ASC
+      ORDER BY e.poll_seq ASC
       LIMIT ${o.limit}`;
+  }
+
+  /** R-3: gán `poll_seq` cho event đã commit của tenant (≤ 1000/lần), nối tiếp nhau nhờ advisory lock theo tenant. */
+  async assignPollSeq(batch = 1000): Promise<number> {
+    const lock = Prisma.sql`SELECT pg_advisory_xact_lock(4242, hashtext(${this.tenantId}))::text AS locked`;
+    // nextval trong PHÉP CHIẾU trên subquery đã sắp theo seq -> trong cùng một lô, poll_seq giữ thứ tự seq.
+    const assign = Prisma.sql`
+      UPDATE "hub"."events" e SET poll_seq = t.ps
+      FROM (SELECT o.id, nextval('"hub"."events_poll_seq"') AS ps
+            FROM (SELECT id FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid AND poll_seq IS NULL
+                  ORDER BY seq LIMIT ${batch}) o) t
+      WHERE e.id = t.id`;
+    const client = this.prisma as any;
+    if (typeof client.$transaction === 'function') {
+      const [, n] = await client.$transaction([client.$queryRaw(lock), client.$executeRaw(assign)]);
+      return n as number;
+    }
+    // Đang ở trong một transaction có sẵn: lock xact giữ tới khi transaction đó kết thúc.
+    await client.$queryRaw(lock);
+    return client.$executeRaw(assign);
   }
 
   /** S7 (ADR-077): dashboard `?after=<seq>` — tăng dần theo seq (cùng nghĩa với polling, không cửa sổ lắng). */
@@ -740,7 +761,6 @@ export interface PollEventsOptions {
   readTypes?: string[];
   failedOnly?: boolean;
   endpointId?: string;
-  settleSeconds?: number;
 }
 
 export interface PolledEvent {

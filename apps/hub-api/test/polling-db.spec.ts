@@ -4,7 +4,7 @@ import { describeDb, newTestPrisma } from '../../../libs/database/test/support/t
 import { longPoll } from '../src/modules/service-api/polling';
 
 /**
- * S7 (SPEC §4.5, ADR-077) trên Postgres THẬT: polling theo `seq`, cửa sổ lắng 2s theo `created_at` (lúc INSERT),
+ * S7 (SPEC §4.5, ADR-077) trên Postgres THẬT: polling theo cursor `seq` (R-3/ADR-095: poll_seq theo thứ tự COMMIT),
  * lọc `types` (wildcard) ∩ `readTypes`, `status=failed` theo generation MỚI NHẤT, long-poll.
  */
 describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
@@ -36,25 +36,23 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     await raw.$disconnect();
   });
 
-  it('[MS:U24] event created_at = now()-1s KHÔNG trả (cửa sổ lắng); now()-5s thì trả', async () => {
-    const fresh = await mk('order.fresh', ago(1));
-    const settled = await mk('order.settled', ago(5));
-    const ids = (await repo().pollEvents({ after: 0n, limit: 100 })).map((e) => e.id);
-    expect(ids).toContain(settled.id);
-    expect(ids).not.toContain(fresh.id);
+  it('[MS:U24] R-3 (ADR-095): event vừa COMMIT được trả NGAY (không còn trễ 2s); chưa commit thì không (xem polling-commit-order-db)', async () => {
+    const fresh = await mk('order.fresh', new Date());
+    const ids = (await repo().pollEvents({ after: 0n, limit: 1000 })).map((e) => e.id);
+    expect(ids).toContain(fresh.id);
   });
 
-  it('[MS:U25] (phần a) 3 event, after=seq đầu -> trả 2 event sau theo seq TĂNG dần; seq là bigint', async () => {
+  it('[MS:U25] (phần a) 3 event, cursor = seq poll của event đầu -> trả 2 event sau theo seq TĂNG dần; seq là bigint', async () => {
     const a = await mk('order.a', ago(10));
     const b = await mk('order.b', ago(10));
     const c = await mk('order.c', ago(10));
-    const rows = await repo().pollEvents({ after: a.seq, limit: 100 });
-    const ours = rows.filter((r) => [b.id, c.id].includes(r.id));
-    expect(ours.map((r) => r.id)).toEqual([b.id, c.id]);
+    const all = await repo().pollEvents({ after: 0n, limit: 1000 });
+    const seqOf = (id: string) => all.find((r) => r.id === id)!.seq;
+    const rows = await repo().pollEvents({ after: seqOf(a.id), limit: 100 });
+    expect(rows.map((r) => r.id)).toEqual([b.id, c.id]);
     expect(rows.map((r) => r.seq)).toEqual([...rows.map((r) => r.seq)].sort((x, y) => (x < y ? -1 : 1)));
-    expect(rows.every((r) => r.seq > a.seq)).toBe(true);
     expect(typeof rows[0].seq).toBe('bigint');
-    expect((await repo().pollEvents({ after: c.seq, limit: 100 })).map((r) => r.id)).not.toContain(c.id);
+    expect((await repo().pollEvents({ after: seqOf(c.id), limit: 100 })).map((r) => r.id)).not.toContain(c.id);
   });
 
   it('S7: types (wildcard) giao với readTypes; project khác không thấy', async () => {
