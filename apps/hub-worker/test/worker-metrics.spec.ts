@@ -45,3 +45,28 @@ describe('worker /metrics (S3-4)', () => {
     }
   });
 });
+
+describe('worker /metrics có METRICS_TOKEN (review #6)', () => {
+  it('đặt token: thiếu/sai Bearer -> 401; đúng -> 200', async () => {
+    const tmp = http.createServer();
+    await new Promise<void>((r) => tmp.listen(0, '127.0.0.1', r));
+    const port = (tmp.address() as AddressInfo).port;
+    await new Promise<void>((r) => tmp.close(() => r()));
+    const ms = startMetricsServer(port, 'tok-123')!;
+    await new Promise((r) => ms.once('listening', r));
+    const get = (auth?: string) =>
+      new Promise<number>((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port, path: '/metrics', headers: auth ? { authorization: auth } : {} }, (res) => {
+          res.resume();
+          res.on('end', () => resolve(res.statusCode ?? 0));
+        }).on('error', reject);
+      });
+    try {
+      expect(await get()).toBe(401);
+      expect(await get('Bearer sai')).toBe(401);
+      expect(await get('Bearer tok-123')).toBe(200);
+    } finally {
+      await new Promise<void>((r) => ms.close(() => r()));
+    }
+  });
+});

@@ -28,3 +28,14 @@ export function timingSafeCompare(a: string, b: string): boolean {
 export function bodyHashKey(rawBody: Buffer | string): string {
   return createHash('sha256').update(rawBody).digest('hex').slice(0, 32);
 }
+
+/**
+ * `/metrics` (hub-api và hub-worker, review SPEC-3 #6): `token` rỗng/không đặt -> mở (local, Prometheus
+ * trong mạng compose); có token -> bắt buộc `Authorization: Bearer <token>`, so bằng timingSafeEqual.
+ */
+export function bearerAuthorized(authHeader: string | string[] | undefined, token: string | undefined): boolean {
+  if (!token) return true;
+  const h = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  const m = /^Bearer (.+)$/.exec(h ?? '');
+  return !!m && timingSafeCompare(token, m[1]);
+}

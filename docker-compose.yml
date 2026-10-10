@@ -172,6 +172,8 @@ services:
       - "9101"
     environment:
       - WORKER_METRICS_PORT=9101
+      # Review #6: cùng token với hub-api; đặt thì prometheus.yml phải gửi Bearer (xem DEPLOYMENT §8)
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
       # connection_limit/pool_timeout TƯỜNG MINH chỉ cho hub-worker: process này chạy
       # CẢ outbox relay (1 transaction có thể giữ connection tới RELAY_TX_TIMEOUT_MS =
       # 15s, xem scheduler/outbox.relay.ts) LẪN delivery consumer (1 transaction/message,

@@ -328,6 +328,12 @@ SHUTDOWN_TIMEOUT_MS=25000
 METRICS_TICK_MS=5000
 NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE); hub-api KHÔNG đăng ký /mock/* (ADR-054)
 CIRCUIT_MAX_DEFERRALS=30 # hub-worker: trần số lần hoãn liên tiếp vì circuit (≈30 phút) rồi tính là một lần thử thất bại (ADR-054)
+METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub-worker :WORKER_METRICS_PORT/metrics đòi
+                         # "Authorization: Bearer <token>" (review #6). Prometheus/scraper phải gửi token: trong
+                         # prometheus.yml bỏ comment khối `authorization: {type: Bearer, credentials: ...}` ở cả 2 job
+                         # (Prometheus không tự đọc env trong file cấu hình). Local: để trống.
+WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
+INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
 
 # --- web (Vercel) — build-time, Next inline vào bundle → KHÔNG đặt secret ở đây ---
 NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — REST + Socket.IO của dashboard

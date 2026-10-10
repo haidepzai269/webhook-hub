@@ -2,11 +2,19 @@ global:
   scrape_interval: 5s
 
 # S3-4: hub-api phục vụ /metrics qua Nest (cổng 4000); hub-worker qua http server tối giản (9101,
-# chỉ trong mạng compose). Deployed: đặt METRICS_TOKEN và thêm bearer_token cho job hub-api.
+# chỉ trong mạng compose).
+# Review #6: nếu đặt METRICS_TOKEN (cả hai tiến trình đều kiểm) thì bỏ comment khối `authorization`
+# ở CẢ HAI job và điền token (Prometheus không tự đọc biến môi trường trong file này). Local để trống.
 scrape_configs:
   - job_name: 'hub-api'
+    # authorization:
+    #   type: Bearer
+    #   credentials: '<METRICS_TOKEN>'
     static_configs:
       - targets: ['hub-api:4000']
   - job_name: 'hub-worker'
+    # authorization:
+    #   type: Bearer
+    #   credentials: '<METRICS_TOKEN>'
     static_configs:
       - targets: ['hub-worker:9101']

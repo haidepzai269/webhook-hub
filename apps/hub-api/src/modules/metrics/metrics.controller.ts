@@ -1,6 +1,6 @@
 import { Controller, Get, Headers, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { timingSafeCompare } from '@hub/crypto';
+import { bearerAuthorized } from '@hub/crypto';
 import { apiRegistry } from './metrics';
 
 /**
@@ -9,9 +9,7 @@ import { apiRegistry } from './metrics';
  * Local docker để trống -> Prometheus scrape thẳng trong mạng compose.
  */
 export function metricsAuthorized(authHeader: string | undefined, token: string | undefined = process.env.METRICS_TOKEN): boolean {
-  if (!token) return true;
-  const m = /^Bearer (.+)$/.exec(authHeader ?? '');
-  return !!m && timingSafeCompare(token, m[1]);
+  return bearerAuthorized(authHeader, token);
 }
 
 @Controller('metrics')

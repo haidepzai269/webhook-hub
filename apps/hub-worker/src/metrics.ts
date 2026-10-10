@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { bearerAuthorized } from '@hub/crypto';
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 /**
@@ -58,10 +59,19 @@ export const normalizeRetries = new Counter({
  * HTTP server tối giản chỉ phục vụ `/metrics` (S3-4) — worker không có Nest HTTP. Cổng
  * `WORKER_METRICS_PORT` (mặc định 9101; `0` = tắt). Chỉ mở trong mạng nội bộ compose, không publish ra host.
  */
-export function startMetricsServer(port = Number(process.env.WORKER_METRICS_PORT ?? 9101)): http.Server | null {
+export function startMetricsServer(
+  port = Number(process.env.WORKER_METRICS_PORT ?? 9101),
+  token: string | undefined = process.env.METRICS_TOKEN,
+): http.Server | null {
   if (!Number.isInteger(port) || port <= 0) return null;
   const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (req.url === '/metrics' || req.url?.startsWith('/metrics?'))) {
+      // Review SPEC-3 #6: cùng luật với hub-api — METRICS_TOKEN đặt thì bắt buộc Bearer.
+      if (!bearerAuthorized(req.headers.authorization, token)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end('{"error":"metrics_unauthorized"}');
+        return;
+      }
       res.writeHead(200, { 'Content-Type': workerRegistry.contentType });
       res.end(await workerRegistry.metrics());
       return;
