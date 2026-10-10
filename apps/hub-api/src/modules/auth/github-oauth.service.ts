@@ -122,7 +122,11 @@ export class GithubOAuthService {
       return { redirect: this.web('/login?error=github_failed') };
     }
     if (!profile) return { redirect: this.web('/login?error=github_email_unverified') };
+    return this.match(profile, ctx, true);
+  }
 
+  /** Ghép hồ sơ GitHub với user (spec §5.8). `retry`: đua tạo user (P2002 email/githubId) -> ghép lại MỘT lần, user kia đã có. */
+  private async match(profile: { id: string; email: string; name: string }, ctx: ReqCtx, retry: boolean): Promise<CallbackResult> {
     const idn = this.prisma.identity();
     // 1. đã liên kết theo githubId (id số — login đổi được) -> đăng nhập user đó
     const byGithub = await idn.findUserByGithubId(profile.id);
@@ -135,19 +139,29 @@ export class GithubOAuthService {
     if (byEmail) {
       if (byEmail.isOperator) return { redirect: this.web('/login?error=operator_github_forbidden') };
       if (!byEmail.emailVerifiedAt) return { redirect: this.web('/login?error=email_exists_unverified') };
-      if ((await idn.linkGithub(byEmail.id, profile.id)) === 1) {
-        await idn.recordAuthAudit({ userId: byEmail.id, action: 'github.linked', ip: ctx.ip, meta: { githubId: profile.id } });
-        void this.mail
-          .send({ to: byEmail.email, ...mailTemplates.githubLinked(byEmail.name) })
-          .catch((err) => logger.warn({ err: (err as Error).message, to: maskEmail(byEmail.email) }, 'Gửi mail github.linked thất bại'));
+      // R-12 (ADR-116): user đã gắn GitHub KHÁC (linkGithub = 0) -> KHÔNG đăng nhập bằng tài khoản GitHub này.
+      if ((await idn.linkGithub(byEmail.id, profile.id)) !== 1) {
+        await idn.recordAuthAudit({ userId: byEmail.id, action: 'github.link_mismatch', ip: ctx.ip, meta: { githubId: profile.id } });
+        return { redirect: this.web('/login?error=github_account_mismatch') };
       }
+      await idn.recordAuthAudit({ userId: byEmail.id, action: 'github.linked', ip: ctx.ip, meta: { githubId: profile.id } });
+      void this.mail
+        .send({ to: byEmail.email, ...mailTemplates.githubLinked(byEmail.name) })
+        .catch((err) => logger.warn({ err: (err as Error).message, to: maskEmail(byEmail.email) }, 'Gửi mail github.linked thất bại'));
       return { redirect: this.web('/dashboard'), session: await this.login(byEmail.id, ctx) };
     }
     // 3. người mới: email GitHub đã xác minh -> tạo user đã xác minh, không mật khẩu, kèm project đầu tiên (§5.8)
-    const created = await this.auth.createUserWithFirstProject(
-      { email: profile.email, name: profile.name, passwordHash: null, emailVerifiedAt: new Date(), githubId: profile.id },
-      ctx,
-    );
+    let created: { userId: string };
+    try {
+      created = await this.auth.createUserWithFirstProject(
+        { email: profile.email, name: profile.name, passwordHash: null, emailVerifiedAt: new Date(), githubId: profile.id },
+        ctx,
+      );
+    } catch (e) {
+      // R-12: callback đồng thời cùng email/githubId -> P2002; trước đây thành 500. Lượt kia đã tạo user -> ghép lại.
+      if ((e as { code?: string })?.code === 'P2002' && retry) return this.match(profile, ctx, false);
+      throw e;
+    }
     return { redirect: this.web('/dashboard'), session: await this.login(created.userId, ctx) };
   }
 

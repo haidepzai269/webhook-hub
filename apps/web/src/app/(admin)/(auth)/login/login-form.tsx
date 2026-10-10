@@ -22,6 +22,14 @@ const formSchema = z.object({
 
 type LoginValues = z.infer<typeof formSchema>;
 
+const GITHUB_ERRORS: Record<string, string> = {
+  github_failed: "GitHub không phản hồi. Thử lại sau.",
+  github_email_unverified: "Tài khoản GitHub chưa có email chính đã xác minh.",
+  email_exists_unverified: "Email này đã đăng ký nhưng chưa xác minh. Đăng nhập bằng mật khẩu hoặc dùng Quên mật khẩu.",
+  github_account_mismatch: "Tài khoản này đã liên kết với một tài khoản GitHub khác.",
+  operator_github_forbidden: "Operator không đăng nhập bằng GitHub.",
+};
+
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
@@ -41,6 +49,12 @@ export function LoginForm() {
 
   useEffect(() => {
     if (params.get("expired")) toast.warning("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+  }, [params]);
+
+  // Lỗi từ callback GitHub (`/login?error=…`, github-oauth.service).
+  useEffect(() => {
+    const code = params.get("error");
+    if (code) setServerError(GITHUB_ERRORS[code] ?? `Đăng nhập GitHub thất bại (${code}).`);
   }, [params]);
 
   const onSubmit = async (values: LoginValues) => {

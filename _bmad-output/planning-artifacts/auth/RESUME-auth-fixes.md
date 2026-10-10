@@ -9,11 +9,12 @@ Luật: RED→GREEN→GATED→PROBED, mỗi mục một commit có `Verify:`, `n
 | R-7 | xong | c05299f | gate data-migration-rls, ADR-111 | |
 | R-3 | xong | e43a60d | ADR-112 | |
 | R-4 | chưa | | |
-| R-5 | xong | (commit R-5) | ADR-115 | |
+| R-5 | xong | 81f6e2f | ADR-115 | |
 | R-6 | chưa | | |
 | R-8 | xong | 3dbb7cd | ADR-113 | |
 | R-10 | xong | 1eb26a2 | ADR-114 |
-| R-9,R-11..R-14 | chưa | | |
+| R-12 | xong | (commit R-12) | ADR-116 |
+| R-9,R-11,R-13,R-14 | chưa | | |
 
 ## Bước kế
 - R-1 PROBED live (hubv, image mới): 18 login sai song song → 5×401 + 13×429.

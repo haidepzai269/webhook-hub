@@ -1188,3 +1188,9 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** link trong mail (quên/đặt lại mật khẩu, lời mời, "có người thử đăng ký") và redirect `/onboarding` của GitHub dẫn tới 404 — không tự cứu tài khoản qua giao diện được, demo hỏng.
 **Chọn:** ba trang tối thiểu dùng `AuthShell`/`AuthField` sẵn có + icon Lucide (thêm prop `social={false}`). Trang token đọc token rồi `replaceState` (không còn trên URL, `no-referrer` đã có ở next.config); `/invite` giữ token trong `sessionStorage` để sống qua `/login?next=/invite`. `login-form` theo `?next=` qua `safeNext` (chỉ chấp nhận đường bắt đầu bằng một `/`, chặn `//host`, `/\host` — open redirect). GitHub user mới → `/dashboard` (chưa có trang onboarding).
 **Đánh đổi:** giao diện trần, bản đầy đủ vẫn là việc của phiên UI. Token lời mời nằm trong `sessionStorage` của tab tới khi nhận (cùng mức lộ với URL ban đầu, nhưng không vào lịch sử/Referer).
+
+## ADR-116 — Review AU R-12: GitHub — user đã gắn GitHub khác thì không đăng nhập; callback đồng thời không thành 500 (2026-10-11)
+
+**Vấn đề:** (a) email GitHub trùng user đã xác minh nhưng user đó đã gắn GitHub KHÁC: `linkGithub` trả 0 mà vẫn đăng nhập. (b) hai callback cùng lúc cho email mới: P2002 trên email (hoặc githubId — trường hợp này còn bị thử slug 3 lần rồi ném lỗi thường) → 500.
+**Chọn:** (a) `linkGithub ≠ 1` → `/login?error=github_account_mismatch`, ghi `github.link_mismatch`, không phiên. (b) `createUserWithFirstProject` ném lại P2002 trên email|githubId; `GithubOAuthService.match` bắt P2002 và ghép lại đúng một lần (lượt kia đã tạo user → nhánh "theo githubId"). Web `/login` hiển thị thông báo theo `?error=`.
+**Đánh đổi:** người dùng muốn đổi sang GitHub khác phải gỡ liên kết cũ trước (unlink cần còn mật khẩu). TA11 (luồng GitHub thật) vẫn làm tay.

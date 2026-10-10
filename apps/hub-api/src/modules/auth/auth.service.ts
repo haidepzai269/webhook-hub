@@ -134,7 +134,8 @@ export class AuthService {
       } catch (e) {
         if ((e as { code?: string })?.code !== 'P2002') throw e;
         // P2002 trên email = đăng ký đồng thời cùng email: trả hình dạng giống hệt nhánh "đã tồn tại".
-        if (String((e as { meta?: { target?: unknown } }).meta?.target ?? '').includes('email')) throw e;
+        // R-12: trùng email HOẶC githubId (callback GitHub đồng thời) -> ném cho người gọi xử lý, không thử slug khác.
+        if (/email|github/i.test(String((e as { meta?: { target?: unknown } }).meta?.target ?? ''))) throw e;
       }
     }
     throw new Error('Không tạo được slug project duy nhất sau 3 lần');

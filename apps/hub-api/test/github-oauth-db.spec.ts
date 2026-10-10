@@ -160,6 +160,29 @@ describeDb('Đăng nhập GitHub (Postgres + fetch giả, AU5)', () => {
     expect(sent.some((m) => m.to === email && /GitHub/.test(m.subject))).toBe(true);
   });
 
+  it('[AR:R-12] (phần a) email trùng user đã xác minh nhưng ĐÃ liên kết GitHub KHÁC -> /login?error=github_account_mismatch, không phiên, không đổi githubId', async () => {
+    const email = `khac-gh-${run}@gh.test`;
+    createdEmails.push(email);
+    const u = await raw.user.create({ data: { email, name: 'Bình', passwordHash: 'x', emailVerifiedAt: new Date(), githubId: '99001' } });
+    const r: any = await roundTrip(email, { id: 99002 });
+    expect(r).toEqual({ redirect: 'http://web.test/login?error=github_account_mismatch' });
+    expect((await raw.user.findUniqueOrThrow({ where: { id: u.id } })).githubId).toBe('99001');
+  });
+
+  it('[AR:R-12] (phần b) hai callback GitHub đồng thời cho cùng email mới (P2002 trên email) -> cả hai đăng nhập, KHÔNG 500, đúng một user', async () => {
+    const email = `dongthoi-${run}@gh.test`;
+    createdEmails.push(email);
+    ghUser = { id: 66001, login: 'octo', name: 'Octo' };
+    ghEmails = [{ email, primary: true, verified: true }];
+    const one = () => {
+      const s = gh.start();
+      return status(gh.callback({ code: 'c', state: new URL(s.redirectUrl).searchParams.get('state')! }, s.cookie.value, ctx));
+    };
+    const rs: any[] = await Promise.all([one(), one(), one()]);
+    expect(rs.map((r) => r.redirect)).toEqual(Array(3).fill('http://web.test/dashboard'));
+    expect(await raw.user.count({ where: { email } })).toBe(1);
+  });
+
   it('operator không đăng nhập bằng GitHub (kể cả email trùng) -> /login?error=operator_github_forbidden', async () => {
     const email = `op-${run}@gh.test`;
     createdEmails.push(email);
