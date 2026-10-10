@@ -6,7 +6,7 @@ function headerValue(req: RawWebhookRequest, name: string): string | undefined {
   const v = req.headers[name] ?? req.headers[name.charAt(0).toUpperCase() + name.slice(1)];
   return Array.isArray(v) ? v[0] : v;
 }
-import { NormalizeContext, amountOf, envelope, fallbackTxnId, str } from './normalize-helpers';
+import { NormalizeContext, amountOf, envelope, fallbackTxnId, receivedTime, str } from './normalize-helpers';
 
 export class SepayAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'sepay';
@@ -51,7 +51,7 @@ export class SepayAdapter implements ProviderAdapter {
   normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
     const body = req.body || {};
     const isOut = body.transferType === 'out';
-    const at = body.transactionDate ? parseProviderTime(body.transactionDate) : new Date().toISOString();
+    const at = body.transactionDate ? parseProviderTime(body.transactionDate) : receivedTime(context);
     // SePay luôn gửi `id`; thiếu thì referenceCode, thiếu nữa thì hash body (không bao giờ null).
     const providerTxnId = str(body.id) ?? str(body.referenceCode) ?? fallbackTxnId(req.rawBody);
 

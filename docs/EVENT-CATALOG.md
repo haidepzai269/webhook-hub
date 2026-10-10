@@ -40,6 +40,7 @@ Body hub gửi tới đích webhook (`apps/hub-worker/src/senders/webhook.sender
 6. **Số tiền:** số nguyên > 0, đơn vị nhỏ nhất ISO 4217 (VND = đồng, USD = cent). `currency` 3 chữ in hoa.
 7. **Thời gian:** ISO 8601 có múi giờ. Chuỗi `YYYY-MM-DD HH:mm:ss` không múi giờ của PayOS/SePay được hiểu
    là giờ Việt Nam (+07:00) — `parseProviderTime`. Unix giây (Stripe) → ISO.
+   Provider không gửi thời gian giao dịch → dùng thời điểm hub **nhận** raw event (`raw_events.received_at`), nên chuẩn hoá lại vẫn ra cùng giá trị.
 8. **`subject`** không chứa khái niệm của khách hàng: `payment:<providerTxnId>`, `repo:<fullName>`.
 9. Event tạo trước S3-2 (kiểu `payment.succeeded`, `bank.transfer.*`, `repo.<event>`) **không** migrate;
    cột `events.normalized` của chúng mặc định `true`. Retention dọn dần.

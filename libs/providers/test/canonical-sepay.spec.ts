@@ -66,3 +66,31 @@ describe('SePay thiếu id + referenceCode', () => {
     expect(validateCanonical(e1.type, e1.data)).toEqual({ ok: true });
   });
 });
+
+/** Review SPEC-3 #4: thiếu thời gian giao dịch -> dùng receivedAt của raw event; renormalize ra cùng giá trị. */
+describe('Thời gian dự phòng ổn định', () => {
+  const RECEIVED = '2026-10-10T03:04:05.000Z';
+  it('SePay/PayOS/Stripe thiếu thời gian -> paidAt = receivedAt (2 lần normalize giống hệt)', () => {
+    const { PayosAdapter, StripeAdapter } = require('../src');
+    const { payosSuccess, stripePiSucceeded } = require('./fixtures');
+    const c = { ...ctx, receivedAt: RECEIVED };
+    const s: any = sepayTx();
+    delete s.transactionDate;
+    const p: any = payosSuccess();
+    delete p.data.transactionDateTime;
+    const st: any = stripePiSucceeded();
+    delete st.created;
+    for (const [adapter, provider, body] of [
+      [new SepayAdapter(), 'sepay', s],
+      [new PayosAdapter(), 'payos', p],
+      [new StripeAdapter(), 'stripe', st],
+    ] as const) {
+      const [e1] = (adapter as any).normalize(req(provider as any, body), c);
+      const [e2] = (adapter as any).normalize(req(provider as any, body), c);
+      expect(e1.data.paidAt).toBe(RECEIVED);
+      expect(e1.occurredAt).toBe(RECEIVED);
+      expect(e1.receivedAt).toBe(RECEIVED);
+      expect(e2.data.paidAt).toBe(e1.data.paidAt);
+    }
+  });
+});

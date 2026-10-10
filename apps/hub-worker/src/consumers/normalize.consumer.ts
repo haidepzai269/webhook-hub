@@ -122,7 +122,14 @@ export class NormalizeConsumer {
           body: rawEvent.body,
           contentType: rawEvent.contentType || undefined,
         },
-        { tenantId, sourceId, correlationId, rawEventId },
+        {
+          tenantId,
+          sourceId,
+          correlationId,
+          rawEventId,
+          // Review SPEC-3 #4: thời gian dự phòng = lúc hub NHẬN, không phải lúc normalize -> renormalize ổn định.
+          receivedAt: rawEvent.receivedAt ? new Date(rawEvent.receivedAt).toISOString() : undefined,
+        },
       );
       // 3b. Kiểu dành riêng phải đúng khuôn — kiểm TRƯỚC transaction: sai thì không có dòng nào.
       assertCanonical(normalizedEvents, provider);

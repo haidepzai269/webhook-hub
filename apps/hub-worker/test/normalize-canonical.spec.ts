@@ -104,4 +104,16 @@ describe('U45 NormalizeConsumer kiểm catalog', () => {
     expect(channel.ack).toHaveBeenCalled();
     expect(tx.event.create.mock.calls.map((c: any) => c[0].data.normalized)).toEqual([true, false]);
   });
+
+  it('review #4: truyền raw_events.received_at vào context normalize (receivedAt ổn định khi renormalize)', async () => {
+    const { prisma, channel, msg } = setup();
+    const at = new Date('2026-10-10T03:04:05.000Z');
+    prisma.forTenant.mockReturnValue({
+      findRawEventById: jest.fn().mockResolvedValue({ id: rawEventId, headers: {}, body: {}, bodyRaw: Buffer.from('{}'), contentType: null, receivedAt: at }),
+    });
+    const normalize = jest.fn().mockReturnValue([]);
+    jest.spyOn(ProviderRegistry, 'get').mockReturnValue({ normalize } as any);
+    await new NormalizeConsumer(prisma).handleMessage(msg, channel);
+    expect(normalize.mock.calls[0][1].receivedAt).toBe('2026-10-10T03:04:05.000Z');
+  });
 });

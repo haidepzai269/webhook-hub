@@ -8,6 +8,16 @@ export interface NormalizeContext {
   sourceId: string;
   correlationId: string;
   rawEventId: string;
+  /**
+   * Review SPEC-3 #4: thời điểm hub NHẬN raw event (`raw_events.received_at`). Dùng cho `receivedAt` và
+   * làm thời gian dự phòng khi provider không gửi thời gian giao dịch — renormalize ra CÙNG giá trị.
+   */
+  receivedAt?: string;
+}
+
+/** Thời gian dự phòng ổn định: thời điểm nhận raw event; chỉ khi không có mới dùng giờ hiện tại. */
+export function receivedTime(ctx: NormalizeContext): string {
+  return ctx.receivedAt ?? new Date().toISOString();
 }
 
 /** Phong bì chung (luật 1 §4.14.1) — adapter chỉ quyết định type/subject/data/occurredAt/normalized. */
@@ -16,7 +26,7 @@ export function envelope(
   ctx: NormalizeContext,
   e: { type: string; subject?: string; data: Record<string, unknown>; occurredAt?: string; normalized: boolean; id?: string },
 ): NormalizedEvent {
-  const now = new Date().toISOString();
+  const now = receivedTime(ctx);
   return {
     id: e.id ?? `evt_${ulid()}`,
     tenantId: ctx.tenantId,

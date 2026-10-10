@@ -1,7 +1,7 @@
 import Stripe from 'stripe';
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, parseProviderTime } from '@hub/common';
-import { NormalizeContext, amountOf, envelope, fallbackTxnId, str } from './normalize-helpers';
+import { NormalizeContext, amountOf, envelope, fallbackTxnId, receivedTime, str } from './normalize-helpers';
 import { bodyHashKey } from '@hub/crypto';
 
 /**
@@ -81,7 +81,7 @@ export class StripeAdapter implements ProviderAdapter {
       ];
     }
 
-    const at = occurredAt ?? new Date().toISOString();
+    const at = occurredAt ?? receivedTime(context);
     const methodType = object.payment_method_types?.[0] ?? object.payment_method_details?.type;
     const providerTxnId = str(object.id) ?? fallbackTxnId(req.rawBody);
     const data: Record<string, unknown> = {

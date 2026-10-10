@@ -33,6 +33,8 @@ export interface ProviderAdapter {
       sourceId: string;
       correlationId: string;
       rawEventId: string;
+      /** `raw_events.received_at` (ISO) — thời gian dự phòng ổn định khi renormalize (review SPEC-3 #4). */
+      receivedAt?: string;
     },
   ): NormalizedEvent[];
 
