@@ -178,6 +178,9 @@ export class ServiceResourcesController {
     if (given !== undefined && (typeof given !== 'string' || given.length < 16 || given.length > 256)) {
       unprocessable({ error: 'validation_failed', field: 'signingSecret', message: 'signingSecret là chuỗi 16–256 ký tự' });
     }
+    // R2-2 (ADR-098): xoay key -> nhận lại endpoint CÙNG url của key cũ ĐÃ REVOKE CÙNG serviceName (không tạo bản thứ hai).
+    const orphan = await this.findAdoptable(tenantId, url, req);
+    if (orphan) return this.adoptEndpoint(tenantId, orphan, url, given, req);
     const signingSecret: string = given ?? generateWhsecSecret();
     const masterKey = getMasterKey();
     const created = await this.withAudit(tenantId, async (repo) => {
@@ -196,6 +199,42 @@ export class ServiceResourcesController {
     const outcome = await this.verifier.challenge(url, signingSecret);
     const updated = await this.recordVerification(tenantId, created.id, outcome, `key:${req.apiKey!.id}`);
     return { ...publicEndpoint(updated ?? created, url), ...(given === undefined ? { signingSecret } : {}) };
+  }
+
+  /**
+   * R2-2 (ADR-098): endpoint "mồ côi" mà key này được NHẬN LẠI: webhook cùng project, cùng url, chủ là một key ĐÃ REVOKE
+   * có CÙNG serviceName với key đang gọi (serviceName do operator đặt = danh tính service). Không bao giờ nhận endpoint
+   * của key còn sống, của service khác, hay của operator (chủ NULL).
+   */
+  private async findAdoptable(tenantId: string, url: string, req: RequestWithPrincipal) {
+    const repo = this.prisma.forTenant(tenantId);
+    const keys = await repo.findApiKeys();
+    const retired = new Set(keys.filter((k: any) => k.revokedAt && k.serviceName === req.apiKey!.serviceName && k.id !== req.apiKey!.id).map((k: any) => k.id));
+    if (retired.size === 0) return null;
+    const rows = await repo.findDestinations({ type: 'webhook', createdByKeyId: { in: [...retired] } });
+    return rows.find((d) => endpointUrl(d.configEncrypted) === url) ?? null;
+  }
+
+  /** Chuyển chủ sang key mới (audit `endpoint.adopted`) rồi chứng minh lại sở hữu: có secret mới -> xoay (ADR-086). */
+  private async adoptEndpoint(tenantId: string, d: any, url: string, given: string | undefined, req: RequestWithPrincipal) {
+    const actor = `key:${req.apiKey!.id}`;
+    await this.withAudit(tenantId, async (repo) => {
+      await repo.updateDestination(d.id, { createdByKeyId: req.apiKey!.id });
+      await repo.createAuditLog({ action: 'endpoint.adopted', entityType: 'destination', entityId: d.id, actor, metadata: { fromKeyId: d.createdByKeyId } });
+    });
+    let secret: string | null = given ?? null;
+    if (!secret) {
+      try {
+        secret = d.signingSecretEncrypted ? aesGcmDecrypt(d.signingSecretEncrypted, getMasterKey()) : null;
+      } catch {
+        secret = null;
+      }
+    }
+    const outcome: VerificationOutcome = secret ? await this.verifier.challenge(url, secret) : { verification: 'FAILED', verificationError: 'no_signing_secret' };
+    // Secret mới chỉ được lưu khi endpoint chứng minh được nó (cùng luật ADR-086); sai thì giữ secret cũ.
+    const rotate = given && outcome.verification === 'VERIFIED' ? aesGcmEncrypt(given, getMasterKey()) : undefined;
+    const updated = await this.recordVerification(tenantId, d.id, outcome, actor, rotate);
+    return { ...publicEndpoint(updated ?? d, url), adopted: true };
   }
 
   /** S6: chạy lại challenge (vd sau khi sửa endpoint). Endpoint không thuộc project -> 404 giống hệt. */

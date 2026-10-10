@@ -390,3 +390,10 @@ Deploy lần đầu **luôn** mất một ngày. Mất nó ở Ngày 3 khi còn 
 | **Tổng** | **~$7/tháng** trong 1–2 tháng cần online |
 
 > **Đã cân nhắc và loại:** một VPS ~$5/tháng chạy nguyên `docker-compose` sẽ cho RabbitMQ không quota, quyền kill container, và load test thoải mái — tức là gộp được hai môi trường làm một. Đổi lại mất trải nghiệm PaaS/serverless và phần "triển khai trên nền tảng hiện đại" trong báo cáo. **Đã chốt đi theo Render + Vercel + Neon + Upstash.**
+
+## Xoay API key của một service (R2-2, ADR-098)
+
+1. Console tạo key mới với **cùng `serviceName`** (ví dụ `shop`) và cùng scope. `serviceName` là danh tính của service: không đặt trùng cho hai service khác nhau.
+2. Cập nhật `HUB_URL` của service sang key mới, khởi động lại service.
+3. Revoke key cũ (`DELETE /api/v1/projects/:projectId/keys/:keyId`).
+4. Lần `ensure` sau, endpoint cùng url của key cũ (đã revoke, cùng `serviceName`) được **nhận lại** (audit `endpoint.adopted`), không tạo endpoint thứ hai. Endpoint khác url của key cũ: operator tắt subscription ở console.

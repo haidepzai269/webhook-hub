@@ -31,6 +31,12 @@ describe('Service API — endpoint + subscription (S5)', () => {
     ];
     const subs: any[] = [];
     const audits: any[] = [];
+    // R2-2: key cũ của service (đã revoke) + key còn sống của service khác
+    const apiKeys: any[] = [
+      { id: 'key-old', tenantId: PA, serviceName: 'cafe-be', revokedAt: new Date(0) },
+      { id: 'key-live-other', tenantId: PA, serviceName: 'cafe-be', revokedAt: null },
+      { id: 'key-shop-old', tenantId: PA, serviceName: 'shop', revokedAt: new Date(0) },
+    ];
     const match = (row: any, where: any) =>
       Object.entries(where).every(([k, v]: [string, any]) =>
         v && typeof v === 'object' && 'in' in v ? v.in.includes(row[k]) : row[k] === v,
@@ -73,6 +79,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
         ),
       },
       auditLog: { create: jest.fn(async ({ data }: any) => audits.push(data)) },
+      apiKey: { findMany: jest.fn(async ({ where }: any) => apiKeys.filter((k) => k.tenantId === where.tenantId)) },
     };
     const prisma: any = {
       forTenant: (tenantId: string, c?: any) => new TenantScopedRepository(c ?? client, tenantId),
@@ -81,7 +88,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
     const req = (tenantId: string, readTypes: string[] = [], keyId = 'key-1') => ({ tenantId, apiKey: { id: keyId, tenantId, serviceName: 'cafe-be', readTypes } }) as any;
     const verifier = { challenge: jest.fn(async (): Promise<any> => verdict.next) };
     const verdict: { next: any } = { next: { verification: 'VERIFIED', verificationError: null } };
-    return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, subs, audits, req, verifier, verdict };
+    return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, subs, audits, req, verifier, verdict, apiKeys };
   }
 
   async function status(p: Promise<unknown>): Promise<{ status: number; body: any }> {
@@ -263,4 +270,34 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(await controller.listSubscriptions(other)).toEqual([]);
     expect((await controller.listSubscriptions(req(PA))).map((x: any) => x.id)).toEqual([subs[0].id]);
   });
+
+  it('R2-2: xoay key — endpoint cùng url của key CŨ (đã revoke, CÙNG serviceName) được key mới nhận lại, không tạo endpoint thứ hai', async () => {
+    const { controller, req, destinations, audits, verifier } = build();
+    const url = 'https://a.example/old';
+    const enc = (o: any) => aesGcmEncrypt(JSON.stringify(o), getMasterKey());
+    destinations.push({ id: '99999999-9999-4999-8999-999999999999', tenantId: PA, name: 'old', type: 'webhook', configEncrypted: enc({ url }), signingSecretEncrypted: aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey()), verification: 'VERIFIED', createdByKeyId: 'key-old' });
+    const before = destinations.length;
+    const r: any = await controller.createEndpoint(req(PA), { name: 'cafe', url, signingSecret: 'whsec_bmV3LXNlY3JldC1mb3ItbXMtcjQtdGVzdA==' });
+    expect(r).toMatchObject({ id: '99999999-9999-4999-8999-999999999999', adopted: true, verification: 'VERIFIED' });
+    expect(destinations).toHaveLength(before);
+    expect(destinations.find((d) => d.id === r.id)!.createdByKeyId).toBe('key-1');
+    expect(verifier.challenge).toHaveBeenLastCalledWith(url, 'whsec_bmV3LXNlY3JldC1mb3ItbXMtcjQtdGVzdA==');
+    expect(audits.map((a) => a.action)).toContain('endpoint.adopted');
+  });
+
+  it('R2-2: KHÔNG nhận endpoint của key còn sống, của service khác (serviceName khác) hay của operator (NULL) -> tạo mới', async () => {
+    const { controller, req, destinations } = build();
+    const enc = (o: any) => aesGcmEncrypt(JSON.stringify(o), getMasterKey());
+    const mk = (id: string, url: string, owner: string | null) =>
+      destinations.push({ id, tenantId: PA, name: 'x', type: 'webhook', configEncrypted: enc({ url }), signingSecretEncrypted: null, verification: 'VERIFIED', createdByKeyId: owner });
+    mk('aaaaaaaa-0000-4000-8000-000000000001', 'https://a.example/live', 'key-live-other');
+    mk('aaaaaaaa-0000-4000-8000-000000000002', 'https://a.example/shop', 'key-shop-old');
+    mk('aaaaaaaa-0000-4000-8000-000000000003', 'https://a.example/op', null);
+    for (const url of ['https://a.example/live', 'https://a.example/shop', 'https://a.example/op']) {
+      const r: any = await controller.createEndpoint(req(PA), { name: 'n', url });
+      expect(r.adopted).toBeUndefined();
+      expect(r.id).not.toMatch(/^aaaaaaaa/);
+    }
+  });
 });
+
