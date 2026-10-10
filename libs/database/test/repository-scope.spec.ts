@@ -47,4 +47,16 @@ describe('TenantScopedRepository — scope tenant ở quan hệ (S1-5, S1-1)', (
     await new TenantScopedRepository(client, T).findRawEventById('r1');
     expect(client.rawEvent.findFirst.mock.calls[0][0].where).toEqual({ id: 'r1', source: { tenantId: T } });
   });
+
+  it('R2-4: assignPollSeq bỏ qua transaction ghi khi không còn dòng poll_seq IS NULL (một SELECT rẻ trên index một phần)', async () => {
+    const client: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ pending: false }]),
+      $executeRaw: jest.fn(),
+      $transaction: jest.fn(),
+    };
+    expect(await new TenantScopedRepository(client, T).assignPollSeq()).toBe(0);
+    expect(client.$transaction).not.toHaveBeenCalled();
+    expect(client.$executeRaw).not.toHaveBeenCalled();
+  });
 });
+

@@ -255,6 +255,11 @@ export class TenantScopedRepository {
 
   /** R-3: gán `poll_seq` cho event đã commit của tenant (≤ 1000/lần), nối tiếp nhau nhờ advisory lock theo tenant. */
   async assignPollSeq(batch = 1000): Promise<number> {
+    // R2-4: đa số lần poll (nhất là mỗi giây của long-poll) không có dòng mới -> một SELECT rẻ trên index một phần
+    // (poll_seq IS NULL), không mở transaction ghi + advisory lock.
+    const [{ pending }] = await this.prisma.$queryRaw<{ pending: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid AND poll_seq IS NULL) AS pending`;
+    if (!pending) return 0;
     const lock = Prisma.sql`SELECT pg_advisory_xact_lock(4242, hashtext(${this.tenantId}))::text AS locked`;
     // nextval trong PHÉP CHIẾU trên subquery đã sắp theo seq -> trong cùng một lô, poll_seq giữ thứ tự seq.
     const assign = Prisma.sql`
