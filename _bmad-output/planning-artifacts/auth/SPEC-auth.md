@@ -522,39 +522,39 @@ Tổng khoảng **25 giờ (3–3,5 ngày)**. Con số "1–1,5 ngày" ở ADR-0
 
 ### 10.1 Unit (UA)
 
-| # | Mục | Kỳ vọng |
-|---|---|---|
-| UA1 | băm mật khẩu | hash bcrypt cost 12; `compare` đúng/sai |
-| UA2 | mật khẩu 73 byte (tiếng Việt có dấu) | 422 `password_too_long` |
-| UA3 | mật khẩu nằm trong danh sách phổ biến / chứa phần trước `@` của email | 422 `password_weak` |
-| UA4 | login email không tồn tại | 401 cùng body với sai mật khẩu; `bcrypt.compare` vẫn được gọi (spy) |
-| UA5 | register email đã tồn tại | 201 cùng hình dạng body; mail "có người thử" được gửi; không tạo user |
-| UA6 | access JWT `alg:none` / sai `aud` / sai `iss` / hết hạn | 401 |
-| UA7 | refresh hợp lệ | dòng cũ `rotatedAt`, dòng mới cùng `familyId`, `absoluteExpiresAt` giữ nguyên |
-| UA8 | refresh dùng lại sau 6 giây | cả family bị thu hồi, `auth_audit` `session.reuse_detected` |
-| UA9 | refresh dùng lại sau 2 giây | 401 `refresh_race`, family **không** bị thu hồi |
-| UA10 | session đã thu hồi + access JWT còn hạn | 401 (SessionGuard kiểm DB) |
-| UA11 | CSRF thiếu / sai chữ ký / ký cho sid khác | 403 `csrf_failed` |
-| UA12 | rate limit email: 5 lần sai | lần 6 → 429, áp dụng cả cho email không tồn tại |
-| UA13 | Redis ném lỗi | rate limit chuyển sang bộ nhớ, request vẫn chạy |
-| UA14 | email token dùng 2 lần song song | đúng một lần thành công |
-| UA15 | reset mật khẩu | mọi session bị thu hồi |
-| UA16 | `ProjectAccessGuard`: không phải thành viên vs project không tồn tại | cùng 404, cùng body |
-| UA17 | `ROLE_SCOPES` | viewer gọi route `manage:endpoints` → 403 `missing_scope` |
-| UA18 | `last_owner` | xoá / hạ quyền owner cuối → 409 |
-| UA19 | tạo API key xin `manage:keys` | 422 `scope_not_grantable` |
-| UA20 | quét metadata controller | mọi route `/api/v1/*` có `@RequireScope` |
-| UA21 | operator vào project không là thành viên | được, và ghi `operator.access` |
-| UA22 | logger | chuỗi chứa password, refresh token, `hk_live_` bị che |
-| UA23 | GitHub callback `state` sai | 400 `oauth_state_mismatch` |
-| UA24 | GitHub email trùng user **chưa** xác minh | không liên kết, redirect `email_exists_unverified` |
-| UA25 | GitHub email trùng user đã xác minh | liên kết `githubId`, ghi audit, gửi mail |
-| UA26 | invite: đang đăng nhập bằng email khác | 403 `invite_email_mismatch` |
-| UA27 | invite accept bởi user chưa xác minh, email trùng | membership tạo + `emailVerifiedAt` được set |
-| UA28 | user chưa xác minh tạo key `hk_live_` / mời người | 403 `email_not_verified` |
-| UA29 | socket ticket `aud` sai / hết hạn / session đã thu hồi | kết nối bị từ chối |
-| UA30 | quét mã nguồn | `app.rls_system` chỉ xuất hiện trong `prisma.service.ts` |
-| UA31 | kiểm khởi động với role superuser | `process.exit(1)` (mock) |
+| # | Mục | Kỳ vọng | Story |
+|---|---|---|---|
+| UA1 | băm mật khẩu | hash bcrypt cost 12; `compare` đúng/sai | AU1 |
+| UA2 | mật khẩu 73 byte (tiếng Việt có dấu) | 422 `password_too_long` | AU1 |
+| UA3 | mật khẩu nằm trong danh sách phổ biến / chứa phần trước `@` của email | 422 `password_weak` | AU1 |
+| UA4 | login email không tồn tại | 401 cùng body với sai mật khẩu; `bcrypt.compare` vẫn được gọi (spy) | AU1 |
+| UA5 | register email đã tồn tại | 201 cùng hình dạng body; mail "có người thử" được gửi; không tạo user | AU2 |
+| UA6 | access JWT `alg:none` / sai `aud` / sai `iss` / hết hạn | 401 | AU1 |
+| UA7 | refresh hợp lệ | dòng cũ `rotatedAt`, dòng mới cùng `familyId`, `absoluteExpiresAt` giữ nguyên | AU1 |
+| UA8 | refresh dùng lại sau 6 giây | cả family bị thu hồi, `auth_audit` `session.reuse_detected` | AU1 |
+| UA9 | refresh dùng lại sau 2 giây | 401 `refresh_race`, family **không** bị thu hồi | AU1 |
+| UA10 | session đã thu hồi + access JWT còn hạn | 401 (SessionGuard kiểm DB) | AU1 |
+| UA11 | CSRF thiếu / sai chữ ký / ký cho sid khác | 403 `csrf_failed` | AU1 |
+| UA12 | rate limit email: 5 lần sai | lần 6 → 429, áp dụng cả cho email không tồn tại | AU1 |
+| UA13 | Redis ném lỗi | rate limit chuyển sang bộ nhớ, request vẫn chạy | AU1 |
+| UA14 | email token dùng 2 lần song song | đúng một lần thành công | AU2 |
+| UA15 | reset mật khẩu | mọi session bị thu hồi | AU2 |
+| UA16 | `ProjectAccessGuard`: không phải thành viên vs project không tồn tại | cùng 404, cùng body | AU3 |
+| UA17 | `ROLE_SCOPES` | viewer gọi route `manage:endpoints` → 403 `missing_scope` | AU3 |
+| UA18 | `last_owner` | xoá / hạ quyền owner cuối → 409 | AU4 |
+| UA19 | tạo API key xin `manage:keys` | 422 `scope_not_grantable` | AU4 |
+| UA20 | quét metadata controller | mọi route `/api/v1/*` có `@RequireScope` | AU3 |
+| UA21 | operator vào project không là thành viên | được, và ghi `operator.access` | AU3 |
+| UA22 | logger | chuỗi chứa password, refresh token, `hk_live_` bị che | AU1 |
+| UA23 | GitHub callback `state` sai | 400 `oauth_state_mismatch` | AU5 |
+| UA24 | GitHub email trùng user **chưa** xác minh | không liên kết, redirect `email_exists_unverified` | AU5 |
+| UA25 | GitHub email trùng user đã xác minh | liên kết `githubId`, ghi audit, gửi mail | AU5 |
+| UA26 | invite: đang đăng nhập bằng email khác | 403 `invite_email_mismatch` | AU4 |
+| UA27 | invite accept bởi user chưa xác minh, email trùng | membership tạo + `emailVerifiedAt` được set | AU4 |
+| UA28 | user chưa xác minh tạo key `hk_live_` / mời người | 403 `email_not_verified` | AU3 |
+| UA29 | socket ticket `aud` sai / hết hạn / session đã thu hồi | kết nối bị từ chối | AU3 |
+| UA30 | quét mã nguồn | `app.rls_system` chỉ xuất hiện trong `prisma.service.ts` | AU6 |
+| UA31 | kiểm khởi động với role superuser | `process.exit(1)` (mock) | AU6 |
 
 ### 10.2 E2E (TA) — chạy ở LOCAL, `MAIL_DRIVER=log`
 
@@ -587,6 +587,12 @@ csrf() { grep hub_csrf $J | awk '{print $7}'; }
 - **TA13 — Khởi động sai role.** Đặt `DATABASE_URL` thành user superuser → hub-api thoát với thông báo rõ ràng.
 - **TA14 — Trình duyệt thật.** Chrome và Firefox ở `http://localhost:3000`: đăng ký, F5 vẫn đăng nhập (refresh chạy), DevTools → `document.cookie` **không** thấy `__Host-hub_at` / `__Host-hub_rt`.
 - **TA15 — Operator.** Đăng nhập operator, mở project của A → được; `audit_logs` của project A có `operator.access`.
+
+**Mã TA → story** (cho `verify:map` / `done.groups`, thêm 10/10; không đổi nội dung kịch bản):
+
+| Mã | TA1 | TA2 | TA3 | TA4 | TA5 | TA6 | TA7 | TA8 | TA9 | TA10 | TA11 | TA12 | TA13 | TA14 | TA15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Story | AU1 | AU2 | AU1 | AU1 | AU1 | AU1 | AU1 | AU3 | AU4 | AU2 | AU5 | AU6 | AU6 | AU3 | AU3 |
 
 ### 10.3 Màn demo cho hội đồng (thêm vào đầu demo hiện có)
 
