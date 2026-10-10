@@ -61,6 +61,11 @@ const XS = '\\bx(it|describe|test)\\(';
 const NEW_PRISMA = 'new ' + 'PrismaClient\\(';
 const NO_VERIFY = '--no-' + 'verify|--passWith' + 'NoTests';
 const RLS_SYSTEM = 'app\\.rls' + '_system';
+/** R-7: migration bật RLS; migration sau mốc này chạy dưới FORCE RLS khi owner không phải superuser (Neon). */
+const RLS_MIGRATION_TS = '20261011110000';
+/** Bảng có RLS (migration 20261011110000_rls_hub_app). Thêm bảng RLS mới -> thêm vào đây. */
+const RLS_TABLES = ['sources', 'events', 'destinations', 'subscriptions', 'deliveries', 'audit_logs', 'source_secrets', 'raw_events', 'delivery_attempts'];
+const DATA_DML_RLS = new RegExp(`\\b(UPDATE|INSERT\\s+INTO|DELETE\\s+FROM)\\s+("?hub"?\\s*\\.\\s*)?"?(${RLS_TABLES.join('|')})"?(\\s|;|\\(|$)`, 'i');
 const OWNER_URL = 'VERIFY_DB_' + 'OWNER_URL|MAIL_DRIVER.*capt' + 'ure';
 
 /**
@@ -124,6 +129,21 @@ export const GATES: Gate[] = [
     source: 'SPEC-auth §5.12',
     include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts',
     check: grepLines(new RegExp(RLS_SYSTEM)),
+  },
+  {
+    id: 'data-migration-rls',
+    rule:
+      "Migration DỮ LIỆU (UPDATE/INSERT/DELETE trên bảng có RLS) tạo sau 20261011110000_rls_hub_app phải tự `SET LOCAL app.rls" +
+      "_system = 'on';` ở đầu file — Neon: owner không phải superuser, FORCE RLS làm câu lệnh ảnh hưởng 0 dòng mà KHÔNG báo lỗi",
+    source: 'REVIEW-AUTH R-7, ADR-111, DEPLOYMENT §9',
+    include: (f) => {
+      const m = /^libs\/database\/prisma\/migrations\/(\d{14})_[^/]+\/migration\.sql$/.exec(f);
+      return !!m && m[1] > RLS_MIGRATION_TS;
+    },
+    check: (text) => {
+      if (new RegExp(`set_config\\(\\s*'${RLS_SYSTEM}'\\s*,\\s*'on'|SET\\s+LOCAL\\s+${RLS_SYSTEM}\\s*(=|TO)\\s*'?on`, 'i').test(text)) return [];
+      return grepLines(DATA_DML_RLS, { transform: (ln) => ln.replace(/--.*$/, '') })(text);
+    },
   },
   {
     id: 'repo-subclass',

@@ -76,6 +76,25 @@ const r = new Base(p, t);`,
     expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/y/a.ts:2', 'apps/hub-api/src/modules/y/b.ts:3']);
   });
 
+  it('[AR:R-7] migration dữ liệu sau RLS: UPDATE/INSERT/DELETE bảng có RLS mà thiếu cờ hệ thống -> đỏ; có cờ, hoặc migration trước RLS, hoặc chỉ DDL -> xanh', () => {
+    const M = 'libs/database/prisma/migrations/';
+    const FLAG = "SET LOCAL app.rls" + "_system = 'on';";
+    const f = files({
+      [M + '20261020000000_backfill_x/migration.sql']: ['-- backfill', 'UPDATE "hub"."deliveries" SET x = 1;', 'INSERT INTO hub.events (id) VALUES (1);'].join('\n'),
+      [M + '20261020000001_backfill_ok/migration.sql']: [FLAG, 'UPDATE "hub"."deliveries" SET x = 1;'].join('\n'),
+      [M + '20261020000002_ddl_only/migration.sql']: ['ALTER TABLE "hub"."deliveries" ADD COLUMN y int;', 'CREATE INDEX i ON hub.events (id);'].join('\n'),
+      [M + '20261020000003_non_rls/migration.sql']: ['UPDATE hub.outbox SET a = 1;', 'DELETE FROM "hub"."users" WHERE false;'].join('\n'),
+      [M + '20261011060000_endpoint_owner_from_audit/migration.sql']: 'UPDATE hub.destinations SET a = 1;',
+      [M + '20261020000004_cte/migration.sql']: 'WITH d AS (DELETE FROM hub.raw_events RETURNING 1) SELECT 1;',
+    });
+    const r = runGates([byId('data-migration-rls')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file.slice(M.length)}:${v.line}`)).toEqual([
+      '20261020000000_backfill_x/migration.sql:2',
+      '20261020000000_backfill_x/migration.sql:3',
+      '20261020000004_cte/migration.sql:1',
+    ]);
+  });
+
   it('Shop ≤ 300 dòng', () => {
     const f = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(301) });
     expect(runGates([byId('shop-size')], f.list, f.read)[0].violations).toHaveLength(1);

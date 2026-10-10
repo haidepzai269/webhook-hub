@@ -313,6 +313,13 @@ DIRECT_URL=              # Neon direct, role OWNER — chỉ cho prisma migrate 
                          # rồi chạy `prisma migrate deploy` (DIRECT_URL): migration cấp quyền schema hub + bật RLS.
                          # hub-api/hub-worker THOÁT nếu DATABASE_URL là role superuser/BYPASSRLS (vd neondb_owner).
                          # Seed trên deployed: `docker-entrypoint.sh seed` với DIRECT_URL (seed tự mở phiên hệ thống).
+                         # MIGRATION DỮ LIỆU (R-7, ADR-111): trên Neon owner KHÔNG phải superuser nên FORCE RLS chặn cả
+                         # owner — UPDATE/INSERT/DELETE trên bảng có RLS ảnh hưởng 0 DÒNG mà KHÔNG báo lỗi (local thì
+                         # chạy đúng vì hub_user là superuser → lệch môi trường im lặng). Mọi migration dữ liệu tạo sau
+                         # 20261011110000_rls_hub_app phải mở đầu bằng:
+                         #   SET LOCAL app.rls_system = 'on';   -- Prisma gửi cả file một lần = một transaction ngầm
+                         # Gate `data-migration-rls` (npm run verify:gates) đỏ nếu thiếu. Đã thử bằng `prisma migrate
+                         # deploy` với owner không superuser: thiếu dòng này → 0 dòng; có → đủ dòng.
 REDIS_URL=               # Upstash rediss://
 AMQP_URL=                # CloudAMQP amqps://
 

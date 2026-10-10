@@ -5,8 +5,8 @@ Luật: RED→GREEN→GATED→PROBED, mỗi mục một commit có `Verify:`, `n
 | Mục | Trạng thái | Commit | Ghi chú |
 |---|---|---|---|
 | R-1 | xong | 275abbd | ADR-109; RED: 18 song song → 18×401 (unit), review: 17×401 |
-| R-2 | xong | (commit R-2) | |
-| R-7 | chưa | | |
+| R-2 | xong | d237654 | |
+| R-7 | xong | (commit R-7) | gate data-migration-rls, ADR-111 | |
 | R-3 | chưa | | |
 | R-4 | chưa | | |
 | R-5 | chưa | | |
