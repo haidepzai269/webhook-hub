@@ -5,6 +5,7 @@ import {
   FlowNode,
   FlowTopology,
   healthOf,
+  providerLabel,
   SourceFlowNode,
   SubscriptionFlowNode,
   TopologyWindow,
@@ -12,11 +13,27 @@ import {
 
 export interface TopologyConfig {
   sources: { id: string; name: string; provider: string; sourceKey: string; isActive: boolean }[];
-  subscriptions: { id: string; name: string; eventTypes: string[]; isActive: boolean; destinationId: string }[];
-  destinations: { id: string; name: string; type: string; circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN'; rateLimitRps: number }[];
+  subscriptions: { id: string; name: string; eventTypes: string[]; isActive: boolean; destinationId: string; sourceIds?: string[] }[];
+  destinations: {
+    id: string;
+    name: string;
+    type: string;
+    circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    rateLimitRps: number;
+    verification?: 'PENDING' | 'VERIFIED' | 'FAILED';
+    verificationError?: string | null;
+  }[];
 }
 
-const round = (n: number | null | undefined) => (n === null || n === undefined || Number.isNaN(Number(n)) ? null : Math.round(Number(n)));
+/** Nhãn gọn cho nhãn cạnh "chỉ từ …": tên provider nếu project chỉ có một source của provider đó, không thì tên source. */
+function shortSourceLabel(sources: TopologyConfig['sources'], id: string): string {
+  const s = sources.find((x) => x.id === id);
+  if (!s) return id.slice(0, 8);
+  const sameProvider = sources.filter((x) => x.provider === s.provider).length;
+  return sameProvider === 1 ? providerLabel(s.provider) : s.name;
+}
+
+const round =(n: number | null | undefined) => (n === null || n === undefined || Number.isNaN(Number(n)) ? null : Math.round(Number(n)));
 const pct = (ok: number, total: number) => (total > 0 ? Math.round((ok / total) * 1000) / 10 : null);
 
 /**
@@ -121,6 +138,9 @@ export function assembleTopology(
       label: sub.name,
       destinationId: sub.destinationId,
       eventTypes: sub.eventTypes,
+      // §6A: subscription chỉ nhận từ các source này (rỗng = mọi source). UI ghi nhãn trên cạnh.
+      sourceIds: sub.sourceIds ?? [],
+      sourceLabels: (sub.sourceIds ?? []).map((id) => shortSourceLabel(cfg.sources, id)),
       active: sub.isActive,
       deliveries: c.total,
       health: sub.isActive ? healthOf({ events: c.total, failed: c.dead, retrying: c.retrying }) : 'idle',
@@ -151,7 +171,10 @@ export function assembleTopology(
       attemptP95Ms: round(att?.p95),
       retrying: bl.retrying,
       dead: bl.dead,
+      verification: d.verification ?? 'VERIFIED',
+      verificationError: d.verificationError ?? null,
       health: healthOf({
+        verification: d.verification,
         events: agg.total,
         successRate,
         p95Ms: round(att?.p95),

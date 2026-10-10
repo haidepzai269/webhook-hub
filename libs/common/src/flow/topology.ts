@@ -63,6 +63,8 @@ export interface SubscriptionFlowNode extends FlowNodeBase {
   eventTypes: string[];
   active: boolean;
   deliveries: number;
+  /** Tên các source trong `sourceIds` (để ghi nhãn "chỉ từ …"). */
+  sourceLabels?: string[];
 }
 
 export interface DestinationFlowNode extends FlowNodeBase {
@@ -78,6 +80,8 @@ export interface DestinationFlowNode extends FlowNodeBase {
   /** Hiện tại (không theo cửa sổ): đang RETRYING / DEAD trong DLQ. */
   retrying: number;
   dead: number;
+  /** Cột `destinations.verification_error` (đa service) — lý do challenge thất bại. */
+  verificationError?: string | null;
 }
 
 export type FlowNode = SourceFlowNode | GateFlowNode | NormalizeFlowNode | SubscriptionFlowNode | DestinationFlowNode;

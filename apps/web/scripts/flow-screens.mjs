@@ -16,7 +16,7 @@ mkdirSync(outDir, { recursive: true });
 const login = await fetch(`${HUB}/auth/login`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ username: "admin", password: "admin123" }),
+  body: JSON.stringify({ username: "admin", password: process.env.ADMIN_PASSWORD ?? "admin123" }),
 }).then((r) => r.json());
 const token = login.accessToken;
 if (!token) throw new Error("Không đăng nhập được hub-api");
@@ -26,6 +26,9 @@ for (const theme of themes) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: theme });
   await ctx.addCookies([{ name: "theme_mode", value: theme, url: WEB }]);
   await ctx.addInitScript((t) => localStorage.setItem("hub_jwt_token", t), token);
+  // F7: project đang xem (V2/V3/V1 gửi ?projectId=). Trống = project của JWT (default).
+  const projectId = process.env.PROJECT_ID ?? "";
+  await ctx.addInitScript((p) => (p ? localStorage.setItem("flow:projectId", p) : localStorage.removeItem("flow:projectId")), projectId);
   const page = await ctx.newPage();
   // Ẩn nút chỉ báo của next dev (chỉ có ở dev, không thuộc giao diện).
   await ctx.addInitScript(() => {
@@ -36,7 +39,7 @@ for (const theme of themes) {
   const shot = async (name, url, opts = {}) => {
     await page.goto(`${WEB}${url}`, { waitUntil: "networkidle" });
     await page.waitForTimeout(opts.wait ?? 2500);
-    const file = join(outDir, `${name}-${theme}.png`);
+    const file = join(outDir, `${name}${process.env.NAME_SUFFIX ?? ""}-${theme}.png`);
     await page.screenshot({ path: file, fullPage: Boolean(opts.full) });
     console.log("đã chụp", file);
   };

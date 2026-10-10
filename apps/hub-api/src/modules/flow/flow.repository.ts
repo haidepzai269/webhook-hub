@@ -50,7 +50,9 @@ export class FlowScopedRepository extends TenantScopedRepository {
                 name: true,
                 eventTypes: true,
                 // KHÔNG đọc configEncrypted / signingSecretEncrypted (SPEC §3: secret không bao giờ ra UI).
-                destination: { select: { id: true, name: true, type: true, circuitState: true, rateLimitRps: true } },
+                destination: {
+                  select: { id: true, name: true, type: true, circuitState: true, rateLimitRps: true, verification: true, verificationError: true },
+                },
               },
             },
           },
@@ -246,12 +248,12 @@ export class FlowScopedRepository extends TenantScopedRepository {
       }),
       this.db.subscription.findMany({
         where: { tenantId: this.tenantId },
-        select: { id: true, name: true, eventTypes: true, isActive: true, destinationId: true },
+        select: { id: true, name: true, eventTypes: true, isActive: true, destinationId: true, sourceIds: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.db.destination.findMany({
         where: { tenantId: this.tenantId },
-        select: { id: true, name: true, type: true, circuitState: true, rateLimitRps: true },
+        select: { id: true, name: true, type: true, circuitState: true, rateLimitRps: true, verification: true, verificationError: true },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -266,7 +268,8 @@ export class FlowScopedRepository extends TenantScopedRepository {
   async findSubscriptionsMatching(eventType: string) {
     return this.db.subscription.findMany({
       where: { tenantId: this.tenantId, eventTypes: { hasSome: eventTypeCandidates(eventType) } },
-      select: { id: true, name: true, eventTypes: true, isActive: true },
+      // F7 (§6A): source_ids + destinations.verification của đợt đa service.
+      select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, destination: { select: { verification: true } } },
     });
   }
 }

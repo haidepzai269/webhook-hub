@@ -66,6 +66,7 @@ export function toDeliveryInputs(event: EventRow): FlowDeliveryInput[] {
       type: d.subscription.destination.type,
       circuitState: d.subscription.destination.circuitState,
       rateLimitRps: d.subscription.destination.rateLimitRps,
+      verification: d.subscription.destination.verification,
     },
     attempts: d.attempts.map((a) => ({
       attemptNo: a.attemptNo,
@@ -208,9 +209,10 @@ export class FlowService {
 
     const candidates = event ? await repo.findSubscriptionsMatching(event.type) : [];
     const skipped = classifySkippedSubscriptions(
-      candidates,
+      candidates.map((c) => ({ ...c, destinationVerification: c.destination?.verification ?? null })),
       (event?.deliveries ?? []).map((d) => d.subscriptionId),
-      raw?.sourceId ?? null,
+      // events.source_id (S5) — có cả với event không còn raw_event.
+      raw?.sourceId ?? event?.sourceId ?? null,
     );
     const input: EventFlowInput = {
       raw: raw

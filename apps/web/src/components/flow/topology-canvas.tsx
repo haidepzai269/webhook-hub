@@ -22,7 +22,7 @@ import {
 } from "@xyflow/react";
 import type { DestinationFlowNode, FlowEdge, FlowNode, FlowTopology, Health, SourceFlowNode, SubscriptionFlowNode, TopologyWindow } from "@hub/flow";
 import { HEALTH_LABELS } from "@hub/flow";
-import { Gauge, Zap, ZapOff } from "lucide-react";
+import { Gauge, ShieldAlert, Zap, ZapOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { subscribeHubSocket } from "@/lib/hub/socket";
@@ -64,8 +64,11 @@ function subtitleOf(node: FlowNode): string {
       return "verify · COMMIT · ACK";
     case "normalize":
       return "q.normalize → events";
-    case "subscription":
-      return (node as SubscriptionFlowNode).eventTypes.join(", ");
+    case "subscription": {
+      const sub = node as SubscriptionFlowNode;
+      const from = sub.sourceLabels?.length ? ` · chỉ từ ${sub.sourceLabels.join(", ")}` : "";
+      return sub.eventTypes.join(", ") + from;
+    }
     case "destination":
       return (node as DestinationFlowNode).type;
   }
@@ -134,10 +137,20 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           </>
         )}
       </div>
-      {((dst && (dst.circuitState !== "CLOSED" || dst.throttleRps > 0 || dst.retrying > 0 || dst.dead > 0)) || (src && src.rejected > 0) || (sub && !sub.active)) && (
+      {((dst && ((dst.verification && dst.verification !== "VERIFIED") || dst.circuitState !== "CLOSED" || dst.throttleRps > 0 || dst.retrying > 0 || dst.dead > 0)) || (src && src.rejected > 0) || (sub && !sub.active)) && (
         <div className="mt-2 flex flex-wrap items-center gap-1">
           {dst && (
             <>
+              {dst.verification && dst.verification !== "VERIFIED" && (
+                <span
+                  className="flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]"
+                  style={toneStyle(dst.verification === "FAILED" ? "crashed" : "warning")}
+                  title={dst.verificationError ?? undefined}
+                >
+                  <ShieldAlert {...ICON_SM} aria-hidden />
+                  {dst.verification === "FAILED" ? "XÁC MINH LỖI" : "CHƯA XÁC MINH"}
+                </span>
+              )}
               {dst.circuitState !== "CLOSED" && (
                 <span className="flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]" style={toneStyle(dst.circuitState === "OPEN" ? "crashed" : "warning")}>
                   {dst.circuitState === "OPEN" ? <ZapOff {...ICON_SM} aria-hidden /> : <Zap {...ICON_SM} aria-hidden />}
@@ -231,7 +244,11 @@ const TopologyEdge = memo(function TopologyEdge(props: EdgeProps<Edge<EdgeData>>
             className="flow-edge-label nodrag nopan pointer-events-none absolute rounded-lg px-2 py-1 text-center font-semibold text-[12px] leading-[1.35] tabular-nums shadow-sm"
             style={{ ...toneStyle(tone), transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
           >
-            {caption && <div className="max-w-36 truncate font-mono font-medium text-[11px] opacity-90">{caption}</div>}
+            {caption?.split(CAPTION_SEP).map((line, i) => (
+              <div key={line} className={`max-w-48 truncate font-medium text-[11px] opacity-90 ${i === 0 ? "font-mono" : ""}`} title={line}>
+                {line}
+              </div>
+            ))}
             {live ? (
               <div>
                 {fmtCount(edge.count)} ev/{WINDOW_SHORT[window]}
@@ -256,6 +273,7 @@ const edgeTypes = { flow: TopologyEdge };
  * Gộp cột Subscription vào NHÃN cạnh Normalize → Đích (mặc định): bản đồ còn 4 cột nên thẻ đủ to để đọc
  * (giống ảnh mẫu). Cạnh gộp mang tổng số + health xấu nhất của các cạnh subscription → đích (server tính).
  */
+const CAPTION_SEP = "|";
 const HEALTH_RANK: Record<Health, number> = { crashed: 3, warning: 2, healthy: 1, idle: 0 };
 function foldSubscriptions(topo: FlowTopology): { topo: FlowTopology; captions: Record<string, string> } {
   const subs = topo.nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription");
@@ -279,7 +297,11 @@ function foldSubscriptions(topo: FlowTopology): { topo: FlowTopology; captions: 
       health: worst,
     });
     const patterns = [...new Set(group.flatMap((g) => g.eventTypes))];
-    captions[id] = group.length > 1 ? `${group.length} sub · ${patterns.join(", ")}` : patterns.join(", ");
+    // §6A: subscription chỉ nhận từ một số source (sourceIds) → ghi rõ trên nhãn cạnh.
+    const from = [...new Set(group.flatMap((g) => g.sourceLabels ?? []))];
+    captions[id] =
+      (group.length > 1 ? `${group.length} sub · ${patterns.join(", ")}` : patterns.join(", ")) +
+      (from.length ? `${CAPTION_SEP}chỉ từ: ${from.join(", ")}` : "");
   }
   return { topo: { ...topo, nodes: topo.nodes.filter((n) => n.kind !== "subscription"), edges }, captions };
 }

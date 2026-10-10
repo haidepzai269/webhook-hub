@@ -4,6 +4,7 @@ import { PrismaService } from '@hub/database';
 import { AuthModule } from '../auth/auth.module';
 import { FlowController } from './flow.controller';
 import { FlowService } from './flow.service';
+import { FlowProjectScopeGuard } from './flow-scope';
 
 /**
  * Module Event Flow — tách khỏi `ApiController` để không đụng file agent đa service đang sửa.
@@ -22,6 +23,7 @@ import { FlowService } from './flow.service';
         return new FlowService(() => (cached ??= ref.get(PrismaService, { strict: false })));
       },
     },
+    FlowProjectScopeGuard,
   ],
 })
 export class FlowModule {}

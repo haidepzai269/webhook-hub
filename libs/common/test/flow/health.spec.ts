@@ -28,6 +28,12 @@ describe('healthOf — ngưỡng sức khoẻ một nguồn sự thật', () => 
     expect(healthOf({ events: 100, rejected: 5 })).toBe('warning');
   });
 
+  it('[UI:F7-01] endpoint đa service: verification FAILED → crashed (kể cả idle), PENDING → warning', () => {
+    expect(healthOf({ events: 0, verification: 'FAILED' })).toBe('crashed');
+    expect(healthOf({ events: 0, verification: 'PENDING' })).toBe('warning');
+    expect(healthOf({ events: 10, successRate: 1, verification: 'VERIFIED' })).toBe('healthy');
+  });
+
   it('[UI:F1-24] cạnh dùng cùng ngưỡng', () => {
     expect(edgeHealthOf(0, 0)).toBe('idle');
     expect(edgeHealthOf(100, 0)).toBe('healthy');

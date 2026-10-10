@@ -320,7 +320,8 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
 
   it('[UI:F1-26] nguồn api (đa service) xác thực bằng API key — tiêu đề không ghi "chữ ký"', () => {
     const f = flow({ raw: raw({ provider: 'api' }) });
-    expect(f.stages[1].title).toBe('API key API hợp lệ');
+    expect(f.stages[1].title).toBe('API key hợp lệ');
+    expect(f.stages[0].title).toContain('/events');
     expect(flow({}).stages[1].title).toBe('Chữ ký PayOS hợp lệ');
   });
 

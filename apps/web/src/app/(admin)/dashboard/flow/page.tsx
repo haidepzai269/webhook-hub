@@ -6,6 +6,7 @@ import { TOPOLOGY_WINDOWS, type TopologyWindow } from "@hub/flow";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 
 import { EventLog } from "@/components/flow/event-log";
+import { ProjectPicker } from "@/components/flow/project-picker";
 import { HealthPill } from "@/components/flow/pills";
 import { ProviderIcon } from "@/components/flow/provider-icon";
 import { ICON } from "@/components/flow/tokens";
@@ -60,6 +61,7 @@ export default function FlowMapPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ProjectPicker className="bg-[var(--flow-card)] backdrop-blur" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur" aria-label="Cửa sổ thời gian">

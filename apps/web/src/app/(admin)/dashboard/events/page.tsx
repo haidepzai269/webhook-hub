@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
 import { EXECUTION_TONE, ExecutionStatusPill, FailedAt, MiniPipeline } from "@/components/flow/execution-bits";
+import { ProjectPicker } from "@/components/flow/project-picker";
 import { ProviderIcon } from "@/components/flow/provider-icon";
 import { clock } from "@/components/flow/time";
 import { ICON, TONE_VAR } from "@/components/flow/tokens";
@@ -80,10 +81,13 @@ function ExecutionsView() {
         title="Hành trình sự kiện"
         description="Mỗi dòng là một lần provider gọi vào hub: đi qua chặng nào, hỏng ở đâu. Bấm dòng để mở hành trình đầy đủ."
         actions={
+          <>
+          <ProjectPicker />
           <Button variant={paused ? "default" : "outline"} size="sm" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
             {paused ? <Play {...ICON} /> : <Pause {...ICON} />}
             {paused ? "Tiếp tục luồng" : "Tạm dừng luồng"}
           </Button>
+          </>
         }
       />
       <OrphanBanner />

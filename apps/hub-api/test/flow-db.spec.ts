@@ -185,7 +185,7 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     expect(n.actions).toContain('renormalize');
   });
 
-  it('[UI:F2-05][BB:5] cô lập tenant: event/raw của tenant khác → 404', async () => {
+  it('[UI:F2-05] (BB-5) cô lập tenant: event/raw của tenant khác → 404', async () => {
     await expect(controller.getEventFlow(other, ids.event)).rejects.toThrow('Hành trình không tồn tại');
     await expect(controller.getEventFlow(other, ids.rawOk)).rejects.toThrow('Hành trình không tồn tại');
     await expect(controller.getEventFlow(other, ids.rawRejected)).rejects.toThrow('Hành trình không tồn tại');
@@ -231,7 +231,7 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     await expect(controller.listExecutions(tenant, { cursor: 'rác' })).rejects.toThrow('cursor');
   });
 
-  it('[UI:F4-04][BB:5] executions cô lập tenant: tenant khác không thấy dòng nào', async () => {
+  it('[UI:F4-04] (BB-5) executions cô lập tenant: tenant khác không thấy dòng nào', async () => {
     const res: any = await controller.listExecutions(other, {});
     expect(res.items).toHaveLength(0);
   });
@@ -252,13 +252,69 @@ describeDb('flow API (Postgres, SPEC-event-flow-ui)', () => {
     expect(topo.edges.find((e: any) => e.id === `e:sub:${ids.subFail}`)).toMatchObject({ count: 2, retrying: 1, health: "crashed" }); // gen 1 + gen 2 (replay) đều là lưu lượng
   });
 
-  it('[UI:F5-02][BB:5] topology cô lập tenant + không lộ secret', async () => {
+  it('[UI:F5-02] (BB-5) topology cô lập tenant + không lộ secret', async () => {
     const topo: any = await controller.getTopology(other, '24h');
     expect(topo.nodes.filter((n: any) => n.kind !== 'gate' && n.kind !== 'normalize')).toHaveLength(0);
     const text = JSON.stringify(await controller.getTopology(tenant, '24h'));
     for (const m of SECRET_MARKERS) expect(text).not.toContain(m);
     expect(text).not.toMatch(/Encrypted|signingSecret|secret/i);
     await expect(controller.getTopology(tenant, '7d')).rejects.toThrow();
+  });
+
+  it('[UI:F7-02] cột đa service: subscription sourceIds → nhãn source; endpoint PENDING → warning; source_filtered/endpoint_unverified ở routed', async () => {
+    const otherSrc = await raw.source.create({ data: { tenantId: tenant, provider: 'sepay', name: `khác-${run}`, sourceKey: `src_flow_other_${run}` } });
+    const pend = await raw.destination.create({
+      data: { tenantId: tenant, name: `Pending-${run}`, type: 'webhook', configEncrypted: 'x', verification: 'PENDING' },
+    });
+    const subFiltered = await raw.subscription.create({
+      data: { tenantId: tenant, destinationId: ids.destOk, name: 'chỉ từ source khác', eventTypes: ['payment.*'], sourceIds: [otherSrc.id] },
+    });
+    const subPending = await raw.subscription.create({ data: { tenantId: tenant, destinationId: pend.id, name: 'chờ xác minh', eventTypes: ['payment.*'] } });
+    try {
+      const topo: any = await controller.getTopology(tenant, '1h');
+      const subNode = topo.nodes.find((n: any) => n.id === `sub:${subFiltered.id}`);
+      expect(subNode.sourceIds).toEqual([otherSrc.id]);
+      expect(subNode.sourceLabels).toEqual(["SePay"]); // provider duy nhất trong project → nhãn gọn
+      const pendNode = topo.nodes.find((n: any) => n.id === `dst:${pend.id}`);
+      expect(pendNode).toMatchObject({ verification: 'PENDING', health: 'warning' });
+
+      const f: any = await controller.getEventFlow(tenant, ids.event);
+      const skipped = f.stages.find((s: any) => s.key === 'routed').detail.skipped.map((s: any) => [s.id, s.reason.code]);
+      expect(skipped).toEqual(
+        expect.arrayContaining([
+          [subFiltered.id, 'source_filtered'],
+          [subPending.id, 'endpoint_unverified'],
+          [ids.subOff, 'subscription_inactive'],
+        ]),
+      );
+    } finally {
+      await raw.subscription.deleteMany({ where: { id: { in: [subFiltered.id, subPending.id] } } });
+      await raw.destination.delete({ where: { id: pend.id } });
+      await raw.source.delete({ where: { id: otherSrc.id } });
+    }
+  });
+
+  it('[UI:F7-03] (BB-5) phạm vi project đi qua ProjectScopeGuard: ?projectId= hợp lệ đổi tenant, lạ → 404, không có → tenant của JWT', async () => {
+    const { FlowProjectScopeGuard } = await import('../src/modules/flow/flow-scope');
+    const guard = new FlowProjectScopeGuard(flow);
+    const ctx = (query: Record<string, string>) => {
+      const req: any = { query, tenantId: other };
+      return { req, ctx: { switchToHttp: () => ({ getRequest: () => req }) } as any };
+    };
+    await raw.project.create({ data: { id: tenant, slug: `flow-${run}`, name: `flow ${run}` } });
+    try {
+      const a = ctx({ projectId: tenant });
+      await expect(guard.canActivate(a.ctx)).resolves.toBe(true);
+      expect(a.req.tenantId).toBe(tenant);
+      const items: any = await controller.listExecutions(a.req.tenantId, {});
+      expect(items.items.length).toBe(3);
+      await expect(guard.canActivate(ctx({ projectId: randomUUID() }).ctx)).rejects.toThrow();
+      const none = ctx({});
+      await expect(guard.canActivate(none.ctx)).resolves.toBe(true);
+      expect(none.req.tenantId).toBe(other);
+    } finally {
+      await raw.project.delete({ where: { id: tenant } });
+    }
   });
 
   it('[UI:F2-06] che bí mật: không ciphertext, signingSecret, token hay authorization thô trong response', async () => {

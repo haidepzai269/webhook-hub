@@ -83,7 +83,14 @@ export interface FlowDeliveryInput {
   createdAt: DateLike;
   updatedAt: DateLike;
   subscription: { id: string; name: string; eventTypes: string[] };
-  destination: { id: string; name: string; type: string; circuitState?: CircuitStateInput | null; rateLimitRps?: number | null };
+  destination: {
+    id: string;
+    name: string;
+    type: string;
+    circuitState?: CircuitStateInput | null;
+    rateLimitRps?: number | null;
+    verification?: 'PENDING' | 'VERIFIED' | 'FAILED' | null;
+  };
   /** Mọi attempt (V1) hoặc chỉ attempt cuối (V2). */
   attempts: FlowAttemptInput[];
 }
@@ -287,6 +294,7 @@ function buildBranch(
       circuitState: circuit,
       throttleRps,
       maxAttempts,
+      verification: d.destination.verification ?? null,
     },
   });
 
@@ -487,7 +495,7 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
       startedAt: at,
       endedAt: at,
       durationMs: 0,
-      title: `${prov} gọi /hooks`,
+      title: raw.provider === 'api' ? 'Service publish /v1/p/…/events' : `${prov} gọi /hooks`,
       subtitle: raw.sourceName,
       detail: {
         provider: raw.provider,
@@ -513,7 +521,7 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
         startedAt: at,
         endedAt: at,
         durationMs: 0,
-        title: `${credentialLabel(raw.provider)} ${prov} KHÔNG hợp lệ`,
+        title: raw.provider === 'api' ? 'API key KHÔNG hợp lệ' : `${credentialLabel(raw.provider)} ${prov} KHÔNG hợp lệ`,
         subtitle: 'hub trả 401',
         reason: reason('signature_invalid'),
         actions: ['open_config'],
@@ -528,7 +536,7 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
         startedAt: at,
         endedAt: at,
         durationMs: 0,
-        title: `${credentialLabel(raw.provider)} ${prov} hợp lệ`,
+        title: raw.provider === 'api' ? 'API key hợp lệ' : `${credentialLabel(raw.provider)} ${prov} hợp lệ`,
         detail: { signatureValid: true },
       });
       if (raw.status === 'DUPLICATE') {

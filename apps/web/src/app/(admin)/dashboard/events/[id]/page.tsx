@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
 import { ArrowLeft, CalendarClock, ChevronDown, RotateCcw, Tag, WandSparkles } from "lucide-react";
@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HubApiError } from "@/lib/hub/client";
-import { useEventFlow, useRenormalizeRawEvents, useReplayDelivery } from "@/lib/hub/queries";
+import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
 
 
 
@@ -51,11 +51,13 @@ function InfoCard({ icon, label, children }: { icon: React.ReactNode; label: str
  */
 export default function EventJourneyPage() {
   const { id } = useParams<{ id: string }>();
+  // F7: project đang xem (chọn ở V2/V3, nhớ trong localStorage) → `?projectId=` cho mọi gọi của trang.
+  useEffect(() => restoreFlowProject(), []);
   const router = useRouter();
   const { data, isLoading, error } = useEventFlow(id ? decodeURIComponent(id) : null);
   const [selected, setSelected] = useState<{ stage: StageView; branch?: FlowBranch } | null>(null);
-  const replay = useReplayDelivery();
-  const renormalize = useRenormalizeRawEvents();
+  const replay = useFlowReplayDelivery();
+  const renormalize = useFlowRenormalize();
   const [replaying, setReplaying] = useState<string | null>(null);
 
   const doReplay = useCallback(
@@ -100,7 +102,7 @@ export default function EventJourneyPage() {
         <Link href="/dashboard/events" className="inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground">
           <ArrowLeft {...ICON} /> Quay lại
         </Link>
-        <p className="text-muted-foreground text-sm">Không tìm thấy hành trình (có thể thuộc tenant khác).</p>
+        <p className="text-muted-foreground text-sm">Không tìm thấy hành trình trong project đang chọn (có thể thuộc project khác — đổi project ở Bản đồ luồng / Hành trình sự kiện).</p>
       </div>
     );
 

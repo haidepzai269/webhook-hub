@@ -39,6 +39,8 @@ export interface HealthInput {
   dlqDelta?: number;
   /** Request bị từ chối chữ ký trong cửa sổ (node source/gate). */
   rejected?: number;
+  /** Endpoint (đa service): FAILED = không gửi được gì → crashed; PENDING = chờ challenge → warning. */
+  verification?: 'PENDING' | 'VERIFIED' | 'FAILED' | null;
 }
 
 export function healthOf(i: HealthInput): Health {
@@ -52,12 +54,14 @@ export function healthOf(i: HealthInput): Health {
 
   // Crashed: đỏ, nổi bật từ xa.
   if (i.circuit === 'OPEN') return 'crashed';
+  if (i.verification === 'FAILED') return 'crashed';
   if ((i.dlqDelta ?? 0) > 0) return 'crashed';
   if (events > 0 && failureRate > t.crashFailureRate) return 'crashed';
   if (rejected >= t.crashRejectedMin && rejectedRate > t.crashRejectedRate) return 'crashed';
 
   // Warning: vàng.
   if (i.circuit === 'HALF_OPEN') return 'warning';
+  if (i.verification === 'PENDING') return 'warning';
   if ((i.retrying ?? 0) > 0) return 'warning';
   if (events > 0 && failureRate > t.warnFailureRate) return 'warning';
   if (rejected > 0) return 'warning';
