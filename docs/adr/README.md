@@ -888,3 +888,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** Từ khi có `POST /v1/p/:project/events` và GenericAdapter, MỘT key `publish:events` bất kỳ trong project `default` gửi được `payment.received` đúng khuôn (qua validator) có `memo:"DH…"` → đơn Shop thành PAID mà không có tiền.
 **Chọn:** `readPayment(body, allowed = SHOP_PAYMENT_SOURCES ?? ['payos','sepay'])` bỏ qua (IGNORED) mọi event có `source` ngoài danh sách. `source` do adapter của hub đặt — đường `/events` luôn là `api`, nguồn tuỳ chỉnh là `generic` — nên publisher không giả được. Không dùng `sourceIds` trong `ensure` vì key `shop` không có `manage:sources` (không liệt kê được id source) và id khác nhau giữa các stack.
 **Đánh đổi:** Shop phải đổi env khi thêm cổng thanh toán (vd ngân hàng qua GenericAdapter có mapping). Hub vẫn cho service publish kiểu `payment.*` hợp lệ — bên nhận nào xử lý tiền phải tự kiểm `source` (ghi ở EVENT-CATALOG §5b).
+
+---
+
+## ADR-085 — `/v1/p` subscription chỉ tới endpoint (webhook); push không rộng hơn `readTypes` của key (MS-R3, 2026-10-11)
+
+**Vấn đề:** `POST /v1/p/:project/subscriptions` nhận mọi `destinationId` cùng project — key `manage:endpoints` gắn được đích Telegram/Discord của operator vào `*` (spam kênh admin); `GET` trả cả subscription của operator (lộ id đích). `readTypes` chỉ giới hạn polling nên key `readTypes=["order.*"]` vẫn nhận `payment.*` qua push.
+**Chọn:** Đích `type ≠ webhook` → 404 `not_found` (như không tồn tại, cùng khuôn `/verify`, `GET /endpoints`); `GET /subscriptions` lọc `destination.type = webhook`. Key có `readTypes` thì mỗi mẫu trong `eventTypes` phải được một mẫu của `readTypes` phủ (`*` phủ mọi thứ, `a.*` phủ `a.x` và `a.x.*`) — sai → 422 `{error:"outside_read_types", field:"eventTypes", invalid}`.
+**Đánh đổi:** Kiểm lúc TẠO subscription; subscription sống độc lập với key (đổi `readTypes` của key sau đó không thu hẹp subscription cũ — key hiện không sửa được scope, chỉ revoke/tạo mới).

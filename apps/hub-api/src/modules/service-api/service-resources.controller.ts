@@ -96,6 +96,12 @@ export class WindowLimiter {
   }
 }
 
+/** Mẫu `r` phủ mẫu `p`? `*` phủ mọi thứ; `a.*` phủ `a.x`, `a.x.*`; còn lại phải bằng nhau. */
+export function patternCovers(r: string, p: string): boolean {
+  if (r === '*' || r === p) return true;
+  return r.endsWith('.*') && p !== '*' && p.startsWith(r.slice(0, -1));
+}
+
 /** Bản công khai của source: không bao giờ có `secrets` (ciphertext). */
 function publicSource(s: any) {
   return {
@@ -232,10 +238,17 @@ export class ServiceResourcesController {
     // Endpoint phải thuộc project (404 giống hệt "không tồn tại"); khoá ngoại ghép là lưới cuối (S1).
     const endpointId = body?.endpointId;
     const endpoint = typeof endpointId === 'string' && UUID_RE.test(endpointId) ? await repo.findDestinationById(endpointId) : null;
-    if (!endpoint) throw new NotFoundException(NOT_FOUND);
+    // MS-R3: service chỉ gắn vào ENDPOINT (webhook) — đích Telegram/Discord của operator coi như không tồn tại.
+    if (!endpoint || endpoint.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     if (!name || name.length > 255) unprocessable({ error: 'validation_failed', field: 'name', message: 'name là chuỗi 1–255 ký tự' });
     const eventTypes = parseEventTypes422(body?.eventTypes);
+    // MS-R3: readTypes là ranh giới quyền ĐỌC của key — push không được rộng hơn polling.
+    const readTypes = req.apiKey!.readTypes ?? [];
+    if (readTypes.length > 0) {
+      const invalid = eventTypes.filter((p) => !readTypes.some((r) => patternCovers(r, p)));
+      if (invalid.length > 0) unprocessable({ error: 'outside_read_types', field: 'eventTypes', invalid, message: `Key chỉ đọc được: ${readTypes.join(', ')}` });
+    }
     const sourceIds = await resolveSourceIds(repo, body?.sourceIds);
     const created = await this.withAudit(tenantId, async (tx) => {
       const s = await tx.createSubscription({ destinationId: endpoint.id, name, eventTypes, sourceIds, isActive: true });
@@ -254,7 +267,8 @@ export class ServiceResourcesController {
   @Get('subscriptions')
   @RequireScope('manage:endpoints')
   async listSubscriptions(@Req() req: RequestWithPrincipal) {
-    const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions();
+    // MS-R3: chỉ subscription tới endpoint (webhook) — không lộ đích Telegram/Discord của operator.
+    const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions({ destination: { type: 'webhook' } });
     return rows.map(publicSubscription);
   }
 

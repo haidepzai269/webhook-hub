@@ -17,11 +17,13 @@ describe('Service API — endpoint + subscription (S5)', () => {
   const EB = '22222222-2222-2222-2222-222222222222';
   const SA = '33333333-3333-3333-3333-333333333333';
   const SB = '44444444-4444-4444-4444-444444444444';
+  const ETG = '88888888-8888-8888-8888-888888888888';
 
   function build() {
     const destinations: any[] = [
       { id: EA, tenantId: PA, name: 'A', type: 'webhook', configEncrypted: aesGcmEncrypt(JSON.stringify({ url: 'https://a.example/h' }), getMasterKey()), signingSecretEncrypted: aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey()), verification: 'VERIFIED' },
       { id: EB, tenantId: PB, name: 'B', type: 'webhook', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED' },
+      { id: ETG, tenantId: PA, name: 'Telegram Ops', type: 'telegram', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED' },
     ];
     const sources = [
       { id: SA, tenantId: PA },
@@ -55,7 +57,11 @@ describe('Service API — endpoint + subscription (S5)', () => {
           subs.push(row);
           return { ...row, destination: destinations.find((d) => d.id === data.destinationId) };
         }),
-        findMany: jest.fn(async ({ where }: any) => subs.filter((s) => s.tenantId === where.tenantId)),
+        findMany: jest.fn(async ({ where }: any) =>
+          subs
+            .filter((s) => s.tenantId === where.tenantId)
+            .filter((s) => !where.destination?.type || destinations.find((d) => d.id === s.destinationId)?.type === where.destination.type),
+        ),
       },
       auditLog: { create: jest.fn(async ({ data }: any) => audits.push(data)) },
     };
@@ -63,7 +69,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
       forTenant: (tenantId: string, c?: any) => new TenantScopedRepository(c ?? client, tenantId),
       $transaction: async (fn: any) => fn(client),
     };
-    const req = (tenantId: string) => ({ tenantId, apiKey: { id: 'key-1', tenantId, serviceName: 'cafe-be' } }) as any;
+    const req = (tenantId: string, readTypes: string[] = []) => ({ tenantId, apiKey: { id: 'key-1', tenantId, serviceName: 'cafe-be', readTypes } }) as any;
     const verifier = { challenge: jest.fn(async (): Promise<any> => verdict.next) };
     const verdict: { next: any } = { next: { verification: 'VERIFIED', verificationError: null } };
     return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, subs, audits, req, verifier, verdict };
@@ -168,6 +174,25 @@ describe('Service API — endpoint + subscription (S5)', () => {
     const before = verifier.challenge.mock.calls.length;
     expect(await status(controller.verifyEndpoint(req(PA), EA))).toMatchObject({ status: 429, body: { error: 'rate_limited' } });
     expect(verifier.challenge.mock.calls.length).toBe(before);
+  });
+
+  it('MS-R3: subscription trỏ đích telegram/discord của operator (cùng project) -> 404 như không tồn tại; GET chỉ trả subscription tới webhook', async () => {
+    const { controller, subs, req } = build();
+    expect(await status(controller.createSubscription(req(PA), { endpointId: ETG, name: 'spam', eventTypes: ['*'] }))).toEqual({ status: 404, body: { error: 'not_found' } });
+    expect(subs).toHaveLength(0);
+    subs.push({ id: 'sub-admin', tenantId: PA, destinationId: ETG, name: 'admin tg', eventTypes: ['payment.*'], sourceIds: [], isActive: true });
+    await controller.createSubscription(req(PA), { endpointId: EA, name: 'ok', eventTypes: ['order.*'] });
+    const list: any[] = await controller.listSubscriptions(req(PA));
+    expect(list.map((x) => x.endpointId)).toEqual([EA]);
+  });
+
+  it('MS-R3: key có readTypes -> eventTypes phải nằm trong readTypes (push không rộng hơn polling)', async () => {
+    const { controller, req } = build();
+    const k = req(PA, ['order.*', 'payment.received']);
+    expect(await status(controller.createSubscription(k, { endpointId: EA, name: 'x', eventTypes: ['payment.*'] }))).toMatchObject({ status: 422, body: { error: 'outside_read_types', field: 'eventTypes', invalid: ['payment.*'] } });
+    expect(await status(controller.createSubscription(k, { endpointId: EA, name: 'x', eventTypes: ['*'] }))).toMatchObject({ status: 422 });
+    await expect(controller.createSubscription(k, { endpointId: EA, name: 'ok', eventTypes: ['order.created', 'order.refund.*', 'payment.received'] })).resolves.toMatchObject({ eventTypes: ['order.created', 'order.refund.*', 'payment.received'] });
+    await expect(controller.createSubscription(req(PA, ['*']), { endpointId: EA, name: 'all', eventTypes: ['*'] })).resolves.toBeTruthy();
   });
 });
 
