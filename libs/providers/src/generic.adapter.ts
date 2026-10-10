@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
-import { IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parseProviderTime } from '@hub/common';
+import { IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parseProviderTime, validateCanonical } from '@hub/common';
 import { swVerify, timingSafeCompare } from '@hub/crypto';
-import { AdapterContext, ProviderAdapter } from './provider.interface';
+import { AdapterContext, Diagnosis, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
 import { GenericConfig, MappingValue, paymentTimeKey, validateGenericConfig } from './generic-config';
 import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
@@ -114,6 +114,57 @@ export class GenericAdapter implements ProviderAdapter {
         normalized: true,
       }),
     ];
+  }
+
+  /**
+   * S9 (SPEC §4.8, §4.14.4): chẩn đoán raw_event ĐÃ LƯU cho chế độ lắng nghe — không cần secret, không bao giờ
+   * trả giá trị (chỉ tên header/trường). REJECTED + signature_valid=true = chữ ký đúng nhưng thiếu khoá chống trùng.
+   */
+  diagnose(raw: StoredRawEvent, ctx?: AdapterContext): Diagnosis {
+    const c = configOf(ctx);
+    if (!c) return { ok: false, reason: 'config_invalid' };
+    const headers = isObj(raw.headers) ? raw.headers : {};
+    const has = (h: string) => typeof headers[h] === 'string' || Array.isArray(headers[h]);
+    if (raw.status === 'ACCEPTED') return c.mapping ? this.diagnoseMapping(raw, c) : { ok: true, reason: 'ok' };
+    if (raw.signatureValid) {
+      const id = c.idempotency;
+      return 'header' in id
+        ? { ok: false, reason: 'missing_idempotency_key', expectedHeader: id.header }
+        : { ok: false, reason: 'missing_idempotency_key', expectedField: id.field };
+    }
+    const candidates = (expected: string) =>
+      Object.keys(headers)
+        .map((h) => h.toLowerCase())
+        .filter((h) => h !== expected && !h.startsWith('__') && /sig|token|auth|hmac|key/.test(h))
+        .sort();
+    if (c.scheme === 'standard-webhooks') {
+      const missing = ['webhook-id', 'webhook-timestamp', 'webhook-signature'].find((h) => !has(h));
+      if (missing) return { ok: false, reason: 'missing_header', expectedHeader: missing, candidateHeaders: candidates(missing) };
+      const ts = Number(headers['webhook-timestamp']);
+      const at = Math.floor(new Date(raw.receivedAt).getTime() / 1000);
+      if (!Number.isFinite(ts) || Math.abs(at - ts) > 300) return { ok: false, reason: 'timestamp_out_of_range' };
+      return { ok: false, reason: 'signature_mismatch', expectedHeader: 'webhook-signature' };
+    }
+    const expected = c.header!;
+    if (!has(expected)) return { ok: false, reason: 'missing_header', expectedHeader: expected, candidateHeaders: candidates(expected) };
+    return { ok: false, reason: c.scheme === 'static-token' ? 'token_mismatch' : 'signature_mismatch', expectedHeader: expected };
+  }
+
+  /** ACCEPTED có mapping: chạy lại ánh xạ + validator trên body đã lưu; báo TÊN trường body (không giá trị). */
+  private diagnoseMapping(raw: StoredRawEvent, c: GenericConfig): Diagnosis {
+    const req = { provider: this.provider, sourceKey: '', headers: {}, rawBody: Buffer.from(raw.bodyRaw), body: raw.body } as RawWebhookRequest;
+    let data: unknown;
+    try {
+      data = this.normalize(req, { tenantId: '', sourceId: '', correlationId: '', rawEventId: '', verificationConfig: c })[0].data;
+    } catch (e) {
+      if (e instanceof MappingFieldMissingError) return { ok: false, reason: 'mapping_field_missing', field: e.field };
+      return { ok: false, reason: 'mapping_field_invalid' };
+    }
+    const r = validateCanonical(c.eventType, data);
+    if (r.ok) return { ok: true, reason: 'ok' };
+    const key = (r as { field: string }).field;
+    const m = c.mapping?.[key];
+    return { ok: false, reason: 'mapping_field_invalid', field: typeof m === 'string' ? m : key };
   }
 
   buildAck(result: IngestResult): { status: number; body: unknown } {

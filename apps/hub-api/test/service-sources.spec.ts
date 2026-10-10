@@ -69,3 +69,46 @@ describe('POST/GET /v1/p/:project/sources (S8)', () => {
     expect(parseSourceInput({ provider: 'sepay', name: 'SePay', secret: 'apikey_123456' })).toEqual({ provider: 'sepay', name: 'SePay', secret: 'apikey_123456', verificationConfig: undefined });
   });
 });
+
+describe('GET /v1/p/:project/sources/:id/inspect (S9)', () => {
+  const PA = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const SG = '55555555-5555-5555-5555-555555555555';
+  const SP = '66666666-6666-6666-6666-666666666666';
+  const CFG = { scheme: 'hmac-sha256', header: 'x-signature', idempotency: { field: 'transactionId' }, eventType: 'bank.transaction.received' };
+  function build() {
+    const sources: Record<string, any> = {
+      [SG]: { id: SG, tenantId: PA, provider: 'generic', verificationConfig: CFG },
+      [SP]: { id: SP, tenantId: PA, provider: 'sepay', verificationConfig: null },
+    };
+    const raws = [
+      { id: 'r1', status: 'ACCEPTED', signatureValid: true, headers: { 'x-signature': 'SIGVAL_abc' }, body: { transactionId: 'T' }, bodyRaw: Buffer.from('{}'), receivedAt: new Date('2026-10-10T00:00:03Z') },
+      { id: 'r2', status: 'REJECTED', signatureValid: false, headers: { 'x-sig': 'SIGVAL_abc' }, body: {}, bodyRaw: Buffer.from('{}'), receivedAt: new Date('2026-10-10T00:00:02Z') },
+    ];
+    const repo = {
+      findSourceById: jest.fn(async (id: string) => sources[id] ?? null),
+      findRecentRawEventsForSource: jest.fn(async () => raws),
+    };
+    const prisma: any = { forTenant: () => repo };
+    const req: any = { tenantId: PA, apiKey: { id: 'k1', tenantId: PA } };
+    return { ctrl: new ServiceResourcesController(prisma, {} as any), req, repo };
+  }
+
+  it('[MS:T9] (phần e) 10 raw mới nhất kèm chẩn đoán; KHÔNG có giá trị chữ ký; source khác project -> 404; since sai -> 422', async () => {
+    const { ctrl, req, repo } = build();
+    const r: any[] = await ctrl.inspectSource(req, SG, '2026-10-10T00:00:00Z');
+    expect(repo.findRecentRawEventsForSource).toHaveBeenCalledWith(SG, new Date('2026-10-10T00:00:00Z'), 10);
+    expect(r).toEqual([
+      { id: 'r1', receivedAt: new Date('2026-10-10T00:00:03Z'), status: 'ACCEPTED', diagnosis: { ok: true, reason: 'ok' } },
+      { id: 'r2', receivedAt: new Date('2026-10-10T00:00:02Z'), status: 'REJECTED', diagnosis: { ok: false, reason: 'missing_header', expectedHeader: 'x-signature', candidateHeaders: ['x-sig'] } },
+    ]);
+    expect(JSON.stringify(r)).not.toContain('SIGVAL');
+    await expect(ctrl.inspectSource(req, '77777777-7777-7777-7777-777777777777', undefined)).rejects.toMatchObject({ status: 404 });
+    await expect(ctrl.inspectSource(req, SG, 'hôm qua')).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('S9: adapter không có diagnose (sepay) -> {ok: signatureValid}', async () => {
+    const { ctrl, req } = build();
+    const r: any[] = await ctrl.inspectSource(req, SP, undefined);
+    expect(r.map((x) => x.diagnosis)).toEqual([{ ok: true }, { ok: false }]);
+  });
+});

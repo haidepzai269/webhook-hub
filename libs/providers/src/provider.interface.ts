@@ -8,6 +8,38 @@ export interface AdapterContext {
   verificationConfig?: unknown;
 }
 
+/** S9: raw_event ĐÃ LƯU (header đã che, body REJECTED là mẫu ≤4KB) — đầu vào của `diagnose`. */
+export interface StoredRawEvent {
+  status: string;
+  signatureValid: boolean;
+  headers: unknown;
+  body: unknown;
+  bodyRaw: Buffer | Uint8Array;
+  receivedAt: Date;
+}
+
+/**
+ * S9 (SPEC §4.8, §4.14.4): kết quả chẩn đoán cho "chế độ lắng nghe". CHỈ tên header/trường — tuyệt đối không giá trị
+ * chữ ký, token, secret hay dữ liệu body.
+ */
+export interface Diagnosis {
+  ok: boolean;
+  reason?:
+    | 'ok'
+    | 'missing_header'
+    | 'signature_mismatch'
+    | 'token_mismatch'
+    | 'timestamp_out_of_range'
+    | 'missing_idempotency_key'
+    | 'mapping_field_missing'
+    | 'mapping_field_invalid'
+    | 'config_invalid';
+  expectedHeader?: string;
+  expectedField?: string;
+  candidateHeaders?: string[];
+  field?: string;
+}
+
 export interface ProviderAdapter {
   readonly provider: ProviderType;
 
@@ -37,6 +69,9 @@ export interface ProviderAdapter {
    * ngoài danh sách cố định của redactHeaders. Không có -> không cài.
    */
   sensitiveHeaders?(ctx?: AdapterContext): string[];
+
+  /** S9: chẩn đoán một raw_event đã lưu. Không cài -> lõi trả `{ok: signatureValid}`. */
+  diagnose?(raw: StoredRawEvent, ctx?: AdapterContext): Diagnosis;
 
   /**
    * Chuyển đổi payload gốc thành mảng sự kiện chuẩn hóa (NormalizedEvent).

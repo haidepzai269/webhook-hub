@@ -471,6 +471,15 @@ export class TenantScopedRepository {
     });
   }
 
+  /** S9: raw_events mới nhất của MỘT source (scope qua source.tenantId) — cho `inspect`. Không kèm `source`. */
+  async findRecentRawEventsForSource(sourceId: string, since: Date, limit: number) {
+    return this.prisma.rawEvent.findMany({
+      where: { sourceId, receivedAt: { gte: since }, source: { tenantId: this.tenantId } },
+      orderBy: { receivedAt: 'desc' },
+      take: limit,
+    });
+  }
+
   /**
    * Raw event "mồ côi" (S1-3): ACCEPTED, quá `olderThanSeconds`, chưa sinh event nào và chưa
    * được normalize xong (không có `processed_messages(normalize, id)` — loại trừ raw event mà

@@ -154,3 +154,42 @@ describe('GenericAdapter — normalize (S8, S14 mapping)', () => {
     expect(a.buildAck({ accepted: false, status: 401, message: 'sai chữ ký' } as any)).toEqual({ status: 401, body: { ok: false, error: 'sai chữ ký' } });
   });
 });
+
+describe('GenericAdapter — diagnose (S9, chế độ lắng nghe)', () => {
+  const stored = (o: Partial<{ status: string; signatureValid: boolean; headers: any; body: any; bodyRaw: Buffer; receivedAt: Date }>) => ({
+    status: 'REJECTED', signatureValid: false, headers: {}, body: {}, bodyRaw: Buffer.from('{}'), receivedAt: new Date('2026-10-10T00:00:00Z'), ...o,
+  });
+
+  it('[MS:U15] header gửi là x-sig, config chờ x-signature -> missing_header, candidateHeaders có x-sig, KHÔNG có giá trị', () => {
+    const d = a.diagnose(stored({ headers: { 'x-sig': 'deadbeefSIGVALUE', 'content-type': 'application/json', __hub_meta: { truncated: false } } }), HMAC_HEX);
+    expect(d).toEqual({ ok: false, reason: 'missing_header', expectedHeader: 'x-signature', candidateHeaders: ['x-sig'] });
+    expect(JSON.stringify(d)).not.toContain('deadbeef');
+  });
+
+  it('S9: header đúng tên nhưng sai -> signature_mismatch (hmac) / token_mismatch (static-token); thiếu khoá -> missing_idempotency_key; ok', () => {
+    expect(a.diagnose(stored({ headers: { 'x-signature': 'x' } }), HMAC_HEX)).toEqual({ ok: false, reason: 'signature_mismatch', expectedHeader: 'x-signature' });
+    const st = cfg({ scheme: 'static-token', header: 'x-token', idempotency: { field: 'id' }, eventType: 'bank.x' });
+    expect(a.diagnose(stored({ headers: { 'x-token': '***' } }), st)).toEqual({ ok: false, reason: 'token_mismatch', expectedHeader: 'x-token' });
+    expect(a.diagnose(stored({ signatureValid: true }), HMAC_HEX)).toEqual({ ok: false, reason: 'missing_idempotency_key', expectedField: 'transactionId' });
+    expect(a.diagnose(stored({ status: 'ACCEPTED', signatureValid: true, body: { transactionId: 'T' } }), HMAC_HEX)).toEqual({ ok: true, reason: 'ok' });
+  });
+
+  it('S9: standard-webhooks — thiếu header -> missing_header; timestamp lệch > 300s so với lúc nhận -> timestamp_out_of_range', () => {
+    const sw = cfg({ scheme: 'standard-webhooks', eventType: 'bank.x' });
+    expect(a.diagnose(stored({ headers: { 'webhook-id': 'm', 'x-signature': 'v1,abc' } }), sw)).toMatchObject({ ok: false, reason: 'missing_header', expectedHeader: 'webhook-timestamp', candidateHeaders: ['x-signature'] });
+    const ts = String(Math.floor(new Date('2026-10-10T00:00:00Z').getTime() / 1000) - 400);
+    expect(a.diagnose(stored({ headers: { 'webhook-id': 'm', 'webhook-timestamp': ts, 'webhook-signature': 'v1,x' } }), sw)).toEqual({ ok: false, reason: 'timestamp_out_of_range' });
+  });
+
+  it('[MS:U48] (phần b) ACCEPTED mà body thiếu soTien -> mapping_field_missing field "soTien", không giá trị; "50.000" -> mapping_field_invalid', () => {
+    const MAPC = cfg({
+      scheme: 'hmac-sha256', header: 'x-signature', idempotency: { field: 'maGD' }, eventType: 'payment.received',
+      mapping: { amount: 'soTien', currency: { const: 'VND' }, method: { const: 'bank_transfer' }, providerTxnId: 'maGD', paidAt: 'thoiGian' },
+    });
+    const body = { maGD: 'GD1', thoiGian: '2026-10-10 09:00:00' };
+    const d = a.diagnose(stored({ status: 'ACCEPTED', signatureValid: true, body, bodyRaw: Buffer.from(JSON.stringify(body)) }), MAPC);
+    expect(d).toEqual({ ok: false, reason: 'mapping_field_missing', field: 'soTien' });
+    const b2 = { ...body, soTien: '50.000' };
+    expect(a.diagnose(stored({ status: 'ACCEPTED', signatureValid: true, body: b2, bodyRaw: Buffer.from(JSON.stringify(b2)) }), MAPC)).toEqual({ ok: false, reason: 'mapping_field_invalid', field: 'soTien' });
+  });
+});
