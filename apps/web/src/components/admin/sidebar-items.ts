@@ -4,6 +4,7 @@ import {
   FlaskConical,
   Inbox,
   LayoutDashboard,
+  Network,
   type LucideIcon,
   ScrollText,
   Send,
@@ -26,18 +27,20 @@ export interface NavGroup {
 
 export const sidebarItems: NavGroup[] = [
   {
-    id: "overview",
-    label: "Tổng quan",
-    items: [{ id: "dashboard", title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
-  },
-  {
     id: "flow",
     label: "Luồng dữ liệu",
     items: [
-      { id: "events", title: "Sự kiện", url: "/dashboard/events", icon: Activity },
+      // SPEC-event-flow-ui V3: màn đầu tiên — nhìn là biết luồng nào chạy, luồng nào crash.
+      { id: "flow-map", title: "Bản đồ luồng", url: "/dashboard/flow", icon: Network },
+      { id: "events", title: "Hành trình sự kiện", url: "/dashboard/events", icon: Activity },
       { id: "deliveries", title: "Giao hàng (Deliveries)", url: "/dashboard/deliveries", icon: Send },
       { id: "dlq", title: "DLQ", url: "/dashboard/dlq", icon: Skull },
     ],
+  },
+  {
+    id: "overview",
+    label: "Tổng quan",
+    items: [{ id: "dashboard", title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
   },
   {
     id: "config",

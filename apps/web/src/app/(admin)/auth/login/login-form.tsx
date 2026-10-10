@@ -33,7 +33,7 @@ export function LoginForm() {
 
   // Đã có token (vào thẳng /auth/login) → về dashboard; token sai thì 401 đầu tiên sẽ đưa lại đây.
   useEffect(() => {
-    if (getToken() && !params.get("expired")) router.replace("/dashboard");
+    if (getToken() && !params.get("expired")) router.replace("/dashboard/flow");
   }, [params, router]);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export function LoginForm() {
         return;
       }
       setToken(data.accessToken);
-      router.replace("/dashboard");
+      router.replace("/dashboard/flow");
     } catch (e) {
       setServerError(`Không kết nối được hub-api: ${e instanceof Error ? e.message : String(e)}`);
     }
