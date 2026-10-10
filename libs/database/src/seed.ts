@@ -19,6 +19,9 @@ export function disconnectSeedClient(): Promise<void> {
   return prisma.$disconnect();
 }
 
+/** sourceKey các source thế giới default do seed tạo — R-7: "đã seed" xét theo đúng các dòng này. */
+export const SEED_DEFAULT_SOURCE_KEYS = ['src_github_main', 'src_payos_main', 'src_sepay_main'] as const;
+
 /** Tên các đích do seed tạo — `--sync-destinations` chỉ đụng đúng những đích này. */
 export const SEED_DESTINATION_NAMES = {
   discord: 'Discord Dev Channel',
@@ -217,10 +220,14 @@ async function seedDefaultWorld() {
   // An toàn / idempotent (BB-2: Postgres là trọng tài duy nhất, không được tự xoá dữ liệu).
   // Chỉ seed khi project default CHƯA có source — không bao giờ xoá dữ liệu đang có. (Trước MS-P2-2 đếm source
   // TOÀN DB: project demo / source `api` tạo trước làm default bị bỏ trống.)
-  const existingSourceCount = await prisma.source.count({ where: { tenantId: DEFAULT_TENANT_ID } });
+  // R-7 (ADR-096): xét theo ĐÚNG các dòng seed này tạo (sourceKey cố định), không đếm mọi source của default — source
+  // khác (vd `api_*` của key publish:events) có trước không được làm seed bỏ trống thế giới default.
+  const existingSourceCount = await prisma.source.count({
+    where: { tenantId: DEFAULT_TENANT_ID, sourceKey: { in: [...SEED_DEFAULT_SOURCE_KEYS] } },
+  });
   if (existingSourceCount > 0) {
     console.log(
-      `--- Project default đã có ${existingSourceCount} source(s), bỏ qua seed default (idempotent, không xoá dữ liệu). ---`,
+      `--- Project default đã có ${existingSourceCount} source seed, bỏ qua seed default (idempotent, không xoá dữ liệu). ---`,
     );
     return;
   }

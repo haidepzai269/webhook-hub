@@ -44,12 +44,14 @@ describeDb('Seed trên DB rỗng (MS-P2-2)', () => {
 
   it('MS-P2-2: seed lần đầu tạo ĐỦ thế giới default (3 source, đích, subscription) VÀ demo cafe/bookstore; chạy lại không nhân đôi', async () => {
     const seed = [path.join(ROOT, 'node_modules/ts-node/dist/bin.js'), '-r', 'tsconfig-paths/register', '--transpile-only', '-P', 'tsconfig.json', 'libs/database/src/seed.ts'];
+    const DEFAULT = '00000000-0000-0000-0000-000000000001';
+    fresh = newTestPrisma('owner', freshUrl);
+    // R-7: default đã có một source KHÁC (vd source `api` của key publish:events) trước khi seed -> seed default vẫn chạy
+    await fresh.source.create({ data: { tenantId: DEFAULT, provider: 'api', name: 'pre', sourceKey: 'api_preexisting' } });
     run(seed);
     run(seed); // idempotent
-    fresh = newTestPrisma('owner', freshUrl);
-    const DEFAULT = '00000000-0000-0000-0000-000000000001';
     const keys = (await fresh.source.findMany({ where: { tenantId: DEFAULT }, select: { sourceKey: true } })).map((s: any) => s.sourceKey).sort();
-    expect(keys).toEqual(['src_github_main', 'src_payos_main', 'src_sepay_main']);
+    expect(keys).toEqual(['api_preexisting', 'src_github_main', 'src_payos_main', 'src_sepay_main']);
     expect(await fresh.destination.count({ where: { tenantId: DEFAULT } })).toBe(2);
     expect(await fresh.subscription.count({ where: { tenantId: DEFAULT } })).toBe(2);
     expect((await fresh.project.findMany({ select: { slug: true } })).map((p: any) => p.slug).sort()).toEqual(['bookstore', 'cafe', 'default']);
