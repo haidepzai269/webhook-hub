@@ -239,4 +239,26 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(take()).toEqual(['eval', 'get']);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it('X9: POST /v1/p/:project/events đi qua persistAccepted -> ĐÚNG số lệnh như /hooks (EVAL + GET + SET); ApiKeyGuard 0 lệnh', async () => {
+    const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
+    const prisma: any = {
+      forTenant: () => ({ findSourceById: jest.fn().mockResolvedValue({ id: 'src-api', tenantId: TENANT, provider: 'api', isActive: true, secrets: [] }) }),
+      $transaction: jest.fn(async (fn: any) => fn(tx)),
+    };
+    const body = { type: 'order.created', data: { total: 1 }, idempotencyKey: 'ord-budget' };
+    const svc = new IngestService(prisma, new RedisService());
+    const res = await svc.publishFromService(TENANT, 'src-api', {
+      provider: 'api', sourceKey: 'api_k', headers: {}, rawBody: Buffer.from(JSON.stringify(body)), body,
+    });
+    expect(res.status).toBe(202);
+    expect(take()).toEqual(['eval', 'get', 'set']);
+    // gửi lại: Redis trúng -> 200 duplicate, 2 lệnh, không transaction
+    const again = await svc.publishFromService(TENANT, 'src-api', {
+      provider: 'api', sourceKey: 'api_k', headers: {}, rawBody: Buffer.from(JSON.stringify(body)), body,
+    });
+    expect(again).toEqual({ status: 200, body: { duplicate: true } });
+    expect(take()).toEqual(['eval', 'get']);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
 });

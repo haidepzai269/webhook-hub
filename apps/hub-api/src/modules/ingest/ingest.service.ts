@@ -45,9 +45,46 @@ export class IngestService {
   ) {}
 
   async ingestWebhook(req: RawWebhookRequest): Promise<{ status: number; body: unknown }> {
+    return this.traced(req, (trace) => this.ingestCore(req, trace));
+  }
+
+  /**
+   * S4 (SPEC §4.4): service tự phát sự kiện qua `POST /v1/p/:project/events`. Xác thực (API key + scope) và kiểm
+   * đầu vào/catalog đã xong ở controller. Đi ĐÚNG đường ingest: rate limit -> chống trùng -> `persistAccepted`
+   * (raw_event + outbox cùng transaction, SET NX SAU COMMIT) -> 202. Cùng số lệnh Redis như `/hooks` (X9) và
+   * cũng phát `trace.ingested`.
+   */
+  async publishFromService(tenantId: string, sourceId: string, req: RawWebhookRequest): Promise<{ status: number; body: unknown }> {
+    return this.traced(req, async (trace) => {
+      const log = logger.child({ correlationId: trace.correlationId, provider: req.provider, sourceId });
+      const source = await this.prisma.forTenant(tenantId).findSourceById(sourceId);
+      if (!source || !source.isActive) {
+        log.warn('Source api của key không tồn tại hoặc đã tắt');
+        return { status: 409, body: { error: 'source_inactive' } };
+      }
+      trace.tenantId = source.tenantId;
+      if (!(await this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60))) {
+        trace.outcome = 'RATE_LIMITED';
+        return { status: 429, body: { error: 'rate_limited' } };
+      }
+      const adapter = ProviderRegistry.get(req.provider);
+      const idempotencyKey = adapter.extractIdempotencyKey(req);
+      const r = await this.persistAccepted(source, req, idempotencyKey, trace.correlationId, {
+        headers: redactHeaders(req.headers as Record<string, unknown>) as Record<string, unknown>,
+        signatureHeader: null,
+      });
+      return this.ackFor(adapter, r, idempotencyKey, trace);
+    });
+  }
+
+  /** Bọc chung cho /hooks và /events: metric trong bộ nhớ + `trace.ingested` in-process (0 lệnh Redis). */
+  private async traced(
+    req: RawWebhookRequest,
+    run: (trace: TraceState) => Promise<{ status: number; body: unknown }>,
+  ): Promise<{ status: number; body: unknown }> {
     const startedAt = Date.now();
     const trace: TraceState = { correlationId: generateCorrelationId() };
-    const result = await this.ingestCore(req, trace);
+    const result = await run(trace);
     this.recordMetrics(req.provider, trace, result.status, startedAt);
     // Chỉ phát khi ĐÃ BIẾT tenant (source tồn tại) — 404/400/413 không phát gì. Best-effort.
     if (trace.tenantId && trace.outcome && this.notifier) {
@@ -66,6 +103,90 @@ export class IngestService {
       }
     }
     return result;
+  }
+
+  /**
+   * Lõi dùng chung của `/hooks` và `/events` (SPEC §4.4) — ARCHITECTURE §3.1 bước 5–7, KHÔNG nhân bản:
+   *   5. Redis GET (đường tắt, được phép sai — BB-2)
+   *   6. Transaction: raw_events ACCEPTED + outbox `event.received` (Postgres là trọng tài: unique -> trùng)
+   *   7. SAU COMMIT mới SET NX Redis (BB-3: chưa COMMIT thì chưa có gì để nhớ)
+   */
+  async persistAccepted(
+    source: { id: string; tenantId: string },
+    req: RawWebhookRequest,
+    idempotencyKey: string,
+    correlationId: string,
+    stored: { headers: Record<string, unknown>; signatureHeader: string | null },
+  ): Promise<PersistResult> {
+    const log = logger.child({ correlationId, provider: req.provider, sourceId: source.id });
+    const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
+    if (await this.redis.getIdempotencyKey(redisIdemKey)) {
+      log.info({ idempotencyKey }, 'Chống trùng lớp 1 (Redis Cache Hit): đã nhận trước đó');
+      return { kind: 'duplicate' };
+    }
+
+    let rawEventRecord;
+    try {
+      rawEventRecord = await this.prisma.$transaction(async (tx) => {
+        const rawEvent = await tx.rawEvent.create({
+          data: {
+            sourceId: source.id,
+            idempotencyKey,
+            headers: stored.headers as any,
+            body: typeof req.body === 'object' && req.body !== null ? req.body : {},
+            bodyRaw: new Uint8Array(req.rawBody),
+            contentType: req.contentType,
+            signatureHeader: stored.signatureHeader,
+            signatureValid: true,
+            status: 'ACCEPTED',
+            origin: 'webhook',
+          },
+        });
+        // Transactional outbox trong CÙNG transaction
+        const outboxPayload: OutboxPayload = {
+          rawEventId: rawEvent.id,
+          sourceId: source.id,
+          tenantId: source.tenantId,
+          provider: req.provider,
+          correlationId,
+        };
+        await tx.outbox.create({ data: { topic: 'event.received', payload: outboxPayload as any } });
+        return rawEvent;
+      });
+    } catch (error: any) {
+      // UNIQUE(source_id, idempotency_key): PostgreSQL là trọng tài
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        log.info({ idempotencyKey }, 'Chống trùng lớp 2 (PostgreSQL Unique Violation): bỏ qua bản trùng');
+        return { kind: 'duplicate' };
+      }
+      log.error({ err: error.message }, 'Lỗi transaction khi lưu raw_event và outbox');
+      return { kind: 'error' };
+    }
+
+    // Sau khi COMMIT thành công: cập nhật đường tắt Redis (BB-3)
+    await this.redis.setIdempotencyKey(redisIdemKey, rawEventRecord.id, 86400);
+    log.info({ rawEventId: rawEventRecord.id }, 'Đã tiếp nhận và commit thành công vào Outbox');
+    return { kind: 'accepted', rawEventId: rawEventRecord.id };
+  }
+
+  /** Kết quả persistAccepted -> ACK đúng định dạng của adapter (provider hoặc API). */
+  private ackFor(
+    adapter: { buildAck(r: IngestResult): { status: number; body: unknown } },
+    r: PersistResult,
+    idempotencyKey: string,
+    trace: TraceState,
+  ): { status: number; body: unknown } {
+    if (r.kind === 'duplicate') {
+      trace.outcome = 'DUPLICATE';
+      return adapter.buildAck({ accepted: true, status: 200, isDuplicate: true, idempotencyKey });
+    }
+    if (r.kind === 'error') {
+      trace.outcome = 'ERROR';
+      return { status: 500, body: { error: 'Lỗi máy chủ nội bộ khi lưu sự kiện' } };
+    }
+    trace.outcome = 'ACCEPTED';
+    trace.rawEventId = r.rawEventId;
+    return adapter.buildAck({ accepted: true, status: 200, rawEventId: r.rawEventId, idempotencyKey, isDuplicate: false });
   }
 
   /**
@@ -186,96 +307,18 @@ export class IngestService {
       return { status: 401, body: { error: 'Chữ ký webhook không hợp lệ (Unauthorized)' } };
     }
 
-    // 4. Trích xuất Idempotency Key
+    // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)
     const idempotencyKey = adapter.extractIdempotencyKey(req);
-
-    // 5. Đường tắt Redis (BB-2: Chỉ đọc, nếu hit -> duplicate ACK)
-    const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
-    const cachedHit = await this.redis.getIdempotencyKey(redisIdemKey);
-    if (cachedHit) {
-      log.info({ idempotencyKey }, 'Chống trùng lớp 1 (Redis Cache Hit): Webhook đã được nhận trước đó');
-      trace.outcome = 'DUPLICATE';
-      return adapter.buildAck({
-        accepted: true,
-        status: 200,
-        isDuplicate: true,
-        idempotencyKey,
-      });
-    }
-
-    // 6. Transaction: PostgreSQL là trọng tài (BB-2 + BB-3)
-    let rawEventRecord;
-    try {
-      rawEventRecord = await this.prisma.$transaction(async (tx) => {
-        // Ghi raw_events
-        const rawEvent = await tx.rawEvent.create({
-          data: {
-            sourceId: source.id,
-            idempotencyKey,
-            headers: storedHeaders as any,
-            body: typeof req.body === 'object' && req.body !== null ? req.body : {},
-            bodyRaw: new Uint8Array(req.rawBody),
-            contentType: req.contentType,
-            signatureHeader,
-            signatureValid: true,
-            status: 'ACCEPTED',
-            origin: 'webhook',
-          },
-        });
-
-        // Ghi transactional outbox trong CÙNG transaction
-        const outboxPayload: OutboxPayload = {
-          rawEventId: rawEvent.id,
-          sourceId: source.id,
-          tenantId: source.tenantId,
-          provider: req.provider,
-          correlationId,
-        };
-
-        await tx.outbox.create({
-          data: {
-            topic: 'event.received',
-            payload: outboxPayload as any,
-          },
-        });
-
-        return rawEvent;
-      });
-    } catch (error: any) {
-      // Bắt lỗi trùng lặp PostgreSQL UNIQUE(source_id, idempotency_key)
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        log.info({ idempotencyKey }, 'Chống trùng lớp 2 (PostgreSQL Unique Violation): Bỏ qua webhook trùng lặp');
-        trace.outcome = 'DUPLICATE';
-        return adapter.buildAck({
-          accepted: true,
-          status: 200,
-          isDuplicate: true,
-          idempotencyKey,
-        });
-      }
-
-      log.error({ err: error.message }, 'Lỗi transaction khi lưu raw_event và outbox');
-      trace.outcome = 'ERROR';
-      return { status: 500, body: { error: 'Lỗi máy chủ nội bộ khi lưu sự kiện' } };
-    }
-
-    // 7. Sau khi COMMIT thành công: Cập nhật đường tắt Redis (BB-3)
-    await this.redis.setIdempotencyKey(redisIdemKey, rawEventRecord.id, 86400);
-
-    log.info({ rawEventId: rawEventRecord.id }, 'Đã tiếp nhận và commit thành công webhook vào Outbox');
-
-    // 8. Trả ACK thành công theo định dạng của provider
-    trace.outcome = 'ACCEPTED';
-    trace.rawEventId = rawEventRecord.id;
-    return adapter.buildAck({
-      accepted: true,
-      status: 200,
-      rawEventId: rawEventRecord.id,
-      idempotencyKey,
-      isDuplicate: false,
+    const persisted = await this.persistAccepted(source, req, idempotencyKey, correlationId, {
+      headers: storedHeaders as Record<string, unknown>,
+      signatureHeader,
     });
+    // 8. ACK theo định dạng của provider
+    return this.ackFor(adapter, persisted, idempotencyKey, trace);
   }
 }
+
+export type PersistResult = { kind: 'accepted'; rawEventId: string } | { kind: 'duplicate' } | { kind: 'error' };
 
 /** Trần request/phút/source (mặc định 100). Giá trị không hợp lệ -> 100. */
 export function ingestRateLimitPerMin(v: string | undefined = process.env.INGEST_RATE_LIMIT_PER_MIN): number {
