@@ -380,6 +380,12 @@ HUB_API_INTERNAL_URL=      # https://hub-api.onrender.com — đích proxy /api/
 NEXT_PUBLIC_SHOP_API_URL=  # URL shop — storefront gọi
 WEB_PROXY_SECRET=          # RUNTIME (không phải NEXT_PUBLIC_, không vào bundle) — giống hệt bên hub-api (R-2/ADR-110).
                            # `src/proxy.ts` gắn IP client (x-real-ip/x-forwarded-for do Vercel ghi đè) + secret
+                           # N-4/ADR-123 — KIỂM MỘT LẦN trên Vercel thật (local thì client tự đặt XFF được, đã biết):
+                           #   1. redis-cli (Upstash) --scan --pattern 'rl:reg:ip:*' -> ghi lại khoá hiện có
+                           #   2. curl -X POST https://<web>/auth/register -H 'content-type: application/json'
+                           #        -H 'x-forwarded-for: 6.6.6.6' -H 'x-real-ip: 6.6.6.6' -d '{"email":"x@y.vn","name":"x","password":"..."}'
+                           #   3. khoá mới phải là rl:reg:ip:<IP THẬT của máy bạn>, KHÔNG phải rl:reg:ip:6.6.6.6.
+                           #   Thấy 6.6.6.6 = Vercel không ghi đè header -> báo lại, đừng dựa vào giới hạn theo IP.
 NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
 NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel
 ```

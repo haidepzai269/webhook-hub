@@ -26,9 +26,11 @@ interface IpRequest {
 export function clientIp(req: IpRequest, secret: string | undefined = process.env.WEB_PROXY_SECRET): string | null {
   const h = req.headers ?? {};
   if (proxySecretValid(h[PROXY_SECRET_HEADER], secret)) {
+    // N-4 (ADR-123): request đã qua proxy web -> CHỈ tin x-hub-client-ip. Thiếu/rác thì null (bucket "unknown"),
+    // KHÔNG lùi về req.ip — với TRUST_PROXY=1 req.ip đọc X-Forwarded-For, thứ client có thể đã đặt.
     const fwd = h[CLIENT_IP_HEADER];
     const ip = typeof fwd === 'string' ? fwd.trim() : '';
-    if (isIP(ip)) return ip;
+    return isIP(ip) ? ip : null;
   }
   return req.ip ?? null;
 }

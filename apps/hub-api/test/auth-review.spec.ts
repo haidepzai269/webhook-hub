@@ -26,7 +26,8 @@ describe('R-2 — IP client qua proxy web (ADR-110)', () => {
     expect(reqCtx(viaWeb('203.0.113.7')).ip).toBe(WEB_IP);
     process.env.WEB_PROXY_SECRET = SECRET;
     expect(clientIp(viaWeb('203.0.113.7'), '')).toBe(WEB_IP);
-    expect(reqCtx(viaWeb('not-an-ip, 1.2.3.4')).ip).toBe(WEB_IP);
+    // N-4: secret ĐÚNG mà IP rác -> null (không lùi về req.ip, có thể đến từ XFF client đặt khi TRUST_PROXY=1)
+    expect(reqCtx(viaWeb('not-an-ip, 1.2.3.4')).ip).toBeNull();
     expect(proxySecretValid(['a', 'b'], SECRET)).toBe(false);
     expect(proxySecretValid(SECRET + 'x', SECRET)).toBe(false);
   });
@@ -128,5 +129,19 @@ describe('R-13 — production phải có WEB_PUBLIC_URL', () => {
     expect(authSecretProblems({ ...base, NODE_ENV: 'production', WEB_PUBLIC_URL: 'https://hub.vercel.app' })).toEqual([]);
     expect(authSecretProblems({ ...base, NODE_ENV: 'development' })).toEqual([]);
     expect(authSecretProblems({ ...base, WEB_PROXY_SECRET: 'ngan' })).toEqual(['WEB_PROXY_SECRET < 32 ký tự (để trống để tắt)']);
+  });
+});
+
+describe('N-3 — mọi POST có body của /auth chỉ nhận JSON', () => {
+  it('[AR:N-3] mỗi handler @Post có @Body() trong auth.controller gọi requireJsonBody(req) ngay đầu', () => {
+    const src: string = require('fs').readFileSync(require('path').join(__dirname, '../src/modules/auth/auth.controller.ts'), 'utf8');
+    const missing: string[] = [];
+    const re = /@Post\('([^']+)'\)[\s\S]*?\{\n([^\n]*)\n/g;
+    for (const m of src.matchAll(re)) {
+      const sig = src.slice(m.index!, m.index! + m[0].length);
+      if (!/@Body\(\)/.test(sig)) continue;
+      if (!/requireJsonBody\(req\)/.test(m[2])) missing.push(m[1]);
+    }
+    expect(missing).toEqual([]);
   });
 });

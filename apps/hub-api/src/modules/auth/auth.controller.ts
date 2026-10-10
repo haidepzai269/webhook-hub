@@ -106,6 +106,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(SessionGuard)
   acceptInvitation(@Req() req: RequestWithPrincipal, @Body() body: any) {
+    requireJsonBody(req); // N-3 (ADR-123): mọi POST có body của /auth chỉ nhận JSON
     return this.members.acceptInvitation(user(req), body ?? {}, reqCtx(req));
   }
 
@@ -179,6 +180,7 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+    requireJsonBody(req); // N-3 (ADR-123): mọi POST có body của /auth chỉ nhận JSON
     // R-6: link xác minh đăng nhập luôn (đăng ký không còn tự đăng nhập).
     const r = await this.auth.verifyEmail(body ?? {}, reqCtx(req));
     setSessionCookies(res, r.session);
@@ -197,6 +199,7 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.ACCEPTED)
   async forgotPassword(@Req() req: Request, @Body() body: any) {
+    requireJsonBody(req); // N-3 (ADR-123): mọi POST có body của /auth chỉ nhận JSON
     await this.auth.forgotPassword(body ?? {}, reqCtx(req));
     return { ok: true };
   }
@@ -204,6 +207,7 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   async resetPassword(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {
+    requireJsonBody(req); // N-3 (ADR-123): mọi POST có body của /auth chỉ nhận JSON
     await this.auth.resetPassword(body ?? {}, reqCtx(req));
     clearSessionCookies(res); // mọi phiên đã bị thu hồi
   }
@@ -212,6 +216,7 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(SessionGuard)
   async changePassword(@Req() req: RequestWithPrincipal, @Body() body: any) {
+    requireJsonBody(req); // N-3 (ADR-123): mọi POST có body của /auth chỉ nhận JSON
     await this.auth.changePassword(user(req), body ?? {}, reqCtx(req));
   }
 
