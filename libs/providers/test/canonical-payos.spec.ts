@@ -45,3 +45,23 @@ describe('PayOS -> catalog', () => {
     expect(e2.type).toBe('payment.failed');
   });
 });
+
+describe('PayOS / Stripe thiếu id giao dịch (review SPEC-3 #1)', () => {
+  it('PayOS thiếu paymentLinkId + reference -> providerTxnId sha:…, qua validator', () => {
+    const b: any = payosSuccess();
+    delete b.data.paymentLinkId;
+    delete b.data.reference;
+    const [e] = new PayosAdapter().normalize(req('payos', b), ctx);
+    expect(e.data.providerTxnId).toMatch(/^sha:[0-9a-f]{32}$/);
+    expect(validateCanonical(e.type, e.data)).toEqual({ ok: true });
+  });
+
+  it('Stripe object thiếu id -> providerTxnId sha:…', () => {
+    const { StripeAdapter } = require('../src');
+    const { stripePiSucceeded } = require('./fixtures');
+    const b = stripePiSucceeded();
+    delete b.data.object.id;
+    const [e] = new StripeAdapter().normalize(req('stripe', b), ctx);
+    expect(e.data.providerTxnId).toMatch(/^sha:[0-9a-f]{32}$/);
+  });
+});

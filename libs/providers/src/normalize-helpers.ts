@@ -1,5 +1,6 @@
 import { NormalizedEvent, ProviderType } from '@hub/common';
 import { ulid } from 'ulidx';
+import { bodyHashKey } from '@hub/crypto';
 
 /** Ngữ cảnh normalize mà lõi truyền cho adapter. */
 export interface NormalizeContext {
@@ -39,6 +40,15 @@ export function envelope(
  */
 export function amountOf(v: unknown): unknown {
   return typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
+}
+
+/**
+ * Id giao dịch dự phòng (review SPEC-3 #1): provider không gửi id nào thì dùng hash của body gốc,
+ * KHÔNG để null (null làm validator từ chối -> 0 event dù hub đã trả 200). Cùng body -> cùng giá trị,
+ * khớp với khoá chống trùng dự phòng (S3-1).
+ */
+export function fallbackTxnId(rawBody: Buffer | string): string {
+  return `sha:${bodyHashKey(rawBody)}`;
 }
 
 /** Chuỗi rỗng / thiếu -> null (luật 7: khoá luôn có mặt, thiếu dữ liệu thì null). */

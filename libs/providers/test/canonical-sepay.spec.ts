@@ -43,3 +43,26 @@ describe('SePay -> catalog', () => {
     expect((raw as any).transferAmount).toBe(50000);
   });
 });
+
+/** Review SPEC-3 #1: body thiếu cả id lẫn referenceCode vẫn ra event hợp lệ, providerTxnId ổn định theo body. */
+describe('SePay thiếu id + referenceCode', () => {
+  const a = new SepayAdapter();
+  const body = () => {
+    const b: any = sepayTx();
+    delete b.id;
+    delete b.referenceCode;
+    return b;
+  };
+
+  it('hai lần cùng body -> cùng providerTxnId (sha:…), cùng khoá chống trùng, qua validator', () => {
+    const r1 = req('sepay', body());
+    const r2 = req('sepay', body());
+    const [e1] = a.normalize(r1, ctx);
+    const [e2] = a.normalize(r2, ctx);
+    expect(e1.data.providerTxnId).toMatch(/^sha:[0-9a-f]{32}$/);
+    expect(e2.data.providerTxnId).toBe(e1.data.providerTxnId);
+    expect(e1.subject).toBe(`payment:${e1.data.providerTxnId}`);
+    expect(a.extractIdempotencyKey(r1)).toBe(a.extractIdempotencyKey(r2));
+    expect(validateCanonical(e1.type, e1.data)).toEqual({ ok: true });
+  });
+});

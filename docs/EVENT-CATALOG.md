@@ -64,11 +64,13 @@ Phần lõi chung (`PaymentCore`):
 | `memo` | string \| null | `description` | `content` | `description` |
 | `counterparty` | `{name, accountNumber, bank}` \| null | `counterAccount*` (cả ba rỗng → `null`) | `null` | `null` |
 | `account` | `{number, bank}` \| null | `{number: accountNumber, bank: null}` | `{number: accountNumber, bank: gateway}` | `null` |
-| `providerTxnId` | string ≠ "" | `paymentLinkId ?? reference` | `String(id)` (thiếu → `referenceCode`) | `id` |
+| `providerTxnId` | string ≠ "" | `paymentLinkId ?? reference ?? "sha:"+hash(body)` | `String(id) ?? referenceCode ?? "sha:"+hash(body)` | `id ?? "sha:"+hash(body)` |
 | `raw` | any | body | body | body (Stripe Event đầy đủ) |
 | `reason` (failed) | string \| null | `body.desc ?? data.desc` | — | `last_payment_error.message` |
 
 `method` hợp lệ: `bank_transfer | card | ewallet | payment_link | other`.
+
+`hash(body)` = 32 hex đầu của sha256 trên **bytes gốc** — provider không gửi id nào thì vẫn có id ổn định (gửi lại y hệt → cùng giá trị, cùng khoá chống trùng).
 
 Ví dụ — cùng một khoản 50.000đ qua PayOS và SePay ra **cùng tập khoá** (U37):
 

@@ -1,7 +1,7 @@
 import { PayOS } from '@payos/node';
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, parseProviderTime } from '@hub/common';
-import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
+import { NormalizeContext, amountOf, envelope, fallbackTxnId, str } from './normalize-helpers';
 import { bodyHashKey, timingSafeCompare } from '@hub/crypto';
 
 /**
@@ -67,7 +67,7 @@ export class PayosAdapter implements ProviderAdapter {
     const ok = body.code === '00' && body.success !== false;
     const type = ok ? 'payment.received' : 'payment.failed';
     const at = d.transactionDateTime ? parseProviderTime(d.transactionDateTime) : new Date().toISOString();
-    const providerTxnId = str(d.paymentLinkId) ?? str(d.reference);
+    const providerTxnId = str(d.paymentLinkId) ?? str(d.reference) ?? fallbackTxnId(req.rawBody);
     const cp = { name: str(d.counterAccountName), accountNumber: str(d.counterAccountNumber), bank: str(d.counterAccountBankName) };
 
     const data: Record<string, unknown> = {
@@ -90,7 +90,7 @@ export class PayosAdapter implements ProviderAdapter {
     return [
       envelope('payos', context, {
         type,
-        subject: providerTxnId ? `payment:${providerTxnId}` : undefined,
+        subject: `payment:${providerTxnId}`,
         data,
         occurredAt: at,
         normalized: true,

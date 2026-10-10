@@ -6,7 +6,7 @@ function headerValue(req: RawWebhookRequest, name: string): string | undefined {
   const v = req.headers[name] ?? req.headers[name.charAt(0).toUpperCase() + name.slice(1)];
   return Array.isArray(v) ? v[0] : v;
 }
-import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
+import { NormalizeContext, amountOf, envelope, fallbackTxnId, str } from './normalize-helpers';
 
 export class SepayAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'sepay';
@@ -52,8 +52,8 @@ export class SepayAdapter implements ProviderAdapter {
     const body = req.body || {};
     const isOut = body.transferType === 'out';
     const at = body.transactionDate ? parseProviderTime(body.transactionDate) : new Date().toISOString();
-    // SePay luôn gửi `id`; thiếu thì dùng referenceCode (không bịa id).
-    const providerTxnId = str(body.id) ?? str(body.referenceCode);
+    // SePay luôn gửi `id`; thiếu thì referenceCode, thiếu nữa thì hash body (không bao giờ null).
+    const providerTxnId = str(body.id) ?? str(body.referenceCode) ?? fallbackTxnId(req.rawBody);
 
     const data: Record<string, unknown> = {
       amount: amountOf(body.transferAmount),
@@ -71,7 +71,7 @@ export class SepayAdapter implements ProviderAdapter {
     return [
       envelope('sepay', context, {
         type: isOut ? 'payment.sent' : 'payment.received',
-        subject: providerTxnId ? `payment:${providerTxnId}` : undefined,
+        subject: `payment:${providerTxnId}`,
         data,
         occurredAt: at,
         normalized: true,
