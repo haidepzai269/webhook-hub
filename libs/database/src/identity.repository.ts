@@ -119,6 +119,29 @@ export class IdentityRepository {
     return rows.map((r) => ({ projectId: r.project.id, slug: r.project.slug, name: r.project.name, environment: r.project.environment, role: r.role }));
   }
 
+  /**
+   * R-3 (review AU, ADR-112): kiểm lại theo LÔ các socket đang mở — HAI truy vấn cho mọi socket của một instance.
+   * Trả session còn sống (kèm userId, isOperator) và các cặp `userId:projectId` còn là thành viên.
+   */
+  async socketAccess(sessionIds: string[], pairs: { userId: string; projectId: string }[], now: Date) {
+    const sessions = sessionIds.length
+      ? await this.db.authSession.findMany({
+          where: { id: { in: sessionIds }, revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
+          select: { id: true, userId: true, user: { select: { isOperator: true } } },
+        })
+      : [];
+    const members = pairs.length
+      ? await this.db.projectMember.findMany({
+          where: { OR: pairs.map((p) => ({ userId: p.userId, tenantId: p.projectId })) },
+          select: { userId: true, tenantId: true },
+        })
+      : [];
+    return {
+      live: new Map(sessions.map((s) => [s.id, { userId: s.userId, isOperator: s.user.isOperator }])),
+      members: new Set(members.map((m) => `${m.userId}:${m.tenantId}`)),
+    };
+  }
+
   async findMembershipRole(userId: string, projectId: string): Promise<MemberRole | null> {
     const m = await this.db.projectMember.findUnique({ where: { tenantId_userId: { tenantId: projectId, userId } }, select: { role: true } });
     return m?.role ?? null;

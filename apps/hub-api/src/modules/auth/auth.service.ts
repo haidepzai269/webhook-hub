@@ -11,6 +11,7 @@ import { newOpaqueToken, sha256Hex, signAccessToken } from './tokens';
 import { IssuedSession } from './cookies';
 import { authError, TooManyAttempts } from './auth-errors';
 import { UserPrincipal } from '../service-api/principal';
+import { notifyAccessRevoked } from '../realtime/access-revocation';
 
 export interface ReqCtx {
   ip: string | null;
@@ -186,6 +187,7 @@ export class AuthService {
     // MỘT transaction: khoá dòng (FOR UPDATE) -> kiểm -> xoay vòng. Nhánh lỗi TRẢ VỀ (không ném) để việc thu hồi
     // family khi phát hiện dùng lại vẫn được COMMIT; lượt refresh đồng thời thứ hai chờ khoá rồi thấy rotatedAt.
     type Outcome = { kind: 'ok'; issued: IssuedSession } | { kind: 'error'; status: HttpStatus; error: string };
+    let reusedBy: string | null = null; // R-3: family bị thu hồi -> ngắt socket của user SAU commit
     const outcome: Outcome = await this.store.$transaction(async (tx) => {
       const idn = this.store.identity(tx);
       const row = await idn.lockSessionByTokenHash(sha256Hex(refreshToken));
@@ -198,6 +200,7 @@ export class AuthService {
         }
         // Token cũ bị dùng lại: dấu hiệu bị đánh cắp -> thu hồi cả family (§5.3 bước 4).
         await idn.revokeFamily(row.familyId, 'reuse_detected', now);
+        reusedBy = row.userId;
         await idn.recordAuthAudit({ userId: row.userId, action: 'session.reuse_detected', ip: ctx.ip, meta: { familyId: row.familyId } });
         logger.warn({ userId: row.userId, familyId: row.familyId }, 'Refresh token bị dùng lại -> thu hồi cả family');
         return { kind: 'error', status: HttpStatus.UNAUTHORIZED, error: 'session_expired' };
@@ -207,6 +210,7 @@ export class AuthService {
       await idn.markRotated(row.id, issued.sessionId, now);
       return { kind: 'ok', issued };
     });
+    if (reusedBy) notifyAccessRevoked(reusedBy);
     if (outcome.kind === 'error') throw authError(outcome.status, outcome.error);
     return outcome.issued;
   }
@@ -215,11 +219,13 @@ export class AuthService {
 
   async logout(p: UserPrincipal, ctx: ReqCtx): Promise<void> {
     await this.store.identity().revokeOwnFamily(p.id, p.sessionId, 'logout', this.now());
+    notifyAccessRevoked(p.id);
     await this.audit(p.id, 'session.revoked', ctx.ip, { reason: 'logout' });
   }
 
   async logoutAll(p: UserPrincipal, ctx: ReqCtx): Promise<void> {
     await this.store.identity().revokeUserSessions(p.id, 'logout_all', this.now());
+    notifyAccessRevoked(p.id);
     await this.audit(p.id, 'session.revoked', ctx.ip, { reason: 'logout_all' });
   }
 
@@ -234,6 +240,7 @@ export class AuthService {
   async revokeSession(p: UserPrincipal, sessionId: string, ctx: ReqCtx): Promise<void> {
     const n = /^[0-9a-f-]{36}$/i.test(sessionId) ? await this.store.identity().revokeOwnFamily(p.id, sessionId, 'logout', this.now()) : 0;
     if (n === 0) throw authError(HttpStatus.NOT_FOUND, 'not_found');
+    notifyAccessRevoked(p.id);
     await this.audit(p.id, 'session.revoked', ctx.ip, { reason: 'device' });
   }
 
@@ -292,6 +299,7 @@ export class AuthService {
       // Bấm link trong mail đã chứng minh sở hữu email.
       await idn.setEmailVerified(row.userId!, now);
     });
+    notifyAccessRevoked(row.userId);
     await this.audit(row.userId, 'password.reset', ctx.ip);
   }
 
@@ -310,6 +318,7 @@ export class AuthService {
       await idn.updatePassword(user.id, passwordHash, now);
       await idn.revokeUserSessions(user.id, 'password_changed', now, p.sessionId);
     });
+    notifyAccessRevoked(user.id);
     await this.audit(user.id, 'password.changed', ctx.ip);
   }
 

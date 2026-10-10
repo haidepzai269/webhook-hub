@@ -7,6 +7,7 @@ import { authError } from './auth-errors';
 import { newOpaqueToken, sha256Hex } from './tokens';
 import { ReqCtx } from './auth.service';
 import { UserPrincipal } from '../service-api/principal';
+import { notifyAccessRevoked } from '../realtime/access-revocation';
 
 /** Lời mời sống 7 ngày (SPEC-auth §5.9). */
 const INVITE_TTL_MS = 7 * 86_400_000;
@@ -182,6 +183,7 @@ export class MembersService {
         metadata: { role: current, self },
       });
     });
+    notifyAccessRevoked(userId); // R-3: socket đang mở của người bị xoá vào project này bị ngắt (sau commit)
   }
 
   private async isOwner(p: UserPrincipal, projectId: string, owners?: string[]): Promise<boolean> {

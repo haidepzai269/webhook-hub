@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T21:22:10.116Z, commit d237654).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-10T21:29:43.972Z, commit c05299f).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 227 mã khai báo · 142 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 227 mã khai báo · 143 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -47,7 +47,8 @@ Tổng: 227 mã khai báo · 142 mã có test · 0 mồ côi · 12 mồ côi có
 | `AF:#39` | REVIEW-CHECKLIST.md · S1-8 | — | — | mồ côi có lý do: bash scripts/e2e-smoke.sh — VF4 thay bằng runner L2 TS có tag |
 | `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:222 | ✅ pass |
 | `AF:#41` | REVIEW-CHECKLIST.md · S3-6 | — | — | mồ côi có lý do: PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test |
-| `AR:R-2` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:15<br>apps/hub-api/test/auth-review.spec.ts:22<br>verify/scenarios/auth-e2e.ts:338 | ✅ pass |
+| `AR:R-2` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:15<br>apps/hub-api/test/auth-review.spec.ts:22<br>verify/scenarios/auth-e2e.ts:389 | ✅ pass |
+| `AR:R-3` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:47<br>apps/hub-api/test/auth-review.spec.ts:80<br>apps/hub-api/test/auth-review.spec.ts:88<br>verify/scenarios/auth-e2e.ts:332 | ✅ pass |
 | `AR:R-7` | REVIEW-AUTH-2026-10-11.md | L0 | verify/test/gates.spec.ts:79 | ✅ pass |
 | `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:75 | chưa chạy |
 | `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:192 | chưa chạy |
@@ -163,6 +164,6 @@ Tổng: 227 mã khai báo · 142 mã có test · 0 mồ côi · 12 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (107 file, 611 khai báo it/test)
+## File test (107 file, 614 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

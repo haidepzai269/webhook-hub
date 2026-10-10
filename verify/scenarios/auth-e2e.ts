@@ -329,6 +329,57 @@ ${r.stderr}`;
     console.log(`  TA13: exit ${r.status}, log có "superuser/BYPASSRLS"`);
   });
 
+  await run.scenario('[AR:R-3] (phần d) socket đang mở: E bị A xoá khỏi project -> socket bị ngắt, không nhận event mới; E logout-all -> socket project của E bị ngắt', async () => {
+    await flushRateLimits();
+    const A = await registered('r3a');
+    const E = await registered('r3e');
+    const pa = A.body.memberships[0];
+    const pe = E.body.memberships[0];
+    const vlink = await mailLink(A.email, /https?:\/\/\S+\/verify-email\?token=[A-Za-z0-9_-]+/);
+    expect((await new HttpSession(API).post('/auth/verify-email', { token: tokenOf(vlink) })).status === 200, 'A verify');
+    const inv = await A.s.post(`/api/v1/projects/${pa.projectId}/invitations`, { email: E.email, role: 'viewer' });
+    expect(inv.status === 201, `invite → ${inv.status} ${inv.text}`);
+    const ilink = await mailLink(E.email, /https?:\/\/\S+\/invite\?token=[A-Za-z0-9_-]+/);
+    expect((await E.s.post('/auth/invitations/accept', { token: tokenOf(ilink) })).status === 200, 'E accept');
+    const open = async (projectId: string) => {
+      const t = await E.s.get(`/auth/socket-ticket?projectId=${projectId}`);
+      expect(t.status === 200, `vé → ${t.status} ${t.text}`);
+      const sock = ioClient(API, { transports: ['websocket'], auth: { ticket: t.body.ticket }, reconnection: false });
+      const st = { got: 0, closed: false };
+      sock.on('event.received', () => st.got++);
+      sock.on('disconnect', () => (st.closed = true));
+      await new Promise<void>((ok, bad) => {
+        sock.once('connect', () => ok());
+        sock.once('connect_error', (e: Error) => bad(e));
+      });
+      return { sock, st };
+    };
+    const onA = await open(pa.projectId);
+    const onE = await open(pe.projectId);
+    try {
+      const rm = await A.s.req('DELETE', `/api/v1/projects/${pa.projectId}/members/${E.body.user.id}`);
+      expect(rm.status === 204, `xoá E → ${rm.status} ${rm.text}`);
+      for (let i = 0; i < 20 && !onA.st.closed; i++) await sleep(150);
+      const key = await A.s.post(`/api/v1/projects/${pa.projectId}/keys`, { serviceName: 'r3', scopes: ['publish:events'] });
+      await fetch(`${API}/v1/p/${pa.slug}/events`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${key.body.key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ type: `r3.created_${RUN}`, idempotencyKey: `r3-${RUN}`, data: { a: 1 } }),
+      });
+      await sleep(1500);
+      expect(onA.st.closed && onA.st.got === 0, `sau khi bị xoá: socket ${onA.st.closed ? 'đã' : 'VẪN'} mở, nhận ${onA.st.got} event`);
+      expect(!onE.st.closed, 'socket project của chính E bị ngắt oan khi E bị xoá khỏi project A');
+      const la = await E.s.post('/auth/logout-all', {});
+      expect(la.status === 204 || la.status === 200, `logout-all → ${la.status} ${la.text}`);
+      for (let i = 0; i < 20 && !onE.st.closed; i++) await sleep(150);
+      expect(onE.st.closed, 'sau logout-all socket của E vẫn mở');
+      console.log(`  R-3: xoá thành viên -> ngắt, nhận ${onA.st.got} event · logout-all -> ngắt`);
+    } finally {
+      onA.sock.close();
+      onE.sock.close();
+    }
+  });
+
   // R-2 (ADR-110) — đi QUA proxy web (cổng 13000, profile `web`). Web chưa chạy -> bỏ qua có ghi rõ (không tính).
   const WEB = process.env.VERIFY_WEB_URL || 'http://localhost:13000';
   const webUp = await fetch(`${WEB}/login`, { redirect: 'manual' }).then((r) => r.status < 500).catch(() => false);
