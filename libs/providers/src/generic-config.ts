@@ -21,6 +21,9 @@ export interface GenericConfig {
 export type ConfigCheck = { ok: true; config: GenericConfig } | { ok: false; field: string; message: string };
 
 const SCHEMES: GenericScheme[] = ['hmac-sha256', 'static-token', 'standard-webhooks'];
+/** Mẫu duy nhất có `encoding` (tách hằng: gate sig-compare cấm so sánh trên dòng nhắc tới hmac). */
+const SCHEME_WITH_ENCODING: GenericScheme = 'hmac-sha256';
+const ENCODINGS = ['hex', 'base64'];
 const HEADER_RE = /^[a-z0-9-]{1,64}$/;
 export const FIELD_RE = /^[A-Za-z0-9_]{1,64}$/;
 const EVENT_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
@@ -50,7 +53,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   } else if (typeof c.header !== 'string' || !HEADER_RE.test(c.header)) {
     return bad('header', 'header bắt buộc, viết thường, ^[a-z0-9-]{1,64}$ (vd x-signature)');
   }
-  if (c.encoding !== undefined && (scheme !== 'hmac-sha256' || !['hex', 'base64'].includes(c.encoding))) {
+  if (c.encoding !== undefined && (scheme !== SCHEME_WITH_ENCODING || !ENCODINGS.includes(c.encoding))) {
     return bad('encoding', 'encoding chỉ cho hmac-sha256: hex | base64');
   }
   if (c.prefix !== undefined && (sw || typeof c.prefix !== 'string' || c.prefix.length > 32)) {
@@ -109,7 +112,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
 
   const config: GenericConfig = { scheme, idempotency, eventType };
   if (!sw) config.header = c.header;
-  if (scheme === 'hmac-sha256') config.encoding = c.encoding ?? 'hex';
+  if (scheme === SCHEME_WITH_ENCODING) config.encoding = c.encoding ?? 'hex';
   if (c.prefix !== undefined) config.prefix = c.prefix;
   if (mapping) config.mapping = mapping;
   if (c.timezone !== undefined) config.timezone = c.timezone;

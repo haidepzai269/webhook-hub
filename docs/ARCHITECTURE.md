@@ -50,7 +50,7 @@ Hai domain tách bạch, giao tiếp **chỉ** qua outbound webhook có ký HMAC
 |   Không biết: đơn hàng, tiền, khách hàng, nghiệp vụ           |
 +---------------------------------------------------------------+
                       |
-                      |  POST + X-Hub-Signature (HMAC-SHA256)
+                      |  POST + webhook-signature (Standard Webhooks)
                       |  <- ranh giới thật, KHÔNG chia sẻ DB
                       v
 +-- DOMAIN B: SHOP — nghiệp vụ, là KHÁCH HÀNG của Hub ----------+
@@ -494,20 +494,24 @@ Cập nhật dùng optimistic locking: `UPDATE ... WHERE id = ? AND version = ?`
 | URL khó đoán | `/hooks/:provider/:sourceKey`, `sourceKey` ngẫu nhiên 32 ký tự |
 | Giới hạn | payload ≤ 1MB · rate limit cửa sổ cố định 60s theo source (mặc định 100/phút) |
 | Lưu cả request hỏng | chữ ký sai vẫn INSERT `status=REJECTED` để điều tra — chỉ 4KB đầu, ≤ 20 bản/phút/source; header nhạy cảm đã che (ADR-045, ADR-051) |
+| Nguồn tuỳ chỉnh (GenericAdapter) | `hmac-sha256` (hex/base64, prefix, trên raw body) · `static-token` · `standard-webhooks`, cấu hình ở `sources.verification_config`; thiếu khoá chống trùng → REJECTED + 422, không fallback ulid; header token do adapter khai được che trước khi lưu (ADR-079) |
+| API cho service | `Authorization: Bearer hk_<env>_…` → `ApiKeyGuard`: 401 → 404 (project khác = không tồn tại, cùng body) → 403 thiếu scope; DB chỉ giữ sha256 (ADR-073) |
 
-### 7.2. Outbound (hub ký webhook gửi đi)
-
-Theo chuẩn [Standard Webhooks](https://www.standardwebhooks.com):
+### 7.2. Outbound (hub ký webhook gửi đi) — Standard Webhooks (ADR-040, ADR-076)
 
 ```
-X-Hub-Event-Id:   evt_01J9ZK...
-X-Hub-Timestamp:  1789550431
-X-Hub-Signature:  v1=<HMAC-SHA256(secret, "{id}.{timestamp}.{body}")>
+webhook-id:        evt_01J9ZK...            (= event id, GIỮ NGUYÊN qua retry và replay)
+webhook-timestamp: 1789550431
+webhook-signature: v1,<base64(HMAC-SHA256(secretBytes, "{id}.{timestamp}.{body}"))>
 ```
 
-Bên nhận (Shop) **bắt buộc**: (1) verify chữ ký · (2) từ chối nếu timestamp lệch > 5 phút (**chống replay attack**) · (3) chống trùng theo `X-Hub-Event-Id`.
+`secretBytes` = base64 của phần sau `whsec_`, hoặc utf8 với secret cũ. Một bản ký/verify dùng chung: `libs/crypto/src/standard-webhooks.ts` (hub) và `verifyWebhook` của `@hub/sdk` (service, không phụ thuộc hub) — cả hai khớp vector chuẩn README standard-webhooks. Không còn `X-Hub-*`.
 
-Xoay secret outbound (gửi hai chữ ký `v1=<cũ>,v1=<mới>`): **chưa làm** — hiện gửi một chữ ký. Header theo Standard Webhooks thật (`webhook-id`/`webhook-signature`) để cho đợt đa service (ADR-040).
+Bên nhận **bắt buộc**: (1) verify chữ ký trên bytes gốc · (2) từ chối nếu timestamp lệch > 5 phút (**chống replay**) · (3) chống trùng theo `webhook-id`.
+
+**Endpoint phải chứng minh sở hữu (challenge):** tạo endpoint hoặc `POST …/endpoints/:id/verify` → hub POST `{"type":"endpoint.verification","challenge"}` đã ký, qua SSRF guard, không redirect, ≤ 10s; đích trả đúng `challenge` → `VERIFIED`. Chưa `VERIFIED` thì normalize **không tạo delivery** cho đích đó.
+
+Xoay secret outbound (nhiều chữ ký trong một header `v1,a v1,b`): bên nhận đã hỗ trợ, hub hiện gửi một chữ ký.
 
 ### 7.3. SSRF — chặn dải IP nội bộ là CHƯA ĐỦ
 
@@ -519,7 +523,7 @@ Bản gốc chỉ nói "chặn URL trỏ về `127.0.0.1`, `10.x`, `192.168.x`".
    → **`maxRedirects: 0`**. Không follow, chấm hết.
 
 Chặn: `127.0.0.0/8` · `10/8` · `172.16/12` · `192.168/16` · `169.254/16` · `::1` · `fc00::/7` · `0.0.0.0`.
-Cho phép bỏ qua **chỉ** khi `NODE_ENV=development`.
+Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong mạng docker) — **trừ** link-local `169.254/16` + `fe80::/10` (metadata đám mây), bị chặn ở MỌI môi trường (ADR-076).
 
 ### 7.4. Hệ thống
 
@@ -540,16 +544,20 @@ Cho phép bỏ qua **chỉ** khi `NODE_ENV=development`.
 | Health | `/health` kiểm Postgres · Redis · RabbitMQ | |
 | **Tự cảnh báo** | *Chưa làm* (bỏ cùng kênh `hub:alerts`, ADR-048) — xem §5.4c | Hiện có `circuit.changed` realtime + metric |
 
-### 8.1. Polling endpoint — cho đích không nhận được push (ADR-016)
+### 8.1. Polling (A) — cho service không nhận được push (ADR-016, ADR-077)
 
 ```
-GET /api/v1/events?after=<cursor>&types=repo.push,payment.received&limit=100
-→ { events: [...], nextCursor: "evt_01J..." }
+GET /v1/p/:project/events?after=<seq>&limit=50&types=payment.*,repo.push&status=failed&endpointId=&wait=0..20
+→ { events: [...], nextCursor: "<seq>" }          (scope read:events; seq là CHUỖI)
 ```
 
-Cursor = `events.id` (ULID, tăng dần theo thời gian). Scope theo `tenant_id`.
+- Cursor = `events.seq` (BIGSERIAL), **không** ULID (nhiều worker cùng mili giây không có thứ tự).
+- **Cửa sổ lắng 2s** theo `events.created_at` (= `clock_timestamp()` lúc INSERT): transaction có seq nhỏ có thể COMMIT sau transaction có seq lớn — đọc ngay thì cursor vượt qua và mất vĩnh viễn sự kiện đó.
+- `types` giao với `readTypes` của key; `status=failed` = có delivery DEAD/RETRYING ở generation mới nhất (tới `endpointId`); long-poll `wait` truy vấn lại mỗi 1s, 0 lệnh Redis.
+- Dashboard `GET /api/v1/events`: `before=<id>` (cũ hơn, giảm dần), `after=<seq>` (mới hơn, tăng dần).
+- Lấy lại được trong `EVENT_RETENTION_DAYS` ngày; raw ACCEPTED giữ vô hạn (ADR-045).
 
-Lý do tồn tại — **không phải mọi đích đều nhận push được**: đích nằm sau firewall doanh nghiệp, đích là client di động, đích là script chạy theo lịch. Push và pull là hai mặt của cùng một bài toán phân phối. ~1 giờ.
+Lý do tồn tại — **không phải mọi đích đều nhận push được**: đích nằm sau firewall doanh nghiệp, đích là client di động, đích là script chạy theo lịch, hoặc endpoint vừa chết và cần lấy lại phần bị lỡ.
 
 **Sự kiện Socket.IO** (room theo user / theo order):
 
@@ -795,6 +803,30 @@ FIFO đòi **single-flight theo partition key**: trong mỗi key chỉ được 
 > Đề tài này làm **tầng webhook tin cậy cho các nền tảng Việt Nam (PayOS, SePay)** — trọng tâm là không mất sự kiện, không xử lý trùng, tự phục hồi và quan sát được, với ba cơ chế xác thực khác nhau trên ba nguồn thật.
 
 ---
+
+## 17. Project · API key · kết nối — hub là hạ tầng dùng chung (đa service, ADR-038..041, ADR-071..082)
+
+| Khái niệm | Trong code | Ghi chú |
+|---|---|---|
+| **Project** = biên cô lập | `hub.projects`; cột `tenant_id` ở mọi bảng GIỮ TÊN, nghĩa là `project_id` | Không project nào đọc/ghi được dữ liệu project khác, kể cả biết UUID (repo + khoá ngoại ghép subscription→đích) |
+| **Service** = một API key | `hub.api_keys` (sha256, `key_prefix` 12 ký tự), scope `publish:events` · `read:events` · `manage:endpoints` · `manage:sources`, `readTypes` | Key thô trả **một lần** lúc tạo; revoke chỉ ngắt đúng service đó |
+| **Connection string** | `hubs://<key>@<host>/<project>` (`hub://` cho http local) | `HUB_PUBLIC_URL`; SDK parse |
+| Console (operator) | `/api/v1/projects`, `/api/v1/projects/:id/keys`; `?projectId=` đọc ở **một** guard `ProjectScopeGuard` | JWT admin như cũ |
+| API cho service | `/v1/p/:project/{me, events (POST/GET), endpoints, endpoints/:id/verify, subscriptions, sources, sources/:id/inspect}` | `ApiKeyGuard` + `@RequireScope`; lỗi đầu vào 422 có tên trường |
+
+```
+service ──POST /v1/p/cafe/events──▶ ApiKeyGuard ─▶ persistAccepted (raw_events + outbox, cùng TX) ─▶ 202
+                                                   (cùng lõi với /hooks — ADR-074; SET NX Redis SAU COMMIT)
+bên thứ ba ──/hooks/generic/<key>──▶ GenericAdapter (cấu hình theo source) ─▶ cùng đường ingest
+worker ──normalize──▶ subscription khớp type (wildcard) VÀ sourceIds ─▶ chỉ đích VERIFIED ─▶ ký Standard Webhooks
+service ◀──push──  hoặc  ──GET /v1/p/cafe/events?after=<seq>&wait=20──▶ (polling A)
+```
+
+- **SDK** `@hub/sdk` (`libs/hub-sdk`): `createHubClient(HUB_URL)`, `publish`, `poll`, `endpoints.ensure` (idempotent), `verifyWebhook`, `challengeResponse`; 0 dependency runtime, key bị che khi log (ADR-081).
+- **Shop** là service thật: tự `ensure` endpoint + subscription `payment.received` lúc khởi động; seed không tạo đích Shop.
+- **Noisy neighbor**: hướng A — `DELIVERY_TIMEOUT_MS` (1000–10000) + circuit breaker; số đo và hướng semaphore ở `docs/DEMO-MULTI-PROJECT.md` §5 (ADR-078).
+- **Chế độ lắng nghe**: `GET …/sources/:id/inspect` chẩn đoán raw_event đã lưu (`missing_header` + tên header ứng viên, `signature_mismatch`, `missing_idempotency_key`, `mapping_field_missing`…), không bao giờ trả giá trị (ADR-080).
+- Demo hai project `cafe`/`bookstore`: `docs/DEMO-MULTI-PROJECT.md`, `scripts/demo-multi-project.sh`.
 
 ## Tham khảo
 

@@ -3,6 +3,9 @@ import { TenantScopedRepository } from '@hub/database';
 import { ServiceResourcesController } from '../src/modules/service-api/service-resources.controller';
 import { parseSourceInput } from '../src/modules/service-api/source-input';
 
+// Tự đủ: không dựa vào test khác trong cùng worker đặt MASTER_KEY (thứ tự jest không cố định).
+process.env.MASTER_KEY = process.env.MASTER_KEY || 'test-master-key-at-least-32-characters!!';
+
 /** S8 (SPEC §4.3B, §4.8): service tự tạo source (GenericAdapter); kiểm cấu hình lúc tạo, 422 có tên trường. */
 describe('POST/GET /v1/p/:project/sources (S8)', () => {
   const PA = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';

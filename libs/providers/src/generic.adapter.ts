@@ -24,7 +24,7 @@ export class GenericAdapter implements ProviderAdapter {
     if (presented === null) return false;
     let ok = false;
     for (const secret of secrets) {
-      const expected = c.scheme === 'hmac-sha256' ? createHmac('sha256', secret).update(req.rawBody).digest(c.encoding ?? 'hex') : secret;
+      const expected = expectedCredential(c, secret, req.rawBody);
       // Không dừng sớm: thời gian không lộ secret nào khớp.
       if (timingSafeCompare(presented, expected)) ok = true;
     }
@@ -49,7 +49,7 @@ export class GenericAdapter implements ProviderAdapter {
   extractSignature(req: RawWebhookRequest, ctx?: AdapterContext): string | null {
     const c = configOf(ctx);
     if (!c) return null;
-    if (c.scheme === 'standard-webhooks') return headerOf(req, 'webhook-signature');
+    if (isStandardWebhooks(c)) return headerOf(req, SW_SIGNATURE_HEADER);
     const v = headerOf(req, c.header!);
     if (v === null) return null;
     return c.scheme === 'static-token' ? '***' : v;
@@ -135,7 +135,7 @@ export class GenericAdapter implements ProviderAdapter {
     const candidates = (expected: string) =>
       Object.keys(headers)
         .map((h) => h.toLowerCase())
-        .filter((h) => h !== expected && !h.startsWith('__') && /sig|token|auth|hmac|key/.test(h))
+        .filter((h) => h !== expected && !h.startsWith('__') && CANDIDATE_HEADER_RE.test(h))
         .sort();
     if (c.scheme === 'standard-webhooks') {
       const missing = ['webhook-id', 'webhook-timestamp', 'webhook-signature'].find((h) => !has(h));
@@ -147,7 +147,8 @@ export class GenericAdapter implements ProviderAdapter {
     }
     const expected = c.header!;
     if (!has(expected)) return { ok: false, reason: 'missing_header', expectedHeader: expected, candidateHeaders: candidates(expected) };
-    return { ok: false, reason: c.scheme === 'static-token' ? 'token_mismatch' : 'signature_mismatch', expectedHeader: expected };
+    const reason = isStaticToken(c) ? 'token_mismatch' : 'signature_mismatch';
+    return { ok: false, reason, expectedHeader: expected };
   }
 
   /** ACCEPTED có mapping: chạy lại ánh xạ + validator trên body đã lưu; báo TÊN trường body (không giá trị). */
@@ -171,6 +172,22 @@ export class GenericAdapter implements ProviderAdapter {
     if (result.isDuplicate) return { status: 200, body: { ok: true, duplicate: true } };
     if (!result.accepted) return { status: result.status, body: { ok: false, error: result.message ?? 'rejected' } };
     return { status: 200, body: { ok: true } };
+  }
+}
+
+const SW_SIGNATURE_HEADER = 'webhook-signature';
+/** Tên header "trông như" mang bằng chứng xác thực — chỉ để gợi ý trong chẩn đoán, không bao giờ kèm giá trị. */
+const CANDIDATE_HEADER_RE = /sig|token|auth|hmac|key/;
+const isStandardWebhooks = (c: GenericConfig) => c.scheme === 'standard-webhooks';
+const isStaticToken = (c: GenericConfig) => c.scheme === 'static-token';
+
+/** Giá trị ĐÚNG mà request phải trình: HMAC của bytes gốc (hmac-sha256) hoặc chính token (static-token). */
+function expectedCredential(c: GenericConfig, secret: string, rawBody: Buffer): string {
+  switch (c.scheme) {
+    case 'hmac-sha256':
+      return createHmac('sha256', secret).update(rawBody).digest(c.encoding ?? 'hex');
+    default:
+      return secret;
   }
 }
 

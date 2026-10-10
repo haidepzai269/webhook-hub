@@ -69,3 +69,4 @@ Ràng buộc deployed phải nhớ khi code:
 
 - **2026-09-17** — chốt kiến trúc + triển khai, viết `docs/`. Chưa có code.
 - **2026-09-18** — Ngày 1.
+- **2026-10-11** — Đa service (S1–S12, ADR-071..082): Project + API key + connection string, `/v1/p/:project/*` (publish, polling A theo `seq`, endpoint có challenge, subscription `sourceIds`, source GenericAdapter + chế độ lắng nghe), push ký Standard Webhooks (bỏ `X-Hub-*`), `@hub/sdk`, Shop tự đăng ký endpoint, demo `cafe`/`bookstore` (`docs/DEMO-MULTI-PROJECT.md`).

@@ -104,6 +104,19 @@ Không chép email của author vào phần chung (dữ liệu cá nhân); email
 - Template: `{{data.amount}} {{data.currency}}`, `{{data.memo}}`, `{{data.reference}}` đúng cho **mọi** nguồn
   thanh toán; `{{data.repo.fullName}}`, `{{data.actor.login}}` cho `repo.*`.
 
+## 5b. Service tự phát và nguồn tuỳ chỉnh (đa service)
+
+- **`POST /v1/p/:project/events`** (ADR-074): `type` thuộc không gian dành riêng (`payment.*`, `repo.*`) phải đúng khuôn catalog — sai → **422** `{"error":"schema_mismatch","field":"<tên trường>"}` NGAY lúc gọi, trước khi ghi. Kiểu riêng của service (vd `order.created`) là hợp đồng của chính service: `normalized: true`, `data` giữ nguyên.
+- **GenericAdapter có `mapping`** (ADR-079): nguồn bên thứ ba chưa có adapter vẫn ra kiểu chuẩn thanh toán. Giá trị chỉ là tên trường **cấp một** của body hoặc `{"const": …}`:
+  ```jsonc
+  "eventType": "payment.received",
+  "mapping": { "amount": "soTien", "currency": {"const":"VND"}, "method": {"const":"bank_transfer"},
+               "reference": "maGD", "memo": "noiDung", "providerTxnId": "maGD", "paidAt": "thoiGian" },
+  "timezone": "+07:00"
+  ```
+  Bắt buộc `amount`, `currency`, `method`, `providerTxnId` và trường thời gian của kiểu; `counterparty`/`account` = `null`; `raw` = body. Số tiền chỉ nhận số nguyên hoặc chuỗi toàn chữ số (`"50.000"` là sai). Body thiếu trường → lỗi normalize vĩnh viễn; chế độ lắng nghe báo `mapping_field_missing` + tên trường. Không có `mapping` thì `data = { raw }`, `normalized: false`.
+- **SDK**: `import type { PaymentReceived, RepoPush } from '@hub/sdk'` — chỉ type, không kéo validator.
+
 ## 6. Ánh xạ sang CloudEvents 1.0 (chỉ tài liệu — hub KHÔNG đổi body)
 
 Admin chốt (DINH-CHINH 10/10 §1 A1): body giữ phong bì của hub; ai cần CloudEvents thì ánh xạ như sau.

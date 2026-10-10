@@ -3,6 +3,9 @@ import { TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { ServiceResourcesController } from '../src/modules/service-api/service-resources.controller';
 
+// Tự đủ: không dựa vào test khác trong cùng worker đặt MASTER_KEY (thứ tự jest không cố định).
+process.env.MASTER_KEY = process.env.MASTER_KEY || 'test-master-key-at-least-32-characters!!';
+
 /**
  * S5 (SPEC §4.3B, §4.6): endpoint + subscription cho service qua `/v1/p/:project`. Repo THẬT trên Prisma giả
  * trong bộ nhớ — kiểm đúng lớp lọc project. Lỗi theo bảng `/v1/p`: 422 có tên trường, tài nguyên khác project 404.
