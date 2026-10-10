@@ -36,7 +36,7 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 
 | Mục | Trạng thái | Commit | Ghi chú |
 |---|---|---|---|
-| N-1 | xong | (commit N-1) | ADR-121: verify-email buộc đặt mật khẩu cho tài khoản mật khẩu chưa xác minh + claimAccount |
-| N-2 | chưa | | |
+| N-1 | xong | 752d4bd | ADR-121: verify-email buộc đặt mật khẩu cho tài khoản mật khẩu chưa xác minh + claimAccount |
+| N-2 | xong | (commit N-2) | ADR-122 | |
 | N-3 | chưa | | |
 | N-4 | chưa | | |

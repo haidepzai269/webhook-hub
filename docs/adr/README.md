@@ -1241,3 +1241,9 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - `POST /auth/reset-password` trên tài khoản CHƯA xác minh cũng đi `claimAccount` (nhận lại qua quên mật khẩu).
 - Web `/verify-email`: gặp `password_required` thì hiện form tên + mật khẩu.
 **Đánh đổi:** người đăng ký thật nhập mật khẩu hai lần (lúc đăng ký và lúc bấm link) — mật khẩu lúc đăng ký chỉ còn để qua kiểm tra hình thức. Sau R-6 kẻ xấu không còn đăng nhập được khi chưa xác minh nên hầu như không để lại gì; phần thu hồi key/lời mời là cho tài khoản cũ (trước R-6). Key trong project dùng chung (≥ 2 thành viên) không bị thu hồi để không phá dữ liệu của người khác. Đã cân nhắc phương án (b) gắn hash vào token: nạn nhân không phân biệt được link của mình với link do kẻ xấu kích hoạt nên bỏ.
+
+## ADR-122 — Review AU vòng 2 N-2: `?next=` kiểm bằng cách PHÂN GIẢI URL cùng origin, không chỉ kiểm tiền tố (2026-10-11)
+
+**Vấn đề:** `safeNext` chỉ chặn tiền tố `//` và `/\`. Parser URL (WHATWG) bỏ tab/newline nên `?next=/%09/evil.com` thành `//evil.com` — sau khi đăng nhập, router của Next chuyển sang site lạ (open redirect, hợp cho phishing).
+**Chọn:** từ chối `raw` chứa ký tự điều khiển (< 0x20, 0x7f) hoặc `\`, đòi bắt đầu bằng đúng một `/`, rồi `new URL(raw, origin)` phải cùng origin; trả `pathname + search + hash` đã phân giải (không trả chuỗi gốc). Test bảng (`next-path.spec.ts`, 14 dòng: `//`, `/\`, `%09`, `%0a`, `%0d`, `%5C`, `%2F%2F`, scheme lạ, `javascript:`).
+**Đánh đổi:** đường nội bộ hợp lệ nhưng có ký tự lạ cũng về dashboard — chấp nhận.
