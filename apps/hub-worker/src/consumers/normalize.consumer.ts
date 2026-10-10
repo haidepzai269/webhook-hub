@@ -1,20 +1,40 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService, DEV_MASTER_KEY } from '@hub/database';
+import { PrismaService, TenantScopedRepository } from '@hub/database';
 import { ProviderRegistry } from '@hub/providers';
-import { EXCHANGES, ROUTING_KEYS } from '@hub/messaging';
-import { logger, OutboxPayload, NormalizedEvent, DeliveryMessage } from '@hub/common';
-import { aesGcmDecrypt } from '@hub/crypto';
+import { QUEUES } from '@hub/messaging';
+import { logger, OutboxPayload, NormalizedEvent, buildDeliveryMessage, EventReceivedNotice } from '@hub/common';
+import { Prisma } from '@prisma/client';
 import * as amqp from 'amqplib';
 import Redis from 'ioredis';
+import {
+  NORMALIZE_MAX_RETRIES,
+  NORMALIZE_RETRY_HEADER,
+  classifyNormalizeError,
+  readNormalizeRetryCount,
+} from './normalize-errors';
+
+/** Topic outbox cho chặng normalize → delivery (S1-2). Relay định tuyến theo TOPIC_ROUTES. */
+export const DELIVERY_REQUESTED_TOPIC = 'delivery.requested';
 
 @Injectable()
 export class NormalizeConsumer {
   private redisPub: Redis;
+  /**
+   * Tiêm lỗi để kiểm S1-3 trên docker: N lần xử lý đầu ném P1001 giả. CHỈ khi NODE_ENV !== 'production'
+   * — trên môi trường thật biến này bị bỏ qua hoàn toàn.
+   */
+  private faultsLeft: number;
 
   constructor(private readonly prisma: PrismaService) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisPub = new Redis(redisUrl, { lazyConnect: true });
+    this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (normalize) lỗi'));
     this.redisPub.connect().catch(() => {});
+    this.faultsLeft =
+      process.env.NODE_ENV === 'production' ? 0 : Math.max(0, parseInt(process.env.NORMALIZE_FAULT_FIRST_N || '0', 10) || 0);
+    if (this.faultsLeft > 0) {
+      logger.warn({ faults: this.faultsLeft }, 'NORMALIZE_FAULT_FIRST_N bật: sẽ tiêm lỗi P1001 giả (chỉ để kiểm, không dùng production)');
+    }
   }
 
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
@@ -33,34 +53,28 @@ export class NormalizeConsumer {
     const log = logger.child({ correlationId, rawEventId, provider });
 
     try {
-      // 1. Kiểm tra idempotency 5 chốt (§5.2): processed_messages
-      const alreadyProcessed = await this.prisma.processedMessage.findUnique({
-        where: {
-          consumer_messageId: {
-            consumer: 'normalize',
-            messageId: rawEventId,
-          },
-        },
-      });
+      this.maybeInjectFault();
 
+      // 1. Idempotency (§5.2): processed_messages
+      const alreadyProcessed = await this.prisma.processedMessage.findUnique({
+        where: { consumer_messageId: { consumer: 'normalize', messageId: rawEventId } },
+      });
       if (alreadyProcessed) {
         log.info('Message đã được normalize trước đó (processed_messages hit), bỏ qua');
         channel.ack(msg);
         return;
       }
 
-      // 2. Nạp raw_event từ DB
-      const rawEvent = await this.prisma.rawEvent.findUnique({
-        where: { id: rawEventId },
-      });
-
+      // 2. Nạp raw_event QUA REPO đã scope tenant (S1-5, BB-5): raw event của tenant khác không đọc được.
+      const repo = this.prisma.forTenant(tenantId);
+      const rawEvent = await repo.findRawEventById(rawEventId);
       if (!rawEvent) {
-        log.warn('Không tìm thấy raw_event trong database');
+        log.warn('Không tìm thấy raw_event (hoặc không thuộc tenant trong message)');
         channel.ack(msg);
         return;
       }
 
-      // 3. Adapter chuẩn hóa (Normalize)
+      // 3. Adapter chuẩn hoá
       const adapter = ProviderRegistry.get(provider);
       const normalizedEvents: NormalizedEvent[] = adapter.normalize(
         {
@@ -71,129 +85,119 @@ export class NormalizeConsumer {
           body: rawEvent.body,
           contentType: rawEvent.contentType || undefined,
         },
-        {
-          tenantId,
-          sourceId,
-          correlationId,
-          rawEventId,
-        },
+        { tenantId, sourceId, correlationId, rawEventId },
       );
 
-      // 4. Nạp subscriptions và tạo deliveries trong Transaction
-      const masterKey = process.env.MASTER_KEY || DEV_MASTER_KEY;
-      const deliveriesToPublish: DeliveryMessage[] = [];
-
+      // 4. Event + delivery + outbox `delivery.requested` + processed_messages trong MỘT transaction (S1-2).
+      // Không còn publish thẳng sau COMMIT: hoặc tất cả cùng COMMIT, hoặc không có gì — relay lo phần gửi.
+      const routed: EventReceivedNotice['deliveries'] = [];
       await this.prisma.$transaction(async (tx) => {
+        routed.length = 0; // phòng khi callback bị gọi lại
+        const repoTx = new TenantScopedRepository(tx, tenantId);
+
         for (const evt of normalizedEvents) {
-          // Lưu Event
-          await tx.event.create({
-            data: {
-              id: evt.id,
-              tenantId: evt.tenantId,
-              rawEventId: evt.rawEventId,
-              idempotencyKey: evt.id,
-              correlationId: evt.correlationId,
-              type: evt.type,
-              source: evt.source,
-              subject: evt.subject,
-              data: evt.data,
-              origin: evt.origin,
-              occurredAt: new Date(evt.occurredAt),
-              receivedAt: new Date(evt.receivedAt),
-            },
+          await repoTx.createEvent({
+            id: evt.id,
+            rawEventId: evt.rawEventId,
+            idempotencyKey: evt.id,
+            correlationId: evt.correlationId,
+            type: evt.type,
+            source: evt.source,
+            subject: evt.subject,
+            data: evt.data,
+            origin: evt.origin,
+            occurredAt: new Date(evt.occurredAt),
+            receivedAt: new Date(evt.receivedAt),
           });
 
-          // Tìm các subscriptions phù hợp với type này
-          const subscriptions = await tx.subscription.findMany({
-            where: {
-              tenantId,
-              isActive: true,
-              eventTypes: { has: evt.type },
-            },
-            include: { destination: true },
-          });
-
+          const subscriptions = await repoTx.findActiveSubscriptionsForEventType(evt.type);
           log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
 
-          // Tạo Delivery cho từng subscription
           for (const sub of subscriptions) {
-            const delivery = await tx.delivery.create({
-              data: {
-                tenantId,
-                eventId: evt.id,
-                subscriptionId: sub.id,
-                attemptGeneration: 1,
-                status: 'PENDING',
-              },
-            });
-
-            // Giải mã cấu hình destination
-            let destConfig = {};
-            try {
-              destConfig = JSON.parse(aesGcmDecrypt(sub.destination.configEncrypted, masterKey));
-            } catch (err) {
-              log.error({ err }, 'Không thể giải mã config của destination');
-            }
-
-            let signingSecret: string | undefined;
-            if (sub.destination.signingSecretEncrypted) {
-              try {
-                signingSecret = aesGcmDecrypt(sub.destination.signingSecretEncrypted, masterKey);
-              } catch {}
-            }
-
-            deliveriesToPublish.push({
-              deliveryId: delivery.id,
-              tenantId,
+            const delivery = await repoTx.createDelivery({
               eventId: evt.id,
               subscriptionId: sub.id,
-              destinationId: sub.destination.id,
-              destinationType: sub.destination.type as any,
-              config: destConfig,
-              signingSecret,
-              event: evt,
-              attemptCount: 0,
               attemptGeneration: 1,
-              correlationId,
-              rateLimitRps: sub.destination.rateLimitRps,
+              status: 'PENDING',
+            });
+            // Outbox không mang tenant_id (hạ tầng xuyên tenant) — payload chỉ là tham chiếu (S1-1).
+            await tx.outbox.create({
+              data: {
+                topic: DELIVERY_REQUESTED_TOPIC,
+                payload: buildDeliveryMessage({
+                  deliveryId: delivery.id,
+                  tenantId,
+                  attemptGeneration: 1,
+                  attemptCount: 0,
+                  correlationId: String(correlationId),
+                }) as unknown as Prisma.InputJsonValue,
+              },
+            });
+            routed.push({
+              deliveryId: delivery.id,
+              eventId: evt.id,
+              destinationId: sub.destination?.id ?? sub.destinationId,
+              destinationName: sub.destination?.name ?? '',
+              destinationType: sub.destination?.type ?? '',
             });
           }
         }
 
-        // Đánh dấu processed_messages
-        await tx.processedMessage.create({
-          data: {
-            consumer: 'normalize',
-            messageId: rawEventId,
-          },
-        });
+        await tx.processedMessage.create({ data: { consumer: 'normalize', messageId: rawEventId } });
       });
 
-      // 5. Publish các delivery sang RabbitMQ x.hub.delivery
-      for (const item of deliveriesToPublish) {
-        channel.publish(
-          EXCHANGES.DELIVERY,
-          ROUTING_KEYS.DELIVER,
-          Buffer.from(JSON.stringify(item)),
-          {
-            persistent: true,
-            headers: { 'x-correlation-id': correlationId },
-          },
-        );
+      // 5. Realtime (best-effort, Redis được phép sai). S2-2: MỘT publish cho mỗi raw event (gộp mảng)
+      // để giữ ngân sách Redis; mang đủ N nhánh (đích) để dashboard vẽ "toả ra" ngay.
+      const routedCount = routed.length;
+      if (normalizedEvents.length > 0) {
+        const notice: EventReceivedNotice = {
+          tenantId,
+          correlationId: String(correlationId),
+          rawEventId,
+          events: normalizedEvents.map((e) => ({ id: e.id, type: e.type, source: e.source })),
+          deliveries: routed,
+        };
+        this.redisPub.publish('hub:realtime:events', JSON.stringify(notice)).catch(() => {});
       }
 
-      // 6. Phát sự kiện realtime sang Redis Pub/Sub
-      for (const evt of normalizedEvents) {
-        this.redisPub.publish('hub:realtime:events', JSON.stringify(evt)).catch(() => {});
-      }
-
-      // Xác nhận xử lý xong
       channel.ack(msg);
-      log.info('Normalize & Route hoàn thành thành công');
+      log.info({ deliveryCount: routedCount }, 'Normalize & Route hoàn thành (delivery đi qua outbox)');
     } catch (err: any) {
-      log.error({ err: err.message }, 'Lỗi trong NormalizeConsumer');
-      // Đẩy vào DLQ nếu lỗi không thể hồi phục
-      channel.nack(msg, false, false);
+      this.handleFailure(err, msg, channel, log);
     }
+  }
+
+  /** S1-3: lỗi tạm -> hàng đợi 30s (tối đa 5 lần); lỗi dữ liệu hoặc hết lượt -> DLQ. */
+  private handleFailure(err: any, msg: amqp.ConsumeMessage, channel: amqp.Channel, log: typeof logger) {
+    const kind = classifyNormalizeError(err);
+    const retries = readNormalizeRetryCount(msg.properties.headers);
+
+    if (kind === 'transient' && retries < NORMALIZE_MAX_RETRIES) {
+      log.warn(
+        { err: err?.message, code: err?.code, [NORMALIZE_RETRY_HEADER]: retries + 1 },
+        'Lỗi tạm ở normalize -> q.normalize.retry.30s',
+      );
+      channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, {
+        persistent: true,
+        headers: { ...(msg.properties.headers || {}), [NORMALIZE_RETRY_HEADER]: retries + 1 },
+      });
+      channel.ack(msg);
+      return;
+    }
+
+    log.error(
+      { err: err?.message, code: err?.code, kind, retries },
+      kind === 'transient' ? 'Lỗi tạm ở normalize đã hết lượt thử lại -> DLQ' : 'Lỗi dữ liệu ở normalize -> DLQ',
+    );
+    channel.nack(msg, false, false);
+  }
+
+  private maybeInjectFault() {
+    if (this.faultsLeft <= 0) return;
+    this.faultsLeft--;
+    throw new Prisma.PrismaClientKnownRequestError('NORMALIZE_FAULT_FIRST_N: lỗi P1001 giả (tiêm để kiểm)', {
+      code: 'P1001',
+      clientVersion: Prisma.prismaVersion?.client ?? 'fault-injection',
+    });
   }
 }

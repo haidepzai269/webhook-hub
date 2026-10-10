@@ -14,6 +14,7 @@ enum ProviderEnum {
   payos
   sepay
   github
+  stripe
 
   @@schema("hub")
 }
@@ -169,7 +170,7 @@ model Subscription {
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  destination Destination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  destination Destination @relation(fields: [destinationId], references: [id], onDelete: Restrict) // ADR-053: đích còn subscription thì không xoá được
   deliveries  Delivery[]
 
   @@map("subscriptions")
@@ -190,11 +191,12 @@ model Delivery {
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   event        Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  subscription Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Restrict) // ADR-053: lịch sử gửi (kể cả DEAD) không mất theo subscription
   attempts     DeliveryAttempt[]
 
   @@unique([eventId, subscriptionId, attemptGeneration])
   @@index([tenantId, status, nextAttemptAt])
+  @@index([tenantId, createdAt(sort: Desc)]) // danh sách deliveries/DLQ/timeseries: lọc tenant + ORDER BY created_at DESC (ADR-033)
   @@map("deliveries")
   @@schema("hub")
 }
@@ -267,9 +269,30 @@ model Order {
   paymentProvider    String?  @map("payment_provider") @db.VarChar(32)
   payosPaymentLinkId String?  @map("payos_payment_link_id") @db.VarChar(128)
   version            Int      @default(1) // optimistic locking
+  items              Json     @default("[]") // [{id,name,price,qty}] — giá chốt tại server lúc tạo đơn (ADR-024)
+  customer           Json? // {name, phone, address?, note?}
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  payments ProcessedHubEvent[]
+
+  @@index([status, createdAt]) // reconcile: PENDING quá hạn
   @@map("orders")
+  @@schema("shop")
+}
+
+// Chống trùng BỀN VỮNG cho outbound webhook từ Hub (thay Set trong bộ nhớ).
+// Insert event_id và cộng paidAmount trong CÙNG transaction -> mỗi khoản tiền
+// chỉ được cộng đúng một lần, bất kể retry/redeliver/restart hay thứ tự đến (ADR-034).
+model ProcessedHubEvent {
+  eventId   String   @id @map("event_id") @db.VarChar(128)
+  orderId   String   @map("order_id") @db.Uuid
+  amount    BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict) // sổ tiền không được mất theo đơn
+
+  @@index([orderId])
+  @@map("processed_hub_events")
   @@schema("shop")
 }

@@ -1,0 +1,349 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+import {
+  type CreatedOrder,
+  type CustomerInput,
+  createOrder,
+  DEMO_SIMULATE,
+  fetchOrder,
+  formatVnd,
+  type OrderState,
+  type OrderStatus,
+  simulateSepayTransfer,
+} from "@/lib/shop/api";
+import { cartSubtotal, useCart } from "@/lib/shop/cart";
+import { useShopUi } from "@/lib/shop/ui";
+
+const POLL_MS = 2000;
+const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+const TERMINAL: OrderStatus[] = ["PAID", "EXPIRED", "CANCELLED"];
+const PHONE_RE = /^[0-9+\s.-]{8,20}$/; // khớp validate của apps/shop
+
+type Errors = Partial<Record<keyof CustomerInput, string>>;
+
+function validate(c: CustomerInput): Errors {
+  const e: Errors = {};
+  if (!c.name.trim()) e.name = "Vui lòng nhập họ tên";
+  if (!c.phone.trim()) e.phone = "Vui lòng nhập số điện thoại";
+  else if (!PHONE_RE.test(c.phone.trim())) e.phone = "Số điện thoại không hợp lệ";
+  return e;
+}
+
+export function CheckoutModal() {
+  const open = useShopUi((s) => s.checkoutOpen);
+  const setCheckoutOpen = useShopUi((s) => s.setCheckoutOpen);
+  const products = useShopUi((s) => s.products);
+  const items = useCart((s) => s.items);
+  const clearCart = useCart((s) => s.clear);
+
+  const [customer, setCustomer] = useState<CustomerInput>({ name: "", phone: "", address: "", note: "" });
+  const [errors, setErrors] = useState<Errors>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Đơn hiện tại sống qua việc đóng/mở modal: đóng lúc đang chờ thì mở lại vẫn thấy QR.
+  const [order, setOrder] = useState<CreatedOrder | null>(null);
+  const [state, setState] = useState<OrderState | null>(null);
+  const [pollStartedAt, setPollStartedAt] = useState(0);
+  const [timedOut, setTimedOut] = useState(false);
+  const [simBusy, setSimBusy] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+  const submittingRef = useRef(false); // chặn double-submit trong cùng một frame
+
+  const status: OrderStatus | null = state?.status ?? order?.status ?? null;
+  const finished = status !== null && TERMINAL.includes(status);
+  const orderCode = order?.orderCode;
+
+  // Poll GET /orders/:code mỗi 2s. Dừng khi: trạng thái cuối, đóng modal, hoặc quá 15 phút.
+  useEffect(() => {
+    if (!open || !orderCode || finished || timedOut) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (Date.now() - pollStartedAt > POLL_TIMEOUT_MS) {
+        setTimedOut(true);
+        return;
+      }
+      try {
+        const s = await fetchOrder(orderCode);
+        if (!alive) return;
+        setState(s);
+        if (TERMINAL.includes(s.status)) return;
+      } catch {
+        /* mạng chập chờn: thử lại ở nhịp sau */
+      }
+      if (alive) timer = setTimeout(tick, POLL_MS);
+    };
+    timer = setTimeout(tick, POLL_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [open, orderCode, finished, timedOut, pollStartedAt]);
+
+  // PAID → xoá giỏ (một lần)
+  useEffect(() => {
+    if (status === "PAID") clearCart();
+  }, [status, clearCart]);
+
+  // Mở lại modal khi đơn cũ đã kết thúc → về form mới (kể cả khi trước đó đóng bằng Esc)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chỉ chạy ở cạnh "mở modal"
+  useEffect(() => {
+    if (open && (finished || timedOut)) resetOrder();
+  }, [open]);
+
+  // Esc đóng modal
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setCheckoutOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, setCheckoutOpen]);
+
+  const resetOrder = () => {
+    setOrder(null);
+    setState(null);
+    setTimedOut(false);
+    setSimError(null);
+    setSubmitError(null);
+  };
+
+  const close = () => {
+    setCheckoutOpen(false);
+    if (finished || timedOut) resetOrder();
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errs = validate(customer);
+    setErrors(errs);
+    if (Object.keys(errs).length > 0 || items.length === 0 || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const created = await createOrder(items, {
+        name: customer.name.trim(),
+        phone: customer.phone.trim(),
+        address: customer.address?.trim() || undefined,
+        note: customer.note?.trim() || undefined,
+      });
+      setOrder(created);
+      setState(null);
+      setTimedOut(false);
+      setPollStartedAt(Date.now());
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Không tạo được đơn");
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  const simulate = async (amount: number) => {
+    if (!order) return;
+    setSimBusy(true);
+    setSimError(null);
+    try {
+      await simulateSepayTransfer(order.orderCode, amount);
+    } catch (err) {
+      setSimError(err instanceof Error ? err.message : "Lỗi bắn webhook");
+    } finally {
+      setSimBusy(false);
+    }
+  };
+
+  const field = (k: keyof CustomerInput) => ({
+    value: customer[k] ?? "",
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setCustomer((c) => ({ ...c, [k]: e.target.value })),
+  });
+
+  const amount = order?.amount ?? 0;
+  const paid = state?.paidAmount ?? 0;
+
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: click nền để đóng; bàn phím dùng Esc
+    <div
+      id="checkoutPop"
+      className={open ? "open" : ""}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Thanh toán"
+      onClick={(e) => e.target === e.currentTarget && close()}
+    >
+      <div className="ckbox">
+        <button type="button" className="mpclose" aria-label="Đóng" onClick={close}>
+          <i className="fas fa-times" />
+        </button>
+
+        <ol className="cksteps" aria-label="Các bước">
+          <li className={!order ? "active" : "done"}>Thông tin</li>
+          <li className={order && status !== "PAID" ? "active" : status === "PAID" ? "done" : ""}>Chuyển khoản</li>
+          <li className={status === "PAID" ? "active" : ""}>Hoàn tất</li>
+        </ol>
+
+        {!order && (
+          <form onSubmit={submit} noValidate>
+            <h4 className="cktitle">Thông tin nhận món</h4>
+            <div className="row g-3">
+              <div className="col-sm-6">
+                <label className="cklabel" htmlFor="ckName">
+                  Họ tên *
+                </label>
+                <input id="ckName" className="form-control" autoComplete="name" maxLength={100} {...field("name")} />
+                {errors.name && <small className="ckerr">{errors.name}</small>}
+              </div>
+              <div className="col-sm-6">
+                <label className="cklabel" htmlFor="ckPhone">
+                  Số điện thoại *
+                </label>
+                <input
+                  id="ckPhone"
+                  className="form-control"
+                  type="tel"
+                  autoComplete="tel"
+                  maxLength={20}
+                  {...field("phone")}
+                />
+                {errors.phone && <small className="ckerr">{errors.phone}</small>}
+              </div>
+              <div className="col-12">
+                <label className="cklabel" htmlFor="ckAddr">
+                  Địa chỉ giao hàng
+                </label>
+                <input
+                  id="ckAddr"
+                  className="form-control"
+                  autoComplete="street-address"
+                  maxLength={300}
+                  {...field("address")}
+                />
+              </div>
+              <div className="col-12">
+                <label className="cklabel" htmlFor="ckNote">
+                  Ghi chú
+                </label>
+                <textarea id="ckNote" className="form-control" rows={2} maxLength={300} {...field("note")} />
+              </div>
+            </div>
+            <div className="cartsum mt-3">
+              <span>Tạm tính ({items.length} món)</span>
+              <strong>{formatVnd(cartSubtotal(items, products))}</strong>
+            </div>
+            {submitError && <p className="ckerr mt-2">{submitError}</p>}
+            <button type="submit" className="mpaddcart mt-3" disabled={submitting || items.length === 0}>
+              {submitting ? (
+                <>
+                  <i className="fas fa-spinner fa-spin" /> Đang tạo đơn...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-qrcode" /> Tạo đơn &amp; lấy mã QR
+                </>
+              )}
+            </button>
+          </form>
+        )}
+
+        {order && status !== "PAID" && (
+          <div className="ckpay">
+            <h4 className="cktitle">Quét mã để chuyển khoản</h4>
+            <img
+              className="ckqr"
+              src={order.qrCodeUrl}
+              alt={`Mã QR thanh toán đơn ${order.orderCode}`}
+              width={220}
+              height={220}
+            />
+            <div className="ckcode-lbl">Nội dung chuyển khoản (ghi ĐÚNG mã này)</div>
+            <div className="ckcode">{order.orderCode}</div>
+            <div className="ckamount">
+              Số tiền: <strong>{formatVnd(amount)}</strong>
+            </div>
+            <ul className="ckitems">
+              {order.items.map((l) => (
+                <li key={l.id}>
+                  <span>
+                    {l.qty} × {l.name}
+                  </span>
+                  <span>{formatVnd(l.price * l.qty)}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div
+              className={`ckstatus ck-${(timedOut ? "TIMEOUT" : (status ?? "PENDING")).toLowerCase()}`}
+              aria-live="polite"
+            >
+              {timedOut ? (
+                <>
+                  <i className="fas fa-hourglass-end" /> Đã hết thời gian chờ (15 phút). Nếu bạn đã chuyển khoản, vui
+                  lòng liên hệ hotline với mã {order.orderCode}.
+                </>
+              ) : status === "UNDERPAID" ? (
+                <>
+                  <i className="fas fa-exclamation-triangle" /> Đã nhận {formatVnd(paid)}, còn thiếu{" "}
+                  <strong>{formatVnd(Math.max(0, amount - paid))}</strong>. Vui lòng gọi hotline 1900 6868 kèm mã{" "}
+                  {order.orderCode} để được hỗ trợ (hệ thống chưa cộng dồn nhiều lần chuyển).
+                </>
+              ) : status === "EXPIRED" || status === "CANCELLED" ? (
+                <>
+                  <i className="fas fa-times-circle" /> Đơn đã {status === "EXPIRED" ? "hết hạn" : "bị huỷ"}.
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-spinner fa-spin" /> Đang chờ thanh toán…
+                </>
+              )}
+            </div>
+
+            {DEMO_SIMULATE && !finished && !timedOut && (
+              <div className="cksim">
+                <div className="cksim-lbl">Chỉ có ở môi trường demo local</div>
+                <div className="d-flex gap-2 flex-wrap justify-content-center">
+                  <button type="button" className="btn-red" disabled={simBusy} onClick={() => simulate(amount)}>
+                    <i className="fas fa-bolt" /> Giả lập chuyển khoản
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-red ckbtn-ghost"
+                    disabled={simBusy}
+                    onClick={() => simulate(Math.max(1000, Math.floor(amount / 2)))}
+                  >
+                    Giả lập chuyển thiếu
+                  </button>
+                </div>
+                {simError && <p className="ckerr mt-2">{simError}</p>}
+              </div>
+            )}
+
+            {finished || timedOut ? (
+              <button type="button" className="mpaddcart mt-3" onClick={resetOrder}>
+                Tạo đơn mới
+              </button>
+            ) : (
+              <button type="button" className="ckcancel mt-3" onClick={resetOrder}>
+                Đổi món / tạo đơn khác
+              </button>
+            )}
+          </div>
+        )}
+
+        {order && status === "PAID" && (
+          <div className="ckdone">
+            <i className="fas fa-check-circle" />
+            <h4 className="cktitle">Đã thanh toán!</h4>
+            <p>
+              Đơn <strong>{order.orderCode}</strong> đã nhận {formatVnd(paid || amount)}. Bếp đang chuẩn bị món cho bạn.
+            </p>
+            <button type="button" className="mpaddcart mt-3" onClick={close}>
+              Tiếp tục xem thực đơn
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

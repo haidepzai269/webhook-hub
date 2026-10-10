@@ -1,0 +1,159 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import type { HubColumn } from "@/components/admin/data-table";
+import { DeliveryStatusBadge } from "@/components/admin/status-badge";
+import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
+import { countdownTicker } from "@/lib/hub/ui-logic";
+import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
+
+/** Lần thử cuối (API không đảm bảo thứ tự attempts trong danh sách) — để hiện HTTP/ms. */
+function lastAttempt(d: Delivery): DeliveryAttempt | undefined {
+  return d.attempts?.reduce<DeliveryAttempt | undefined>(
+    (a, b) => (!a || b.attemptNo > a.attemptNo ? b : a),
+    undefined,
+  );
+}
+
+function httpTone(status: number | null | undefined) {
+  if (!status) return "text-muted-foreground";
+  if (status >= 200 && status < 300) return "text-emerald-600 dark:text-emerald-400";
+  if (status >= 500 || status === 408 || status === 429) return "text-amber-600 dark:text-amber-400";
+  return "text-rose-600 dark:text-rose-400";
+}
+
+/** Đếm ngược tới `next_attempt_at` (S2-2) — tick mỗi giây, tự dừng khi đã tới giờ. */
+export function RetryCountdown({ iso }: { iso: string }) {
+  const target = new Date(iso).getTime();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (target <= Date.now()) return;
+    // Tự clearInterval khi về 0 (review SPEC-2 #8) — không để timer chạy mãi trên hàng đã tới giờ.
+    const t = setInterval(
+      countdownTicker(target, setNow, () => clearInterval(t)),
+      1000,
+    );
+    return () => clearInterval(t);
+  }, [target]);
+  const left = Math.max(0, Math.round((target - now) / 1000));
+  if (left === 0) return <span className="text-muted-foreground text-xs">đang tới lượt…</span>;
+  const m = Math.floor(left / 60);
+  const sec = left % 60;
+  return (
+    <span
+      className="whitespace-nowrap font-mono text-amber-600 text-xs tabular-nums dark:text-amber-400"
+      title={formatDateTime(iso)}
+    >
+      {m > 0 ? `${m}m ${String(sec).padStart(2, "0")}s` : `${sec}s`}
+    </span>
+  );
+}
+
+export const deliveryColumns: HubColumn<Delivery>[] = [
+  {
+    id: "status",
+    header: "Trạng thái",
+    accessorFn: (d) => d.status,
+    cell: ({ row }) => <DeliveryStatusBadge status={row.original.status} />,
+    enableHiding: false,
+  },
+  {
+    id: "destination",
+    header: "Đích",
+    accessorFn: (d) => d.subscription?.destination?.name ?? d.subscription?.name ?? "",
+    cell: ({ row }) => {
+      const dest = row.original.subscription?.destination;
+      return (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-sm">{dest?.name ?? row.original.subscription?.name ?? "—"}</div>
+          {dest?.type && <div className="text-muted-foreground text-xs">{dest.type}</div>}
+        </div>
+      );
+    },
+  },
+  {
+    id: "eventType",
+    header: "Sự kiện",
+    accessorFn: (d) => d.event?.type ?? "",
+    cell: ({ row }) => (
+      <div className="min-w-0">
+        <div className="font-mono text-xs">{row.original.event?.type ?? "—"}</div>
+        <div className="font-mono text-[11px] text-muted-foreground" title={row.original.eventId}>
+          {shortId(row.original.eventId, 12)}
+        </div>
+      </div>
+    ),
+  },
+  {
+    id: "generation",
+    header: "Gen",
+    accessorFn: (d) => String(d.attemptGeneration),
+    cell: ({ row }) => (
+      <span className="font-mono text-xs" title="attempt_generation — replay tạo generation mới">
+        {row.original.attemptGeneration}
+      </span>
+    ),
+  },
+  {
+    id: "attempts",
+    header: "Lần thử",
+    accessorFn: (d) => String(d.attemptCount),
+    cell: ({ row }) => <span className="font-mono text-xs">{row.original.attemptCount}</span>,
+  },
+  {
+    id: "http",
+    header: "HTTP",
+    accessorFn: (d) => String(lastAttempt(d)?.responseStatus ?? ""),
+    cell: ({ row }) => {
+      const a = lastAttempt(row.original);
+      return <span className={`font-mono text-xs ${httpTone(a?.responseStatus)}`}>{a?.responseStatus ?? "—"}</span>;
+    },
+  },
+  {
+    id: "ms",
+    header: "ms",
+    accessorFn: (d) => String(lastAttempt(d)?.durationMs ?? ""),
+    cell: ({ row }) => {
+      const a = lastAttempt(row.original);
+      return <span className="font-mono text-xs tabular-nums">{a?.durationMs ?? "—"}</span>;
+    },
+  },
+  {
+    id: "nextAttemptAt",
+    header: "Thử lại lúc",
+    accessorFn: (d) => d.nextAttemptAt ?? "",
+    cell: ({ row }) => {
+      const d = row.original;
+      const pending = (d.status === "RETRYING" || d.status === "PENDING") && d.nextAttemptAt;
+      return pending && d.nextAttemptAt ? (
+        <RetryCountdown iso={d.nextAttemptAt} />
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      );
+    },
+  },
+  {
+    id: "lastError",
+    header: "Lỗi gần nhất",
+    accessorFn: (d) => d.lastError ?? "",
+    cell: ({ row }) =>
+      row.original.lastError ? (
+        <span className="block max-w-64 truncate text-rose-600 text-xs" title={row.original.lastError}>
+          {row.original.lastError}
+        </span>
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      ),
+  },
+  {
+    id: "updatedAt",
+    header: "Cập nhật",
+    accessorFn: (d) => d.updatedAt,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.updatedAt)}>
+        {formatRelative(row.original.updatedAt)}
+      </span>
+    ),
+  },
+];

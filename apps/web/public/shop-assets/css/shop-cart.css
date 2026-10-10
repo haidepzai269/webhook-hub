@@ -1,0 +1,448 @@
+/* Phần mới không có trong Sarab: giỏ hàng, thanh toán, kết quả tìm kiếm.
+   Chỉ dùng biến màu + ngôn ngữ thiết kế của style.css (--primary, --secondary, .mpaddcart, .mpqbtn). */
+
+/* FA 7 Free mặc định cố định bề rộng icon 1.25em; template gốc (FA 6) không → trả về auto cho khớp. */
+.fas,
+.far,
+.fab {
+  --fa-width: auto;
+}
+
+/* Template dùng div cho các phần tử này; bản React dùng <button> → bỏ style mặc định của button. */
+button.mhrt,
+button.ttag,
+button.sovcat,
+button.cartfl {
+  border: none;
+  font: inherit;
+}
+button.sovcat {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+}
+.mcard:focus-visible,
+.mpqbtn:focus-visible,
+.madd:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
+}
+.mpqbtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Nút giỏ trên navbar — cùng kiểu #navSearchBtn */
+#navCartBtn {
+  position: relative;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #555;
+  font-size: 1rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  transition: 0.3s;
+}
+#navCartBtn:hover {
+  background: rgba(232, 40, 26, 0.08);
+  color: var(--primary);
+}
+.navccount {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* Kết quả tìm kiếm */
+.sovresults {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.sovresults li button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 8px 14px;
+  margin-bottom: 7px;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  transition: 0.3s;
+  text-align: left;
+}
+.sovresults li button:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.sovresults img {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.sovrname {
+  flex: 1;
+  font-weight: 600;
+}
+.sovrprice {
+  color: var(--secondary);
+  font-weight: 700;
+}
+.sovresults li button:hover .sovrprice {
+  color: #fff;
+}
+.sovempty {
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+  padding: 10px;
+}
+
+/* Ngăn giỏ hàng */
+#cartOv {
+  position: fixed;
+  inset: 0;
+  z-index: 99998;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+#cartOv.open {
+  opacity: 1;
+  visibility: visible;
+}
+.cartbox {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(420px, 100%);
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.35s ease;
+  box-shadow: var(--shadow-lg);
+}
+#cartOv.open .cartbox {
+  transform: translateX(0);
+}
+.carthead {
+  position: relative;
+  padding: 22px 24px;
+  border-bottom: 1px solid #f0e6da;
+  background: var(--cream);
+}
+.carthead h4 {
+  margin: 0;
+  font-family: "Playfair Display", serif;
+  font-weight: 900;
+  color: var(--dark);
+}
+.carthead h4 i {
+  color: var(--primary);
+}
+.carthead h4 span {
+  font-family: "Poppins", sans-serif;
+  font-size: 0.9rem;
+  color: #aaa;
+}
+.cartlist {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 24px;
+}
+.cartempty {
+  text-align: center;
+  padding: 50px 10px;
+  color: #aaa;
+}
+.cartempty i {
+  font-size: 2.4rem;
+  color: var(--secondary);
+  margin-bottom: 12px;
+}
+.cartline {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px dashed #eee;
+}
+.cartline img,
+.cartimg-ph {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: var(--cream2);
+  flex-shrink: 0;
+}
+.cartinfo {
+  flex: 1;
+  min-width: 0;
+}
+.cartinfo .mpqty {
+  margin: 6px 0 0;
+}
+.cartinfo .mpqbtn {
+  width: 28px;
+  height: 28px;
+  font-size: 0.9rem;
+}
+.cartname {
+  font-weight: 600;
+  color: var(--dark);
+  font-size: 0.9rem;
+}
+.cartprice {
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.cartdel {
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  padding: 6px;
+  transition: 0.3s;
+}
+.cartdel:hover {
+  color: var(--primary);
+}
+.cartfoot {
+  padding: 18px 24px 24px;
+  border-top: 1px solid #f0e6da;
+}
+.cartsum {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: var(--dark);
+}
+.cartsum strong {
+  font-family: "Playfair Display", serif;
+  font-size: 1.4rem;
+  color: var(--primary);
+}
+.cartnote {
+  font-size: 0.72rem;
+  color: #aaa;
+  margin: 4px 0 14px;
+}
+.mpaddcart:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Modal thanh toán */
+#checkoutPop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.84);
+  backdrop-filter: blur(5px);
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+#checkoutPop.open {
+  display: flex;
+  animation: fadeov 0.28s ease;
+}
+.ckbox {
+  position: relative;
+  background: #fff;
+  border-radius: 22px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 34px 30px 30px;
+}
+.cksteps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0 40px 22px 0;
+  counter-reset: ck;
+}
+.cksteps li {
+  flex: 1;
+  counter-increment: ck;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #bbb;
+  border-top: 3px solid #eee;
+  padding-top: 7px;
+}
+.cksteps li::before {
+  content: counter(ck) ". ";
+}
+.cksteps li.active {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.cksteps li.done {
+  color: var(--green);
+  border-color: var(--green);
+}
+.cktitle {
+  font-family: "Playfair Display", serif;
+  font-weight: 900;
+  color: var(--dark);
+  margin-bottom: 16px;
+}
+.cklabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--dark);
+  margin-bottom: 4px;
+}
+.ckerr {
+  color: var(--primary);
+  font-size: 0.78rem;
+}
+.ckpay,
+.ckdone {
+  text-align: center;
+}
+.ckqr {
+  border-radius: 14px;
+  border: 6px solid var(--cream2);
+  margin-bottom: 14px;
+}
+.ckcode-lbl {
+  font-size: 0.75rem;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.ckcode {
+  font-family: "Playfair Display", serif;
+  font-size: 2.3rem;
+  font-weight: 900;
+  color: var(--primary);
+  letter-spacing: 2px;
+  margin: 2px 0 6px;
+  user-select: all;
+}
+.ckamount {
+  font-size: 1.05rem;
+  color: var(--dark);
+}
+.ckamount strong {
+  color: var(--primary);
+  font-size: 1.3rem;
+}
+.ckitems {
+  list-style: none;
+  padding: 10px 14px;
+  margin: 14px 0;
+  background: var(--light);
+  border-radius: 12px;
+  font-size: 0.85rem;
+  text-align: left;
+}
+.ckitems li {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+.ckstatus {
+  border-radius: 11px;
+  padding: 12px 14px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  background: rgba(246, 166, 35, 0.12);
+  color: #a86b00;
+}
+.ckstatus.ck-underpaid {
+  background: rgba(232, 40, 26, 0.09);
+  color: var(--primary);
+}
+.ckstatus.ck-expired,
+.ckstatus.ck-cancelled,
+.ckstatus.ck-timeout {
+  background: #f2f2f2;
+  color: #777;
+}
+.cksim {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px dashed var(--secondary);
+  border-radius: 12px;
+}
+.cksim-lbl {
+  font-size: 0.7rem;
+  color: #a86b00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.cksim .btn-red {
+  border: none;
+  font-size: 0.82rem;
+  padding: 10px 18px;
+}
+.cksim .btn-red:disabled {
+  opacity: 0.5;
+}
+.ckbtn-ghost {
+  background: #fff !important;
+  color: var(--primary) !important;
+  box-shadow: inset 0 0 0 2px var(--primary) !important;
+}
+.ckdone > i {
+  font-size: 3.4rem;
+  color: var(--green);
+  margin-bottom: 12px;
+}
+
+@media (max-width: 540px) {
+  .ckbox {
+    padding: 28px 18px 22px;
+  }
+  .ckcode {
+    font-size: 1.8rem;
+  }
+}
+
+.ckcancel {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ckcancel:hover {
+  color: var(--primary);
+}
+.gitem:focus-visible,
+.catcard:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 3px;
+}

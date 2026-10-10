@@ -131,6 +131,16 @@ DIRECT_URL   = postgresql://...@ep-xxx.ap-southeast-1.aws.neon.tech/db?sslmode=r
 
 **Thiếu `directUrl` → `prisma migrate` hỏng** trên PgBouncer transaction mode (nó cần prepared statements và advisory lock).
 
+**Migrations, không `db push` (ADR-047, 2026-10-10).** `docker-entrypoint.sh hub-api` chạy `npx prisma migrate deploy --schema=libs/database/prisma/schema.prisma`. Lệnh này tự dùng `DIRECT_URL` (khai báo `directUrl` ở trên), nên trên Neon **bắt buộc** có `DIRECT_URL` trỏ endpoint direct, không phải `-pooler`. Neon đang có dữ liệu từ thời `db push` thì đánh dấu baseline một lần, **không reset**:
+
+```bash
+DATABASE_URL=<direct> DIRECT_URL=<direct> npx prisma migrate resolve --applied 0_init --schema=libs/database/prisma/schema.prisma
+```
+
+Trước đó kiểm `npx prisma migrate diff --from-schema-datasource libs/database/prisma/schema.prisma --to-schema-datamodel libs/database/prisma/schema.prisma` ra rỗng.
+
+**User DB riêng cho Shop (ADR-046).** Local: role `shop_user` tạo bởi `docker/postgres/init/02-shop-user.sh`, chỉ thấy schema `shop`. Neon: tạo role tương tự bằng SQL trong script đó (chạy bằng role sở hữu schema, thay `:"migrator"` bằng role chạy migration), rồi đặt connection string của `shop` theo role này.
+
 `SELECT ... FOR UPDATE SKIP LOCKED` **vẫn chạy đúng** qua pooled vì nó nằm trong transaction tường minh. (`LISTEN/NOTIFY` thì **không** chạy qua transaction pooling — ta không dùng, đừng thêm vào.)
 
 ### 4.2. Autosuspend & dung lượng
@@ -199,6 +209,25 @@ Gói **Little Lemur** (free) giới hạn **số message/tháng** và **số con
 | **Số connection** | ⚠️ **Một AMQP connection cho mỗi tiến trình, nhiều channel trên đó.** Đây là best practice chuẩn và là **câu trả lời khi hội đồng hỏi về quản lý kết nối**. Đừng mở connection cho mỗi consumer |
 | **Số message/tháng** | ☠️ **Không load test vào CloudAMQP.** Một lần k6 500 rps là đủ đốt sạch |
 | Không có Management UI theo ý muốn | → demo queue phình/xẹp ở **local** |
+| **DLQ không có consumer** | `q.delivery.dlq`, `q.normalize.dlq` chỉ tăng → đặt **policy** `hub-dlq-bounded` (max-length 5000, drop-head) — xem §6.1 (ADR-052) |
+
+### 6.1. Policy giới hạn DLQ (ADR-052) — đặt **một lần** sau khi tạo instance
+
+**Không** thêm `x-max-length` vào arguments của queue (queue đã tồn tại khác arguments → `PRECONDITION_FAILED`, cạm bẫy 3). Dùng policy — đổi nóng được, không cần xoá queue. Giá trị nguồn: `DLQ_POLICY` trong `libs/messaging/src/topology.ts`. Local: service one-shot `rabbitmq-init` trong `docker-compose.yml` tự đặt mỗi lần `up`.
+
+CloudAMQP: lấy host/user/pass/vhost từ trang instance (vhost thường **trùng user**). Management API là HTTPS cùng host:
+
+```bash
+# PUT idempotent — chạy lại vô hại. VHOST phải URL-encode ("/" -> %2F).
+curl -u "$USER:$PASS" -X PUT -H 'content-type: application/json' \
+  "https://$HOST/api/policies/$VHOST/hub-dlq-bounded" \
+  -d '{"pattern":"^q\\.(delivery|normalize)\\.dlq$","definition":{"max-length":5000,"overflow":"drop-head"},"priority":10,"apply-to":"queues"}'
+
+# Kiểm: hai DLQ phải hiện policy = hub-dlq-bounded
+curl -s -u "$USER:$PASS" "https://$HOST/api/queues/$VHOST" | grep -o '"name":"q\.[a-z.]*dlq"[^}]*"policy":"[^"]*"'
+```
+
+Hoặc dùng UI CloudAMQP → *RabbitMQ Manager* → Admin → Policies với cùng giá trị. Lưu ý: mỗi queue chỉ chịu **một** policy (priority cao nhất) — nếu instance có policy mặc định khớp `.*`, priority 10 của ta phải cao hơn nó. Bị cắt đầu DLQ **không mất dữ liệu**: nguồn sự thật là Postgres (`deliveries` DEAD, `raw_events`), DLQ trong broker chỉ là bản sao để soi.
 
 ---
 
@@ -282,7 +311,14 @@ PORT=                    # Render cấp — không hardcode
 CORS_ORIGINS=            # domain Vercel production
 SHUTDOWN_TIMEOUT_MS=25000
 METRICS_TICK_MS=5000
-NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE)
+NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE); hub-api KHÔNG đăng ký /mock/* (ADR-054)
+CIRCUIT_MAX_DEFERRALS=30 # hub-worker: trần số lần hoãn liên tiếp vì circuit (≈30 phút) rồi tính là một lần thử thất bại (ADR-054)
+
+# --- web (Vercel) — build-time, Next inline vào bundle → KHÔNG đặt secret ở đây ---
+NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — REST + Socket.IO của dashboard
+NEXT_PUBLIC_SHOP_API_URL=  # URL shop — storefront gọi
+NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
+NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel
 ```
 
 > **Nguyên tắc:** adapter **không đọc env**. Secret vào DB qua `source_secrets` (đã mã hoá). Env chỉ để seed lần đầu. Đây là lý do `verify()` nhận `secrets: string[]` làm tham số.

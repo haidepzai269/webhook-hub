@@ -1,4 +1,6 @@
 import { hmacSha256, timingSafeCompare } from '@hub/crypto';
+import { MENU, priceOrder, maskCustomer } from '../src/menu';
+import { applyPayment, EXPIRE_AFTER_MS } from '../src/payment';
 
 describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
   const SIGNING_SECRET = 'hub_outbound_signing_secret_999';
@@ -76,23 +78,114 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
     });
   });
 
-  describe('So khớp số tiền và phân định trạng thái đơn hàng', () => {
-    const orderAmount = 5000;
-
-    it('phải chuyển sang PAID khi số tiền thanh toán đủ hoặc thừa', () => {
-      const paidExact = 5000;
-      const statusExact = paidExact >= orderAmount ? 'PAID' : 'UNDERPAID';
-      expect(statusExact).toBe('PAID');
-
-      const paidOver = 10000;
-      const statusOver = paidOver >= orderAmount ? 'PAID' : 'UNDERPAID';
-      expect(statusOver).toBe('PAID');
+  describe('Máy trạng thái + cộng dồn thanh toán (ADR-034)', () => {
+    const order = (status: string, paid = 0, ageMin = 1) => ({
+      status,
+      amount: 138000n,
+      paidAmount: BigInt(paid),
+      createdAt: new Date(Date.now() - ageMin * 60_000),
     });
 
-    it('phải chuyển sang UNDERPAID khi số tiền thanh toán thiếu', () => {
-      const paidUnder = 2000;
-      const statusUnder = paidUnder >= orderAmount ? 'PAID' : 'UNDERPAID';
-      expect(statusUnder).toBe('UNDERPAID');
+    it('đủ hoặc thừa tiền -> PAID, thiếu -> UNDERPAID', () => {
+      expect(applyPayment(order('PENDING'), 138000n)).toMatchObject({ status: 'PAID', outcome: 'PAID' });
+      expect(applyPayment(order('PENDING'), 200000n).status).toBe('PAID');
+      expect(applyPayment(order('PENDING'), 100000n)).toMatchObject({ status: 'UNDERPAID', paidAmount: 100000n });
+    });
+
+    it('hai lần chuyển khoản được CỘNG DỒN, không ghi đè', () => {
+      const first = applyPayment(order('PENDING'), 100000n);
+      const second = applyPayment({ ...order(first.status), paidAmount: first.paidAmount }, 38000n);
+      expect(second).toMatchObject({ status: 'PAID', paidAmount: 138000n });
+    });
+
+    it('thứ tự webhook đến không làm đổi kết quả', () => {
+      const run = (amounts: bigint[]) =>
+        amounts.reduce((o, a) => ({ ...o, ...applyPayment(o, a) }), order('PENDING') as any);
+      expect(run([50000n, 30000n, 58000n])).toMatchObject({ status: 'PAID', paidAmount: 138000n });
+      expect(run([58000n, 50000n, 30000n])).toMatchObject({ status: 'PAID', paidAmount: 138000n });
+    });
+
+    it('tiền về đơn EXPIRED: ghi nhận nhưng KHÔNG hồi sinh', () => {
+      expect(applyPayment(order('EXPIRED'), 138000n)).toEqual({
+        status: 'EXPIRED',
+        paidAmount: 138000n,
+        outcome: 'LATE_PAYMENT',
+      });
+    });
+
+    it('tiền về thêm khi đã PAID: giữ PAID, báo EXTRA_PAYMENT', () => {
+      expect(applyPayment(order('PAID', 138000), 1000n)).toEqual({
+        status: 'PAID',
+        paidAmount: 139000n,
+        outcome: 'EXTRA_PAYMENT',
+      });
+    });
+
+    it('UNDERPAID không tự hết hạn (đã có tiền vào), dù đã quá 15 phút', () => {
+      expect(EXPIRE_AFTER_MS).toBe(15 * 60 * 1000);
+      expect(applyPayment(order('UNDERPAID', 100000, 60), 38000n).status).toBe('PAID');
+    });
+
+    it('PENDING quá 15 phút mà cron reconcile CHƯA chạy: vẫn coi là EXPIRED (hết hạn lười)', () => {
+      expect(applyPayment(order('PENDING', 0, 40), 138000n)).toEqual({
+        status: 'EXPIRED',
+        paidAmount: 138000n,
+        outcome: 'LATE_PAYMENT',
+      });
+      expect(applyPayment(order('PENDING', 0, 14), 138000n).status).toBe('PAID');
+    });
+  });
+
+  describe('Tính tiền ở server (ADR-024)', () => {
+    const customer = { name: 'Nguyễn Văn A', phone: '0901234567' };
+
+    it('tổng tiền = Σ price × qty theo menu của server', () => {
+      const r = priceOrder({ items: [{ id: 'm1', qty: 2 }, { id: 'm5', qty: 1 }], customer });
+      expect(r.ok).toBe(true);
+      if ('error' in r) return;
+      expect(r.amount).toBe(69000 * 2 + 45000);
+      expect(r.items.map((l) => l.price)).toEqual([69000, 45000]);
+    });
+
+    it('bỏ qua `amount` và `price` do client gửi lên', () => {
+      const r = priceOrder({ amount: 1, items: [{ id: 'm2', qty: 1, price: 1 }], customer });
+      if ('error' in r) throw new Error(r.error);
+      expect(r.amount).toBe(MENU.find((m) => m.id === 'm2')!.price);
+    });
+
+    it('gộp các dòng trùng id', () => {
+      const r = priceOrder({ items: [{ id: 'm3', qty: 1 }, { id: 'm3', qty: 2 }], customer });
+      if ('error' in r) throw new Error(r.error);
+      expect(r.items).toHaveLength(1);
+      expect(r.items[0].qty).toBe(3);
+    });
+
+    it.each([
+      ['giỏ rỗng', { items: [], customer }],
+      ['thiếu items', { customer }],
+      ['id lạ', { items: [{ id: 'hack', qty: 1 }], customer }],
+      ['qty = 0', { items: [{ id: 'm1', qty: 0 }], customer }],
+      ['qty = 21', { items: [{ id: 'm1', qty: 21 }], customer }],
+      ['qty lẻ', { items: [{ id: 'm1', qty: 1.5 }], customer }],
+      ['qty dạng chuỗi', { items: [{ id: 'm1', qty: '2' }], customer }],
+      ['gộp vượt 20', { items: [{ id: 'm1', qty: 15 }, { id: 'm1', qty: 6 }], customer }],
+      ['thiếu tên', { items: [{ id: 'm1', qty: 1 }], customer: { phone: '0901234567' } }],
+      ['thiếu SĐT', { items: [{ id: 'm1', qty: 1 }], customer: { name: 'A' } }],
+      ['SĐT rác', { items: [{ id: 'm1', qty: 1 }], customer: { name: 'A', phone: 'abc' } }],
+      ['SĐT toàn dấu', { items: [{ id: 'm1', qty: 1 }], customer: { name: 'A', phone: '........' } }],
+      ['id là object độc', { items: [{ id: { toString: 1 }, qty: 1 }], customer }],
+      ['body là mảng', [{ id: 'm1', qty: 1 }]],
+      ['items chứa null', { items: [null], customer }],
+    ])('từ chối: %s', (_label, body) => {
+      expect(priceOrder(body).ok).toBe(false);
+    });
+
+    it('che SĐT khi trả về qua GET /orders/:code', () => {
+      expect(maskCustomer({ name: 'Nguyễn Văn An', phone: '0901234567', address: 'Q1' })).toEqual({
+        name: 'Nguyễn V. A.',
+        phone: '*******567',
+      });
+      expect(maskCustomer(null)).toBeNull();
     });
   });
 });

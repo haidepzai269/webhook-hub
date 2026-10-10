@@ -1,6 +1,7 @@
-version: '3.8'
-
 services:
+  # -------------------------------------------------------------
+  # HẠ TẦNG (INFRASTRUCTURE)
+  # -------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: webhook-hub-postgres
@@ -9,10 +10,14 @@ services:
       POSTGRES_USER: hub_user
       POSTGRES_PASSWORD: hub_password
       POSTGRES_DB: webhook_hub
+      # S1-5: mật khẩu user DB riêng của Shop (docker/postgres/init/02-shop-user.sh)
+      SHOP_DB_PASSWORD: ${SHOP_DB_PASSWORD:-shop_password}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Chỉ chạy khi volume rỗng. Volume đã có dữ liệu: chạy tay script (xem đầu file script).
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hub_user -d webhook_hub"]
       interval: 5s
@@ -51,6 +56,24 @@ services:
       timeout: 10s
       retries: 5
 
+  # ADR-052: giới hạn DLQ bằng POLICY (không đổi arguments queue -> không PRECONDITION_FAILED).
+  # One-shot, idempotent (PUT policy): chạy lại mỗi `up` vô hại. Giá trị phải khớp DLQ_POLICY trong
+  # libs/messaging/src/topology.ts (test dlq-policy.spec.ts kiểm). Deployed (CloudAMQP): xem docs/DEPLOYMENT.md.
+  rabbitmq-init:
+    image: rabbitmq:3-management-alpine
+    container_name: webhook-hub-rabbitmq-init
+    restart: "no"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        rabbitmqadmin -H rabbitmq -u hub_admin -p hub_secret declare policy
+        name=hub-dlq-bounded pattern='^q\.(delivery|normalize)\.dlq$$'
+        definition='{"max-length":5000,"overflow":"drop-head"}' priority=10 apply-to=queues
+        && rabbitmqadmin -H rabbitmq -u hub_admin -p hub_secret list policies
+
   prometheus:
     image: prom/prometheus:latest
     container_name: webhook-hub-prometheus
@@ -71,6 +94,152 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
       - prometheus
+
+  # -------------------------------------------------------------
+  # CÁC ỨNG DỤNG NGHIỆP VỤ (APPLICATIONS)
+  # -------------------------------------------------------------
+  hub-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webhook-hub-api
+    restart: unless-stopped
+    command: ["hub-api"]
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - DATABASE_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub
+      - DIRECT_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://hub_admin:hub_secret@rabbitmq:5672
+      # Không đặt default cho MASTER_KEY ở đây: giá trị mẫu từng bị lộ công khai
+      # trong .env.example/git history. Phải lấy từ .env / shell env — hub-api sẽ
+      # process.exit(1) lúc bootstrap nếu thiếu, thay vì âm thầm dùng key công khai.
+      - MASTER_KEY=${MASTER_KEY}
+      - HUB_SIGNING_SECRET=${HUB_SIGNING_SECRET:-hub_outbound_signing_secret_999}
+      # Không đặt default cho JWT_SECRET ở đây — cùng lý do với MASTER_KEY phía trên:
+      # giá trị mẫu `dev-jwt-super-secret-key` từng bị lộ công khai trong
+      # .env.example/git history. Phải lấy từ .env / shell env — hub-api sẽ
+      # process.exit(1) lúc bootstrap nếu thiếu hoặc < 32 ký tự.
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      # KHÔNG đặt default cho hash bcrypt ở đây: dấu `$` trong hash bị docker-compose
+      # hiểu nhầm thành biến ($2b, $10, $nzHQ...) dù đã escape `$$` (đã kiểm chứng bằng
+      # `docker compose config` — hash bị mangle). Luôn lấy từ `.env`/shell env, giống
+      # PAYOS_API_KEY... bên dưới. Đặt ADMIN_PASSWORD_HASH trong `.env` trước khi chạy.
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
+      - NODE_ENV=development
+      - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
+      - PAYOS_API_KEY=${PAYOS_API_KEY}
+      - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
+      - SEPAY_API_KEY=${SEPAY_API_KEY}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - SHOP_WEBHOOK_URL=http://shop:4001/hub-webhook
+      # Seed chạy TRONG container: mock Discord/Telegram phải trỏ tên service, không phải localhost
+      - MOCK_BASE_URL=http://hub-api:4000
+      # Khoá SePay thứ 2 cho nút Giả lập (seed thêm làm secret v2) — phải trùng build arg của web
+      - DEMO_SEPAY_APIKEY=${DEMO_SEPAY_APIKEY:-demo_sepay_simulate_key_local_only}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  hub-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webhook-hub-worker
+    restart: unless-stopped
+    command: ["hub-worker"]
+    environment:
+      # connection_limit/pool_timeout TƯỜNG MINH chỉ cho hub-worker: process này chạy
+      # CẢ outbox relay (1 transaction có thể giữ connection tới RELAY_TX_TIMEOUT_MS =
+      # 15s, xem scheduler/outbox.relay.ts) LẪN delivery consumer (1 transaction/message,
+      # prefetch=20 -> tới 20 transaction đồng thời). Không set thì Prisma dùng pool mặc
+      # định nhỏ (thường ≤9) -> outbox relay giữ 1 connection lâu có thể khiến delivery
+      # consumer timeout chờ connection dưới tải cao. connection_limit=10 đủ chỗ cho cả
+      # 2 (1 outbox relay + ~9 delivery) mà không mở quá nhiều connection tới Postgres
+      # local; pool_timeout=20 (giây) > 15s (thời gian giữ transaction dài nhất của
+      # outbox relay) để một transaction đang chờ connection không bị timeout giả trong
+      # lúc outbox relay vẫn đang hợp lệ xử lý batch. hub-api KHÔNG chạy outbox relay
+      # nên không cần đổi (không có rủi ro tương tự).
+      - DATABASE_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub&connection_limit=10&pool_timeout=20
+      - DIRECT_URL=postgresql://hub_user:hub_password@postgres:5432/webhook_hub?schema=hub
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://hub_admin:hub_secret@rabbitmq:5672
+      - MASTER_KEY=${MASTER_KEY}
+      - HUB_SIGNING_SECRET=${HUB_SIGNING_SECRET:-hub_outbound_signing_secret_999}
+      - NODE_ENV=development
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      # S1-3: tiêm N lỗi P1001 giả ở normalize để kiểm retry (bị bỏ qua khi NODE_ENV=production)
+      - NORMALIZE_FAULT_FIRST_N=${NORMALIZE_FAULT_FIRST_N:-0}
+      # S1-2: delivery PENDING/DELIVERING kẹt quá ngưỡng này thì sweeper ghi lại outbox
+      - DELIVERY_SWEEP_AFTER_MS=${DELIVERY_SWEEP_AFTER_MS:-600000}
+      # S1-4: giữ outbox/processed_messages/raw_events REJECTED bao nhiêu ngày (phải > tổng TTL retry)
+      - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-7}
+    depends_on:
+      hub-api:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  shop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webhook-hub-shop
+    restart: unless-stopped
+    command: ["shop"]
+    ports:
+      - "4001:4001"
+    environment:
+      - SHOP_PORT=4001
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
+      # Local: shop tự chạy reconcile định kỳ (deployed dùng GitHub Actions, ADR-022)
+      - RECONCILE_INTERVAL_MS=60000
+      # S1-5 (ADR-046): user DB riêng, chỉ thấy schema shop — không đọc được hub.*
+      - DATABASE_URL=postgresql://shop_user:${SHOP_DB_PASSWORD:-shop_password}@postgres:5432/webhook_hub?schema=shop
+      - DIRECT_URL=postgresql://shop_user:${SHOP_DB_PASSWORD:-shop_password}@postgres:5432/webhook_hub?schema=shop
+      - HUB_SIGNING_SECRET=${HUB_SIGNING_SECRET:-hub_outbound_signing_secret_999}
+      - NODE_ENV=development
+      - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
+      - PAYOS_API_KEY=${PAYOS_API_KEY}
+      - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
+    depends_on:
+      hub-api:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # NEXT_PUBLIC_* được nhúng vào bundle LÚC BUILD. Chỉ dùng cho LOCAL (ADR-027) —
+      # deployed build trên Vercel, không đi qua file này.
+      args:
+        NEXT_PUBLIC_DEMO_SIMULATE: ${DEMO_SIMULATE:-true}
+        # KHÔNG dùng SEPAY_API_KEY thật: giá trị này nằm công khai trong JS của trình duyệt
+        NEXT_PUBLIC_DEMO_SEPAY_APIKEY: ${DEMO_SEPAY_APIKEY:-demo_sepay_simulate_key_local_only}
+    container_name: webhook-hub-web
+    restart: unless-stopped
+    command: ["web"]
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    depends_on:
+      hub-api:
+        condition: service_started
 
 volumes:
   pgdata:

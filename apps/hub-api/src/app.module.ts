@@ -3,27 +3,37 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@hub/database';
 import { RedisService } from './modules/redis/redis.service';
 import { IngestController } from './modules/ingest/ingest.controller';
-import { IngestService } from './modules/ingest/ingest.service';
+import { IngestService, TRACE_NOTIFIER } from './modules/ingest/ingest.service';
 import { HealthController } from './modules/health/health.controller';
 import { RealtimeGateway } from './modules/realtime/realtime.gateway';
 import { ApiController } from './modules/api/api.controller';
 import { MockController } from './modules/mock/mock.controller';
+import { AuthModule } from './modules/auth/auth.module';
+
+/**
+ * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
+ * production — trên Render nó là một endpoint công khai không xác thực, ai cũng gọi được.
+ */
+export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE_ENV) {
+  const base = [IngestController, HealthController, ApiController];
+  return nodeEnv === 'production' ? base : [...base, MockController];
+}
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Cấp JwtModule/JwtAuthGuard cho ApiController bên dưới. `/hooks/*` (ingest) và
+    // `/health` KHÔNG được bảo vệ — provider webhook thật và health-check phải public.
+    AuthModule,
   ],
-  controllers: [
-    IngestController,
-    HealthController,
-    ApiController,
-    MockController,
-  ],
+  controllers: hubApiControllers(),
   providers: [
     PrismaService,
     RedisService,
     IngestService,
     RealtimeGateway,
+    // trace.ingested đi in-process: IngestService chỉ thấy interface TraceNotifier (ADR-021, ADR-049)
+    { provide: TRACE_NOTIFIER, useExisting: RealtimeGateway },
   ],
 })
 export class AppModule {}

@@ -1,0 +1,116 @@
+"use client";
+
+import { useState } from "react";
+
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useTimeseries } from "@/lib/hub/queries";
+import type { TimeseriesRange } from "@/lib/hub/types";
+
+const chartConfig = {
+  events: { label: "Sự kiện", color: "var(--chart-1)" },
+  succeeded: { label: "Giao thành công", color: "oklch(0.65 0.15 155)" },
+  retrying: { label: "Đang chờ/thử lại", color: "oklch(0.75 0.15 75)" },
+  dead: { label: "DEAD", color: "oklch(0.63 0.22 25)" },
+} satisfies ChartConfig;
+
+const TZ = "Asia/Ho_Chi_Minh";
+const hourFmt = new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
+const dayFmt = new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", timeZone: TZ });
+
+export function EventsChart() {
+  const [range, setRange] = useState<TimeseriesRange>("24h");
+  const { data, isLoading, isPlaceholderData, error } = useTimeseries(range);
+  // Định dạng nhãn theo range CỦA DỮ LIỆU đang vẽ, không theo nút vừa bấm — tránh vẽ bucket giờ bằng nhãn ngày.
+  const dataRange: TimeseriesRange =
+    data && data.length > 1 && new Date(data[1].bucket).getTime() - new Date(data[0].bucket).getTime() > 3_600_000
+      ? "7d"
+      : "24h";
+  const fmt = dataRange === "24h" ? hourFmt : dayFmt;
+
+  return (
+    <Card className="h-full">
+      <CardHeader>
+        <CardTitle>Lưu lượng sự kiện &amp; delivery</CardTitle>
+        <CardDescription>
+          {range === "24h" ? "24 giờ qua, theo giờ" : "7 ngày qua, theo ngày"} · delivery tính theo trạng thái hiện tại
+        </CardDescription>
+        <CardAction>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={range}
+            onValueChange={(v) => v && setRange(v as TimeseriesRange)}
+          >
+            <ToggleGroupItem value="24h">24 giờ</ToggleGroupItem>
+            <ToggleGroupItem value="7d">7 ngày</ToggleGroupItem>
+          </ToggleGroup>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <p className="text-destructive text-sm">Không tải được biểu đồ: {error.message}</p>
+        ) : isLoading && !data ? (
+          <Skeleton className="h-64 w-full" />
+        ) : (
+          <ChartContainer
+            config={chartConfig}
+            className={`aspect-auto h-64 w-full transition-opacity ${isPlaceholderData ? "opacity-50" : ""}`}
+          >
+            <AreaChart data={data ?? []} margin={{ left: -16, right: 8 }}>
+              <defs>
+                {(Object.keys(chartConfig) as (keyof typeof chartConfig)[]).map((k) => (
+                  <linearGradient key={k} id={`fill-${k}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={`var(--color-${k})`} stopOpacity={0.5} />
+                    <stop offset="95%" stopColor={`var(--color-${k})`} stopOpacity={0.05} />
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="bucket"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                minTickGap={24}
+                tickFormatter={(v: string) => fmt.format(new Date(v))}
+              />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
+              <ChartTooltip
+                cursor={false}
+                content={
+                  <ChartTooltipContent
+                    indicator="dot"
+                    labelFormatter={(_, payload) => {
+                      const b = payload?.[0]?.payload?.bucket as string | undefined;
+                      return b
+                        ? `${dayFmt.format(new Date(b))} ${dataRange === "24h" ? hourFmt.format(new Date(b)) : ""}`
+                        : "";
+                    }}
+                  />
+                }
+              />
+              <Area dataKey="events" type="monotone" stroke="var(--color-events)" fill="url(#fill-events)" />
+              <Area dataKey="succeeded" type="monotone" stroke="var(--color-succeeded)" fill="url(#fill-succeeded)" />
+              <Area dataKey="retrying" type="monotone" stroke="var(--color-retrying)" fill="url(#fill-retrying)" />
+              <Area dataKey="dead" type="monotone" stroke="var(--color-dead)" fill="url(#fill-dead)" />
+              <ChartLegend content={<ChartLegendContent />} />
+            </AreaChart>
+          </ChartContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

@@ -1,25 +1,34 @@
+import { verifyWithFallback } from '@octokit/webhooks-methods';
 import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
-import { hmacSha256, timingSafeCompare } from '@hub/crypto';
 import { ulid } from 'ulidx';
 
 export class GithubAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'github';
 
+  /**
+   * Dùng SDK chính chủ GitHub (`@octokit/webhooks-methods`) thay vì tự tính HMAC:
+   * cùng thuật toán (HMAC-SHA256 + `timingSafeEqual`), nhưng `verifyWithFallback`
+   * xử lý đúng ngữ nghĩa xoay secret (thử `secret` đầu, rớt xuống từng secret
+   * trong `additionalSecrets`) mà không cần tự viết vòng lặp thử từng secret.
+   */
   async verify(req: RawWebhookRequest, secrets: string[]): Promise<boolean> {
     const rawSig = (req.headers['x-hub-signature-256'] || req.headers['X-Hub-Signature-256']) as string;
-    if (!rawSig || !rawSig.startsWith('sha256=')) {
+    if (!rawSig || secrets.length === 0) {
       return false;
     }
-    const signatureHex = rawSig.substring(7);
 
-    for (const secret of secrets) {
-      const computed = hmacSha256(secret, req.rawBody);
-      if (timingSafeCompare(computed, signatureHex)) {
-        return true;
-      }
+    const [primary, ...fallback] = secrets;
+    // eventPayload PHẢI là chuỗi tương ứng đúng byte đã ký (CLAUDE.md: HMAC trên
+    // body_raw) — webhook GitHub luôn là JSON UTF-8 nên decode rawBody an toàn.
+    const payload = req.rawBody.toString('utf8');
+
+    try {
+      return await verifyWithFallback(primary, payload, rawSig, fallback);
+    } catch {
+      // Thiếu secret/signature hoặc lỗi định dạng -> coi như không hợp lệ.
+      return false;
     }
-    return false;
   }
 
   extractIdempotencyKey(req: RawWebhookRequest): string {

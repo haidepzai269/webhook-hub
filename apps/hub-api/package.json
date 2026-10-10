@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
+    "start": "node dist/apps/hub-api/src/main.js",
     "start:dev": "ts-node -r tsconfig-paths/register src/main.ts"
   },
   "dependencies": {
@@ -16,10 +16,12 @@
     "@nestjs/common": "^11.0.9",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.9",
+    "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.0.9",
     "@nestjs/platform-socket.io": "^11.0.9",
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/websockets": "^11.0.9",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "ioredis": "^5.5.0",
     "prom-client": "^15.1.3",

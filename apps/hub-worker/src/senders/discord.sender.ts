@@ -1,6 +1,7 @@
 import { DestinationSender, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent } from '@hub/common';
-import axios from 'axios';
+import { createSsrfSafeAxiosConfig } from '@hub/crypto';
+import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
 
 export class DiscordSender implements DestinationSender {
   readonly type: DestinationType = 'discord';
@@ -9,6 +10,14 @@ export class DiscordSender implements DestinationSender {
     const url = config.webhookUrl;
     if (!url) {
       return { status: 400, error: 'Thiếu cấu hình webhookUrl của Discord', durationMs: 0 };
+    }
+
+    // SSRF Guard: kiểm tra + PIN đúng IP đã kiểm (chống DNS rebinding, ARCHITECTURE.md §7.3)
+    let ssrfConfig;
+    try {
+      ssrfConfig = await createSsrfSafeAxiosConfig(url);
+    } catch (err: any) {
+      return { status: 400, error: `SSRF Guard: ${err.message}`, durationMs: 0 };
     }
 
     const payload = {
@@ -25,21 +34,24 @@ export class DiscordSender implements DestinationSender {
 
     const start = Date.now();
     try {
-      const res = await axios.post(url, payload, {
-        timeout: 5000,
-        maxRedirects: 0,
+      // Phản hồi đọc tối đa 64KB; status từ dòng trạng thái — 2xx body lớn vẫn là thành công (ADR-054).
+      const res = await postLimited(ssrfConfig.url, payload, {
         headers: { 'Content-Type': 'application/json' },
+        httpAgent: ssrfConfig.httpAgent,
+        httpsAgent: ssrfConfig.httpsAgent,
       });
       return {
         status: res.status,
-        body: typeof res.data === 'string' ? res.data : JSON.stringify(res.data || {}),
+        body: res.body.substring(0, 2048),
+        error: httpErrorMessage(res.status),
         durationMs: Date.now() - start,
       };
     } catch (err: any) {
+      // Không có phản hồi (lỗi mạng / timeout) -> 500 retryable, tính vào circuit.
       return {
         status: err.response?.status || 500,
-        error: err.message,
-        body: typeof err.response?.data === 'string' ? err.response.data : JSON.stringify(err.response?.data || {}),
+        error: describeSendError(err),
+        body: '',
         durationMs: Date.now() - start,
       };
     }

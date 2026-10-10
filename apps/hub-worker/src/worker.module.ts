@@ -3,24 +3,24 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@hub/database';
 import { CircuitBreakerService } from './circuit/circuit-breaker.service';
 import { OutboxRelay } from './scheduler/outbox.relay';
+import { DeliverySweeper } from './scheduler/delivery.sweeper';
+import { CleanupJob } from './scheduler/cleanup.job';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 
+const PROVIDERS = [
+  PrismaService,
+  CircuitBreakerService,
+  OutboxRelay,
+  DeliverySweeper,
+  CleanupJob,
+  NormalizeConsumer,
+  DeliveryConsumer,
+];
+
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true })],
-  providers: [
-    PrismaService,
-    CircuitBreakerService,
-    OutboxRelay,
-    NormalizeConsumer,
-    DeliveryConsumer,
-  ],
-  exports: [
-    PrismaService,
-    CircuitBreakerService,
-    OutboxRelay,
-    NormalizeConsumer,
-    DeliveryConsumer,
-  ],
+  providers: PROVIDERS,
+  exports: PROVIDERS,
 })
 export class WorkerModule {}

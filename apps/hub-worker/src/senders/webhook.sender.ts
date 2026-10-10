@@ -1,7 +1,7 @@
 import { DestinationSender, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent } from '@hub/common';
-import { hmacSha256, validateAndPinUrl } from '@hub/crypto';
-import axios from 'axios';
+import { hmacSha256, createSsrfSafeAxiosConfig } from '@hub/crypto';
+import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
 
 export class WebhookSender implements DestinationSender {
   readonly type: DestinationType = 'webhook';
@@ -19,8 +19,10 @@ export class WebhookSender implements DestinationSender {
 
     const start = Date.now();
     try {
-      // 1. SSRF Guard kiểm tra và pin IP (ARCHITECTURE.md §7.3)
-      await validateAndPinUrl(rawUrl);
+      // 1. SSRF Guard: kiểm tra + PIN đúng IP đã kiểm (chống DNS rebinding, §7.3).
+      // httpAgent/httpsAgent bên dưới override `lookup` để axios connect thẳng
+      // vào IP đã pin thay vì tự resolve DNS lại lúc gọi thật.
+      const ssrfConfig = await createSsrfSafeAxiosConfig(rawUrl);
 
       const timestamp = Math.floor(Date.now() / 1000);
       const body = {
@@ -48,22 +50,24 @@ export class WebhookSender implements DestinationSender {
         headers['X-Hub-Signature'] = `v1=${signature}`;
       }
 
-      // 3. Gọi HTTP: maxRedirects: 0 để chống SSRF Redirect
-      const res = await axios.post(rawUrl, bodyString, {
-        timeout: 5000,
-        maxRedirects: 0,
+      // 3. Gọi HTTP: maxRedirects: 0 để chống SSRF Redirect; agent đã pin IP ở trên. Phản hồi đọc tối
+      // đa 64KB, status từ dòng trạng thái — 2xx body lớn vẫn là thành công (ADR-054).
+      const res = await postLimited(ssrfConfig.url, bodyString, {
         headers,
+        httpAgent: ssrfConfig.httpAgent,
+        httpsAgent: ssrfConfig.httpsAgent,
       });
 
       return {
         status: res.status,
-        body: typeof res.data === 'string' ? res.data.substring(0, 2048) : JSON.stringify(res.data || {}).substring(0, 2048),
+        body: res.body.substring(0, 2048),
+        error: httpErrorMessage(res.status),
         durationMs: Date.now() - start,
       };
     } catch (err: any) {
       return {
         status: err.response?.status || 500,
-        error: err.message,
+        error: describeSendError(err),
         body: typeof err.response?.data === 'string' ? err.response.data.substring(0, 2048) : JSON.stringify(err.response?.data || {}).substring(0, 2048),
         durationMs: Date.now() - start,
       };

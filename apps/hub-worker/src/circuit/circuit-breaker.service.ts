@@ -1,76 +1,225 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import Redis from 'ioredis';
+import { randomUUID } from 'crypto';
 import { CircuitState, logger } from '@hub/common';
+import { PrismaService } from '@hub/database';
 
+/** Token DI tuỳ chọn để test tiêm Redis giả; production tự tạo client riêng. */
+export const CIRCUIT_REDIS = Symbol('CIRCUIT_REDIS');
+
+/** Kênh pub/sub duy nhất cho thay đổi circuit (thay `hub:alerts`, luôn kèm tenantId — ADR-035). */
+export const CIRCUIT_CHANNEL = 'hub:realtime:circuit';
+
+export const CIRCUIT_FAILURE_THRESHOLD = 5;
+/** Còn khoá `:open` = OPEN. Hết hạn mà `:failures` còn >= ngưỡng = HALF_OPEN (suy ra, không lưu). */
+export const CIRCUIT_OPEN_SECONDS = 60;
+export const CIRCUIT_OPEN_MS = CIRCUIT_OPEN_SECONDS * 1000;
+/** Lỗi cách nhau hơn 2 phút không còn là "liên tiếp". */
+const FAILURES_WINDOW_SECONDS = 120;
+/** Lúc OPEN, gia hạn `:failures` qua hết OPEN + một khoảng HALF_OPEN — nếu không, bộ đếm có thể hết hạn trước `:open` và circuit nhảy thẳng về CLOSED mà không probe. */
+const FAILURES_AFTER_OPEN_SECONDS = CIRCUIT_OPEN_SECONDS + FAILURES_WINDOW_SECONDS;
+const PROBE_SECONDS = 30;
+
+/**
+ * Review SPEC-2 #6 (ADR-054): các bước "đọc rồi ghi" gộp thành MỘT script Lua — nguyên tử phía Redis,
+ * và mỗi script tính là một lệnh trong ngân sách ≤ 4 lệnh Redis/sự kiện.
+ */
+/** INCR + EXPIRE ở lần đầu. KEYS[1]=bộ đếm; ARGV[1]=TTL giây. Trả giá trị sau INCR. */
+export const LUA_INCR_EXPIRE = `local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n`;
+/**
+ * Giành probe HALF_OPEN: chỉ SET NX khi `:open` KHÔNG tồn tại và `:failures` ≥ ngưỡng (đúng là HALF_OPEN
+ * ngay lúc này, không dựa vào MGET đọc trước có thể đã cũ). KEYS: open, failures, probe;
+ * ARGV: token, TTL giây, ngưỡng. Trả 1 = giành được.
+ */
+export const LUA_ACQUIRE_PROBE = `if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+local f = tonumber(redis.call('GET', KEYS[2]) or '0') or 0
+if f < tonumber(ARGV[3]) then return 0 end
+if redis.call('SET', KEYS[3], ARGV[1], 'NX', 'EX', tonumber(ARGV[2])) then return 1 end
+return 0`;
+/** Nhả probe CHỈ khi giá trị = token của chính mình (không xoá probe của worker khác sau khi mình hết hạn). */
+export const LUA_RELEASE_PROBE = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+/** Redis lỗi -> fail-open: coi như giành được probe; token này không bao giờ được gửi tới Redis để nhả. */
+export const FAIL_OPEN_PROBE = 'fail-open';
+
+export interface CircuitView {
+  state: CircuitState;
+  failures: number;
+  /** Redis lỗi: trạng thái là fail-open (CLOSED) chứ không phải quan sát thật -> không đồng bộ DB. */
+  degraded?: boolean;
+}
+
+/** Đích đang xử lý + trạng thái đang ghi trong DB (đọc kèm delivery, không tốn truy vấn riêng). */
+export interface CircuitTarget {
+  destinationId: string;
+  tenantId: string;
+  persistedState: CircuitState;
+}
+
+/**
+ * Circuit breaker 3 trạng thái (S2-1, ADR-048). Redis là nguồn CHẠY; `destinations.circuit_state`
+ * chỉ để hiển thị và chỉ được ghi khi trạng thái ĐỔI. Redis chết -> fail-open (ARCHITECTURE §5.4).
+ *
+ * Khoá `circuit:{destId}`:
+ *  - `:failures` INCR, EX 120 đặt ở lần lỗi đầu (Lua, một lệnh);
+ *  - `:open`     SET OPEN EX 60;
+ *  - `:probe`    SET token NX EX 30 (Lua: chỉ khi thật sự HALF_OPEN) — người gửi thử DUY NHẤT; nhả theo token.
+ */
 @Injectable()
 export class CircuitBreakerService {
   private redis: Redis;
 
-  constructor(redisClient?: Redis) {
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(CIRCUIT_REDIS) redisClient?: Redis,
+  ) {
     if (redisClient) {
       this.redis = redisClient;
     } else {
       const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
       this.redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
+      // Không để ioredis văng 'Unhandled error event' khi Redis chết (S1-4); circuit fail-open như cũ.
+      this.redis.on('error', (err) => logger.warn({ err: err.message }, 'Redis (circuit breaker) lỗi'));
       this.redis.connect().catch(() => {});
     }
   }
 
-  private getKey(destinationId: string) {
-    return `circuit:${destinationId}`;
+  private keys(destinationId: string) {
+    const base = `circuit:${destinationId}`;
+    return { failures: `${base}:failures`, open: `${base}:open`, probe: `${base}:probe` };
   }
 
-  async getState(destinationId: string): Promise<CircuitState> {
+  /** MỘT lệnh MGET. */
+  async getState(destinationId: string): Promise<CircuitView> {
+    const k = this.keys(destinationId);
     try {
-      const state = await this.redis.get(`${this.getKey(destinationId)}:state`);
-      if (!state) return 'CLOSED';
-      return state as CircuitState;
+      const [open, failuresRaw] = await this.redis.mget(k.open, k.failures);
+      const failures = parseInt(failuresRaw ?? '0', 10) || 0;
+      if (open) return { state: 'OPEN', failures };
+      if (failures >= CIRCUIT_FAILURE_THRESHOLD) return { state: 'HALF_OPEN', failures };
+      return { state: 'CLOSED', failures };
     } catch {
-      // Redis chết -> fail-open (CLOSED) theo ARCHITECTURE.md §5.4
-      return 'CLOSED';
+      return { state: 'CLOSED', failures: 0, degraded: true };
     }
   }
 
-  async recordSuccess(destinationId: string): Promise<void> {
+  /**
+   * HALF_OPEN: giành probe bằng MỘT script Lua (ADR-054). Trả token ngẫu nhiên của lần giành (dùng để
+   * nhả đúng chủ), hoặc null nếu không giành được. Redis lỗi -> FAIL_OPEN_PROBE (cho gửi, fail-open).
+   */
+  async tryAcquireProbe(destinationId: string): Promise<string | null> {
+    const k = this.keys(destinationId);
+    const token = `${process.pid}:${randomUUID()}`;
     try {
-      const key = this.getKey(destinationId);
-      await this.redis.del(`${key}:failures`);
-      await this.redis.set(`${key}:state`, 'CLOSED');
-    } catch {}
+      const res = await this.redis.eval(LUA_ACQUIRE_PROBE, 3, k.open, k.failures, k.probe, token, PROBE_SECONDS, CIRCUIT_FAILURE_THRESHOLD);
+      return Number(res) === 1 ? token : null;
+    } catch {
+      return FAIL_OPEN_PROBE;
+    }
   }
 
-  async recordFailure(destinationId: string): Promise<void> {
+  /** Giành probe rồi mà không gửi (lease thua, đã xử lý, 4xx) -> nhả để worker khác thử ngay, CHỈ nếu mình còn là chủ. */
+  async releaseProbe(destinationId: string, token: string | null): Promise<void> {
+    if (!token || token === FAIL_OPEN_PROBE) return;
     try {
-      const key = this.getKey(destinationId);
-      const failures = await this.redis.incr(`${key}:failures`);
-      if (failures >= 5) {
-        logger.warn({ destinationId, failures }, '🚨 Circuit Breaker chuyển sang OPEN (ngừng gửi 60s)');
-        await this.redis.set(`${key}:state`, 'OPEN', 'EX', 60);
-
-        // Tự cảnh báo (§16 & ADR-016): Bắn alert qua Redis pub/sub
-        const alertMessage = {
-          type: 'CIRCUIT_BREAKER_OPEN',
-          destinationId,
-          failures,
-          message: `[CẢNH BÁO] Đích ${destinationId} đã thất bại liên tiếp ${failures} lần. Circuit Breaker chuyển OPEN (ngừng 60s).`,
-          timestamp: new Date().toISOString(),
-        };
-        await this.redis.publish('hub:alerts', JSON.stringify(alertMessage)).catch(() => {});
-      }
+      await this.redis.eval(LUA_RELEASE_PROBE, 1, this.keys(destinationId).probe, token);
     } catch {}
   }
 
   /**
-   * Kiểm tra outbound throttle token bucket per destination (§5.4b)
+   * Gửi thành công. `failures == 0` và đang CLOSED -> KHÔNG gọi Redis (ngân sách S3-5).
+   * Ngược lại một lệnh DEL ba khoá rồi về CLOSED.
+   */
+  async recordSuccess(target: CircuitTarget, view: CircuitView): Promise<CircuitState> {
+    if (view.failures === 0 && view.state === 'CLOSED') {
+      if (target.persistedState !== 'CLOSED' && !view.degraded) await this.transition(target, 'CLOSED', 0);
+      return 'CLOSED';
+    }
+    const k = this.keys(target.destinationId);
+    try {
+      await this.redis.del(k.failures, k.open, k.probe);
+    } catch {}
+    // `persistedState` đọc kèm delivery có thể đã cũ (worker khác vừa ghi OPEN): KHÔNG dựa vào nó để bỏ
+    // qua — UPDATE có điều kiện `circuit_state <> 'CLOSED'` quyết định (review SPEC-2 #6c).
+    await this.transition(target, 'CLOSED', 0, true);
+    return 'CLOSED';
+  }
+
+  /**
+   * Gửi thất bại (CHỈ lỗi phía đích: 5xx/408/429/mạng — consumer lọc, ADR-054): INCR+EXPIRE trong MỘT
+   * script Lua. Đạt ngưỡng, hoặc probe HALF_OPEN thất bại -> OPEN.
+   */
+  async recordFailure(target: CircuitTarget, view: CircuitView): Promise<CircuitView> {
+    const k = this.keys(target.destinationId);
+    let failures: number;
+    try {
+      failures = Number(await this.redis.eval(LUA_INCR_EXPIRE, 1, k.failures, FAILURES_WINDOW_SECONDS));
+    } catch {
+      return { state: 'CLOSED', failures: 0, degraded: true };
+    }
+
+    if (failures >= CIRCUIT_FAILURE_THRESHOLD || view.state === 'HALF_OPEN') {
+      try {
+        await this.redis
+          .multi()
+          .set(k.open, 'OPEN', 'EX', CIRCUIT_OPEN_SECONDS)
+          .expire(k.failures, FAILURES_AFTER_OPEN_SECONDS)
+          .del(k.probe)
+          .exec();
+      } catch {
+        return { state: 'CLOSED', failures, degraded: true };
+      }
+      if (target.persistedState !== 'OPEN') {
+        logger.warn({ destinationId: target.destinationId, failures }, 'Circuit breaker -> OPEN (hoãn gửi 60s)');
+      }
+      await this.transition(target, 'OPEN', failures);
+      return { state: 'OPEN', failures };
+    }
+    return { state: view.state === 'OPEN' ? 'OPEN' : 'CLOSED', failures };
+  }
+
+  /**
+   * Đồng bộ trạng thái QUAN SÁT được (vd. `:open` hết hạn -> HALF_OPEN, hoặc mọi khoá hết hạn ->
+   * CLOSED) vào DB khi khác bản đang lưu. Không làm gì nếu Redis đang lỗi.
+   */
+  async syncObserved(target: CircuitTarget, view: CircuitView): Promise<void> {
+    if (view.degraded || view.state === target.persistedState) return;
+    await this.transition(target, view.state, view.failures);
+  }
+
+  /**
+   * Chỉ khi trạng thái ĐỔI: (a) ghi `destinations.circuit_state` bằng UPDATE có điều kiện
+   * (`circuit_state <> to`) — nhiều worker cùng thấy một lần đổi thì chỉ một bên đổi được dòng;
+   * (b) chỉ bên đó PUBLISH `hub:realtime:circuit`. Lỗi ở đây không được chặn việc gửi.
+   */
+  private async transition(target: CircuitTarget, to: CircuitState, failures: number, force = false): Promise<void> {
+    const from = target.persistedState;
+    if (from === to && !force) return;
+    target.persistedState = to;
+    try {
+      const changed = await this.prisma
+        .forTenant(target.tenantId)
+        .updateDestinationCircuitState(target.destinationId, to);
+      if (changed !== 1) return;
+      const msg = { tenantId: target.tenantId, destinationId: target.destinationId, from, to, failures, at: new Date().toISOString() };
+      await this.redis.publish(CIRCUIT_CHANNEL, JSON.stringify(msg)).catch(() => {});
+      logger.info(msg, 'Circuit đổi trạng thái');
+    } catch (err: any) {
+      logger.warn({ err: err?.message, destinationId: target.destinationId, to }, 'Không ghi được circuit_state (chỉ ảnh hưởng hiển thị)');
+    }
+  }
+
+  /**
+   * Outbound throttle per destination (§5.4b). Thực chất là cửa sổ cố định 1 giây (fixed window),
+   * không phải token bucket — S3-6 sẽ sửa tài liệu.
    */
   async checkThrottle(destinationId: string, rateLimitRps: number): Promise<boolean> {
     if (!rateLimitRps || rateLimitRps <= 0) return true;
     try {
       const key = `throttle:destination:${destinationId}:${Math.floor(Date.now() / 1000)}`;
-      const count = await this.redis.incr(key);
-      if (count === 1) {
-        await this.redis.expire(key, 2);
-      }
+      const count = Number(await this.redis.eval(LUA_INCR_EXPIRE, 1, key, 2));
       return count <= rateLimitRps;
     } catch {
       return true; // fail-open

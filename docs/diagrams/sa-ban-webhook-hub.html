@@ -1,0 +1,725 @@
+<title>Sa bàn Webhook Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: một cột ≤1120px, thanh tab trên cùng; tab Mô phỏng = sân khấu SVG + (nhật ký | chi tiết) chia đôi.
+   Màu vai trò khớp file .drawio: cam provider · xanh hub · tím đích · xám kho · lá thành công · đỏ lỗi. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#152030; --muted:#5a6678; --line:#d8dee7; --sunk:#e9edf3;
+  --prov:#b85f00; --prov-soft:#fde8cf;
+  --hub:#2a5ca8; --hub-soft:#dbe7f9;
+  --dest:#74479b; --dest-soft:#ece0f5;
+  --store:#56606d; --store-soft:#e6e9ee;
+  --ok:#23784a; --ok-soft:#d9f0e2;
+  --bad:#b3393a; --bad-soft:#f9dcdc;
+  --warn:#9a6b00; --warn-soft:#fbefc9;
+  --font-ui:"Be Vietnam Pro", "Segoe UI", system-ui, sans-serif;
+  --font-mono:"JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f141b; --surface:#171f2a; --ink:#e4eaf2; --muted:#9aa7b8; --line:#2a3546; --sunk:#1d2734;
+  --prov:#f0a04b; --prov-soft:#3a2a17; --hub:#7fb0f5; --hub-soft:#1a2c47; --dest:#c49be6; --dest-soft:#2f2140;
+  --store:#aab4c2; --store-soft:#252e3a; --ok:#6fd39a; --ok-soft:#173526; --bad:#f08484; --bad-soft:#3d1c1e;
+  --warn:#f0c55a; --warn-soft:#3a3016; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0f141b; --surface:#171f2a; --ink:#e4eaf2; --muted:#9aa7b8; --line:#2a3546; --sunk:#1d2734;
+  --prov:#f0a04b; --prov-soft:#3a2a17; --hub:#7fb0f5; --hub-soft:#1a2c47; --dest:#c49be6; --dest-soft:#2f2140;
+  --store:#aab4c2; --store-soft:#252e3a; --ok:#6fd39a; --ok-soft:#173526; --bad:#f08484; --bad-soft:#3d1c1e;
+  --warn:#f0c55a; --warn-soft:#3a3016; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:15px;line-height:1.6}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:28px 64px;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{text-wrap:balance;line-height:1.25;margin:0}
+h1{font-size:clamp(26px,4vw,38px);font-weight:800;letter-spacing:-.02em}
+h2{font-size:22px;font-weight:800;letter-spacing:-.01em}
+h3{font-size:16px;font-weight:700}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--font-mono);font-size:.88em}
+.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.lead{color:var(--muted);font-size:16px}
+header{display:flex;flex-direction:column;gap:8px}
+
+.tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);padding-bottom:10px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:5;padding-top:8px}
+.tabs button{font:inherit;font-weight:600;font-size:14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:7px 14px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tabs button:focus-visible,button:focus-visible,summary:focus-visible,.hot:focus-visible,.node:focus-visible{outline:3px solid var(--hub);outline-offset:2px}
+section.panel{display:flex;flex-direction:column;gap:26px}
+.block{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px}
+.grid2>*{min-width:0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px}
+
+button.btn{font:inherit;font-weight:600;font-size:14px;border-radius:8px;padding:9px 14px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+button.btn.primary{background:var(--hub);border-color:var(--hub);color:var(--surface)}
+button.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+/* Tab 1 — polling vs webhook */
+.feed{list-style:none;margin:0;padding:10px;background:var(--sunk);border-radius:8px;height:230px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.feed li{padding:5px 9px;border-radius:6px;max-width:88%}
+.feed li.me{align-self:flex-end;background:var(--hub-soft)}
+.feed li.them{align-self:flex-start;background:var(--surface);border:1px solid var(--line)}
+.feed li.yes{background:var(--ok-soft);border-color:var(--ok);font-weight:700}
+.tally{font-size:13px;color:var(--muted)}
+.tally b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* Tab 1 — HTTP request anatomy */
+pre.req{margin:0;background:var(--sunk);border-radius:10px;padding:16px;overflow-x:auto;font-family:var(--font-mono);font-size:13px;line-height:1.7}
+.hot{border-bottom:2px dotted var(--hub);cursor:pointer;border-radius:3px;padding:0 2px}
+.hot:hover{background:var(--hub-soft)}
+.hot.on{background:var(--hub);color:var(--surface);border-bottom-color:transparent}
+.explain{border-left:3px solid var(--hub);padding:4px 0 4px 14px;display:flex;flex-direction:column;gap:6px}
+.explain .k{font-family:var(--font-mono);font-size:12px;color:var(--hub);font-weight:600}
+
+/* Tab 1 — mesh vs hub */
+.mini svg{width:100%;height:auto;display:block}
+.mini text{font-family:var(--font-ui);font-size:13px;fill:var(--ink)}
+.promise{display:flex;flex-direction:column;gap:6px}
+.promise .tag{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+
+/* Tab 2 — stage */
+.stage-wrap{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+svg.stage{display:block;width:100%;min-width:760px;height:auto}
+.stage text{font-family:var(--font-ui);fill:var(--ink)}
+.stage .wire{stroke:var(--line);stroke-width:2;fill:none}
+.node{cursor:pointer}
+.node rect{stroke-width:2;transition:stroke-width .2s}
+.node .t1{font-weight:700;font-size:15px}
+.node .t2{font-size:12px;fill:var(--muted)}
+.node.prov rect{fill:var(--prov-soft);stroke:var(--prov)}
+.node.hub rect{fill:var(--hub-soft);stroke:var(--hub)}
+.node.dest rect{fill:var(--dest-soft);stroke:var(--dest)}
+.node.store rect{fill:var(--store-soft);stroke:var(--store)}
+.node.dlqn rect{fill:var(--bad-soft);stroke:var(--bad)}
+.node.sel rect{stroke-width:4}
+.node.down rect{stroke:var(--bad);stroke-dasharray:6 4;fill:var(--bad-soft)}
+.node .off{font-size:11px;font-weight:700;fill:var(--bad);display:none}
+.node.down .off{display:block}
+.node.pulse-ok rect{stroke:var(--ok);stroke-width:5}
+.node.pulse-err rect{stroke:var(--bad);stroke-width:5}
+.badge circle{fill:var(--bad)}
+.badge.outbox circle{fill:var(--warn)}
+.badge text{fill:var(--surface);font-size:12px;font-weight:800}
+.pkt circle{stroke:var(--surface);stroke-width:2}
+.pkt.n circle{fill:var(--hub)} .pkt.ok circle{fill:var(--ok)} .pkt.err circle{fill:var(--bad)} .pkt.prov circle{fill:var(--prov)}
+.pkt text{font-size:12px;font-weight:700;paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.pkt.err text{fill:var(--bad)} .pkt.ok text{fill:var(--ok)}
+
+.controls{display:flex;flex-direction:column;gap:12px}
+.switches{display:flex;flex-wrap:wrap;gap:8px}
+.sw{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px 6px 8px;font-size:13px;font-weight:600;cursor:pointer;user-select:none}
+.sw input{appearance:none;width:30px;height:18px;border-radius:999px;background:var(--line);position:relative;margin:0;cursor:pointer;flex:none}
+.sw input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--surface);transition:left .15s}
+.sw input:checked{background:var(--bad)}
+.sw input:checked::after{left:14px}
+.sw.legacy input:checked{background:var(--warn)}
+.sw input:focus-visible{outline:3px solid var(--hub);outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{font:inherit;font-size:13px;font-weight:600;border:1px dashed var(--muted);background:transparent;color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer}
+.chips button:hover{background:var(--sunk)}
+.guide{background:var(--warn-soft);border-radius:10px;padding:12px 14px;font-size:14px}
+.guide b{display:block;margin-bottom:2px}
+.counters{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.counter{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.counter .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.2}
+.counter .l{font-size:12px;color:var(--muted)}
+.counter.lost{border-color:var(--bad)} .counter.lost .v{color:var(--bad)}
+.counter.dlq .v{color:var(--warn)}
+.busy{font-size:13px;color:var(--muted);min-height:1.4em}
+ol.log{list-style:none;margin:0;padding:0;max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:14px}
+ol.log li{border-left:3px solid var(--hub);padding:4px 0 4px 10px}
+ol.log li.ok{border-color:var(--ok)} ol.log li.err{border-color:var(--bad)} ol.log li.warn{border-color:var(--warn)} ol.log li.big{background:var(--bad-soft);border-radius:0 6px 6px 0;font-weight:700}
+ol.log .tech{display:block;font-family:var(--font-mono);font-size:11.5px;color:var(--muted)}
+.detail{display:flex;flex-direction:column;gap:10px}
+.detail .role{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.detail dl{margin:0;display:grid;gap:8px}
+.detail dt{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.detail dd{margin:0}
+.qa{background:var(--sunk);border-radius:8px;padding:10px 12px;font-size:14px}
+
+/* Tab 3 — flows */
+.flow{display:flex;flex-direction:column;gap:0;border-left:2px solid var(--line);margin-left:14px}
+.flow details{position:relative;padding:0 0 10px 22px}
+.flow details::before{content:attr(data-n);position:absolute;left:-15px;top:6px;width:28px;height:28px;border-radius:50%;background:var(--surface);border:2px solid var(--hub);font-size:12px;font-weight:800;display:grid;place-items:center;color:var(--hub)}
+.flow details.crit::before{border-color:var(--bad);color:var(--bad)}
+.flow summary{cursor:pointer;list-style:none;padding:8px 12px;border-radius:8px;font-weight:700;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.flow summary::-webkit-details-marker{display:none}
+.flow summary:hover{background:var(--surface)}
+.flow summary .s{font-weight:400;color:var(--muted);font-size:13px}
+.flow details[open] summary{background:var(--surface)}
+.flow .body{background:var(--surface);border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;padding:12px 14px;display:grid;gap:10px;margin-top:-4px}
+.flow .body h4{margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.flow .body p{font-size:14px}
+.flow .if{background:var(--bad-soft);border-radius:6px;padding:8px 10px;font-size:14px}
+.flowhead{display:flex;flex-direction:column;gap:4px}
+.toggleall{align-self:flex-start}
+
+/* Tab 4 — glossary */
+.terms{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.term{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.term .w{font-weight:800}
+.term .like{font-size:13px;color:var(--muted)}
+.term .like::before{content:"Giống như: ";font-weight:700}
+
+@media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+</style>
+
+<div class="wrap">
+<header>
+  <span class="eyebrow">Đồ án Webhook Hub · tài liệu cho cả nhóm</span>
+  <h1>Sa bàn Webhook Hub</h1>
+  <p class="lead">Đi theo thứ tự: hiểu webhook là gì, bấm cho một khoản tiền chạy qua hệ thống, cố tình làm hỏng từng bộ phận, rồi mở từng bước để xem chi tiết kỹ thuật.</p>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Các phần">
+  <button role="tab" id="t-hoc" aria-controls="hoc" aria-selected="true">1 · Webhook là gì</button>
+  <button role="tab" id="t-mo-phong" aria-controls="mo-phong" aria-selected="false">2 · Mô phỏng</button>
+  <button role="tab" id="t-luong" aria-controls="luong" aria-selected="false">3 · Các luồng chi tiết</button>
+  <button role="tab" id="t-tu-dien" aria-controls="tu-dien" aria-selected="false">4 · Từ điển</button>
+</nav>
+
+<!-- ═════════════ TAB 1 ═════════════ -->
+<section class="panel" id="hoc" role="tabpanel" aria-labelledby="t-hoc">
+  <div class="block">
+    <h2>Hỏi liên tục, hay được báo khi có?</h2>
+    <p>Bạn đặt đồ ăn. <b>Cách 1:</b> cứ mỗi phút gọi cho shipper hỏi "tới chưa?". <b>Cách 2:</b> shipper gọi bạn khi đến cửa. Cách 2 chính là <b>webhook</b>: bên có tin (PayOS, GitHub…) <i>chủ động gọi</i> vào một địa chỉ bạn đưa trước, đúng lúc sự việc xảy ra.</p>
+    <div class="grid2">
+      <div class="card block">
+        <h3>Cách 1 · Polling (hỏi liên tục)</h3>
+        <ul class="feed" id="feedPoll" aria-live="polite"></ul>
+        <div class="tally">Số lần hỏi: <b id="pollN">0</b> · hỏi vô ích: <b id="pollW">0</b></div>
+      </div>
+      <div class="card block">
+        <h3>Cách 2 · Webhook (được báo)</h3>
+        <ul class="feed" id="feedHook" aria-live="polite"></ul>
+        <div class="tally">Số lần gọi: <b id="hookN">0</b> · gọi vô ích: <b>0</b></div>
+      </div>
+    </div>
+    <div class="row"><button class="btn primary" id="runCompare">Chạy so sánh</button><span class="tally">Khách chuyển tiền ở giây thứ 11.</span></div>
+  </div>
+
+  <div class="block">
+    <h2>Một webhook thật trông như thế nào?</h2>
+    <p>Bấm vào các phần được gạch chân. Đây là bản rút gọn của webhook PayOS gửi vào Hub khi khách chuyển khoản cho đơn <b>DH123</b>.</p>
+    <div class="grid2">
+<pre class="req" aria-label="Ví dụ request webhook"><span class="hot" tabindex="0" data-k="post">POST</span> <span class="hot" tabindex="0" data-k="url">/hooks/payos/src_k3J9xQ</span> HTTP/1.1
+Host: hub.example.com
+<span class="hot" tabindex="0" data-k="ctype">Content-Type: application/json</span>
+
+{
+  "code": "00",
+  "desc": "success",
+  "data": {
+    "orderCode": 123,
+    "amount": 50000,
+    <span class="hot" tabindex="0" data-k="desc">"description": "DH123"</span>,
+    <span class="hot" tabindex="0" data-k="ref">"reference": "FT24275XK9Q"</span>,
+    "transactionDateTime": "2026-10-02 14:03:11"
+  },
+  <span class="hot" tabindex="0" data-k="sig">"signature": "8f1c0e…a92d"</span>
+}
+
+<span style="color:var(--muted)">── Hub trả lời ──</span>
+HTTP/1.1 <span class="hot" tabindex="0" data-k="ack">200 OK</span></pre>
+      <div class="card explain" id="explain" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2>Vì sao cần một Hub ở giữa?</h2>
+    <p>Không có Hub, mỗi ứng dụng tự viết code nhận webhook của từng nhà cung cấp: kiểm chữ ký, chống trùng, thử lại khi lỗi… lặp đi lặp lại. Có Hub, mỗi thứ chỉ viết <b>một lần</b>.</p>
+    <div class="grid2">
+      <div class="card mini">
+        <h3>Không có Hub · 3 × 3 = 9 đường nối</h3>
+        <svg viewBox="0 0 420 220" role="img" aria-label="3 provider nối chéo với 3 ứng dụng">
+          <g stroke="var(--bad)" stroke-width="1.6" opacity=".75">
+            <line x1="95" y1="40" x2="325" y2="40"/><line x1="95" y1="40" x2="325" y2="110"/><line x1="95" y1="40" x2="325" y2="180"/>
+            <line x1="95" y1="110" x2="325" y2="40"/><line x1="95" y1="110" x2="325" y2="110"/><line x1="95" y1="110" x2="325" y2="180"/>
+            <line x1="95" y1="180" x2="325" y2="40"/><line x1="95" y1="180" x2="325" y2="110"/><line x1="95" y1="180" x2="325" y2="180"/>
+          </g>
+          <g fill="var(--prov-soft)" stroke="var(--prov)" stroke-width="2"><rect x="10" y="22" width="85" height="36" rx="6"/><rect x="10" y="92" width="85" height="36" rx="6"/><rect x="10" y="162" width="85" height="36" rx="6"/></g>
+          <g fill="var(--dest-soft)" stroke="var(--dest)" stroke-width="2"><rect x="325" y="22" width="85" height="36" rx="6"/><rect x="325" y="92" width="85" height="36" rx="6"/><rect x="325" y="162" width="85" height="36" rx="6"/></g>
+          <text x="52" y="45" text-anchor="middle">PayOS</text><text x="52" y="115" text-anchor="middle">SePay</text><text x="52" y="185" text-anchor="middle">GitHub</text>
+          <text x="367" y="45" text-anchor="middle">Discord</text><text x="367" y="115" text-anchor="middle">Telegram</text><text x="367" y="185" text-anchor="middle">Shop</text>
+        </svg>
+      </div>
+      <div class="card mini">
+        <h3>Có Hub · 3 + 3 = 6 đường nối</h3>
+        <svg viewBox="0 0 420 220" role="img" aria-label="3 provider và 3 ứng dụng cùng nối vào Hub">
+          <g stroke="var(--ok)" stroke-width="2">
+            <line x1="95" y1="40" x2="165" y2="110"/><line x1="95" y1="110" x2="165" y2="110"/><line x1="95" y1="180" x2="165" y2="110"/>
+            <line x1="255" y1="110" x2="325" y2="40"/><line x1="255" y1="110" x2="325" y2="110"/><line x1="255" y1="110" x2="325" y2="180"/>
+          </g>
+          <g fill="var(--prov-soft)" stroke="var(--prov)" stroke-width="2"><rect x="10" y="22" width="85" height="36" rx="6"/><rect x="10" y="92" width="85" height="36" rx="6"/><rect x="10" y="162" width="85" height="36" rx="6"/></g>
+          <g fill="var(--dest-soft)" stroke="var(--dest)" stroke-width="2"><rect x="325" y="22" width="85" height="36" rx="6"/><rect x="325" y="92" width="85" height="36" rx="6"/><rect x="325" y="162" width="85" height="36" rx="6"/></g>
+          <rect x="165" y="80" width="90" height="60" rx="8" fill="var(--hub-soft)" stroke="var(--hub)" stroke-width="2"/>
+          <text x="52" y="45" text-anchor="middle">PayOS</text><text x="52" y="115" text-anchor="middle">SePay</text><text x="52" y="185" text-anchor="middle">GitHub</text>
+          <text x="367" y="45" text-anchor="middle">Discord</text><text x="367" y="115" text-anchor="middle">Telegram</text><text x="367" y="185" text-anchor="middle">Shop</text>
+          <text x="210" y="115" text-anchor="middle" font-weight="800">HUB</text>
+        </svg>
+      </div>
+    </div>
+    <h3>Ba điều Hub hứa, và cái giá để giữ lời</h3>
+    <div class="grid3">
+      <div class="card promise"><b>Không mất sự kiện</b><span>Chỉ trả 200 cho PayOS sau khi đã ghi chắc vào PostgreSQL.</span><span class="tag">BB-3 · transaction + outbox</span></div>
+      <div class="card promise"><b>Không xử lý trùng</b><span>PayOS gửi lại 5 lần thì đơn vẫn chỉ được cộng tiền 1 lần.</span><span class="tag">BB-2 · 5 chốt idempotency</span></div>
+      <div class="card promise"><b>Không làm PayOS phải chờ</b><span>Nhận xong trả lời ngay; việc chậm (gửi Discord, Shop) làm sau, ở tiến trình khác.</span><span class="tag">BB-4 · hub-api ≠ hub-worker</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 2 ═════════════ -->
+<section class="panel" id="mo-phong" role="tabpanel" aria-labelledby="t-mo-phong" hidden>
+  <div class="block">
+    <h2>Cho một khoản tiền chạy qua hệ thống</h2>
+    <p>Bấm <b>Khách chuyển 50.000đ</b> rồi nhìn chấm tròn di chuyển. Bật công tắc để làm hỏng từng bộ phận. Bấm vào bất kỳ ô nào trên sơ đồ để đọc nó làm gì. Thời gian chờ retry thật (10 giây, 1 phút…) được rút gọn còn vài giây.</p>
+  </div>
+  <div class="stage-wrap">
+    <svg class="stage" id="stage" viewBox="0 0 1100 470" role="img" aria-label="Sơ đồ mô phỏng luồng sự kiện">
+      <g id="wires"></g><g id="nodes"></g><g id="pkts"></g>
+    </svg>
+  </div>
+  <div class="controls">
+    <div class="row">
+      <button class="btn primary" id="bSend">Khách chuyển 50.000đ</button>
+      <button class="btn" id="bResend" disabled>PayOS gửi lại sự kiện vừa rồi</button>
+      <button class="btn" id="bReplay" disabled>Replay hàng trong DLQ</button>
+      <button class="btn" id="bReset">Làm lại từ đầu</button>
+      <label class="sw" for="speed" style="cursor:default">Tốc độ
+        <select id="speed" style="font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)">
+          <option value="0.6">chậm</option><option value="1" selected>vừa</option><option value="1.8">nhanh</option>
+        </select></label>
+    </div>
+    <div class="switches" aria-label="Làm hỏng bộ phận">
+      <label class="sw"><input type="checkbox" id="fRedis">Tắt Redis</label>
+      <label class="sw"><input type="checkbox" id="fPg">Tắt PostgreSQL</label>
+      <label class="sw"><input type="checkbox" id="fMq">Tắt RabbitMQ</label>
+      <label class="sw"><input type="checkbox" id="fDiscord">Discord hỏng (trả 500)</label>
+      <label class="sw legacy"><input type="checkbox" id="fLegacy">Chạy bản ý tưởng gốc (sai)</label>
+    </div>
+    <div>
+      <div class="eyebrow" style="margin-bottom:6px">Kịch bản dựng sẵn</div>
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="guide" id="guide"><b>Bắt đầu ở đây</b>Chọn kịch bản ① để xem đường đi bình thường, hoặc tự bấm nút và công tắc.</div>
+    <div class="counters">
+      <div class="counter"><div class="v" id="cSent">0</div><div class="l">PayOS đã gửi</div></div>
+      <div class="counter"><div class="v" id="cStored">0</div><div class="l">Đã ghi vào sổ (PG)</div></div>
+      <div class="counter"><div class="v" id="cDiscord">0</div><div class="l">Discord đã nhận</div></div>
+      <div class="counter"><div class="v" id="cShop">0</div><div class="l">Shop đã nhận</div></div>
+      <div class="counter dlq"><div class="v" id="cDlq">0</div><div class="l">Đang nằm trong DLQ</div></div>
+      <div class="counter lost"><div class="v" id="cLost">0</div><div class="l">Sự kiện bị MẤT</div></div>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="card block">
+      <div class="row" style="justify-content:space-between"><h3>Nhật ký</h3><span class="busy" id="busy"></span></div>
+      <ol class="log" id="log"></ol>
+    </div>
+    <div class="card detail" id="detail" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ═════════════ TAB 3 ═════════════ -->
+<section class="panel" id="luong" role="tabpanel" aria-labelledby="t-luong" hidden>
+  <div class="flowhead">
+    <h2>Các luồng chi tiết</h2>
+    <p>Mỗi bước có bốn phần: nói dễ hiểu, kỹ thuật, nằm ở file nào, và chuyện gì xảy ra nếu bỏ bước đó. Bước viền đỏ là bước hội đồng hay hỏi.</p>
+    <button class="btn toggleall" id="openAll">Mở tất cả</button>
+  </div>
+  <div id="flows" class="block"></div>
+</section>
+
+<!-- ═════════════ TAB 4 ═════════════ -->
+<section class="panel" id="tu-dien" role="tabpanel" aria-labelledby="t-tu-dien" hidden>
+  <div class="block"><h2>Từ điển</h2><p>Các từ sẽ gặp khi đọc code và tài liệu của đồ án.</p></div>
+  <div class="terms" id="terms"></div>
+</section>
+</div>
+
+<script>
+/* ───────── tabs ───────── */
+const tabs=[...document.querySelectorAll('.tabs button')];
+function showTab(id){
+  tabs.forEach(b=>{const on=b.getAttribute('aria-controls')===id;b.setAttribute('aria-selected',on);document.getElementById(b.getAttribute('aria-controls')).hidden=!on;});
+  try{localStorage.setItem('sb-tab',id)}catch(e){}
+}
+tabs.forEach(b=>b.addEventListener('click',()=>{showTab(b.getAttribute('aria-controls'));history.replaceState(null,'','#'+b.getAttribute('aria-controls'));}));
+(function(){let id=location.hash.slice(1);if(!document.getElementById(id)||!tabs.some(b=>b.getAttribute('aria-controls')===id)){try{id=localStorage.getItem('sb-tab')}catch(e){id=null}}
+  if(id&&tabs.some(b=>b.getAttribute('aria-controls')===id))showTab(id);})();
+
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ───────── tab 1: polling vs webhook ───────── */
+const fp=document.getElementById('feedPoll'),fh=document.getElementById('feedHook');
+function say(feed,cls,txt){const li=document.createElement('li');li.className=cls;li.textContent=txt;feed.append(li);feed.scrollTop=feed.scrollHeight;}
+function seedCompare(){
+  fp.innerHTML='';fh.innerHTML='';
+  say(fp,'me','App: "Có tiền chưa?"');say(fp,'them','PayOS: "Chưa."');
+  say(fh,'them','(App đưa PayOS địa chỉ /hooks/payos/… rồi làm việc khác, không hỏi gì)');
+  document.getElementById('pollN').textContent=1;document.getElementById('pollW').textContent=1;document.getElementById('hookN').textContent=0;
+}
+seedCompare();
+let comparing=false;
+document.getElementById('runCompare').addEventListener('click',async()=>{
+  if(comparing)return;comparing=true;fp.innerHTML='';fh.innerHTML='';
+  say(fh,'them','(App đưa PayOS địa chỉ /hooks/payos/… rồi làm việc khác, không hỏi gì)');
+  let n=0,w=0;const step=reduce?60:380;
+  for(let s=1;s<=12;s++){
+    n++;say(fp,'me',`Giây ${s}: "Có tiền chưa?"`);
+    if(s<12){w++;say(fp,'them','"Chưa."');}else{say(fp,'them yes','"Có rồi! 50.000đ"');}
+    if(s===11){say(fh,'them yes','Giây 11 — PayOS gọi: "Có 50.000đ cho DH123!"');say(fh,'me','App: "200, nhận rồi."');document.getElementById('hookN').textContent=1;}
+    document.getElementById('pollN').textContent=n;document.getElementById('pollW').textContent=w;
+    await sleep(step);
+  }
+  say(fp,'them','Biết chậm 1 giây, và 11 lần hỏi bị phí.');
+  comparing=false;
+});
+
+/* ───────── tab 1: request anatomy ───────── */
+const EXPL={
+  post:['POST','Gửi dữ liệu tới','PayOS là bên chủ động gọi. Hub chỉ mở sẵn một cửa và chờ. Đây là điểm khác cơ bản so với việc ta đi gọi API của người khác.'],
+  url:['/hooks/payos/src_k3J9xQ','Địa chỉ ta đăng ký với PayOS','<code>payos</code> cho Hub biết dùng bộ đọc (adapter) nào. <code>src_k3J9xQ</code> là <b>sourceKey</b>: cho biết webhook này thuộc nguồn nào, của khách (tenant) nào, và dùng khoá bí mật nào để kiểm chữ ký. Thêm nhà cung cấp mới chỉ cần thêm một adapter, dạng URL giữ nguyên.'],
+  ctype:['Content-Type','Nội dung là JSON, nhưng Hub giữ bản gốc','Hub cất nguyên chuỗi bytes nhận được vào cột <code>body_raw</code>. Lý do: chữ ký thường được tính trên đúng chuỗi bytes đó. Parse JSON rồi ghép lại có thể đổi khoảng trắng hoặc thứ tự khoá, chữ ký sẽ lệch dù dữ liệu không đổi.'],
+  desc:['description: "DH123"','Nội dung chuyển khoản','Hub <b>không hiểu</b> "DH123" là gì. Hub chỉ chở sự kiện. Shop mới là bên tìm mã đơn trong nội dung này và đánh dấu đơn đã trả. Quy tắc BB-1: trong code của Hub không có chữ "đơn hàng".'],
+  ref:['reference','Mã giao dịch ngân hàng, dùng làm khoá chống trùng','Hub ghép thành khoá <code>payos:123:FT24275XK9Q</code>. PayOS có thể gửi cùng một sự kiện nhiều lần (mạng chập chờn, timeout). Cùng khoá thì là cùng sự kiện: lần đầu ghi vào sổ, các lần sau chỉ trả lời "nhận rồi".'],
+  sig:['signature','Chữ ký HMAC: bằng chứng đây đúng là PayOS','PayOS băm dữ liệu bằng một khoá bí mật chỉ PayOS và Hub biết. Hub tính lại rồi so hai chuỗi bằng <code>crypto.timingSafeEqual</code> (so sánh thời gian cố định, không lộ thông tin qua tốc độ trả lời). Kẻ giả mạo không có khoá nên không ký đúng, Hub trả 401. PayOS để chữ ký trong body, GitHub để trong header <code>X-Hub-Signature-256</code>. Mỗi bên một kiểu, nên mới cần adapter.'],
+  ack:['200 OK','"Tôi nhận rồi, đừng gửi nữa"','Đây là câu quan trọng nhất. Nhận 200, PayOS coi như xong và <b>không bao giờ gửi lại</b>. Vì vậy Hub chỉ trả 200 sau khi đã ghi chắc vào PostgreSQL (BB-3). Trả 200 trước rồi mới ghi, mà ghi lỗi, thì sự kiện mất vĩnh viễn và không ai biết.'],
+};
+const ex=document.getElementById('explain');const hots=[...document.querySelectorAll('.hot')];
+function pick(k){hots.forEach(h=>h.classList.toggle('on',h.dataset.k===k));const [code,t,body]=EXPL[k];ex.innerHTML=`<span class="k">${code}</span><h3>${t}</h3><p>${body}</p>`;}
+hots.forEach(h=>{h.addEventListener('click',()=>pick(h.dataset.k));h.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick(h.dataset.k);}});});
+pick('ack');
+
+/* ───────── tab 2: stage ───────── */
+const NS='http://www.w3.org/2000/svg';
+const N={
+  payos:{x:90,y:220,w:140,cls:'prov',t1:'PayOS',t2:'bên gửi'},
+  api:{x:275,y:220,w:150,cls:'hub',t1:'hub-api',t2:'cổng nhận'},
+  redis:{x:275,y:395,w:150,cls:'store',t1:'Redis',t2:'trí nhớ nhanh'},
+  pg:{x:480,y:395,w:160,cls:'store',t1:'PostgreSQL',t2:'sổ cái'},
+  relay:{x:480,y:220,w:160,cls:'hub',t1:'Outbox relay',t2:'người đưa thư'},
+  mq:{x:670,y:220,w:150,cls:'store',t1:'RabbitMQ',t2:'băng chuyền'},
+  worker:{x:850,y:220,w:150,cls:'hub',t1:'hub-worker',t2:'chia & giao'},
+  dlq:{x:850,y:395,w:150,cls:'dlqn',t1:'DLQ',t2:'hàng chờ xử lý tay'},
+  discord:{x:1025,y:140,w:130,cls:'dest',t1:'Discord',t2:'đích'},
+  shop:{x:1025,y:300,w:130,cls:'dest',t1:'Shop',t2:'đích'},
+};
+const WIRES=[['payos','api'],['api','redis'],['api','pg'],['pg','relay'],['relay','mq'],['mq','worker'],['worker','discord'],['worker','shop'],['worker','dlq']];
+const H=64;
+const gW=document.getElementById('wires'),gN=document.getElementById('nodes'),gP=document.getElementById('pkts');
+WIRES.forEach(([a,b])=>{const l=document.createElementNS(NS,'line');l.setAttribute('class','wire');l.setAttribute('x1',N[a].x);l.setAttribute('y1',N[a].y);l.setAttribute('x2',N[b].x);l.setAttribute('y2',N[b].y);gW.append(l);});
+const el={};
+for(const [id,n] of Object.entries(N)){
+  const g=document.createElementNS(NS,'g');g.setAttribute('class','node '+n.cls);g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label',n.t1+' — xem giải thích');
+  g.innerHTML=`<rect x="${n.x-n.w/2}" y="${n.y-H/2}" width="${n.w}" height="${H}" rx="10"/>
+   <text class="t1" x="${n.x}" y="${n.y-3}" text-anchor="middle">${n.t1}</text>
+   <text class="t2" x="${n.x}" y="${n.y+16}" text-anchor="middle">${n.t2}</text>
+   <text class="off" x="${n.x}" y="${n.y-H/2-8}" text-anchor="middle">✕ ĐANG TẮT</text>`;
+  g.addEventListener('click',()=>showDetail(id));
+  g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();showDetail(id);}});
+  gN.append(g);el[id]=g;
+}
+function badge(id,cls){const n=N[id];const b=document.createElementNS(NS,'g');b.setAttribute('class','badge '+cls);b.innerHTML=`<circle cx="${n.x+n.w/2-4}" cy="${n.y-H/2+4}" r="13"/><text x="${n.x+n.w/2-4}" y="${n.y-H/2+8.5}" text-anchor="middle">0</text>`;b.style.display='none';gN.append(b);return b;}
+const bOutbox=badge('pg','outbox'),bDlq=badge('dlq','');
+function setBadge(b,v){b.style.display=v>0?'':'none';b.querySelector('text').textContent=v;}
+
+const DETAIL={
+  payos:{role:'Provider · bên gửi',c:'prov',plain:'Cổng thanh toán. Khi khách chuyển khoản xong, PayOS tự gọi vào địa chỉ của Hub để báo. Nếu không nhận được 200, PayOS sẽ gửi lại sau.',tech:'POST JSON kèm chữ ký. Mỗi provider có định dạng và cách ký riêng, nên mỗi provider có một adapter riêng.',file:'libs/providers/src/payos.adapter.ts',qa:['Thêm Stripe thì sửa những đâu?','Chỉ viết thêm một class adapter và đăng ký vào registry. Không động vào ingest, worker hay database.']},
+  api:{role:'Tiến trình 1 · hub-api',c:'hub',plain:'Lễ tân. Kiểm tra giấy tờ (chữ ký), ghi vào sổ, ký nhận rồi trả lời ngay. Không làm việc nặng nào.',tech:'Thứ tự cố định: giới hạn 1MB → rate limit → verify chữ ký → lấy khoá chống trùng → hỏi Redis → transaction (raw_events + outbox) → COMMIT → ghi Redis → trả 200.',file:'apps/hub-api/src/modules/ingest/ingest.service.ts',qa:['Sao không gửi Discord luôn rồi mới trả 200?','Discord chậm hay sập thì PayOS phải chờ, quá thời gian thì PayOS tưởng lỗi và gửi lại. Tách nhận khỏi xử lý thì phần nhận luôn nhanh (mục tiêu p95 dưới 100ms) dù phía sau đang có sự cố.']},
+  redis:{role:'Kho · đường tắt',c:'store',plain:'Cuốn sổ tay ghi nhớ nhanh: "sự kiện này thấy rồi". Được phép quên. Quên thì hệ thống chậm hơn một chút, không sai.',tech:'Khoá idem:{sourceId}:{key} hết hạn sau 24h. Còn dùng cho rate limit, circuit breaker, pub/sub realtime. Redis không phản hồi thì fail-open (cho đi tiếp). Tối đa 4 lệnh Redis cho mỗi sự kiện.',file:'apps/hub-api/src/modules/redis/redis.service.ts',qa:['Redis đã chống trùng rồi, cần PostgreSQL làm gì?','Redis có thể mất dữ liệu (restart, hết bộ nhớ). Trọng tài cuối cùng là ràng buộc UNIQUE trong PostgreSQL (BB-2). Thử tắt Redis trong mô phỏng rồi gửi trùng.']},
+  pg:{role:'Kho · nguồn sự thật',c:'store',plain:'Sổ cái. Thứ gì đã nằm ở đây thì không mất. Hub chỉ trả 200 sau khi ghi xong vào đây.',tech:'Một transaction ghi raw_events (UNIQUE(source_id, idempotency_key)) và outbox. Hai bản ghi cùng thành công hoặc cùng thất bại. Số trên ô vàng = số phiếu outbox chưa gửi được.',file:'libs/database/prisma/schema.prisma',qa:['Ghi outbox để làm gì, sao không publish RabbitMQ luôn?','Không thể ghi DB và gửi RabbitMQ trong cùng một thao tác nguyên tử. Ghi DB xong mà gửi lỗi thì mất; gửi xong mà ghi lỗi thì có sự kiện ma. Ghi phiếu outbox trong cùng transaction rồi để relay gửi sau giải quyết cả hai.']},
+  relay:{role:'hub-worker · outbox relay',c:'hub',plain:'Người đưa thư. Cứ khoảng nửa giây mở sổ, lấy những phiếu chưa gửi, đưa lên băng chuyền RabbitMQ rồi đánh dấu đã gửi.',tech:'SELECT … WHERE published_at IS NULL LIMIT 50 FOR UPDATE SKIP LOCKED, publish chờ xác nhận, rồi UPDATE published_at, tất cả trong một transaction. Chạy nhiều worker cùng lúc vẫn an toàn vì SKIP LOCKED.',file:'apps/hub-worker/src/scheduler/outbox.relay.ts',qa:['Hai worker cùng lấy một phiếu thì sao?','SKIP LOCKED: phiếu đang bị worker A khoá thì worker B bỏ qua và lấy phiếu khác. Nếu vẫn trùng (publish xong nhưng chưa kịp đánh dấu thì sập) thì phía sau đã có chốt chống trùng.']},
+  mq:{role:'Kho · hàng đợi',c:'store',plain:'Băng chuyền có ngăn chờ. Giữ việc chưa làm xong. Worker sập giữa chừng thì việc quay lại băng chuyền cho worker khác.',tech:'Exchange x.hub.events → q.normalize; x.hub.delivery → q.delivery.main; 5 hàng retry có TTL (10s, 1m, 5m, 30m, 2h), hết hạn tự quay về hàng chính; 2 DLQ. Khai báo tập trung một chỗ.',file:'libs/messaging/src/topology.ts',qa:['Retry sao không requeue ngay?','Requeue ngay sẽ đập liên tục vào một đích đang hỏng. Hàng retry có TTL tạo khoảng nghỉ tăng dần mà không cần timer trong code.']},
+  worker:{role:'Tiến trình 2 · hub-worker',c:'hub',plain:'Nhân viên kho. Mở gói, dịch sang dạng chung (payment.succeeded), xem ai đăng ký nhận loại này, rồi giao cho từng người.',tech:'NormalizeConsumer: adapter.normalize → INSERT events + deliveries + processed_messages trong 1 transaction. DeliveryConsumer: kiểm circuit breaker và throttle → gửi HTTP 5s → 2xx: SUCCEEDED; 4xx: DEAD; 5xx/timeout: hàng retry.',file:'apps/hub-worker/src/consumers/',qa:['Chạy 3 worker thì có giao trùng không?','Không. Mỗi message chỉ một worker nhận. Message bị giao lại (worker sập trước khi ack) thì bảng processed_messages chặn xử lý lần hai.']},
+  dlq:{role:'Hàng thất lạc',c:'bad',plain:'Không vứt đi. Thử đủ 5 lần vẫn hỏng, hoặc lỗi chắc chắn không tự khỏi (4xx), thì sự kiện nằm đây chờ người xử lý bấm Replay.',tech:'Replay tạo delivery mới với attempt_generation + 1, ghi audit_logs. Lịch sử các lần thử cũ giữ nguyên.',file:'apps/hub-api/src/modules/api/api.controller.ts (POST /api/v1/deliveries/:id/replay)',qa:['Replay có đụng ràng buộc UNIQUE không?','Không, vì UNIQUE là (event_id, subscription_id, attempt_generation). Mỗi lần replay là một generation mới.']},
+  discord:{role:'Đích',c:'dest',plain:'Kênh chat nhận thông báo "đơn DH123 đã thanh toán 50.000đ".',tech:'Gửi HTTP, timeout 5 giây, không đi theo redirect, có chặn SSRF (không cho gọi vào IP nội bộ). Lỗi liên tiếp 5 lần thì circuit breaker ngừng gửi 60 giây.',file:'apps/hub-worker/src/senders/discord.sender.ts',qa:['Discord chết 1 tiếng thì sao?','Sự kiện đi qua các hàng retry 10s → 1m → 5m → 30m → 2h. Hết vẫn lỗi thì vào DLQ, chờ Replay. Không có gì bị vứt.']},
+  shop:{role:'Đích · nơi có nghiệp vụ',c:'dest',plain:'Shop demo. Chỉ Shop biết "DH123" là một đơn hàng. Nhận sự kiện, tìm mã đơn trong nội dung, chuyển đơn sang PAID.',tech:'Hub ký sự kiện gửi đi bằng HMAC; Shop kiểm chữ ký bằng timingSafeEqual trước khi tin. Shop giữ dưới ~300 dòng.',file:'apps/shop/src/main.ts (POST /hub-webhook)',qa:['Sao không cho Hub tự cập nhật đơn hàng?','Hub sẽ dính chặt vào một nghiệp vụ, không còn dùng chung được cho GitHub, Telegram… (BB-1).']},
+};
+const detail=document.getElementById('detail');
+function showDetail(id){
+  Object.entries(el).forEach(([k,g])=>g.classList.toggle('sel',k===id));
+  const d=DETAIL[id];const color={prov:'var(--prov)',hub:'var(--hub)',store:'var(--store)',dest:'var(--dest)',bad:'var(--bad)'}[d.c];
+  detail.innerHTML=`<span class="role" style="color:${color}">${d.role}</span><h3 style="font-size:20px">${N[id].t1}</h3>
+   <dl><div><dt>Nói dễ hiểu</dt><dd>${d.plain}</dd></div><div><dt>Kỹ thuật</dt><dd>${d.tech}</dd></div><div><dt>Code</dt><dd><code>${d.file}</code></dd></div></dl>
+   <div class="qa"><b>Hội đồng có thể hỏi:</b> ${d.qa[0]}<br><span style="color:var(--muted)">→</span> ${d.qa[1]}</div>`;
+}
+showDetail('api');
+
+/* sim state */
+const S={f:{redis:false,pg:false,mq:false,discord:false},legacy:false,seen:new Set(),redis:new Set(),outbox:[],dlq:[],next:123,last:null,speed:1,
+  c:{sent:0,stored:0,discord:0,shop:0,dlq:0,lost:0}};
+const logEl=document.getElementById('log');
+function log(txt,kind='',tech=''){const li=document.createElement('li');if(kind)li.className=kind;li.innerHTML=txt+(tech?`<span class="tech">${tech}</span>`:'');logEl.append(li);logEl.scrollTop=logEl.scrollHeight;}
+function paint(){for(const k in S.c){const m={sent:'cSent',stored:'cStored',discord:'cDiscord',shop:'cShop',dlq:'cDlq',lost:'cLost'}[k];document.getElementById(m).textContent=S.c[k];}
+  setBadge(bOutbox,S.outbox.length);setBadge(bDlq,S.dlq.length);
+  document.getElementById('bResend').disabled=!S.last;document.getElementById('bReplay').disabled=S.dlq.length===0;
+  el.redis.classList.toggle('down',S.f.redis);el.pg.classList.toggle('down',S.f.pg);el.mq.classList.toggle('down',S.f.mq);el.discord.classList.toggle('down',S.f.discord);}
+function pulse(id,kind){const c=kind==='err'?'pulse-err':'pulse-ok';el[id].classList.add(c);setTimeout(()=>el[id].classList.remove(c),reduce?80:420);}
+function fly(a,b,label,kind='n',fast=1){
+  return new Promise(res=>{
+    const A=N[a],B=N[b];const g=document.createElementNS(NS,'g');g.setAttribute('class','pkt '+kind);
+    g.innerHTML=`<circle r="9"/><text x="0" y="-16" text-anchor="middle">${label}</text>`;gP.append(g);
+    const dur=reduce?120:(900/S.speed)*fast;const t0=performance.now();
+    function step(now){const k=Math.min(1,(now-t0)/dur);const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+      g.setAttribute('transform',`translate(${A.x+(B.x-A.x)*e},${A.y+(B.y-A.y)*e})`);
+      if(k<1)requestAnimationFrame(step);else{g.remove();if(kind==='err'||kind==='ok')pulse(b,kind);res();}}
+    requestAnimationFrame(step);
+  });
+}
+const pause=ms=>sleep(reduce?40:ms/S.speed);
+
+/* queue: mọi hành động chạy lần lượt */
+let chain=Promise.resolve(),pending=0;const busy=document.getElementById('busy');
+function enqueue(fn){pending++;busy.textContent='Đang chạy…';chain=chain.then(fn).catch(e=>console.error(e)).then(()=>{pending--;if(!pending)busy.textContent='';paint();});}
+
+async function ingest(id,isResend){
+  S.c.sent++;paint();
+  log(`<b>PayOS gửi webhook ${isResend?'(lần gửi lại) ':''}cho đơn ${id}</b>`,'', `POST /hooks/payos/src_k3J9xQ · khoá payos:${id.slice(2)}:FT…`);
+  await fly('payos','api',isResend?'gửi lại '+id:id,'prov');
+  log('hub-api kiểm chữ ký HMAC trên bytes gốc → hợp lệ','','adapter.verify(body_raw, headers, secrets[]) · timingSafeEqual');
+  await pause(300);
+  if(S.legacy) return ingestLegacy(id);
+  // ⑥ đường tắt Redis: chỉ ĐỌC
+  if(!S.f.redis){
+    await fly('api','redis','GET idem');
+    if(S.redis.has(id)){
+      await fly('redis','api','thấy rồi','ok');
+      await fly('api','payos','200 · trùng','ok');
+      log('Redis nhớ sự kiện này → trả "200, nhận rồi" ngay, không chạm database','ok','chốt ① · đường tắt');
+      return;
+    }
+    await fly('redis','api','chưa thấy');
+  } else {
+    await fly('api','redis','GET idem','err');
+    log('Redis không trả lời → bỏ qua, đi thẳng xuống PostgreSQL (chậm hơn, vẫn đúng)','warn','fail-open · BB-2: Redis được phép sai');
+  }
+  // ⑦ transaction
+  await fly('api','pg','BEGIN · INSERT');
+  if(S.f.pg){
+    pulse('pg','err');
+    log('PostgreSQL không trả lời → ROLLBACK, không ghi được gì','err','transaction lỗi');
+    await fly('api','payos','500','err');
+    log('Hub trả <b>500</b>: "chưa nhận được, gửi lại sau". Redis chưa ghi gì, nên lần gửi lại sẽ không bị nhầm là trùng.','warn','BB-3 · Redis SET nằm SAU COMMIT');
+    return;
+  }
+  if(S.seen.has(id)){
+    await fly('pg','api','UNIQUE chặn','ok');
+    await fly('api','payos','200 · trùng','ok');
+    log('PostgreSQL: khoá này đã có → <b>trùng thật</b>, không ghi lần hai. Trả "200, nhận rồi".','ok','chốt ② · UNIQUE(source_id, idempotency_key) · P2002');
+    return;
+  }
+  S.seen.add(id);S.c.stored++;S.outbox.push(id);paint();
+  await fly('pg','api','COMMIT ✓','ok');
+  log('Ghi vào sổ cái: raw_events + phiếu outbox, cùng một transaction → COMMIT','ok','từ đây sự kiện không thể mất');
+  await fly('api','payos','200 OK','ok');
+  log('Trả <b>200</b> cho PayOS. PayOS sẽ không gửi lại nữa.','ok','BB-3 · chỉ trả 2xx sau COMMIT');
+  if(!S.f.redis){await fly('api','redis','SET idem');S.redis.add(id);log('Ghi nhớ vào Redis để lần sau trả lời nhanh','', 'SET idem:… EX 86400 · sau COMMIT');}
+  await relay();
+}
+async function ingestLegacy(id){
+  log('⚠ Bản gốc: ghi khoá vào Redis <b>trước</b> khi ghi database','warn','SET NX trước BEGIN');
+  if(!S.f.redis){
+    await fly('api','redis','SET NX');
+    if(S.redis.has(id)){
+      await fly('redis','api','đã có');
+      await fly('api','payos','200 · trùng','ok');
+      if(!S.seen.has(id)){S.c.lost++;paint();
+        log(`💥 Redis bảo "đã có" nhưng database <b>chưa từng ghi ${id}</b>. PayOS nhận 200 và ngừng gửi. Tiền của khách đã trừ, đơn không bao giờ được xác nhận. <b>Sự kiện MẤT vĩnh viễn, không có log lỗi nào.</b>`,'big');}
+      else log('Trùng, trả 200','ok');
+      return;
+    }
+    S.redis.add(id);
+    await fly('redis','api','OK');
+  }
+  await fly('api','pg','BEGIN · INSERT');
+  if(S.f.pg){pulse('pg','err');await fly('api','payos','500','err');
+    log('PostgreSQL chết → ROLLBACK → trả 500. Nhưng khoá trong Redis <b>đã ghi rồi</b> và vẫn còn đó…','err','đây là mầm của lỗi mất sự kiện');return;}
+  if(S.seen.has(id)){await fly('api','payos','200 · trùng','ok');return;}
+  S.seen.add(id);S.c.stored++;S.outbox.push(id);paint();
+  await fly('pg','api','COMMIT ✓','ok');await fly('api','payos','200 OK','ok');
+  log('Lần này may mắn: database sống nên vẫn ổn. Bản gốc chỉ sai khi database lỗi giữa chừng.','warn');
+  await relay();
+}
+async function relay(){
+  while(S.outbox.length){
+    const id=S.outbox[0];
+    await fly('pg','relay','phiếu '+id);
+    if(S.f.mq){
+      await fly('relay','mq','publish','err');
+      log(`RabbitMQ không chạy → phiếu ${id} vẫn nằm trong outbox, relay sẽ thử lại. PayOS đã nhận 200 từ trước, không ảnh hưởng.`,'warn','published_at = NULL · ROLLBACK');
+      return;
+    }
+    await fly('relay','mq','publish');
+    S.outbox.shift();paint();
+    log(`Relay đưa ${id} lên băng chuyền và đánh dấu đã gửi`,'', 'FOR UPDATE SKIP LOCKED → publish → UPDATE published_at');
+    await process(id);
+  }
+}
+async function process(id){
+  await fly('mq','worker','q.normalize');
+  log('Worker chuẩn hoá thành <b>payment.succeeded</b>, thấy 2 đăng ký: Discord và Shop','', 'events + deliveries + processed_messages (1 transaction)');
+  await pause(250);
+  await Promise.all([deliver(id,'discord',1),deliver(id,'shop',1)]);
+}
+const TIERS=['10 giây','1 phút','5 phút','30 phút','2 giờ'];
+async function deliver(id,dest,gen){
+  for(let attempt=1;;attempt++){
+    await fly('worker',dest,id);
+    const fail=dest==='discord'&&S.f.discord;
+    if(!fail){
+      await fly(dest,'worker','200','ok');
+      S.c[dest]++;paint();
+      if(dest==='shop')log(`Shop nhận ${id}, tìm thấy mã đơn trong nội dung → đơn <b>PAID</b>`,'ok','Hub không biết "đơn hàng" là gì (BB-1)');
+      else log(`Discord nhận thông báo ${id}${attempt>1?` sau ${attempt} lần thử`:''}${gen>1?' (replay)':''}`,'ok','SUCCEEDED · reset circuit');
+      return;
+    }
+    await fly(dest,'worker','500','err');
+    if(attempt<=5){
+      if(attempt===5)log('Đích lỗi 5 lần liên tiếp → circuit breaker <b>OPEN</b>: ngừng gửi 60 giây, bắn cảnh báo','warn','≥5 failures · SET :state OPEN EX 60');
+      log(`Discord trả 500 (lần ${attempt}) → chờ ${TIERS[attempt-1]} rồi thử lại`,'warn',`RETRYING · q.delivery.retry.${['10s','1m','5m','30m','2h'][attempt-1]}`);
+      await fly('worker','mq','chờ '+TIERS[attempt-1],'n',.6);
+      await pause(350);
+      await fly('mq','worker','thử lại','n',.6);
+      continue;
+    }
+    await fly('worker','dlq','DEAD','err');
+    S.dlq.push({id,dest,gen});S.c.dlq=S.dlq.length;paint();
+    log(`Hết 5 tầng retry → ${id} vào <b>DLQ</b>. Không bị vứt, chờ người bấm Replay.`,'err','DEAD · q.delivery.dlq');
+    return;
+  }
+}
+async function replay(){
+  const items=S.dlq.splice(0);S.c.dlq=0;paint();
+  for(const it of items){
+    await fly('dlq','worker','replay');
+    log(`Replay ${it.id} → tạo lượt giao mới (thế hệ ${it.gen+1}), lịch sử cũ giữ nguyên`,'', 'attempt_generation + 1 · audit_logs');
+    await deliver(it.id,it.dest,it.gen+1);
+  }
+}
+
+/* buttons & switches */
+document.getElementById('bSend').addEventListener('click',()=>{const id='DH'+(S.next++);S.last=id;paint();enqueue(()=>ingest(id,false));});
+document.getElementById('bResend').addEventListener('click',()=>{const id=S.last;if(id)enqueue(()=>ingest(id,true));});
+document.getElementById('bReplay').addEventListener('click',()=>enqueue(replay));
+document.getElementById('speed').addEventListener('change',e=>S.speed=+e.target.value);
+const sw={redis:'fRedis',pg:'fPg',mq:'fMq',discord:'fDiscord'};
+for(const [k,idd] of Object.entries(sw)){document.getElementById(idd).addEventListener('change',e=>{S.f[k]=e.target.checked;paint();
+  log(`${e.target.checked?'⛔ Tắt':'✅ Bật lại'} ${N[k].t1}`,e.target.checked?'err':'ok');
+  if(k==='mq'&&!e.target.checked&&S.outbox.length){log('RabbitMQ sống lại → relay đẩy bù các phiếu còn trong outbox','ok');enqueue(relay);}});}
+document.getElementById('fLegacy').addEventListener('change',e=>{S.legacy=e.target.checked;log(e.target.checked?'⚠ Chuyển sang <b>bản ý tưởng gốc</b>: Redis SET NX đứng TRƯỚC transaction':'Quay về bản đúng',e.target.checked?'warn':'ok');});
+function setSwitch(k,v){if(k==='legacy'){document.getElementById('fLegacy').checked=v;S.legacy=v;return;}document.getElementById(sw[k]).checked=v;S.f[k]=v;}
+function resetAll(){
+  ['redis','pg','mq','discord','legacy'].forEach(k=>setSwitch(k,false));
+  Object.assign(S,{seen:new Set(),redis:new Set(),outbox:[],dlq:[],next:123,last:null});
+  for(const k in S.c)S.c[k]=0;logEl.innerHTML='';paint();
+}
+document.getElementById('bReset').addEventListener('click',()=>enqueue(async()=>{resetAll();log('Đã làm lại từ đầu');}));
+
+/* kịch bản */
+const guide=document.getElementById('guide');
+const SC=[
+  {n:'① Bình thường',g:'Một khoản tiền đi trọn đường: PayOS → hub-api → sổ cái → relay → RabbitMQ → worker → Discord + Shop. Để ý: PayOS nhận 200 <i>trước khi</i> Discord nhận gì cả.',
+   run:async()=>{const id=newId();await ingest(id,false);}},
+  {n:'② PayOS gửi trùng',g:'PayOS gửi cùng một sự kiện hai lần (chuyện xảy ra thật khi mạng chập chờn). Lần 2 bị Redis chặn ngay, Discord không bị báo hai lần.',
+   run:async()=>{const id=newId();await ingest(id,false);await pause(500);await ingest(id,true);}},
+  {n:'③ Trùng khi Redis chết',g:'Tắt Redis rồi gửi trùng. Không còn đường tắt, nhưng PostgreSQL vẫn chặn được nhờ UNIQUE. Redis mất chỉ làm chậm hơn, không làm sai.',
+   run:async()=>{setSwitch('redis',true);paint();const id=newId();await ingest(id,false);await pause(500);await ingest(id,true);}},
+  {n:'④ PostgreSQL chết',g:'Database chết đúng lúc nhận. Hub trả 500 (không nói dối là "nhận rồi"). Database sống lại, PayOS gửi lại, sự kiện được ghi bình thường.',
+   run:async()=>{setSwitch('pg',true);paint();const id=newId();await ingest(id,false);await pause(700);setSwitch('pg',false);paint();log('✅ PostgreSQL sống lại','ok');await pause(400);await ingest(id,true);}},
+  {n:'⑤ RabbitMQ chết',g:'Băng chuyền dừng. Phần nhận vẫn trả 200 vì chỉ cần ghi database. Phiếu dồn trong outbox (ô vàng trên PostgreSQL). Bật lại RabbitMQ, phiếu tự chảy tiếp.',
+   run:async()=>{setSwitch('mq',true);paint();await ingest(newId(),false);await ingest(newId(),false);await pause(700);setSwitch('mq',false);paint();log('✅ RabbitMQ sống lại → relay đẩy bù','ok');await relay();}},
+  {n:'⑥ Discord chết',g:'Discord trả 500. Hub thử lại theo nhịp giãn dần, mở circuit breaker, cuối cùng đưa vào DLQ. Shop vẫn nhận bình thường. Sửa Discord rồi Replay.',
+   run:async()=>{setSwitch('discord',true);paint();await ingest(newId(),false);await pause(600);setSwitch('discord',false);paint();log('✅ Discord đã sửa xong','ok');await replay();}},
+  {n:'⑦ Bản gốc làm mất tiền',g:'Chạy bản ý tưởng gốc (Redis SET trước transaction) và cho database chết giữa chừng. Xem bộ đếm <b>Sự kiện bị MẤT</b>. Đây là lỗi nhóm đã sửa trong kiến trúc.',
+   run:async()=>{setSwitch('legacy',true);setSwitch('pg',true);paint();const id=newId();await ingest(id,false);await pause(700);setSwitch('pg',false);paint();log('✅ PostgreSQL sống lại, PayOS gửi lại…','ok');await pause(400);await ingest(id,true);}},
+];
+function newId(){const id='DH'+(S.next++);S.last=id;paint();return id;}
+const chips=document.getElementById('chips');
+SC.forEach(sc=>{const b=document.createElement('button');b.textContent=sc.n;b.addEventListener('click',()=>{
+  guide.innerHTML=`<b>${sc.n}</b>${sc.g}`;
+  enqueue(async()=>{resetAll();log(`<b>Kịch bản ${sc.n}</b>`);await sc.run();});
+});chips.append(b);});
+log('Bấm <b>Khách chuyển 50.000đ</b> hoặc chọn một kịch bản để bắt đầu.','', 'Bấm vào ô bất kỳ trên sơ đồ để xem giải thích.');
+paint();
+
+/* ───────── tab 3: flows ───────── */
+const FLOWS=[
+ {t:'Luồng A · Nhận webhook (hub-api)',s:'Lễ tân: kiểm tra, ghi sổ, ký nhận. Thứ tự này là bắt buộc.',steps:[
+  ['Chặn gói quá lớn','Gói trên 1MB bị từ chối ngay.','Kiểm rawBody.length > 1MB → 413. NestFactory.create phải bật { rawBody: true } thì mới giữ được bytes gốc.','ingest.service.ts','Kẻ xấu gửi gói vài trăm MB làm tràn bộ nhớ, sập cổng nhận của mọi khách.'],
+  ['Giới hạn tần suất theo nguồn','Mỗi nguồn tối đa 100 lần/phút.','Token bucket trong Redis, khoá rate:source:{id}. Redis chết → cho qua (fail-open) và ghi cảnh báo.','redis.service.ts → checkRateLimit','Một nguồn bị spam làm nghẽn cả hệ thống, các khách khác bị chậm theo.'],
+  ['Tìm nguồn và khoá bí mật','Từ sourceKey trên URL, biết webhook này của ai và dùng khoá nào để kiểm.','findSourceBySourceKeyForIngest: điểm DUY NHẤT được truy vấn không qua tenant (vì lúc này chưa biết tenant). Khoá lưu mã hoá AES-GCM, có thể có nhiều khoá để xoay vòng.','prisma.service.ts','Không xác định được tenant, không biết dùng khoá nào.'],
+  ['Kiểm chữ ký','Đúng là PayOS gửi, không phải ai đó giả mạo.','adapter.verify(body_raw, headers, secrets[]). So bằng crypto.timingSafeEqual. Sai → lưu raw_events với status REJECTED để điều tra → 401.','libs/providers/src/*.adapter.ts','Ai biết URL cũng gửi được "khách đã trả 50 triệu" và Shop sẽ tin.',true],
+  ['Lấy khoá chống trùng','Mỗi sự kiện có một "số định danh" cố định.','adapter.extractIdempotencyKey(): PayOS = payos:{orderCode}:{reference}, GitHub = github:{X-GitHub-Delivery}.','*.adapter.ts','Không phân biệt được "gửi lại" với "sự kiện mới".'],
+  ['Hỏi Redis (chỉ đọc)','Đã thấy sự kiện này chưa? Thấy rồi thì trả "nhận rồi" luôn.','GET idem:{sourceId}:{key}. Hit → 200 duplicate, không chạm DB. Chỉ là đường tắt.','ingest.service.ts','Hệ thống vẫn đúng (DB chặn), chỉ tốn thêm một lượt vào DB.'],
+  ['Ghi sổ trong một transaction','Ghi bản gốc + một phiếu "việc cần làm" cùng lúc. Cả hai cùng thành công hoặc cùng thất bại.','BEGIN → INSERT raw_events (UNIQUE source_id + idempotency_key) → INSERT outbox → COMMIT. Vi phạm UNIQUE (P2002) = trùng thật → 200. Lỗi khác → 500 để provider gửi lại.','ingest.service.ts','Ghi sự kiện mà quên ghi phiếu thì sự kiện nằm im mãi, không ai xử lý.',true],
+  ['Ghi Redis (sau COMMIT)','Ghi nhớ để lần sau trả lời nhanh. Lỗi ở bước này thì mặc kệ.','SET idem:… EX 86400. Bắt buộc nằm SAU COMMIT.','ingest.service.ts','Nếu đặt trước COMMIT: DB chết giữa chừng thì Redis vẫn nhớ, lần gửi lại bị trả "trùng", sự kiện mất. Xem kịch bản ⑦ trong tab Mô phỏng.',true],
+  ['Trả 200 đúng định dạng provider','"Nhận rồi, đừng gửi nữa."','adapter.buildAck(): mỗi provider mong một kiểu body trả về khác nhau.','*.adapter.ts','Provider hiểu nhầm là lỗi và gửi lại mãi.'],
+ ]},
+ {t:'Luồng B · Outbox relay (hub-worker)',s:'Người đưa thư chuyển phiếu từ sổ cái lên băng chuyền.',steps:[
+  ['Thức dậy mỗi ~500ms','Có độ lệch ngẫu nhiên để nhiều worker không cùng dậy một lúc.','setTimeout(500 ± jitter).','outbox.relay.ts','Nhiều worker cùng đập vào DB đúng một thời điểm.'],
+  ['Lấy và khoá phiếu chưa gửi','Lấy tối đa 50 phiếu. Phiếu nào worker khác đang cầm thì bỏ qua.','BEGIN; SELECT … WHERE published_at IS NULL LIMIT 50 FOR UPDATE SKIP LOCKED.','outbox.relay.ts','Hai worker gửi cùng một phiếu, hoặc phải có hẳn một tiến trình scheduler riêng (ADR-020).',true],
+  ['Đưa lên RabbitMQ và chờ xác nhận','Chỉ coi là gửi xong khi RabbitMQ xác nhận đã nhận.','publish x.hub.events / event.received với publisher confirm.','outbox.relay.ts','RabbitMQ chưa nhận mà relay tưởng đã nhận → mất.'],
+  ['Đánh dấu đã gửi, COMMIT','Gạch phiếu trong sổ.','UPDATE published_at = now(); COMMIT, cùng transaction với bước lấy. Publish lỗi thì ROLLBACK, lần sau gửi lại.','outbox.relay.ts','Tách ra khỏi transaction thì khoá mất sớm, worker khác lấy lại phiếu đang gửi dở.'],
+ ]},
+ {t:'Luồng C · Chuẩn hoá và định tuyến (hub-worker)',s:'Mở gói, dịch sang dạng chung, chia cho người đăng ký.',steps:[
+  ['Nhận từ q.normalize','Nhận số hiệu sự kiện, không nhận cả gói.','Message {rawEventId, tenantId, correlationId}.','normalize.consumer.ts','—'],
+  ['Đã làm chưa?','Message có thể đến hai lần. Làm rồi thì bỏ qua.','processed_messages (consumer=normalize, message_id). Có → ack, bỏ qua (chốt ⑤).','normalize.consumer.ts','Worker sập sau khi làm nhưng trước khi ack → message quay lại → Discord bị báo hai lần.',true],
+  ['Dịch sang sự kiện chuẩn','Mọi provider đều thành một dạng chung, ví dụ payment.succeeded.','adapter.normalize(raw) → 1..n NormalizedEvent (kiểu CloudEvents).','*.adapter.ts','Mỗi đích phải tự hiểu định dạng của từng provider.'],
+  ['Ghi sự kiện và lượt giao trong một transaction','Mỗi người đăng ký nhận một "lượt giao" riêng.','INSERT events (UNIQUE idempotency_key) · tìm subscriptions khớp type · INSERT deliveries · INSERT processed_messages.','normalize.consumer.ts','Ghi được nửa chừng thì có lượt giao mà không có sự kiện, hoặc ngược lại.'],
+  ['Đưa từng lượt giao lên hàng giao','Mỗi lượt giao là một message riêng, hỏng cái nào thử lại cái đó.','publish x.hub.delivery / deliver. Lỗi vĩnh viễn → nack(requeue=false) → q.normalize.dlq.','normalize.consumer.ts','Discord hỏng kéo theo Shop không nhận được.'],
+ ]},
+ {t:'Luồng D · Giao hàng (hub-worker)',s:'Gửi tới đích, thử lại thông minh, không đập vào đích đang chết.',steps:[
+  ['Circuit breaker','Đích đang hỏng thì đừng gõ cửa nữa. Đẩy sang hàng retry dài nhất.','Redis :state = OPEN sau ≥5 lỗi liên tiếp, giữ 60s. Redis chết → coi như CLOSED.','circuit-breaker.service.ts','Hàng nghìn request đập vào một đích đã chết, tốn CPU, đích càng khó sống lại.',true],
+  ['Throttle','Giữ nhịp để không làm đích quá tải. Hết lượt thì chờ 10 giây.','Token bucket theo destination.rate_limit_rps.','circuit-breaker.service.ts → checkThrottle','Scale lên 5 worker = bắn gấp 5 lần vào đích yếu, tự gây ra sự cố.'],
+  ['Gửi HTTP an toàn','Gửi có giới hạn thời gian và không cho gọi vào mạng nội bộ.','Timeout 5s, không follow redirect, chặn SSRF (kể cả DNS rebinding), ký HMAC cho đích kiểm.','senders/*.sender.ts · libs/crypto/src/ssrf.ts','Khách đăng ký URL http://169.254.169.254 để lấy trộm thông tin máy chủ.'],
+  ['Ghi lại lần thử','Mỗi lần gửi đều được ghi: mã trả về, thời gian, lỗi.','INSERT delivery_attempts (response cắt 2KB).','delivery.consumer.ts','Không trả lời được câu "vì sao Discord không nhận?".'],
+  ['Phân loại kết quả','2xx: xong. 4xx: lỗi cấu hình, thử lại vô ích. 5xx/timeout: thử lại.','2xx → SUCCEEDED. 4xx (trừ 408, 429) → DEAD ngay. 5xx/408/429/timeout → retry 10s, 1m, 5m, 30m, 2h → hết thì DEAD → DLQ.','delivery.consumer.ts','Thử lại lỗi 404 năm lần là phí; bỏ cuộc với lỗi 503 tạm thời là mất.',true],
+  ['Báo lên dashboard','Màn hình cập nhật ngay, không cần tải lại.','Redis PUBLISH hub:realtime → RealtimeGateway → Socket.IO.','realtime.gateway.ts','—'],
+ ]},
+ {t:'Luồng E · Replay',s:'Đưa hàng thất lạc đi giao lại sau khi đích đã sửa.',steps:[
+  ['Chọn lượt giao trong DLQ','Người vận hành xem lỗi, sửa đích, rồi bấm Replay.','POST /api/v1/deliveries/:id/replay.','api.controller.ts','—'],
+  ['Tạo thế hệ mới','Không sửa bản ghi cũ. Tạo một lượt giao mới.','attempt_generation + 1. UNIQUE(event_id, subscription_id, attempt_generation) nên không đụng nhau.','api.controller.ts','UNIQUE(event_id, subscription_id) như bản gốc → replay vi phạm ràng buộc → không replay được.',true],
+  ['Ghi nhật ký kiểm toán','Ai replay, lúc nào, vì sao.','INSERT audit_logs.','api.controller.ts','Không truy được ai đã gửi lại một khoản thanh toán.'],
+ ]},
+];
+const flowsEl=document.getElementById('flows');
+FLOWS.forEach(f=>{
+  const wrap=document.createElement('div');wrap.className='block';
+  wrap.innerHTML=`<div><h3 style="font-size:18px">${f.t}</h3><p style="color:var(--muted);font-size:14px">${f.s}</p></div>`;
+  const fl=document.createElement('div');fl.className='flow';
+  f.steps.forEach((s,i)=>{const [title,plain,tech,file,ifnot,crit]=s;const d=document.createElement('details');d.dataset.n=i+1;if(crit)d.className='crit';
+    d.innerHTML=`<summary>${title}<span class="s">${plain}</span></summary><div class="body"><div><h4>Kỹ thuật</h4><p>${tech}</p></div><div><h4>Code</h4><p><code>${file}</code></p></div>${ifnot!=='—'?`<div class="if"><b>Nếu bỏ bước này:</b> ${ifnot}</div>`:''}</div>`;
+    fl.append(d);});
+  wrap.append(fl);flowsEl.append(wrap);
+});
+let allOpen=false;document.getElementById('openAll').addEventListener('click',e=>{allOpen=!allOpen;document.querySelectorAll('.flow details').forEach(d=>d.open=allOpen);e.target.textContent=allOpen?'Đóng tất cả':'Mở tất cả';});
+
+/* ───────── tab 4: glossary ───────── */
+const TERMS=[
+ ['Webhook','Một HTTP request mà hệ thống khác tự gửi tới địa chỉ của bạn khi có sự việc xảy ra.','shipper gọi bạn khi tới cửa, thay vì bạn gọi hỏi liên tục.'],
+ ['Provider','Bên gửi webhook: PayOS, SePay, GitHub, Stripe.','bưu điện gửi thư tới.'],
+ ['Đích (destination)','Nơi Hub giao sự kiện tới: Discord, Telegram, Shop, một URL bất kỳ.','địa chỉ người nhận.'],
+ ['Subscription','Quy tắc "đích X muốn nhận loại sự kiện Y".','đăng ký nhận báo.'],
+ ['ACK / 200','Câu trả lời "nhận rồi". Provider nhận được thì ngừng gửi lại.','ký nhận bưu phẩm.'],
+ ['Chữ ký HMAC','Chuỗi băm từ dữ liệu + khoá bí mật. Ai không có khoá thì không làm giả được.','con dấu giáp lai chỉ hai bên có.'],
+ ['Idempotency (chống trùng)','Làm một việc nhiều lần cho ra kết quả như làm một lần.','bấm nút thang máy 5 lần thì thang vẫn chỉ đến 1 lần.'],
+ ['Transaction · COMMIT','Nhiều thao tác ghi cùng thành công hoặc cùng thất bại. COMMIT là lúc chốt.','chuyển khoản: trừ bên này và cộng bên kia phải đi cùng nhau.'],
+ ['Outbox','Bảng "việc cần gửi đi", ghi cùng transaction với dữ liệu chính, có tiến trình khác gửi sau.','khay thư đi trên bàn làm việc.'],
+ ['Hàng đợi (RabbitMQ)','Nơi giữ việc chưa làm, chia cho các worker, trả việc lại nếu worker sập.','băng chuyền trong kho.'],
+ ['Retry + TTL','Thử lại sau khoảng chờ tăng dần: 10 giây, 1 phút, 5 phút, 30 phút, 2 giờ.','gọi không ai nghe thì lát nữa gọi lại, mỗi lần chờ lâu hơn.'],
+ ['DLQ (dead-letter queue)','Ngăn chứa những gì đã thử đủ mà vẫn hỏng. Không vứt, chờ xử lý tay.','kho hàng thất lạc của bưu điện.'],
+ ['Replay','Giao lại một sự kiện từ DLQ sau khi đích đã sửa.','gửi lại bưu phẩm sau khi người nhận báo địa chỉ đúng.'],
+ ['Circuit breaker','Đích lỗi liên tục thì ngừng gửi một lúc, cho nó thời gian hồi.','cầu dao tự ngắt khi chập điện.'],
+ ['Throttle','Giới hạn tốc độ gửi tới một đích để không làm nó quá tải.','đèn giao thông ở lối vào cao tốc.'],
+ ['Tenant','Một khách hàng dùng chung hệ thống. Mọi bảng nghiệp vụ có tenant_id để dữ liệu không lẫn nhau.','mỗi căn hộ trong cùng một toà nhà.'],
+ ['At-least-once · effectively-once','Hệ thống đảm bảo giao ít nhất một lần (có thể trùng), cộng chống trùng ở đầu nhận, thành ra hiệu quả như đúng một lần.','gửi thư bảo đảm hai lần cũng được, vì người nhận có sổ ghi "đã nhận thư số 123".'],
+ ['SSRF','Kẻ xấu lừa máy chủ gọi vào địa chỉ nội bộ. Hub chặn các dải IP nội bộ và cả trò đổi DNS.','nhờ lễ tân "mang hộ cái này vào phòng sếp".'],
+];
+const termsEl=document.getElementById('terms');
+TERMS.forEach(([w,d,l])=>{const c=document.createElement('div');c.className='term';c.innerHTML=`<span class="w">${w}</span><span>${d}</span><span class="like">${l}</span>`;termsEl.append(c);});
+</script>

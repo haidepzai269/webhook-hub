@@ -1,6 +1,7 @@
 import { DestinationSender, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent } from '@hub/common';
-import axios from 'axios';
+import { createSsrfSafeAxiosConfig } from '@hub/crypto';
+import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
 
 export class TelegramSender implements DestinationSender {
   readonly type: DestinationType = 'telegram';
@@ -11,34 +12,47 @@ export class TelegramSender implements DestinationSender {
       return { status: 400, error: 'Thiếu cấu hình botToken hoặc chatId Telegram', durationMs: 0 };
     }
 
-    // Nếu chạy local với mock token, có thể trỏ về mock endpoint
-    const baseUrl = config.apiUrl || (botToken.includes('mock') ? 'http://localhost:4000/mock/telegram' : 'https://api.telegram.org');
+    // URL mock (nếu có) do seed ghi vào config.apiUrl — sender không tự đoán localhost
+    const baseUrl = config.apiUrl || 'https://api.telegram.org';
     const url = `${baseUrl}/bot${botToken}/sendMessage`;
 
+    // SSRF Guard: config.apiUrl có thể bị override tùy ý — bắt buộc qua guard
+    // trước khi gọi HTTP thật, kể cả khi trỏ về base URL mặc định của Telegram.
+    let ssrfConfig;
+    try {
+      ssrfConfig = await createSsrfSafeAxiosConfig(url);
+    } catch (err: any) {
+      return { status: 400, error: `SSRF Guard: ${err.message}`, durationMs: 0 };
+    }
+
     const text = renderedContent || `[Webhook Hub] Sự kiện: ${event.type}\nID: ${event.id}\nNguồn: ${event.source}`;
+    // Văn bản THUẦN (S1-7, ADR-042): không đặt parse_mode. Với Markdown, một dấu '_' hay '*' lẻ trong
+    // dữ liệu (tên repo, nội dung chuyển khoản) làm Telegram trả 400 -> non-retryable -> DEAD.
     const payload = {
       chat_id: chatId,
       text,
-      parse_mode: 'Markdown',
     };
 
     const start = Date.now();
     try {
-      const res = await axios.post(url, payload, {
-        timeout: 5000,
-        maxRedirects: 0,
+      // Phản hồi đọc tối đa 64KB; status từ dòng trạng thái — 2xx body lớn vẫn là thành công (ADR-054).
+      const res = await postLimited(ssrfConfig.url, payload, {
         headers: { 'Content-Type': 'application/json' },
+        httpAgent: ssrfConfig.httpAgent,
+        httpsAgent: ssrfConfig.httpsAgent,
       });
       return {
         status: res.status,
-        body: JSON.stringify(res.data || {}),
+        body: res.body.substring(0, 2048),
+        error: httpErrorMessage(res.status),
         durationMs: Date.now() - start,
       };
     } catch (err: any) {
+      // Không có phản hồi (lỗi mạng / timeout) -> 500 retryable, tính vào circuit.
       return {
         status: err.response?.status || 500,
-        error: err.message,
-        body: JSON.stringify(err.response?.data || {}),
+        error: describeSendError(err),
+        body: '',
         durationMs: Date.now() - start,
       };
     }

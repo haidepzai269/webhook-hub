@@ -10,3 +10,8 @@ build/
 coverage/
 .DS_Store
 *.tsbuildinfo
+# S1-6: không bao giờ commit/nạp bản build cũ (BB09 P0-1)
+**/dist/
+libs/*/src/**/*.js
+libs/*/src/**/*.d.ts
+*.js.map

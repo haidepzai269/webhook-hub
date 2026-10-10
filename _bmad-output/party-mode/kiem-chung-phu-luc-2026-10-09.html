@@ -1,0 +1,617 @@
+<title>Kiểm chứng Phụ lục Webhook Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: phiếu kiểm định — cột đọc 860px, mỗi câu hỏi là một "biên bản" có nhãn kết luận, bằng chứng chạy thật và giải pháp */
+:root{
+  --bg:#f5f6f8; --paper:#ffffff; --ink:#18202b; --muted:#5b6674; --line:#dde2e8;
+  --accent:#1f5f8b; --accent-soft:#e3eef6;
+  --ok:#1d7a4a; --ok-bg:#e2f3e9; --bad:#b42318; --bad-bg:#fbe7e5; --warn:#9a5b00; --warn-bg:#fdf0d9; --na:#56606c; --na-bg:#eceff3;
+  --code-bg:#f0f2f5;
+  --f-body:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11161d; --paper:#18202a; --ink:#e4e9ef; --muted:#97a3b1; --line:#2b3542;
+  --accent:#6fb2e0; --accent-soft:#1c2c3b;
+  --ok:#5fd193; --ok-bg:#163223; --bad:#ff8a7e; --bad-bg:#3a1d1b; --warn:#f2b34f; --warn-bg:#352812; --na:#a7b1bd; --na-bg:#232b35;
+  --code-bg:#121820; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161d; --paper:#18202a; --ink:#e4e9ef; --muted:#97a3b1; --line:#2b3542;
+  --accent:#6fb2e0; --accent-soft:#1c2c3b;
+  --ok:#5fd193; --ok-bg:#163223; --bad:#ff8a7e; --bad-bg:#3a1d1b; --warn:#f2b34f; --warn-bg:#352812; --na:#a7b1bd; --na-bg:#232b35;
+  --code-bg:#121820; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15.5px;line-height:1.65}
+.wrap{max-width:900px;margin:0 auto;padding-inline:16px;padding-block:28px 64px;display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{text-wrap:balance;line-height:1.25;margin:0}
+h1{font-size:clamp(1.7rem,4vw,2.4rem);font-weight:800;letter-spacing:-.02em}
+h2{font-size:1.35rem;font-weight:800}
+h3{font-size:1rem;font-weight:600}
+p{margin:0}
+.eyebrow{font-size:.74rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.muted{color:var(--muted)}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{font-family:var(--f-mono);font-size:.8rem;line-height:1.55;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:0;overflow-x:auto;white-space:pre}
+a{color:var(--accent)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+section{display:flex;flex-direction:column;gap:14px}
+.paper{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+header.top{display:flex;flex-direction:column;gap:10px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.86rem;color:var(--muted)}
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.02em}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.ok{color:var(--ok);background:var(--ok-bg)} .bad{color:var(--bad);background:var(--bad-bg)}
+.warn{color:var(--warn);background:var(--warn-bg)} .na{color:var(--na);background:var(--na-bg)}
+/* verdict board */
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.board a{display:flex;flex-direction:column;gap:6px;text-decoration:none;color:inherit;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.board a:hover{border-color:var(--accent)}
+.board .q{font-weight:600;font-size:.92rem}
+.board .s{font-size:.82rem;color:var(--muted);line-height:1.45}
+/* blockers */
+.blocker{border-left:4px solid var(--bad);background:var(--paper);border-radius:0 10px 10px 0;padding:16px 18px;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.blocker h3{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+/* tables */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:.86rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+/* question */
+.qhead{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.qnum{font-family:var(--f-mono);font-weight:600;color:var(--accent);font-size:.95rem}
+.claim{border-left:3px solid var(--line);padding-left:12px;color:var(--muted);font-size:.9rem;font-style:italic}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid2>*{min-width:0}
+@media (max-width:680px){.grid2{grid-template-columns:1fr}}
+.box{display:flex;flex-direction:column;gap:6px}
+.box h4{margin:0;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+ul{margin:0;padding-left:1.15em;display:flex;flex-direction:column;gap:4px}
+li::marker{color:var(--muted)}
+.fix{background:var(--accent-soft);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.fix h4{margin:0;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:600}
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding-block:8px;display:flex;gap:6px;flex-wrap:wrap}
+nav.toc a{font-size:.78rem;text-decoration:none;color:var(--ink);padding:3px 9px;border:1px solid var(--line);border-radius:6px;background:var(--paper)}
+nav.toc a:hover{border-color:var(--accent)}
+/* pipeline svg */
+.pipe{overflow-x:auto}
+.pipe svg{display:block;min-width:760px;width:100%;height:auto}
+.legend{display:flex;flex-wrap:wrap;gap:8px}
+.callout{font-size:.88rem;padding:10px 14px;border-radius:8px;background:var(--warn-bg);color:var(--ink);border:1px solid var(--line)}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">Biên bản kiểm chứng · đối chiếu Phụ lục mô tả yêu cầu kỹ thuật với code và hệ thống đang chạy</span>
+  <h1>Kiểm chứng Phụ lục Webhook Hub</h1>
+  <div class="meta">
+    <span>Ngày 09/10/2026</span>
+    <span>Nhánh <code>master</code> + thay đổi chưa commit</span>
+    <span>Môi trường: LOCAL docker-compose (ADR-019)</span>
+    <span>Phương pháp: đọc code · chạy 9 bộ test · bắn webhook thật bằng curl · truy vấn Postgres và RabbitMQ</span>
+  </div>
+  <p>Mỗi kết luận dưới đây có kèm bằng chứng: dòng code, lệnh đã chạy, hoặc dữ liệu đọc được từ DB. Nhãn <span class="chip ok">Chạy thật</span> nghĩa là đã quan sát được trên hệ thống đang chạy, không chỉ đọc code.</p>
+</header>
+
+<nav class="toc" aria-label="Mục lục">
+  <a href="#chan">Lỗi chặn</a><a href="#luong">Luồng</a><a href="#env">.env &amp; test</a>
+  <a href="#q1">1 Chữ ký</a><a href="#q2">2 Chuẩn hoá</a><a href="#q3">3 Định tuyến</a><a href="#q4">4 Chống trùng</a><a href="#q5">5 Retry</a><a href="#q6">6 DLQ</a><a href="#q7">7 Dashboard</a><a href="#q8">8 Polling</a><a href="#q9">9 Tenant</a><a href="#lotrinh">Lộ trình sửa</a>
+</nav>
+
+<section aria-label="Tóm tắt kết luận">
+  <h2>Kết luận nhanh 9 câu</h2>
+  <div class="board">
+    <a href="#q1"><span class="qhead"><span class="qnum">1</span><span class="chip warn">Đúng một phần</span></span><span class="q">Xác thực chữ ký</span><span class="s">GitHub, Stripe dùng SDK chính chủ và so sánh an toàn. PayOS dùng SDK nhưng SDK so sánh bằng <code>!==</code>. SePay là API key, không có HMAC.</span></a>
+    <a href="#q2"><span class="qhead"><span class="qnum">2</span><span class="chip warn">Có, chưa đồng nhất</span></span><span class="q">Chuẩn hoá sự kiện</span><span class="s">Có <code>NormalizedEvent</code> chung. Thiếu trường của CloudEvents, cách đặt tên <code>type</code> lệch giữa các nguồn.</span></a>
+    <a href="#q3"><span class="qhead"><span class="qnum">3</span><span class="chip bad">Định tuyến chạy, gửi hỏng</span></span><span class="q">Định tuyến &amp; phân phối</span><span class="s">Delivery được tạo đúng subscription. 100% lần gửi thất bại do lỗi SSRF guard trên Node 22.</span></a>
+    <a href="#q4"><span class="qhead"><span class="qnum">4</span><span class="chip warn">Đủ hạ tầng, hở 1 khâu</span></span><span class="q">Không trùng, không mất</span><span class="s">Redis, RabbitMQ, Postgres đủ. Khâu normalize → delivery ghi đôi ngoài outbox, có thể mất delivery.</span></a>
+    <a href="#q5"><span class="qhead"><span class="qnum">5</span><span class="chip warn">Retry thật, CB sơ sài</span></span><span class="q">Retry · circuit breaker · throttle</span><span class="s">5 tầng TTL chạy thật (đã thấy lần 1 → lần 2 sau 10s). Circuit breaker không có HALF_OPEN, UI luôn hiện CLOSED.</span></a>
+    <a href="#q6"><span class="qhead"><span class="qnum">6</span><span class="chip bad">1 trên 3 có thật</span></span><span class="q">DLQ · Replay · audit log</span><span class="s">Replay từng delivery có. Replay hàng loạt không có. Audit log không có một dòng code nào ghi.</span></a>
+    <a href="#q7"><span class="qhead"><span class="qnum">7</span><span class="chip bad">Thiếu dữ liệu để vẽ</span></span><span class="q">Dashboard realtime</span><span class="s">Socket.IO chỉ phát 2 loại sự kiện, không phát lỗi/retry/circuit, không xác thực, không tách tenant.</span></a>
+    <a href="#q8"><span class="qhead"><span class="qnum">8</span><span class="chip bad">Có endpoint, sai ngữ nghĩa</span></span><span class="q">API polling</span><span class="s"><code>?after=</code> trả sự kiện CŨ hơn, <code>?types=</code> bị bỏ qua, chỉ dùng được bằng JWT admin. Chưa cắm vào BE nào.</span></a>
+    <a href="#q9"><span class="qhead"><span class="qnum">9</span><span class="chip warn">Khung đúng, có lỗ rò</span></span><span class="q">Multi-tenant</span><span class="s">Repository scope tốt. Rò qua subscription chéo tenant và Socket.IO phát cho mọi người. Thực tế chỉ có 1 tenant.</span></a>
+  </div>
+</section>
+
+<section id="chan">
+  <h2>Ba lỗi chặn phát hiện khi chạy thật</h2>
+  <p class="muted">Không lỗi nào lộ ra qua bộ test đơn vị. Cả ba chỉ thấy khi bắn webhook vào stack đang chạy.</p>
+
+  <div class="blocker">
+    <h3><span class="chip bad">P0</span> Worker xoá sạch database mỗi lần khởi động, và normalize chết 100%</h3>
+    <p>Image <code>hub-worker</code> (build 56 phút trước khi kiểm) nạp <code>@hub/database</code> từ <code>libs/database/dist/index.js</code> bản cũ ngày 18/09. File đó có <code>export * from "./seed"</code>, và <code>dist/seed.js</code> cũ gọi <code>seed()</code> ngay khi được import, chạy <code>deleteMany()</code> trên 9 bảng hub. Bản cũ cũng không có <code>getMasterKey</code>, nên mọi message vào normalize đều lỗi.</p>
+    <div class="grid2">
+      <div class="box"><h4>Bằng chứng</h4>
+<pre>worker log:
+"err":"(0 , database_1.getMasterKey) is not a function"
+RabbitMQ: q.normalize.dlq = 2  (cả 2 webhook vừa bắn)
+hub.events = 0 dòng dù raw_events ACCEPTED
+dist/seed.js:11-19  prisma.*.deleteMany()
+dist/seed.js:127    seed()   ← chạy khi import</pre></div>
+      <div class="box"><h4>Tác động</h4><ul>
+        <li>Worker crash-loop khi RabbitMQ chưa lên (đã thấy sau khi Docker restart). Mỗi vòng restart là một lần xoá DB.</li>
+        <li>BB-2 thủng hoàn toàn: trọng tài idempotency bị xoá thì webhook gửi lại sẽ được nhận như mới.</li>
+        <li>Lệnh chẩn đoán <code>node -e require("@hub/database")</code> của tôi cũng kích hoạt một lần xoá. Chỉ mất 3 raw_event thử vừa tạo.</li>
+      </ul></div>
+    </div>
+    <div class="fix"><h4>Đã làm và cần làm</h4><ul>
+      <li><strong>Đã làm:</strong> <code>docker compose build hub-worker</code>. Image mới không còn seed, có <code>getMasterKey</code>, normalize chạy lại.</li>
+      <li>Xoá mọi <code>libs/*/dist</code> trên máy và commit thay đổi <code>tsconfig.json</code> (đang chưa commit) để không ai build lại ra bản cũ.</li>
+      <li>Trong <code>Dockerfile</code> thêm <code>RUN rm -rf libs/*/dist apps/*/dist</code> trước <code>npm run build</code>. Rebuild cả 4 image bằng <code>--no-cache</code>.</li>
+      <li>Thêm kiểm tra khởi động: worker gọi <code>typeof getMasterKey === "function"</code> và thoát nếu sai, để lỗi lộ ngay chứ không đẩy message vào DLQ.</li>
+      <li>Đổi <code>prisma db push --accept-data-loss</code> trong <code>docker-entrypoint.sh</code> sang <code>prisma migrate deploy</code>. Cờ đó cho phép xoá cột khi schema lệch.</li>
+    </ul></div>
+  </div>
+
+  <div class="blocker">
+    <h3><span class="chip bad">P0</span> Mọi lần gửi tới đích đều thất bại: <code>Invalid IP address: undefined</code></h3>
+    <p><code>libs/crypto/src/ssrf.ts</code> ghim IP bằng cách thay hàm <code>lookup</code> của http Agent. Từ Node 20, <code>net.connect</code> gọi <code>lookup</code> với <code>{ all: true }</code> và chờ một <em>mảng</em> địa chỉ. Hàm hiện tại luôn trả về một chuỗi, nên Node đọc ra <code>undefined</code>. Container chạy Node 22.23.</p>
+    <div class="grid2">
+      <div class="box"><h4>Bằng chứng</h4>
+<pre>delivery_attempts (6 dòng mới nhất):
+ attempt 1,2  status 500  1-4ms
+ error: Invalid IP address: undefined
+Discord, Telegram, Shop: cùng lỗi
+
+Thử trong container worker:
+ lookup hiện tại → Invalid IP address: undefined
+ lookup đã sửa  → đi tới bước connect thật</pre></div>
+      <div class="box"><h4>Vì sao test không bắt được</h4><ul>
+        <li><code>ssrf-rebinding.spec.ts</code> gọi thẳng hàm <code>lookup</code> bằng tay, không mở kết nối thật qua Agent.</li>
+        <li>Không có test tích hợp nào gửi HTTP thật tới một server cục bộ.</li>
+      </ul></div>
+    </div>
+    <div class="fix"><h4>Sửa (3 dòng)</h4>
+<pre>const pinnedLookup = (_h, options, callback) =&gt; {
+  const cb = typeof options === 'function' ? options : callback;
+  if (typeof options === 'object' &amp;&amp; options?.all) {
+    return cb(null, [{ address: pinned.pinnedIp, family: pinnedFamily }]);
+  }
+  cb(null, pinned.pinnedIp, pinnedFamily);
+};</pre>
+      <p>Thêm một test tích hợp: dựng <code>http.createServer</code> trên cổng ngẫu nhiên, gửi qua <code>createSsrfSafeAxiosConfig(url, true)</code>, khẳng định nhận được 200.</p>
+    </div>
+  </div>
+
+  <div class="blocker">
+    <h3><span class="chip bad">P0</span> URL đích mặc định trỏ vào <code>localhost</code> bên trong container</h3>
+    <p>Seed dùng <code>http://localhost:4000/mock/discord</code> và <code>http://localhost:4001/hub-webhook</code> (worker không có biến <code>SHOP_WEBHOOK_URL</code>). Trong container worker, <code>localhost</code> là chính worker. Đã thử: <code>worker → localhost:4000</code> trả <code>ECONNREFUSED</code>. Sửa xong lỗi SSRF thì Discord mock và Shop vẫn không nhận được gì.</p>
+    <div class="fix"><h4>Sửa</h4><ul>
+      <li>Thêm vào env của worker: <code>SHOP_WEBHOOK_URL=http://shop:4001/hub-webhook</code>, <code>DISCORD_MOCK_URL=http://hub-api:4000/mock/discord</code>. Seed đọc các biến này.</li>
+      <li>Seed chỉ chạy khi DB rỗng, nên điền <code>.env</code> sau khi đã seed sẽ không có tác dụng. Cần một lệnh <code>seed --sync-destinations</code> hoặc sửa đích qua API.</li>
+    </ul></div>
+  </div>
+</section>
+
+<section id="luong">
+  <h2>Một webhook đi qua hệ thống: trạng thái từng chặng</h2>
+  <p class="muted">Màu thể hiện kết quả quan sát trên stack local ngày 09/10, sau khi đã rebuild worker.</p>
+  <div class="legend"><span class="chip ok">Chạy thật, đúng</span><span class="chip warn">Chạy, có lỗ hổng</span><span class="chip bad">Hỏng</span><span class="chip na">Có code, chưa kiểm được</span></div>
+  <div class="paper pipe">
+    <svg viewBox="0 0 860 400" role="img" aria-label="Sơ đồ luồng webhook qua Webhook Hub với trạng thái từng chặng">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker>
+      </defs>
+      <style>
+        .n rect{stroke-width:1.5;rx:8}
+        .n text{font-family:var(--f-body);font-size:12px;fill:var(--ink)}
+        .n .t{font-weight:600}
+        .n .d{font-size:10.5px;fill:var(--muted)}
+        .e{stroke:var(--muted);stroke-width:1.4;fill:none;marker-end:url(#ar)}
+        .lane{font-family:var(--f-body);font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+        .sok rect{fill:var(--ok-bg);stroke:var(--ok)} .swarn rect{fill:var(--warn-bg);stroke:var(--warn)}
+        .sbad rect{fill:var(--bad-bg);stroke:var(--bad)} .sna rect{fill:var(--na-bg);stroke:var(--na)}
+      </style>
+      <text class="lane" x="10" y="18">HUB-API (tiến trình 1)</text>
+      <text class="lane" x="10" y="168">HUB-WORKER (tiến trình 2)</text>
+      <text class="lane" x="10" y="318">ĐÍCH</text>
+      <line x1="10" y1="150" x2="850" y2="150" stroke="var(--line)" stroke-dasharray="4 4"/>
+      <line x1="10" y1="300" x2="850" y2="300" stroke="var(--line)" stroke-dasharray="4 4"/>
+
+      <g class="n sok"><rect x="10" y="30" width="130" height="62"/><text class="t" x="20" y="52">① Nhận + verify</text><text class="d" x="20" y="68">200 / 401 REJECTED</text><text class="d" x="20" y="82">rawBody: true</text></g>
+      <g class="n sok"><rect x="160" y="30" width="150" height="62"/><text class="t" x="170" y="52">② raw_events + outbox</text><text class="d" x="170" y="68">1 transaction, UNIQUE</text><text class="d" x="170" y="82">trùng → 200 duplicate</text></g>
+      <g class="n sok"><rect x="330" y="30" width="130" height="62"/><text class="t" x="340" y="52">③ Redis SET NX</text><text class="d" x="340" y="68">sau COMMIT (BB-3)</text><text class="d" x="340" y="82">rồi mới ACK</text></g>
+      <g class="n sok"><rect x="480" y="30" width="160" height="62"/><text class="t" x="490" y="52">④ Outbox relay</text><text class="d" x="490" y="68">SKIP LOCKED + confirm</text><text class="d" x="490" y="82">outbox chưa publish = 0</text></g>
+
+      <g class="n swarn"><rect x="480" y="180" width="160" height="70"/><text class="t" x="490" y="202">⑤ Normalize + route</text><text class="d" x="490" y="218">events, deliveries ✓</text><text class="d" x="490" y="232">publish ngoài outbox ⚠</text><text class="d" x="490" y="244">image cũ: chết 100%</text></g>
+      <g class="n sbad"><rect x="300" y="180" width="160" height="70"/><text class="t" x="310" y="202">⑥ Delivery consumer</text><text class="d" x="310" y="218">circuit → throttle → send</text><text class="d" x="310" y="232">SSRF lookup hỏng</text><text class="d" x="310" y="244">→ 100% lỗi 500</text></g>
+      <g class="n sok"><rect x="120" y="180" width="160" height="70"/><text class="t" x="130" y="202">⑦ Retry 5 tầng TTL</text><text class="d" x="130" y="218">10s·1m·5m·30m·2h</text><text class="d" x="130" y="232">đã thấy lần 1 → lần 2</text></g>
+      <g class="n swarn"><rect x="660" y="180" width="180" height="70"/><text class="t" x="670" y="202">⑧ DEAD / DLQ / Replay</text><text class="d" x="670" y="218">replay đơn: có</text><text class="d" x="670" y="232">hàng loạt + audit: không</text></g>
+
+      <g class="n sbad"><rect x="120" y="330" width="150" height="56"/><text class="t" x="130" y="352">Discord</text><text class="d" x="130" y="368">mock URL localhost</text></g>
+      <g class="n sbad"><rect x="300" y="330" width="150" height="56"/><text class="t" x="310" y="352">Telegram (token thật)</text><text class="d" x="310" y="368">chặn bởi lỗi SSRF</text></g>
+      <g class="n sbad"><rect x="480" y="330" width="160" height="56"/><text class="t" x="490" y="352">Shop /hub-webhook</text><text class="d" x="490" y="368">URL localhost sai</text></g>
+      <g class="n sna"><rect x="660" y="330" width="180" height="56"/><text class="t" x="670" y="352">Polling GET /events</text><text class="d" x="670" y="368">phân trang ngược</text></g>
+
+      <path class="e" d="M140 61H158"/><path class="e" d="M310 61H328"/><path class="e" d="M460 61H478"/>
+      <path class="e" d="M560 92V178"/>
+      <path class="e" d="M480 215H462"/>
+      <path class="e" d="M300 205H282"/><path class="e" d="M280 228H298"/>
+      <path class="e" d="M380 250V328"/><path class="e" d="M340 250L200 328"/><path class="e" d="M420 250L540 328"/>
+      <path class="e" d="M640 215H658"/>
+      <path class="e" d="M750 250V328"/>
+    </svg>
+  </div>
+</section>
+
+<section id="env">
+  <h2>Đã có gì để test: <code>.env</code> và công cụ</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Bên thứ ba</th><th>Biến trong .env</th><th>Giá trị DB đang dùng</th><th>Tình trạng</th></tr></thead>
+    <tbody>
+      <tr><td>PayOS</td><td>CLIENT_ID, API_KEY, CHECKSUM_KEY <span class="chip ok">có</span></td><td>Checksum thật (seed đọc từ env)</td><td>Thiếu đường để PayOS gọi vào: Shop tạo link giả <code>link_DH…</code>, không gọi API PayOS. Chưa có tunnel.</td></tr>
+      <tr><td>SePay</td><td>SEPAY_API_KEY <span class="chip bad">rỗng</span></td><td>Key giả <code>sepay_apikey_token_secret_789</code></td><td>Test được bằng curl với key giả. Chưa nối tài khoản SePay thật.</td></tr>
+      <tr><td>GitHub</td><td>GITHUB_WEBHOOK_SECRET <span class="chip bad">rỗng</span></td><td>Secret giả <code>gh_webhook_secret_test_123</code></td><td>Test được bằng curl tự ký. Chưa gắn webhook repo thật.</td></tr>
+      <tr><td>Telegram</td><td>BOT_TOKEN, CHAT_ID <span class="chip ok">có</span></td><td>Token thật</td><td>Gửi hỏng do lỗi SSRF. Template dùng <code>data.orderCode</code>, sự kiện SePay không có trường này nên tin nhắn sẽ trống.</td></tr>
+      <tr><td>Discord</td><td>DISCORD_WEBHOOK_URL <span class="chip bad">rỗng</span></td><td>Mock <code>localhost:4000</code></td><td>Không tới được từ container worker.</td></tr>
+      <tr><td>Stripe</td><td>không có biến</td><td>Không có source</td><td>Adapter có, chưa seed (xem <code>docs/TODO-stripe-setup.md</code>).</td></tr>
+      <tr><td>Cloudflare Tunnel</td><td>không có</td><td>Không có service trong compose</td><td>Thiếu. Provider thật không gọi được vào máy local. CLAUDE.md yêu cầu named tunnel.</td></tr>
+      <tr><td>Render, Neon, Upstash, CloudAMQP</td><td>không có</td><td>—</td><td>Môi trường DEPLOYED chưa có biến nào trong repo.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="tbl"><table>
+    <thead><tr><th>Công cụ test</th><th>Hiện trạng</th><th>Ghi chú</th></tr></thead>
+    <tbody>
+      <tr><td>Jest, 9 bộ, 29 test</td><td><span class="chip ok">pass</span></td><td>Pass khi chạy <code>npx jest -w 2</code>. Chạy song song mặc định bị hết RAM, kéo sập Docker Desktop (exit 137). Toàn bộ là unit test có mock.</td></tr>
+      <tr><td>Test tích hợp / e2e</td><td><span class="chip bad">không có</span></td><td>Vì vậy cả 3 lỗi chặn đều lọt.</td></tr>
+      <tr><td>Nút "Gửi webhook thử" trên dashboard</td><td><span class="chip warn">một nửa</span></td><td>GitHub gửi chữ ký <code>sha256=invalid_mock_or_bypass</code>, luôn nhận 401. Không có nút cho PayOS.</td></tr>
+      <tr><td>Mock Discord / Telegram</td><td><span class="chip warn">có</span></td><td>Ở <code>/mock/*</code> của hub-api, nhưng URL seed sai (xem lỗi chặn 3).</td></tr>
+      <tr><td>Prometheus + Grafana</td><td><span class="chip bad">rỗng</span></td><td>Prometheus scrape <code>hub-api:4000/metrics</code>, endpoint trả 404. Grafana chưa có dashboard nào.</td></tr>
+      <tr><td>k6</td><td><span class="chip bad">không có</span></td><td>Không có script nào trong repo.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ Q1 ============ -->
+<section id="q1" class="paper">
+  <div class="qhead"><span class="qnum">Câu 1</span><h2>Xác thực chữ ký: cái nào tự làm, cái nào chính chủ</h2><span class="chip warn">Đúng một phần</span></div>
+  <p class="claim">"PayOS: checksum HMAC-SHA256 trên dữ liệu đã sắp xếp khoá; SePay: header Authorization dạng Apikey; GitHub: X-Hub-Signature-256 trên nội dung gốc, so sánh an toàn bằng crypto.timingSafeEqual."</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Nguồn</th><th>Ai tính chữ ký</th><th>Tính trên</th><th>So sánh</th><th>Kết luận</th></tr></thead>
+    <tbody>
+      <tr><td>GitHub</td><td>Chính chủ: <code>@octokit/webhooks-methods</code> 4.1.0 <code>verifyWithFallback</code></td><td>rawBody (bytes → utf8)</td><td><code>timingSafeEqual</code> trong SDK</td><td><span class="chip ok">Đúng</span></td></tr>
+      <tr><td>Stripe</td><td>Chính chủ: <code>stripe.webhooks.constructEvent</code></td><td>rawBody</td><td><code>secureCompare</code> → <code>timingSafeEqual</code>; lệch giờ tối đa 5 phút</td><td><span class="chip ok">Đúng</span> nhưng chưa có source</td></tr>
+      <tr><td>PayOS</td><td>Chính chủ: <code>@payos/node</code> 2.0.5 <code>webhooks.verify</code> (sắp xếp khoá rồi HMAC)</td><td>JSON đã parse, theo thiết kế của PayOS</td><td><code>signedSignature !== signature</code> <span class="mono">(webhook.js:53)</span></td><td><span class="chip bad">Sai câu chữ</span> không dùng timingSafeEqual</td></tr>
+      <tr><td>SePay</td><td>Tự làm. Không có HMAC, chỉ là API key dùng chung</td><td>Header <code>Authorization</code></td><td><code>timingSafeCompare</code> của ta → <code>timingSafeEqual</code></td><td><span class="chip warn">Đúng nhưng yếu</span> không bảo vệ nội dung, không chống replay</td></tr>
+      <tr><td>Hub → Shop (chiều ra)</td><td>Tự làm: <code>hmacSha256(secret, id.timestamp.body)</code></td><td>Chuỗi body đã gửi</td><td>Shop dùng <code>timingSafeCompare</code>, kiểm lệch giờ 5 phút</td><td><span class="chip ok">Đúng</span> kiểu Standard Webhooks, header tự đặt</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="box"><h4>Chạy thật</h4>
+<pre>GitHub ký đúng      → 200 {"ok":true,"id":…}
+Gửi lại cùng Delivery → 200 "Duplicate delivery skipped"
+Chữ ký sai           → 401 + raw_events.status=REJECTED
+SePay Apikey đúng    → 200 {"success":true}</pre></div>
+    <div class="box"><h4>Lỗ hổng phụ</h4><ul>
+      <li>SePay chấp nhận cả header không có tiền tố <code>Apikey</code> (cả chuỗi coi như key).</li>
+      <li>Khoá chống trùng rơi về <code>ulid()</code> ngẫu nhiên khi PayOS thiếu <code>reference</code> hoặc SePay thiếu <code>id</code>. Khi đó gửi lại sẽ thành sự kiện mới.</li>
+      <li>Cột <code>signature_header</code> chỉ lưu header GitHub hoặc Authorization. Chữ ký PayOS nằm trong body, Stripe trong <code>Stripe-Signature</code>, đều không được lưu.</li>
+    </ul></div>
+  </div>
+  <div class="fix"><h4>Giải pháp</h4><ul>
+    <li>PayOS: vẫn dùng SDK để tính chữ ký, tự so sánh. Gọi <code>payos.crypto.createSignatureFromObj(body.data, key)</code> rồi <code>timingSafeCompare(expected, body.signature)</code>. Giữ được canonicalization chính chủ và đúng câu trong phụ lục.</li>
+    <li>Sửa phụ lục cho trung thực: "SePay xác thực bằng API key dùng chung (SePay không ký nội dung)".</li>
+    <li>Thêm <code>signatureHeaderName()</code> vào <code>ProviderAdapter</code> để mỗi adapter tự khai báo header cần lưu.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Q2 ============ -->
+<section id="q2" class="paper">
+  <div class="qhead"><span class="qnum">Câu 2</span><h2>Cấu trúc sự kiện sau chuẩn hoá</h2><span class="chip warn">Có, chưa đồng nhất</span></div>
+  <p class="claim">"Chuẩn hoá mọi sự kiện về một cấu trúc chung, lấy cảm hứng từ CloudEvents, tách biệt khỏi nghiệp vụ nguồn gửi."</p>
+  <div class="grid2">
+    <div class="box"><h4>Bản ghi thật trong <code>hub.events</code> (SePay)</h4>
+<pre>{
+  "id": "evt_01M4G2WBQ68STAVTSV1WQGTSVY",
+  "tenantId": "00000000-…-000000000001",
+  "type": "bank.transfer.received",
+  "source": "sepay",
+  "subject": "bank:0987:DH1",
+  "data": {
+    "id": 1791541259, "gateway": "MBBank",
+    "accountNumber": "0987", "code": "DH1",
+    "content": "DH1 test", "transferType": "in",
+    "transferAmount": 2000, "accumulated": 0
+  },
+  "occurredAt": "2026-10-09T10:21:00.006Z",
+  "receivedAt": "2026-10-09T10:21:00.006Z",
+  "correlationId": "f082ec88-…",
+  "rawEventId": "8c189ffe-…",
+  "origin": "webhook"
+}</pre></div>
+    <div class="box"><h4>Body hub gửi tới đích webhook</h4>
+<pre>POST {url}
+X-Hub-Event-Id: evt_…
+X-Hub-Timestamp: 1791541260
+X-Hub-Signature: v1=&lt;hex HMAC&gt;
+
+{ "id", "type", "source", "subject",
+  "data", "occurredAt", "receivedAt",
+  "renderedContent" }</pre>
+      <h4>So với CloudEvents 1.0</h4><ul>
+        <li>Có tương đương: <code>id</code>, <code>source</code>, <code>type</code>, <code>subject</code>, <code>time</code> (≈ occurredAt), <code>data</code>.</li>
+        <li>Thiếu: <code>specversion</code>, <code>datacontenttype</code>, <code>dataschema</code>.</li>
+        <li><code>source</code> chỉ là tên nhà cung cấp, CloudEvents yêu cầu URI.</li>
+      </ul></div>
+  </div>
+  <div class="box"><h4>Chỗ chưa "thống nhất"</h4><ul>
+    <li><strong>Đặt tên type lệch:</strong> PayOS → <code>payment.succeeded</code>, Stripe giữ nguyên <code>payment_intent.succeeded</code>, GitHub → <code>repo.push</code>. Một subscription "mọi thanh toán thành công" phải liệt kê từng kiểu.</li>
+    <li><strong>PayOS luôn ra <code>payment.succeeded</code></strong>, không đọc <code>data.code</code> hay <code>success</code>. Request kiểm tra của PayOS khi đăng ký webhook cũng thành "thanh toán thành công".</li>
+    <li><strong>GitHub không chuẩn hoá <code>data</code></strong>, đẩy nguyên body vài chục KB.</li>
+    <li><strong>Dữ liệu tiền tệ khác trường:</strong> PayOS <code>data.amount</code>, SePay <code>data.transferAmount</code>. Template seed dùng <code>{{data.amount}}</code> nên SePay hiện trống.</li>
+  </ul></div>
+  <div class="fix"><h4>Giải pháp</h4><ul>
+    <li>Thêm <code>specversion: "1.0"</code>, <code>datacontenttype: "application/json"</code>, <code>source: "/sources/{sourceId}"</code> và giữ <code>provider</code> riêng. Tốn khoảng 30 phút, đổi lại câu "lấy cảm hứng CloudEvents" có cơ sở.</li>
+    <li>Viết bảng phân loại type chung cho nhóm thanh toán: <code>payment.succeeded</code> và <code>payment.failed</code>, với <code>data.amount</code>, <code>data.currency</code>, <code>data.reference</code> bắt buộc. Dữ liệu gốc đặt trong <code>data.raw</code>.</li>
+    <li>PayOS: <code>code === "00"</code> mới là <code>payment.succeeded</code>, ngược lại là <code>payment.failed</code>.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Q3 ============ -->
+<section id="q3" class="paper">
+  <div class="qhead"><span class="qnum">Câu 3</span><h2>Định tuyến và phân phối tới nhiều đích</h2><span class="chip bad">Định tuyến chạy, gửi hỏng</span></div>
+  <p class="claim">"Định tuyến và phân phối sự kiện đã chuẩn hoá đến nhiều đích (webhook tuỳ chỉnh, Telegram, Discord) theo subscription loại sự kiện quan tâm."</p>
+  <div class="grid2">
+    <div class="box"><h4>Code có gì</h4><ul>
+      <li>Khớp subscription bằng <code>eventTypes: { has: type }</code>, khớp chính xác, chưa có wildcard kiểu <code>payment.*</code>.</li>
+      <li>Mỗi subscription khớp → 1 dòng <code>deliveries</code> + 1 message vào <code>q.delivery.main</code>.</li>
+      <li>3 sender: <code>WebhookSender</code> (ký HMAC), <code>TelegramSender</code>, <code>DiscordSender</code>, đăng ký qua <code>SenderRegistry</code>.</li>
+      <li>Template <code>{{path}}</code> theo từng subscription.</li>
+    </ul></div>
+    <div class="box"><h4>Chạy thật</h4>
+<pre>repo.push              → 1 delivery (discord)
+bank.transfer.received → 2 delivery (telegram, webhook→shop)
+Cả 3: RETRYING, attempt 2
+lỗi: Invalid IP address: undefined</pre>
+    <p class="muted">Định tuyến đúng theo seed. Không có lần gửi nào tới được đích.</p></div>
+  </div>
+  <div class="box"><h4>Vấn đề thêm</h4><ul>
+    <li>Telegram gửi với <code>parse_mode: "Markdown"</code>. Nội dung có <code>_</code> hoặc <code>*</code> lẻ sẽ nhận 400, bị xếp non-retryable và vào DEAD ngay.</li>
+    <li>Subscription seed có type <code>order.paid</code>. Hub không bao giờ sinh type này (đó là khái niệm của Shop), nên subscription đó không bao giờ khớp.</li>
+    <li>Secret đã giải mã (bot token, URL Discord, signing secret) nằm nguyên văn trong message RabbitMQ.</li>
+  </ul></div>
+  <div class="fix"><h4>Giải pháp</h4><ul>
+    <li>Sửa lỗi SSRF (lỗi chặn 2) và URL localhost (lỗi chặn 3), sau đó kiểm lại 3 đích bằng thao tác thật.</li>
+    <li>Message chỉ mang <code>deliveryId</code>. Worker đọc và giải mã cấu hình đích lúc gửi. Secret không còn đi qua broker, và đổi cấu hình đích có hiệu lực ngay cho cả message đang retry.</li>
+    <li>Telegram: bỏ <code>parse_mode</code> hoặc escape theo MarkdownV2. Thêm khớp tiền tố <code>payment.*</code>.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Q4 ============ -->
+<section id="q4" class="paper">
+  <div class="qhead"><span class="qnum">Câu 4</span><h2>Không trùng, không mất: hạ tầng còn thiếu gì</h2><span class="chip warn">Đủ hạ tầng, hở 1 khâu</span></div>
+  <p class="claim">"Transactional Outbox kết hợp 5 lớp chống trùng (Redis đệm nhanh, PostgreSQL trọng tài) và manual ack với RabbitMQ."</p>
+  <p><strong>Hạ tầng:</strong> Postgres 16, Redis 7, RabbitMQ 3 đều có trong compose và đều healthy. Không thiếu thành phần nào. Chỗ hở nằm ở cách dùng.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Lớp</th><th>Ở đâu</th><th>Kiểm</th></tr></thead>
+    <tbody>
+      <tr><td>1. Redis GET <code>idem:{source}:{key}</code></td><td>ingest, trước transaction, chỉ đọc</td><td><span class="chip ok">Chạy thật</span></td></tr>
+      <tr><td>2. UNIQUE(source_id, idempotency_key)</td><td><code>raw_events</code>, bắt lỗi P2002 → 200 duplicate</td><td><span class="chip ok">Chạy thật</span></td></tr>
+      <tr><td>3. Outbox + <code>FOR UPDATE SKIP LOCKED</code></td><td>relay, publish confirm trong cùng transaction</td><td><span class="chip ok">Chạy thật</span> outbox tồn = 0</td></tr>
+      <tr><td>4. processed_messages (normalize)</td><td>khoá theo rawEventId</td><td><span class="chip na">Code</span></td></tr>
+      <tr><td>5. processed_messages (delivery) + UNIQUE(event, subscription, generation)</td><td>khoá <code>deliveryId:gen:attempt</code></td><td><span class="chip na">Unit test</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="box"><h4>Chỗ có thể mất hoặc treo sự kiện</h4><ul>
+    <li><strong>Ghi đôi ở normalize → delivery.</strong> <code>normalize.consumer.ts</code> COMMIT (events, deliveries, processed_messages) rồi mới <code>channel.publish</code>, kênh không confirm, không qua outbox. Worker chết giữa hai bước thì delivery nằm PENDING mãi, và processed_messages chặn xử lý lại. Đây là đúng bài toán outbox sinh ra để giải, nhưng chỉ được áp dụng ở chặng đầu.</li>
+    <li><strong>Lỗi tạm thời ở normalize vào thẳng DLQ.</strong> Mọi exception dẫn tới <code>nack(requeue=false)</code>. Postgres chập chờn 1 giây là sự kiện vào <code>q.normalize.dlq</code>, và không có công cụ phát lại hàng đợi này.</li>
+    <li><strong>Worker không tự kết nối lại RabbitMQ.</strong> Mất kết nối khi khởi động thì <code>process.exit(1)</code>. Không có handler <code>connection.on("close")</code> khi đang chạy. Hiện dựa hoàn toàn vào <code>restart: unless-stopped</code>.</li>
+    <li><strong>Không có job dọn dẹp.</strong> ARCHITECTURE nói cleanup chạy trong worker với Redis lock. Không tìm thấy code. <code>outbox</code> và <code>processed_messages</code> sẽ tăng mãi.</li>
+  </ul></div>
+  <div class="fix"><h4>Giải pháp</h4><ul>
+    <li>Normalize ghi <code>outbox(topic="delivery.requested", payload={deliveryId})</code> trong cùng transaction, để relay publish. Mỗi chặng đều qua outbox, câu "không thất thoát" mới đứng vững.</li>
+    <li>Thêm sweeper: delivery PENDING quá 2 phút và không có attempt thì tạo lại outbox. Lưới an toàn rẻ, chạy cùng relay.</li>
+    <li>Normalize: lỗi hạ tầng thì requeue có giới hạn (header <code>x-death</code> hoặc đếm), chỉ lỗi dữ liệu mới vào DLQ. Thêm endpoint phát lại <code>q.normalize.dlq</code>.</li>
+    <li>Reconnect AMQP có backoff thay cho <code>exit(1)</code>. Job cleanup xoá <code>outbox.published_at &lt; now()-7d</code>, <code>processed_messages &lt; now()-7d</code>.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Q5 ============ -->
+<section id="q5" class="paper">
+  <div class="qhead"><span class="qnum">Câu 5</span><h2>Retry, circuit breaker, outbound throttle</h2><span class="chip warn">Retry thật, CB sơ sài</span></div>
+  <p class="claim">"Tự động thử lại theo nhiều mức thời gian tăng dần, kết hợp circuit breaker và giới hạn tốc độ gửi ra theo từng đích."</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Cơ chế</th><th>Cài đặt thật</th><th>Kiểm</th><th>Lệch so với mô tả</th></tr></thead>
+    <tbody>
+      <tr><td>Retry</td><td>5 queue TTL (10s, 1m, 5m, 30m, 2h) dead-letter về <code>x.hub.delivery</code>. 4xx trừ 408/429 → DEAD ngay. Tổng 6 lần gửi.</td><td><span class="chip ok">Chạy thật</span> lần 1 → lần 2 sau 10s</td><td>Không có jitter.</td></tr>
+      <tr><td>Circuit breaker</td><td>Redis: 5 lỗi liên tiếp → <code>:state=OPEN</code> TTL 60s</td><td><span class="chip na">Unit test</span></td><td>Không có HALF_OPEN thật. Hết 60s thì mọi message được gửi cùng lúc. Bộ đếm lỗi không reset khi hết OPEN.</td></tr>
+      <tr><td></td><td>Circuit OPEN → đẩy message vào queue <strong>2h</strong></td><td></td><td>Mạch chỉ mở 60s nhưng message chờ 2 giờ.</td></tr>
+      <tr><td></td><td>Cột <code>destinations.circuit_state</code></td><td><span class="chip bad">Sai</span></td><td>Không code nào cập nhật. Dashboard đọc cột này nên luôn hiện CLOSED.</td></tr>
+      <tr><td></td><td>Cảnh báo publish vào <code>hub:alerts</code></td><td><span class="chip bad">Không ai nghe</span></td><td>Gateway không subscribe kênh này.</td></tr>
+      <tr><td>Throttle</td><td>Đếm cửa sổ cố định 1 giây theo đích (<code>INCR</code> + <code>EXPIRE</code>), vượt → queue 10s</td><td><span class="chip na">Unit test</span></td><td>Comment gọi là token bucket, thực tế là fixed window.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="fix"><h4>Giải pháp và cách test</h4><ul>
+    <li>HALF_OPEN thật: khi OPEN hết hạn, dùng <code>SET circuit:{id}:probe NX EX 30</code>. Chỉ worker giành được probe mới gửi thử. Thành công → CLOSED và reset bộ đếm, thất bại → OPEN lại.</li>
+    <li>Circuit OPEN → queue gần nhất với thời gian còn lại của mạch (1m), không dùng 2h.</li>
+    <li>Mỗi lần đổi trạng thái: ghi <code>destinations.circuit_state</code> và publish <code>hub:realtime:circuit</code>. Gateway phát <code>circuit.changed</code>.</li>
+    <li>Cách test sau khi sửa SSRF: thêm <code>/mock/fail?status=500</code> vào hub-api, tạo đích trỏ vào đó, bắn 6 sự kiện. Kỳ vọng: 5 lần lỗi → OPEN, message thứ 6 vào queue retry không gọi HTTP, sau 60s probe đơn lẻ.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Q6 ============ -->
+<section id="q6" class="paper">
+  <div class="qhead"><span class="qnum">Câu 6</span><h2>DLQ, Replay và audit log</h2><span class="chip bad">1 trên 3 có thật</span></div>
+  <p class="claim">"Dead Letter Queue cho sự kiện thất bại vĩnh viễn, kèm Replay từng sự kiện hoặc hàng loạt, có audit log."</p>
+  <div class="grid2">
+    <div class="box"><h4>Queue là của ai</h4><ul>
+      <li><strong>RabbitMQ:</strong> <code>q.delivery.dlq</code> và <code>q.normalize.dlq</code>. Đây chỉ là nơi chứa, không consumer nào đọc, không giao diện nào hiện.</li>
+      <li><strong>Postgres:</strong> <code>deliveries.status = 'DEAD'</code>. Đây mới là "DLQ" mà dashboard và API <code>GET /api/v1/dlq</code> dùng.</li>
+      <li>Nghĩa là nguồn sự thật của DLQ là Postgres, RabbitMQ DLQ chỉ là bản sao. Nên ghi rõ trong báo cáo.</li>
+    </ul></div>
+    <div class="box"><h4>Thực trạng</h4><ul>
+      <li><span class="chip ok">Có</span> Replay từng delivery: <code>POST /api/v1/deliveries/:id/replay</code> tạo delivery <code>attempt_generation + 1</code> và ghi outbox <code>delivery.replayed</code>.</li>
+      <li><span class="chip bad">Không</span> Replay hàng loạt: không có endpoint.</li>
+      <li><span class="chip bad">Không</span> Audit log: bảng <code>audit_logs</code> có trong schema, <strong>0 chỗ trong code ghi vào</strong>, DB có 0 dòng.</li>
+      <li><span class="chip bad">Không</span> Phát lại <code>q.normalize.dlq</code>.</li>
+    </ul></div>
+  </div>
+  <div class="box"><h4>Lỗi trong replay đơn</h4><ul>
+    <li>Tạo delivery và ghi outbox là hai lệnh rời, không cùng transaction. Lỗi ở giữa thì delivery mới nằm PENDING mãi.</li>
+    <li>Không kiểm trạng thái: replay được cả delivery đang RETRYING hoặc đã SUCCEEDED, dễ gửi trùng.</li>
+    <li>Payload outbox chứa cấu hình đích và signing secret đã giải mã, lưu nguyên văn trong bảng <code>outbox</code>.</li>
+  </ul></div>
+  <div class="fix"><h4>Giải pháp (khoảng 2 giờ)</h4>
+<pre>POST /api/v1/deliveries/:id/replay        { reason }
+POST /api/v1/deliveries/replay-bulk       { destinationId?, from?, to?, errorContains?, reason, dryRun? }
+
+trong 1 transaction:
+  repo.createDelivery(gen+1)               -- chỉ khi status = DEAD
+  outbox.create({ topic: "delivery.replayed", payload: { deliveryId } })
+  auditLog.create({ action: "delivery.replay", actor, reason, metadata })</pre>
+  <p>Bulk replay giới hạn 500 dòng mỗi lần, có <code>dryRun</code> trả về số lượng trước khi chạy. Thêm <code>auditLog</code> vào <code>TenantScopedRepository</code>.</p></div>
+</section>
+
+<!-- ============ Q7 ============ -->
+<section id="q7" class="paper">
+  <div class="qhead"><span class="qnum">Câu 7</span><h2>Dashboard realtime: cần gì để thấy rõ một webhook toả đi đâu</h2><span class="chip bad">Thiếu dữ liệu để vẽ</span></div>
+  <p class="claim">"Hiển thị trực tiếp luồng sự kiện, trạng thái phân phối và trạng thái circuit breaker qua Socket.IO."</p>
+  <div class="callout">Phiên thiết kế giao diện cần biết điều này trước: vấn đề lớn nhất nằm ở backend. Hiện backend chỉ phát 2 loại tin, nên giao diện đẹp đến đâu cũng không có dữ liệu để vẽ đường đi của một webhook.</div>
+  <div class="tbl"><table>
+    <thead><tr><th>Chặng</th><th>Socket.IO hiện phát?</th><th>Cần phát</th></tr></thead>
+    <tbody>
+      <tr><td>Nhận request, verify OK hoặc REJECTED</td><td><span class="chip bad">Không</span></td><td><code>trace.received</code> {provider, sourceKey, status 200/401/404/429, ms}</td></tr>
+      <tr><td>COMMIT raw_event + outbox, ACK</td><td><span class="chip bad">Không</span></td><td><code>trace.committed</code> {rawEventId, idempotencyKey, duplicate}</td></tr>
+      <tr><td>Relay publish</td><td><span class="chip bad">Không</span></td><td><code>trace.published</code> {lagMs}</td></tr>
+      <tr><td>Normalize xong</td><td><span class="chip ok">Có</span> <code>event.received</code></td><td>Thêm danh sách deliveries đã tạo: {subscription, destination}</td></tr>
+      <tr><td>Mỗi lần gửi tới đích</td><td><span class="chip warn">Chỉ khi SUCCEEDED</span></td><td><code>delivery.attempt</code> {attemptNo, http, ms, nextQueue, eta}, kể cả RETRYING và DEAD</td></tr>
+      <tr><td>Circuit đổi trạng thái</td><td><span class="chip bad">Không</span></td><td><code>circuit.changed</code> {destinationId, from, to}</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="box"><h4>Lỗi trong code hiện tại</h4><ul>
+      <li>Socket.IO không xác thực, <code>cors: *</code>, phát cho mọi client. Ai biết địa chỉ cũng xem được dữ liệu thanh toán của mọi tenant.</li>
+      <li><code>successRate</code> = số delivery thành công / số event. Một event có 3 đích thì tỉ lệ có thể lên 300%.</li>
+      <li>Trạng thái circuit trên giao diện đọc từ cột DB không ai cập nhật.</li>
+    </ul></div>
+    <div class="box"><h4>Đề xuất cho phiên thiết kế</h4><ul>
+      <li>Màn chính là <strong>"Dấu vết một sự kiện"</strong>, khoá theo <code>correlationId</code>: dòng thời gian dọc ① nhận → ② verify → ③ commit → ④ ACK → ⑤ publish → ⑥ normalize, rồi toả ra N nhánh, mỗi nhánh một đích với các lần thử, mã HTTP, ms, ô đếm ngược tới lần retry kế.</li>
+      <li>Tất cả sự kiện Socket.IO mang chung <code>correlationId</code> và <code>stage</code>, để giao diện chỉ cần nối theo một khoá.</li>
+      <li>Mở chi tiết lấy từ <code>GET /api/v1/events/:id</code> (đã có, gồm rawEvent, deliveries, attempts). Socket chỉ để cập nhật trực tiếp.</li>
+    </ul></div>
+  </div>
+  <div class="fix"><h4>Giải pháp backend (khoảng 3 giờ, nên làm trước giao diện)</h4><ul>
+    <li>Tạo <code>libs/common/realtime.ts</code> với một hàm <code>emitTrace(stage, correlationId, tenantId, data)</code> publish lên Redis <code>hub:realtime:trace</code>. Gọi ở 6 chặng trên. Ngân sách Redis vẫn trong 4 lệnh mỗi sự kiện nếu gộp được chặng ①–④ vào một lần publish.</li>
+    <li>Gateway: xác thực JWT trong handshake, <code>client.join("tenant:" + tenantId)</code>, phát theo room.</li>
+    <li>Subscribe thêm <code>hub:alerts</code> và kênh circuit.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Q8 ============ -->
+<section id="q8" class="paper">
+  <div class="qhead"><span class="qnum">Câu 8</span><h2>API polling cho hệ thống không nhận được push</h2><span class="chip bad">Có endpoint, sai ngữ nghĩa</span></div>
+  <p class="claim">"Cung cấp API truy vấn (polling) sự kiện cho các hệ thống đích không thể nhận webhook đẩy đến."</p>
+  <p><strong>Polling hay long polling?</strong> Thiết kế (ARCHITECTURE §8.1, ADR-016) là polling thường với con trỏ, không phải long polling. Code cũng là polling thường. Phụ lục viết "polling" là khớp.</p>
+  <div class="grid2">
+    <div class="box"><h4>Endpoint hiện có</h4>
+<pre>GET /api/v1/events?after=&lt;id&gt;&amp;limit=50
+Authorization: Bearer &lt;JWT admin&gt;
+→ { events: [...kèm deliveries], nextCursor }</pre></div>
+    <div class="box"><h4>Chạy thật</h4>
+<pre>trang 1 (limit=1): evt_…TSVY  10:21:00
+after=evt_…TSVY : evt_…FVQ50  10:20:59  ← CŨ hơn
+?types=repo.push: trả cả bank.transfer.received
+không token     : 401</pre></div>
+  </div>
+  <div class="box"><h4>Vì sao chưa dùng được cho một BE bên ngoài</h4><ul>
+    <li>Sắp xếp <code>receivedAt DESC</code>, nên <code>after</code> đi lùi về quá khứ. Client muốn hỏi "có gì mới sau lần trước" thì không làm được.</li>
+    <li><code>types</code> trong tài liệu chưa được cài.</li>
+    <li>Chỉ có JWT của tài khoản admin duy nhất. Không có API key riêng cho từng hệ thống tiêu thụ, không thu hồi được riêng.</li>
+    <li>Chưa cắm vào BE nào. Shop nhận qua push, không poll.</li>
+  </ul></div>
+  <div class="fix"><h4>Đề xuất hợp đồng và cách một BE kết nối</h4>
+<pre>GET /api/v1/feed?after=evt_01M4…&amp;types=payment.succeeded,repo.push&amp;limit=100&amp;wait=20
+Authorization: Bearer hk_live_…        (API key theo tenant, quyền read:events)
+
+→ 200 { "events": [ …tăng dần theo id… ], "nextCursor": "evt_01M5…" }
+   rỗng và wait&gt;0: giữ kết nối tối đa 20s (an toàn với giới hạn 30s của Render), có sự kiện thì trả ngay</pre>
+<pre>// phía BE muốn kết nối
+let cursor = await db.get('hub_cursor');           // lưu bền
+for (;;) {
+  const r = await fetch(`${HUB}/api/v1/feed?after=${cursor ?? ''}&amp;types=payment.succeeded&amp;wait=20`,
+                        { headers: { Authorization: `Bearer ${KEY}` } }).then(r =&gt; r.json());
+  for (const e of r.events) await handleOnce(e.id, e);   // chống trùng theo event.id
+  if (r.nextCursor) { cursor = r.nextCursor; await db.set('hub_cursor', cursor); }
+}</pre>
+  <p>Cài đặt: <code>WHERE tenant_id = $1 AND id &gt; $after AND type = ANY($types) ORDER BY id ASC</code>. ID dạng ULID nên tăng theo thời gian. Long poll tuỳ chọn bằng vòng lặp kiểm tra mỗi 1s tối đa <code>wait</code> giây, hoặc subscribe Redis. Thêm bảng <code>api_keys</code> (hash, tenant_id, scopes, revoked_at). Tổng khoảng 3 giờ. Viết thêm một script <code>examples/poll-consumer.ts</code> làm bằng chứng đã cắm vào một BE.</p></div>
+</section>
+
+<!-- ============ Q9 ============ -->
+<section id="q9" class="paper">
+  <div class="qhead"><span class="qnum">Câu 9</span><h2>Multi-tenant: dữ liệu BE này có lẫn BE khác không</h2><span class="chip warn">Khung đúng, có lỗ rò</span></div>
+  <p class="claim">"Mọi bảng nghiệp vụ gắn tenant_id và mọi truy vấn bắt buộc đi qua lớp kiểm soát phạm vi."</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Bảng</th><th>tenant_id</th><th>Nhận xét</th></tr></thead>
+    <tbody>
+      <tr><td>sources, destinations, subscriptions, events, deliveries, audit_logs</td><td><span class="chip ok">có</span></td><td>Truy cập qua <code>TenantScopedRepository</code>. <code>PrismaService</code> không lộ 5 model này ra ngoài.</td></tr>
+      <tr><td>raw_events, source_secrets, delivery_attempts</td><td><span class="chip warn">gián tiếp</span></td><td>Qua khoá ngoại cha. Truy cập trực tiếp qua getter, không scope.</td></tr>
+      <tr><td>outbox, processed_messages</td><td><span class="chip na">không cần</span></td><td>Bảng hạ tầng, hợp lý.</td></tr>
+      <tr><td>tenants</td><td><span class="chip bad">không có bảng</span></td><td><code>tenant_id</code> là UUID trôi nổi, không có khoá ngoại. JWT luôn gán <code>DEFAULT_TENANT_ID</code>, nên thực tế chỉ có 1 tenant.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="box"><h4>Các đường rò cụ thể</h4><ul>
+    <li><strong>Subscription chéo tenant.</strong> <code>createSubscription</code> nhận <code>destinationId</code> từ body mà không kiểm đích thuộc tenant nào. Tenant A tạo subscription trỏ vào đích của B thì sự kiện của A chảy sang hệ thống của B. <code>findActiveSubscriptionsForEventType</code> cũng <code>include: destination</code> không lọc tenant.</li>
+    <li><strong>Socket.IO phát toàn cục.</strong> Không xác thực, không room. Mọi client nhận sự kiện của mọi tenant.</li>
+    <li><strong>DB không tự bảo vệ.</strong> Không có khoá ngoại ghép <code>(tenant_id, id)</code> giữa subscription–destination và delivery–event. Không có Row Level Security. <code>PrismaService</code> vẫn lộ <code>$queryRawUnsafe</code>.</li>
+    <li><strong>Hub và Shop dùng chung user DB <code>hub_user</code>.</strong> Shop đọc được schema <code>hub</code>. Model <code>Order</code> nằm trong cùng Prisma client mà hub dùng, va chạm với BB-1.</li>
+    <li><code>events.idempotency_key</code> UNIQUE toàn cục, không theo tenant. Hiện vô hại vì giá trị là ULID mới.</li>
+  </ul></div>
+  <div class="fix"><h4>Giải pháp theo thứ tự</h4><ul>
+    <li>(20 phút) <code>createSubscription</code>: <code>repo.findDestinationById(body.destinationId)</code>, không thấy thì 404. Thêm test chéo tenant.</li>
+    <li>(1 giờ) Bảng <code>tenants</code> + khoá ngoại. Khoá ngoại ghép: <code>UNIQUE(tenant_id, id)</code> trên destinations, <code>FOREIGN KEY (tenant_id, destination_id) REFERENCES destinations(tenant_id, id)</code> trên subscriptions. Tương tự cho deliveries → events. Khi đó DB tự từ chối dữ liệu lẫn tenant.</li>
+    <li>(2 giờ, điểm cộng cho hội đồng) RLS: <code>ALTER TABLE … ENABLE ROW LEVEL SECURITY; CREATE POLICY t ON … USING (tenant_id = current_setting('app.tenant_id')::uuid)</code>. Repository chạy <code>SET LOCAL app.tenant_id</code> trong mỗi transaction. Là lưới thứ hai nếu code quên scope.</li>
+    <li>Tách user DB cho Shop chỉ có quyền trên schema <code>shop</code>, và tách model <code>Order</code> ra Prisma schema riêng của Shop.</li>
+    <li>Thêm tenant thứ hai vào seed và một test: đăng nhập tenant B không thấy được gì của tenant A. Chứng minh BB-5 bằng test chứ không bằng lời.</li>
+  </ul></div>
+</section>
+
+<section id="lotrinh">
+  <h2>Lộ trình sửa đề xuất</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Ưu tiên</th><th>Việc</th><th>Câu</th><th>Ước tính</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip bad">P0</span></td><td>Dọn <code>dist</code> cũ, commit tsconfig, rebuild mọi image <code>--no-cache</code>, đổi <code>db push</code> sang <code>migrate deploy</code></td><td>4</td><td class="num">30 phút</td></tr>
+      <tr><td><span class="chip bad">P0</span></td><td>Sửa <code>pinnedLookup</code> cho <code>{all:true}</code> + test tích hợp HTTP thật</td><td>3, 5</td><td class="num">30 phút</td></tr>
+      <tr><td><span class="chip bad">P0</span></td><td>URL đích trong Docker (<code>shop:4001</code>, <code>hub-api:4000</code>), seed đồng bộ đích từ .env</td><td>3</td><td class="num">30 phút</td></tr>
+      <tr><td><span class="chip bad">P0</span></td><td>Kiểm subscription cùng tenant</td><td>9</td><td class="num">20 phút</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>Normalize → delivery qua outbox, sweeper PENDING, requeue có giới hạn, AMQP reconnect</td><td>4</td><td class="num">3 giờ</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>Phát trace 6 chặng + JWT handshake + room theo tenant + <code>circuit.changed</code></td><td>7</td><td class="num">3 giờ</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>Replay trong transaction, bulk replay, audit log</td><td>6</td><td class="num">2 giờ</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>Feed polling tăng dần + <code>types</code> + API key + script consumer mẫu</td><td>8</td><td class="num">3 giờ</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>HALF_OPEN thật, ghi circuit_state, queue phù hợp khi OPEN, <code>/mock/fail</code></td><td>5</td><td class="num">2 giờ</td></tr>
+      <tr><td><span class="chip na">P2</span></td><td>PayOS so sánh bằng timingSafeEqual, phân loại <code>code</code>; trường CloudEvents; bảng type chung</td><td>1, 2</td><td class="num">2 giờ</td></tr>
+      <tr><td><span class="chip na">P2</span></td><td>Bảng tenants, khoá ngoại ghép, RLS, tách user DB Shop, tenant thứ 2 trong seed</td><td>9</td><td class="num">3 giờ</td></tr>
+      <tr><td><span class="chip na">P2</span></td><td><code>/metrics</code> (prom-client), dashboard Grafana, script k6, cloudflared named tunnel trong compose</td><td>hạ tầng</td><td class="num">4 giờ</td></tr>
+      <tr><td><span class="chip na">P2</span></td><td>Sửa phụ lục cho khớp: SePay là API key, DLQ nguồn sự thật là Postgres, throttle là fixed window</td><td>1, 5, 6</td><td class="num">30 phút</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Lệnh để tự kiểm lại</h2>
+<pre># webhook GitHub hợp lệ (secret seed mặc định)
+BODY='{"ref":"refs/heads/main","repository":{"full_name":"admin/webhook-hub"},"head_commit":{"id":"c1"}}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac 'gh_webhook_secret_test_123' | sed 's/^.* //')
+curl -X POST localhost:4000/hooks/github/src_github_main -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: push" -H "X-GitHub-Delivery: d_$(date +%s)" -H "X-Hub-Signature-256: sha256=$SIG" -d "$BODY"
+
+# xem sự kiện đi tới đâu
+docker exec webhook-hub-postgres psql -U hub_user -d webhook_hub -c \
+ "select e.type, d.status, d.attempt_count, left(d.last_error,80) from hub.events e
+  left join hub.deliveries d on d.event_id=e.id order by e.received_at desc limit 10;"
+
+# độ sâu các hàng đợi
+curl -s -u hub_admin:hub_secret localhost:15672/api/queues | jq -r '.[] | "\(.name) \(.messages)"'
+
+# test đơn vị (giới hạn worker để không hết RAM)
+npx jest -w 2</pre>
+</section>
+
+</div>

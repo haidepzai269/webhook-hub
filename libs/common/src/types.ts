@@ -1,4 +1,4 @@
-export type ProviderType = 'payos' | 'sepay' | 'github';
+export type ProviderType = 'payos' | 'sepay' | 'github' | 'stripe';
 
 export type RawEventStatus = 'ACCEPTED' | 'REJECTED' | 'DUPLICATE';
 
@@ -45,20 +45,17 @@ export interface NormalizedEvent {
   origin: EventOrigin;
 }
 
+/**
+ * Message delivery CHỈ mang tham chiếu (S1-1, ADR-042). Không bao giờ chứa cấu hình đích,
+ * signing secret hay nội dung event: worker nạp lại từ Postgres (đã scope tenant) và giải mã
+ * cấu hình ngay lúc gửi. Nhờ vậy outbox, hàng đợi retry và DLQ không giữ secret nào.
+ */
 export interface DeliveryMessage {
   deliveryId: string;
   tenantId: string;
-  eventId: string;
-  subscriptionId: string;
-  destinationId: string;
-  destinationType: DestinationType;
-  config: Record<string, any>;
-  signingSecret?: string;
-  event: NormalizedEvent;
-  attemptCount: number;
   attemptGeneration: number;
+  attemptCount: number;
   correlationId: string;
-  rateLimitRps?: number;
 }
 
 export interface OutboxPayload {
@@ -67,4 +64,52 @@ export interface OutboxPayload {
   tenantId: string;
   provider: ProviderType;
   correlationId: string;
+}
+
+// --- Realtime (S2-2, ADR-049) — hợp đồng giữa worker (publish) và hub-api (emit Socket.IO) ---
+
+/** `delivery.attempt` — kênh Redis `hub:realtime:deliveries`. DEFERRED (circuit hoãn) không được publish. */
+export interface DeliveryAttemptNotice {
+  tenantId: string;
+  correlationId: string;
+  eventId: string;
+  deliveryId: string;
+  destinationId: string;
+  attemptNo: number;
+  generation: number;
+  status: 'SUCCEEDED' | 'RETRYING' | 'DEAD' | 'DEFERRED';
+  httpStatus: number;
+  ms: number;
+  nextQueue?: string;
+  nextAttemptAt?: string;
+}
+
+/** `event.received` — kênh `hub:realtime:events`, MỘT publish cho mỗi raw event (gộp mảng). */
+export interface EventReceivedNotice {
+  tenantId: string;
+  correlationId: string;
+  rawEventId: string;
+  events: { id: string; type: string; source: string }[];
+  deliveries: { deliveryId: string; eventId: string; destinationId: string; destinationName: string; destinationType: string }[];
+}
+
+/** `circuit.changed` — kênh `hub:realtime:circuit`. */
+export interface CircuitChangedNotice {
+  tenantId: string;
+  destinationId: string;
+  from: CircuitState;
+  to: CircuitState;
+  failures: number;
+  at: string;
+}
+
+/** `trace.ingested` — phát IN-PROCESS từ hub-api (không qua Redis). Gộp chặng ①–④. */
+export interface TraceIngestedNotice {
+  correlationId: string;
+  provider: string;
+  sourceKey: string;
+  httpStatus: number;
+  outcome: 'ACCEPTED' | 'REJECTED' | 'DUPLICATE' | 'RATE_LIMITED' | 'ERROR';
+  rawEventId?: string;
+  ms: number;
 }

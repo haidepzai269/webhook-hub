@@ -1,4 +1,4 @@
-import { getNextRetryQueue, RETRY_TIERS } from '../src/topology';
+import { getNextRetryQueue, retryQueueForDelay, RETRY_TIERS } from '../src/topology';
 
 describe('RabbitMQ Retry Tiers & Backoff (§5.4 & ADR-007)', () => {
   it('phải có đủ 5 tầng retry với TTL tăng dần và không bị head-of-line blocking', () => {
@@ -41,5 +41,18 @@ describe('RabbitMQ Retry Tiers & Backoff (§5.4 & ADR-007)', () => {
   it('phải trả về null khi vượt quá 5 lần retry để chuyển sang DLQ', () => {
     expect(getNextRetryQueue(6)).toBeNull();
     expect(getNextRetryQueue(10)).toBeNull();
+  });
+
+  // S2-1: hoãn vì circuit OPEN -> tầng NGẮN NHẤT có TTL >= thời gian còn phải chờ.
+  it('retryQueueForDelay chọn tầng ngắn nhất có TTL >= delay', () => {
+    expect(retryQueueForDelay(0)).toEqual({ queueName: 'q.delivery.retry.10s', ttlMs: 10000 });
+    expect(retryQueueForDelay(10_000).queueName).toBe('q.delivery.retry.10s');
+    expect(retryQueueForDelay(10_001).queueName).toBe('q.delivery.retry.1m');
+    expect(retryQueueForDelay(60_000)).toEqual({ queueName: 'q.delivery.retry.1m', ttlMs: 60000 });
+    expect(retryQueueForDelay(61_000).queueName).toBe('q.delivery.retry.5m');
+  });
+
+  it('retryQueueForDelay: delay lớn hơn mọi tầng -> tầng dài nhất', () => {
+    expect(retryQueueForDelay(10 * 3600_000).queueName).toBe('q.delivery.retry.2h');
   });
 });

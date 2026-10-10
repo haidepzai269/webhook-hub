@@ -4,7 +4,4 @@ global:
 scrape_configs:
   - job_name: 'hub-api'
     static_configs:
-      - targets: ['host.docker.internal:4000']
-  - job_name: 'hub-worker'
-    static_configs:
-      - targets: ['host.docker.internal:4002']
+      - targets: ['hub-api:4000']

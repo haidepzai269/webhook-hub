@@ -9,6 +9,9 @@
   "dependencies": {
     "@hub/common": "*",
     "@hub/crypto": "*",
+    "@octokit/webhooks-methods": "^4.1.0",
+    "@payos/node": "^2.0.5",
+    "stripe": "^22.6.2",
     "ulidx": "^2.4.1"
   },
   "devDependencies": {

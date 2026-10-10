@@ -1,0 +1,162 @@
+/* Neo Brutalism (mẫu codepen rustcode/dPYoeMe) — màu cố định, không theo theme admin. */
+
+.page {
+  --primary: #000000;
+  --secondary: #ffffff;
+  --accent: #ff5e5b;
+  --shadow: 8px 8px 0px var(--primary);
+
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: var(--secondary);
+  color: var(--primary);
+  font-family: "Courier New", monospace;
+}
+
+.page * {
+  font-family: inherit;
+}
+
+.container {
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  max-width: 400px;
+  border: 1px solid var(--primary);
+  border-radius: 12px;
+  padding: 40px 30px;
+  background-color: var(--secondary);
+  box-shadow: var(--shadow);
+}
+
+.container::before {
+  content: "";
+  position: absolute;
+  inset: 6px -6px -6px 6px;
+  z-index: -1;
+  border: 1px solid var(--primary);
+  border-radius: 12px;
+}
+
+.title {
+  margin-bottom: 30px;
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.inputGroup {
+  margin-bottom: 20px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.input {
+  width: 100%;
+  border: 2px solid var(--primary);
+  padding: 12px 15px;
+  background-color: var(--secondary);
+  font-size: 16px;
+  outline: none;
+  transition: all 0.3s;
+}
+
+.input:focus {
+  box-shadow: 4px 4px 0px var(--primary);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--accent);
+}
+
+.fieldError {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.serverError {
+  margin-bottom: 10px;
+  border: 2px solid var(--primary);
+  padding: 8px 12px;
+  background-color: #ffe3e2;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.button {
+  width: 100%;
+  margin-top: 10px;
+  border: 2px solid var(--primary);
+  padding: 12px;
+  background-color: var(--accent);
+  color: var(--secondary);
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.button:hover:not(:disabled),
+.socialBtn:hover {
+  box-shadow: 4px 4px 0px var(--primary);
+  transform: translate(-2px, -2px);
+}
+
+.button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 25px 0;
+  font-weight: bold;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  margin: 0 10px;
+  border-bottom: 2px solid var(--primary);
+}
+
+.socialLogin {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+}
+
+.socialBtn {
+  display: flex;
+  width: 50px;
+  height: 50px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--primary);
+  background-color: var(--secondary);
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.footer {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.footer a {
+  font-weight: bold;
+  text-decoration: underline;
+}

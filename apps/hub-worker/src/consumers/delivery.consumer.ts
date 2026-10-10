@@ -1,11 +1,87 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@hub/database';
-import { CircuitBreakerService } from '../circuit/circuit-breaker.service';
+import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
+import { Prisma } from '@prisma/client';
+import { CIRCUIT_OPEN_MS, CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
 import { SenderRegistry } from '../senders/sender.registry';
-import { EXCHANGES, ROUTING_KEYS, getNextRetryQueue } from '@hub/messaging';
-import { logger, DeliveryMessage, renderTemplate } from '@hub/common';
+import { SendResult } from '../senders/sender.interface';
+import { EXCHANGES, ROUTING_KEYS, getNextRetryQueue, retryQueueForDelay, retryTtlMs } from '@hub/messaging';
+import {
+  logger,
+  CircuitState,
+  DeliveryAttemptNotice,
+  DeliveryMessage,
+  DestinationType,
+  NormalizedEvent,
+  buildDeliveryMessage,
+  parseDeliveryMessage,
+  renderTemplate,
+} from '@hub/common';
+import { aesGcmDecrypt } from '@hub/crypto';
 import * as amqp from 'amqplib';
 import Redis from 'ioredis';
+
+// S2-1: circuit OPEN chỉ mở 60s -> hoãn vào tầng NGẮN NHẤT có TTL >= 60s (q.delivery.retry.1m),
+// không phải tầng 2h như trước. Tính từ RETRY_TIERS theo giá trị TTL (topology một chỗ duy nhất).
+const CIRCUIT_DEFER = retryQueueForDelay(CIRCUIT_OPEN_MS);
+// Throttle: phòng ngừa, giữ tầng ngắn nhất.
+const THROTTLE_DEFER = retryQueueForDelay(0);
+
+/**
+ * Review SPEC-2 #4 (ADR-054): số lần hoãn LIÊN TIẾP vì circuit (OPEN / HALF_OPEN không giành được probe)
+ * đếm trong header message. Không có trần thì một đích chết hẳn làm delivery quay vòng retry.1m mãi,
+ * đốt Redis/DB. Vượt trần -> tính là MỘT lần thử thất bại (ghi attempt) và đi tầng retry kế tiếp như
+ * lỗi retryable, cuối cùng thành DEAD. Mặc định 30 lần ≈ 30 phút (tầng 1m).
+ */
+export const CIRCUIT_DEFERRALS_HEADER = 'x-circuit-deferrals';
+export function maxCircuitDeferrals(env: string | undefined = process.env.CIRCUIT_MAX_DEFERRALS): number {
+  const n = Number(env ?? 30);
+  return Number.isInteger(n) && n > 0 ? n : 30;
+}
+
+/**
+ * Review SPEC-2 #3 (ADR-054): chỉ lỗi cho thấy ĐÍCH đang hỏng mới tính vào circuit — 5xx, 408, 429 và
+ * không có phản hồi (sender trả 500 khi lỗi mạng/timeout; status < 100 phòng hờ). 4xx khác là lỗi cấu
+ * hình/nội dung của CHÍNH ta (404 sai URL, 400 payload, 401 sai token): đích vẫn sống, mở circuit vì
+ * chúng sẽ hoãn oan mọi delivery khác của đích đó.
+ */
+export function countsTowardCircuit(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429 || status < 100;
+}
+
+/**
+ * Đánh dấu CHÍNH XÁC lỗi P2002 (unique-violation) xảy ra ở bước ghi
+ * `processed_messages` (composite PK `[consumer, messageId]`) trong transaction
+ * chốt idempotency. Đây là tình huống VÔ HẠI, tự lành: 2 worker xử lý gần như đồng
+ * thời 2 message trùng `deliveryId:attemptGeneration:attemptNo`, worker thua cuộc
+ * chạm unique constraint vì worker kia đã COMMIT trước — chỉ ack, không requeue.
+ */
+class DuplicateProcessedMessageError extends Error {
+  constructor(readonly cause: unknown) {
+    super('processed_messages unique violation (P2002) -- lần gửi này đã được worker khác xử lý xong');
+  }
+}
+
+type DeliveryForSend = NonNullable<Awaited<ReturnType<TenantScopedRepository['findDeliveryForSend']>>>;
+
+/** Dựng NormalizedEvent từ dòng `events` trong DB — message không còn mang event (S1-1). */
+function toNormalizedEvent(row: DeliveryForSend): NormalizedEvent {
+  const e = row.event;
+  return {
+    id: e.id,
+    tenantId: e.tenantId,
+    type: e.type,
+    source: e.source as NormalizedEvent['source'],
+    sourceId: e.rawEvent?.sourceId ?? '',
+    subject: e.subject ?? undefined,
+    data: (e.data ?? {}) as Record<string, any>,
+    occurredAt: e.occurredAt.toISOString(),
+    receivedAt: e.receivedAt.toISOString(),
+    correlationId: e.correlationId,
+    rawEventId: e.rawEventId ?? undefined,
+    parentEventId: e.parentEventId ?? undefined,
+    origin: e.origin as NormalizedEvent['origin'],
+  };
+}
 
 @Injectable()
 export class DeliveryConsumer {
@@ -17,182 +93,302 @@ export class DeliveryConsumer {
   ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisPub = new Redis(redisUrl, { lazyConnect: true });
+    // Không để ioredis văng 'Unhandled error event' khi Redis chết (BB-2: Redis được phép sai).
+    this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (delivery) lỗi'));
     this.redisPub.connect().catch(() => {});
   }
 
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
-    const correlationId = msg.properties.headers?.['x-correlation-id'] || 'unknown';
+    const correlationHeader = msg.properties.headers?.['x-correlation-id'] || 'unknown';
     let deliveryMsg: DeliveryMessage;
 
     try {
-      deliveryMsg = JSON.parse(msg.content.toString());
+      // Tương thích ngược: message kiểu cũ (có config/signingSecret/event) vẫn đọc được,
+      // nhưng CHỈ lấy các trường tham chiếu — cấu hình luôn đọc lại từ DB (S1-1).
+      deliveryMsg = parseDeliveryMessage(msg.content, String(correlationHeader));
     } catch (e: any) {
       logger.error({ err: e.message }, 'Lỗi parse DeliveryMessage -> chuyển DLQ');
       channel.nack(msg, false, false);
       return;
     }
 
-    const { deliveryId, destinationId, destinationType, config, signingSecret, event, attemptCount } = deliveryMsg;
-    const log = logger.child({ correlationId, deliveryId, destinationType, attemptCount });
+    const { deliveryId, attemptCount, tenantId } = deliveryMsg;
+    const correlationId = deliveryMsg.correlationId;
+    const log = logger.child({ correlationId, deliveryId, attemptCount });
+    // Tenant ĐÃ BIẾT tại đây (deliveryMsg.tenantId) -> mọi truy vấn đi qua TenantScopedRepository (BB-5).
+    const repo = this.prisma.forTenant(tenantId);
+    // Mọi lần đẩy lại (retry, hoãn vì circuit/throttle, DLQ) đều dựng lại message GỌN — kể cả
+    // khi message nhận vào là kiểu cũ còn secret, bản sao gửi tiếp sẽ không còn secret nữa.
+    const slim = (count = attemptCount) => Buffer.from(JSON.stringify(buildDeliveryMessage({ ...deliveryMsg, attemptCount: count })));
 
     try {
-      // 1. Kiểm tra Circuit Breaker (§5.4)
-      const circuitState = await this.circuitBreaker.getState(destinationId);
-      if (circuitState === 'OPEN') {
-        log.warn('Circuit Breaker đang OPEN -> đẩy sang tầng retry ngắn nhất');
-        channel.sendToQueue('q.delivery.retry.10s', msg.content, {
+      // 0. Nạp delivery + event + subscription + destination bằng MỘT truy vấn đã scope tenant.
+      const row = await repo.findDeliveryForSend(deliveryId);
+      if (!row) {
+        log.warn('Delivery không còn tồn tại (đã bị xoá hoặc khác tenant) -> ack, bỏ qua');
+        channel.ack(msg);
+        return;
+      }
+      const destination = row.subscription.destination;
+      const destinationId = destination.id;
+      const destinationType = destination.type as DestinationType;
+      const event = toNormalizedEvent(row);
+
+      const currentAttemptNo = attemptCount + 1;
+      // Realtime `delivery.attempt` (S2-2): luôn kèm tenantId để gateway chỉ phát vào room đúng tenant (BB-5).
+      // DEFERRED (circuit hoãn) KHÔNG publish — tiết kiệm Redis.
+      const notifyAttempt = (n: Pick<DeliveryAttemptNotice, 'status' | 'httpStatus' | 'ms' | 'nextQueue' | 'nextAttemptAt'>) => {
+        const notice: DeliveryAttemptNotice = {
+          tenantId,
+          correlationId,
+          eventId: event.id,
+          deliveryId,
+          destinationId,
+          attemptNo: currentAttemptNo,
+          generation: deliveryMsg.attemptGeneration,
+          ...n,
+        };
+        this.redisPub.publish('hub:realtime:deliveries', JSON.stringify(notice)).catch(() => {});
+      };
+
+      // 1. Circuit breaker 3 trạng thái (S2-1, §5.4). Redis là nguồn chạy; DB chỉ để hiển thị.
+      const circuit: CircuitTarget = {
+        destinationId,
+        tenantId,
+        persistedState: ((destination as { circuitState?: CircuitState }).circuitState ?? 'CLOSED') as CircuitState,
+      };
+      const view: CircuitView = await this.circuitBreaker.getState(destinationId);
+      // `:open` hết hạn (-> HALF_OPEN) hay mọi khoá hết hạn (-> CLOSED) không có sự kiện nào báo:
+      // phát hiện ở message kế tiếp bằng cách so với bản DB.
+      await this.circuitBreaker.syncObserved(circuit, view);
+
+      let probeToken: string | null = null;
+      if (view.state === 'HALF_OPEN') {
+        probeToken = await this.circuitBreaker.tryAcquireProbe(destinationId);
+      }
+      const isProbe = probeToken !== null;
+      /** Khác null = hoãn vì circuit đã quá trần -> ghi một lần thử thất bại thay vì gửi (ADR-054). */
+      let circuitTimeout: string | null = null;
+      if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !isProbe)) {
+        const deferrals = (Number(msg.properties.headers?.[CIRCUIT_DEFERRALS_HEADER]) || 0) + 1;
+        const maxDeferrals = maxCircuitDeferrals();
+        if (deferrals <= maxDeferrals) {
+          // Hoãn gửi, KHÔNG phải một lần thử: giữ nguyên attemptCount, chỉ tăng bộ đếm hoãn.
+          const nextAttemptAt = new Date(Date.now() + CIRCUIT_DEFER.ttlMs);
+          log.warn({ queue: CIRCUIT_DEFER.queueName, circuit: view.state, deferrals }, 'Circuit chưa cho gửi -> hoãn (DEFERRED)');
+          await repo.deferDelivery(deliveryId, nextAttemptAt).catch(() => 0);
+          channel.sendToQueue(CIRCUIT_DEFER.queueName, slim(), {
+            persistent: true,
+            headers: { ...msg.properties.headers, [CIRCUIT_DEFERRALS_HEADER]: deferrals },
+          });
+          channel.ack(msg);
+          return;
+        }
+        circuitTimeout = `circuit ${view.state} quá lâu: đã hoãn ${maxDeferrals} lần liên tiếp -> tính là một lần thử thất bại`;
+        log.warn({ circuit: view.state, deferrals: maxDeferrals }, 'Circuit hoãn quá trần -> ghi một lần thử thất bại, đi tầng retry kế');
+      }
+      const releaseProbe = () => (isProbe ? this.circuitBreaker.releaseProbe(destinationId, probeToken) : Promise.resolve());
+
+      // 1b. Outbound Throttle per destination (§5.4b & ADR-016): phòng ngừa, giữ tầng NGẮN nhất.
+      // (Không áp cho lần "thử" do circuit quá trần — lần đó không gọi đích.)
+      if (!circuitTimeout && destination.rateLimitRps && destination.rateLimitRps > 0) {
+        const allowed = await this.circuitBreaker.checkThrottle(destinationId, destination.rateLimitRps);
+        if (!allowed) {
+          log.warn(
+            { destinationId, rateLimitRps: destination.rateLimitRps },
+            'Outbound Throttle kích hoạt (vượt RPS đích) -> đẩy sang tầng retry ngắn nhất',
+          );
+          await releaseProbe();
+          channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          channel.ack(msg);
+          return;
+        }
+      }
+
+      const rendered = renderTemplate(row.subscription.template || '', event);
+
+      // 2. Chốt idempotency processed_messages (§5.2 chốt 5) TRƯỚC KHI gửi thật.
+      // message_id = deliveryId + attemptGeneration + attemptNo (mỗi tầng retry một id riêng).
+      const messageId = `${deliveryId}:${deliveryMsg.attemptGeneration}:${currentAttemptNo}`;
+
+      const alreadyProcessed = await this.prisma.processedMessage.findUnique({
+        where: { consumer_messageId: { consumer: 'delivery', messageId } },
+      });
+      if (alreadyProcessed) {
+        log.info({ messageId }, 'Message đã xử lý xong trước đó (processed_messages hit) -> bỏ qua, không gửi lại');
+        await releaseProbe();
+        channel.ack(msg);
+        return;
+      }
+
+      // 2b. Lease (S1-2): cập nhật CÓ ĐIỀU KIỆN sang DELIVERING. Sweeper và message gốc có thể
+      // cùng tới — chỉ một bên nhận được lần gửi này, bên kia ack và thôi.
+      const claimed = await repo.claimForSend(deliveryId, deliveryMsg.attemptGeneration, attemptCount);
+      if (claimed === 0) {
+        await releaseProbe();
+        // Lease còn hạn cho ĐÚNG lần gửi này (worker khác đang gửi, hoặc worker trước chết/shutdown
+        // giữa chừng và message bị redeliver sớm): KHÔNG bỏ — hoãn 1 phút để thử giành lại sau khi
+        // lease (60s) hết. Đã SUCCEEDED/DEAD/sang lần thử khác thì message này thừa -> ack bỏ.
+        const lease = await repo.getDeliveryLeaseState(deliveryId);
+        if (
+          lease?.status === 'DELIVERING' &&
+          lease.attemptGeneration === deliveryMsg.attemptGeneration &&
+          lease.attemptCount === attemptCount
+        ) {
+          log.info({ messageId, queue: CIRCUIT_DEFER.queueName }, 'Lease DELIVERING còn hạn -> hoãn 1 phút rồi thử giành lại');
+          channel.sendToQueue(CIRCUIT_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          channel.ack(msg);
+          return;
+        }
+        log.debug({ messageId, status: lease?.status }, 'Lần gửi này đã xong hoặc đã sang lần khác (lease) -> ack, bỏ qua');
+        channel.ack(msg);
+        return;
+      }
+
+      let result: SendResult;
+      if (circuitTimeout) {
+        // Không gọi đích: lần "thử" này là circuit quá trần. status 0 = không có phản hồi (retryable).
+        result = { status: 0, error: circuitTimeout, body: '', durationMs: 0 };
+      } else {
+        // 3. Giải mã cấu hình đích NGAY LÚC GỬI (S1-1) — secret không bao giờ rời Postgres
+        // dưới dạng rõ, trừ trong bộ nhớ worker trong khoảnh khắc gửi.
+        const masterKey = getMasterKey();
+        let config: Record<string, any> = {};
+        try {
+          config = JSON.parse(aesGcmDecrypt(destination.configEncrypted, masterKey));
+        } catch (err: any) {
+          log.error({ err: err.message, destinationId }, 'Không thể giải mã config của destination');
+        }
+        let signingSecret: string | undefined;
+        if (destination.signingSecretEncrypted) {
+          try {
+            signingSecret = aesGcmDecrypt(destination.signingSecretEncrypted, masterKey);
+          } catch (err: any) {
+            log.error({ err: err.message, destinationId }, 'Không thể giải mã signing secret của destination');
+          }
+        }
+
+        // 4. Gửi (sender KHÔNG throw -- luôn trả SendResult, kể cả lỗi mạng/timeout)
+        const sender = SenderRegistry.get(destinationType);
+        result = await sender.send(config, rendered, event, signingSecret);
+      }
+
+      const attemptData: Prisma.DeliveryAttemptUncheckedCreateInput = {
+        deliveryId,
+        attemptNo: currentAttemptNo,
+        requestBody: { content: rendered, event } as any,
+        responseStatus: circuitTimeout ? null : result.status,
+        responseBody: (result.body || '').substring(0, 2048),
+        durationMs: result.durationMs,
+        error: result.error,
+      };
+
+      // Ghi delivery_attempts + update delivery.status + processed_messages CÙNG một transaction (§5.2 chốt 5).
+      const persistAttempt = (statusData: Prisma.DeliveryUncheckedUpdateInput) =>
+        this.prisma.$transaction(async (tx) => {
+          await tx.deliveryAttempt.create({ data: attemptData });
+          const repoTx = new TenantScopedRepository(tx, tenantId);
+          await repoTx.updateDeliveryStatus(deliveryId, statusData);
+          try {
+            await tx.processedMessage.create({ data: { consumer: 'delivery', messageId } });
+          } catch (err: any) {
+            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+              throw new DuplicateProcessedMessageError(err);
+            }
+            throw err;
+          }
+        });
+
+      const persistAttemptOrSkipIfDuplicate = async (statusData: Prisma.DeliveryUncheckedUpdateInput): Promise<boolean> => {
+        try {
+          await persistAttempt(statusData);
+          return true;
+        } catch (err) {
+          if (err instanceof DuplicateProcessedMessageError) {
+            log.debug({ messageId }, 'Delivery message đã được xử lý bởi worker khác (duplicate processed_messages) -> ack');
+            channel.ack(msg);
+            return false;
+          }
+          throw err;
+        }
+      };
+
+      const isSuccess = result.status >= 200 && result.status < 300;
+
+      if (isSuccess) {
+        await this.circuitBreaker.recordSuccess(circuit, view);
+        if (
+          !(await persistAttemptOrSkipIfDuplicate({
+            status: 'SUCCEEDED',
+            attemptCount: currentAttemptNo,
+            lastError: null,
+            nextAttemptAt: null,
+          }))
+        ) {
+          return;
+        }
+        notifyAttempt({ status: 'SUCCEEDED', httpStatus: result.status, ms: result.durationMs });
+        log.info({ durationMs: result.durationMs, destinationType }, 'Chuyển phát webhook thành công');
+        channel.ack(msg);
+        return;
+      }
+
+      // --- THẤT BẠI ---
+      // Chỉ lỗi phía đích mới tính vào circuit (ADR-054). Lần "thử" do circuit quá trần không gọi đích
+      // nên không phải bằng chứng mới. Probe HALF_OPEN nhận 4xx (không tính): đích trả lời được nhưng
+      // không chứng minh sống/chết -> NHẢ probe, giữ HALF_OPEN để lần gửi kế tiếp thử lại ngay.
+      if (!circuitTimeout && countsTowardCircuit(result.status)) {
+        await this.circuitBreaker.recordFailure(circuit, view);
+      } else if (isProbe) {
+        log.info({ status: result.status }, 'Probe HALF_OPEN nhận 4xx (không tính vào circuit) -> nhả probe, giữ HALF_OPEN');
+        await releaseProbe();
+      }
+
+      // 4xx (trừ 408, 429) -> lỗi cấu hình/client -> DEAD ngay (§7.3)
+      const isNonRetryable = result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429;
+      const nextQueue = isNonRetryable ? null : getNextRetryQueue(currentAttemptNo);
+
+      if (nextQueue) {
+        log.info({ nextQueue, nextAttempt: currentAttemptNo + 1 }, 'Lỗi retryable -> đẩy vào queue retry tiếp theo');
+        // S2-2: next_attempt_at = now + TTL tầng kế — UI đếm ngược, sweeper dùng để phát hiện RETRYING kẹt.
+        const nextAttemptAt = new Date(Date.now() + (retryTtlMs(nextQueue) ?? 0));
+        if (
+          !(await persistAttemptOrSkipIfDuplicate({
+            status: 'RETRYING',
+            attemptCount: currentAttemptNo,
+            nextAttemptAt,
+            lastError: `Lần ${currentAttemptNo} thất bại (${result.status}): ${result.error || result.body}`,
+          }))
+        ) {
+          return;
+        }
+        notifyAttempt({
+          status: 'RETRYING',
+          httpStatus: result.status,
+          ms: result.durationMs,
+          nextQueue,
+          nextAttemptAt: nextAttemptAt.toISOString(),
+        });
+        channel.sendToQueue(nextQueue, slim(currentAttemptNo), {
           persistent: true,
-          headers: msg.properties.headers,
+          // Lần thử mới -> bộ đếm hoãn vì circuit bắt đầu lại từ 0.
+          headers: { ...msg.properties.headers, 'x-attempt': currentAttemptNo, [CIRCUIT_DEFERRALS_HEADER]: 0 },
         });
         channel.ack(msg);
         return;
       }
 
-      // 1b. Kiểm tra Outbound Throttle per destination (§5.4b & ADR-016)
-      if (deliveryMsg.rateLimitRps && deliveryMsg.rateLimitRps > 0) {
-        const allowed = await this.circuitBreaker.checkThrottle(destinationId, deliveryMsg.rateLimitRps);
-        if (!allowed) {
-          log.warn(
-            { destinationId, rateLimitRps: deliveryMsg.rateLimitRps },
-            'Outbound Throttle kích hoạt (vượt RPS đích) -> đẩy sang tầng retry ngắn nhất',
-          );
-          channel.sendToQueue('q.delivery.retry.10s', msg.content, {
-            persistent: true,
-            headers: msg.properties.headers,
-          });
-          channel.ack(msg);
-          return;
-        }
+      const lastError = isNonRetryable
+        ? `Non-retryable HTTP ${result.status}: ${result.error || result.body}`
+        : `Hết 5 lần retry: ${result.error || result.body}`;
+      log.warn({ status: result.status }, isNonRetryable ? 'Lỗi non-retryable (4xx) -> DEAD + DLQ' : 'Vượt quá 5 tầng retry -> DEAD + DLQ');
+      if (!(await persistAttemptOrSkipIfDuplicate({ status: 'DEAD', attemptCount: currentAttemptNo, lastError, nextAttemptAt: null }))) {
+        return;
       }
-
-      // 2. Nạp Subscription để lấy template
-      const subscription = await this.prisma.subscription.findUnique({
-        where: { id: deliveryMsg.subscriptionId },
-      });
-
-      const template = subscription?.template || '';
-      const rendered = renderTemplate(template, event);
-
-      // Cập nhật trạng thái DELIVERING
-      await this.prisma.delivery.update({
-        where: { id: deliveryId },
-        data: { status: 'DELIVERING' },
-      });
-
-      // 3. Thực hiện gửi đi
-      const sender = SenderRegistry.get(destinationType);
-      const result = await sender.send(config, rendered, event, signingSecret);
-
-      const currentAttemptNo = attemptCount + 1;
-
-      // 4. Ghi nhận attempt vào DB
-      await this.prisma.deliveryAttempt.create({
-        data: {
-          deliveryId,
-          attemptNo: currentAttemptNo,
-          requestBody: { content: rendered, event } as any,
-          responseStatus: result.status,
-          responseBody: (result.body || '').substring(0, 2048),
-          durationMs: result.durationMs,
-          error: result.error,
-        },
-      });
-
-      const isSuccess = result.status >= 200 && result.status < 300;
-
-      if (isSuccess) {
-        // --- THÀNH CÔNG ---
-        await this.circuitBreaker.recordSuccess(destinationId);
-        await this.prisma.delivery.update({
-          where: { id: deliveryId },
-          data: {
-            status: 'SUCCEEDED',
-            attemptCount: currentAttemptNo,
-            lastError: null,
-          },
-        });
-
-        // Đẩy Socket.IO qua Redis Pub/Sub
-        this.redisPub.publish(
-          'hub:realtime:deliveries',
-          JSON.stringify({ deliveryId, status: 'SUCCEEDED', eventId: event.id }),
-        ).catch(() => {});
-
-        log.info({ durationMs: result.durationMs }, 'Chuyển phát webhook thành công');
-        channel.ack(msg);
-      } else {
-        // --- THẤT BẠI ---
-        await this.circuitBreaker.recordFailure(destinationId);
-
-        // Phân loại lỗi: Non-retryable vs Retryable (§7.3)
-        // 4xx (trừ 408, 429) -> Lỗi cấu hình/client -> DEAD ngay!
-        const isNonRetryable = result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429;
-
-        if (isNonRetryable) {
-          log.warn({ status: result.status }, 'Lỗi non-retryable (4xx) -> chuyển DEAD và đưa vào DLQ ngay');
-          await this.prisma.delivery.update({
-            where: { id: deliveryId },
-            data: {
-              status: 'DEAD',
-              attemptCount: currentAttemptNo,
-              lastError: `Non-retryable HTTP ${result.status}: ${result.error || result.body}`,
-            },
-          });
-
-          // Đưa vào DLQ
-          channel.publish(
-            EXCHANGES.DELIVERY_DLX,
-            ROUTING_KEYS.DEAD,
-            msg.content,
-            { persistent: true },
-          );
-          channel.ack(msg);
-          return;
-        }
-
-        // Lỗi Retryable: Kiểm tra tầng retry kế tiếp
-        const nextQueue = getNextRetryQueue(currentAttemptNo);
-
-        if (nextQueue) {
-          log.info({ nextQueue, nextAttempt: currentAttemptNo + 1 }, 'Lỗi retryable -> đẩy vào queue retry tiếp theo');
-          await this.prisma.delivery.update({
-            where: { id: deliveryId },
-            data: {
-              status: 'RETRYING',
-              attemptCount: currentAttemptNo,
-              lastError: `Lần ${currentAttemptNo} thất bại (${result.status}): ${result.error || result.body}`,
-            },
-          });
-
-          // Cập nhật attemptCount trong message
-          deliveryMsg.attemptCount = currentAttemptNo;
-          channel.sendToQueue(nextQueue, Buffer.from(JSON.stringify(deliveryMsg)), {
-            persistent: true,
-            headers: { ...msg.properties.headers, 'x-attempt': currentAttemptNo },
-          });
-
-          channel.ack(msg);
-        } else {
-          // Vượt quá 5 tầng retry -> DEAD -> vào DLQ
-          log.warn('Vượt quá 5 tầng retry -> chuyển DEAD và đưa vào DLQ');
-          await this.prisma.delivery.update({
-            where: { id: deliveryId },
-            data: {
-              status: 'DEAD',
-              attemptCount: currentAttemptNo,
-              lastError: `Hết 5 lần retry: ${result.error || result.body}`,
-            },
-          });
-
-          channel.publish(
-            EXCHANGES.DELIVERY_DLX,
-            ROUTING_KEYS.DEAD,
-            msg.content,
-            { persistent: true },
-          );
-          channel.ack(msg);
-        }
-      }
+      notifyAttempt({ status: 'DEAD', httpStatus: result.status, ms: result.durationMs });
+      // DLQ broker chỉ là bản sao để quan sát — Postgres (status DEAD) mới là trọng tài. Bản sao gọn, không secret.
+      channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, slim(currentAttemptNo), { persistent: true });
+      channel.ack(msg);
     } catch (err: any) {
       log.error({ err: err.message }, 'Ngoại lệ khi thực thi DeliveryConsumer');
       channel.nack(msg, false, true); // requeue nếu gặp lỗi unhandled bất thường
