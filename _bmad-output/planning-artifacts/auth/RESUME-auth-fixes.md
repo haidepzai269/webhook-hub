@@ -38,5 +38,6 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 |---|---|---|---|
 | N-1 | xong | 752d4bd | ADR-121: verify-email buộc đặt mật khẩu cho tài khoản mật khẩu chưa xác minh + claimAccount |
 | N-2 | xong | 25d3505 | ADR-122 | |
-| N-3 | xong | (commit N-3+N-4) | ADR-123 | |
-| N-4 | xong | (commit N-3+N-4) | ADR-123; local vẫn tự chọn IP được (ghi rõ), kiểm Vercel thật theo DEPLOYMENT | |
+| N-3 | xong | a20f0e3 | ADR-123 | |
+| N-4 | xong | a20f0e3 | ADR-123; local vẫn tự chọn IP được (ghi rõ), kiểm Vercel thật theo DEPLOYMENT | |
+- Vòng 2 xong: verify L0 628/0/0 · L1 138/0/0 · map 231 mã 0 ma 0 trùng · gates 14/0 · e2e auth 17/17 · smoke OK · demo exit 0.
