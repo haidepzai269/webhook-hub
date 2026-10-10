@@ -215,13 +215,13 @@ export class ServiceResourcesController {
     return rows.find((d) => endpointUrl(d.configEncrypted) === url) ?? null;
   }
 
-  /** Chuyển chủ sang key mới (audit `endpoint.adopted`) rồi chứng minh lại sở hữu: có secret mới -> xoay (ADR-086). */
+  /**
+   * R3-1 (ADR-101, sửa ADR-098): CHỨNG MINH TRƯỚC, chuyển chủ SAU. Challenge bằng secret mới (nếu có) hoặc secret đang
+   * lưu; chỉ khi VERIFIED mới chuyển chủ + (xoay secret) + audit `endpoint.adopted`, trong MỘT transaction. Không
+   * VERIFIED -> 409, chủ / secret / trạng thái cũ GIỮ NGUYÊN (key sai secret không làm hỏng endpoint đang nhận).
+   */
   private async adoptEndpoint(tenantId: string, d: any, url: string, given: string | undefined, req: RequestWithPrincipal) {
     const actor = `key:${req.apiKey!.id}`;
-    await this.withAudit(tenantId, async (repo) => {
-      await repo.updateDestination(d.id, { createdByKeyId: req.apiKey!.id });
-      await repo.createAuditLog({ action: 'endpoint.adopted', entityType: 'destination', entityId: d.id, actor, metadata: { fromKeyId: d.createdByKeyId } });
-    });
     let secret: string | null = given ?? null;
     if (!secret) {
       try {
@@ -231,9 +231,23 @@ export class ServiceResourcesController {
       }
     }
     const outcome: VerificationOutcome = secret ? await this.verifier.challenge(url, secret) : { verification: 'FAILED', verificationError: 'no_signing_secret' };
-    // Secret mới chỉ được lưu khi endpoint chứng minh được nó (cùng luật ADR-086); sai thì giữ secret cũ.
-    const rotate = given && outcome.verification === 'VERIFIED' ? aesGcmEncrypt(given, getMasterKey()) : undefined;
-    const updated = await this.recordVerification(tenantId, d.id, outcome, actor, rotate);
+    if (outcome.verification !== 'VERIFIED') {
+      throw new HttpException(
+        { error: 'adoption_not_verified', verificationError: outcome.verificationError, message: 'Endpoint không chứng minh được secret — không chuyển chủ' },
+        HttpStatus.CONFLICT,
+      );
+    }
+    const updated = await this.withAudit(tenantId, async (repo) => {
+      const u = await repo.updateDestination(d.id, {
+        createdByKeyId: req.apiKey!.id,
+        ...(given ? { signingSecretEncrypted: aesGcmEncrypt(given, getMasterKey()) } : {}),
+        verification: 'VERIFIED',
+        verificationError: null,
+        verifiedAt: new Date(),
+      });
+      await repo.createAuditLog({ action: 'endpoint.adopted', entityType: 'destination', entityId: d.id, actor, metadata: { fromKeyId: d.createdByKeyId, secretRotated: !!given } });
+      return u;
+    });
     return { ...publicEndpoint(updated ?? d, url), adopted: true };
   }
 

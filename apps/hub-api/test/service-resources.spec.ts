@@ -299,5 +299,20 @@ describe('Service API — endpoint + subscription (S5)', () => {
       expect(r.id).not.toMatch(/^aaaaaaaa/);
     }
   });
+
+  it('R3-1: nhận lại endpoint mà challenge FAILED (secret sai) -> 409, GIỮ NGUYÊN chủ, secret, trạng thái; không audit adopted', async () => {
+    const { controller, req, destinations, audits, verdict } = build();
+    const url = 'https://a.example/old';
+    const oldSecret = aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey());
+    destinations.push({ id: '99999999-9999-4999-8999-999999999998', tenantId: PA, name: 'old', type: 'webhook', configEncrypted: aesGcmEncrypt(JSON.stringify({ url }), getMasterKey()), signingSecretEncrypted: oldSecret, verification: 'VERIFIED', verificationError: null, createdByKeyId: 'key-old' });
+    const before = destinations.length;
+    verdict.next = { verification: 'FAILED', verificationError: 'http_401' };
+    const r = await status(controller.createEndpoint(req(PA), { name: 'cafe', url, signingSecret: 'whsec_c2FpLXNlY3JldC1jdWEta2V5LW1vaS10ZXN0' }));
+    expect(r).toMatchObject({ status: 409, body: { error: 'adoption_not_verified', verificationError: 'http_401' } });
+    const row = destinations.find((d) => d.id === '99999999-9999-4999-8999-999999999998')!;
+    expect(row).toMatchObject({ createdByKeyId: 'key-old', signingSecretEncrypted: oldSecret, verification: 'VERIFIED', verificationError: null });
+    expect(destinations).toHaveLength(before);
+    expect(audits.map((a) => a.action)).not.toContain('endpoint.adopted');
+  });
 });
 

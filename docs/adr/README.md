@@ -1016,3 +1016,11 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 **Vấn đề:** R-9 đổi `prisma` của `TenantScopedRepository` thành `protected` + `extend(Sub)` để `FlowScopedRepository` viết SQL đọc hành trình — mọi lớp con đều có client trần, viết được truy vấn không lọc `tenant_id` mà gate BB-5 (`prisma.<model>.` ngoài libs/database) không bắt.
 **Chọn:** Luật gate mới `repo-subclass` (`verify/lib/gates.ts`): `class X extends TenantScopedRepository` chỉ được ở `REPO_SUBCLASS_ALLOWED` (hiện: `apps/hub-api/src/modules/flow/flow.repository.ts`, kèm lý do). Thêm lớp con = thêm file vào danh sách kèm lý do và review từng câu SQL lọc tenant (giống luật `rls-system`). Test `verify/test/gates.spec.ts` (lớp con ngoài danh sách → đỏ).
 **Đánh đổi:** Gate dựa trên grep (một lớp con gián tiếp qua lớp trung gian sẽ lọt) — đủ cho quy mô repo; khi AU6 bật RLS thì DB là lưới cuối.
+
+---
+
+## ADR-101 — Sửa ADR-098: nhận lại endpoint chỉ SAU khi chứng minh được secret; FAILED → 409, giữ nguyên chủ/secret/trạng thái (R3-1, review vòng 3, 2026-10-11)
+
+**Vấn đề:** ADR-098 chuyển chủ trước rồi mới chạy challenge: key mới (cùng `serviceName`, chủ cũ đã revoke) gửi secret SAI → vẫn `adopted:true`, endpoint chuyển FAILED `http_401` → Shop ngừng nhận tiền.
+**Chọn:** Đảo thứ tự: challenge trước (secret mới nếu có, không thì secret đang lưu); chỉ khi VERIFIED mới chuyển chủ + xoay secret + `verification=VERIFIED` + audit `endpoint.adopted` trong MỘT transaction. Không VERIFIED → 409 `{error:"adoption_not_verified", verificationError}`, KHÔNG ghi gì (chủ cũ, secret cũ, trạng thái cũ giữ nguyên). SDK `ensure` nhận 409 như lỗi → Shop log và thử lại (ADR-097).
+**Đánh đổi:** Không có audit cho lần nhận lại thất bại (chỉ log + 409 trả về caller) — tránh ghi gì khi chưa chứng minh sở hữu.
