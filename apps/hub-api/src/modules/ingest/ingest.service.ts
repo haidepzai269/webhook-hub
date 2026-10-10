@@ -15,6 +15,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
 import { redactHeaders } from './redact-headers';
+import { ingestDuration, ingestRequests } from '../metrics/metrics';
 
 /**
  * S2-2 (ADR-049): chặng ①–④ (nhận, verify, COMMIT, ACK) chạy trong hub-api -> phát `trace.ingested`
@@ -47,6 +48,7 @@ export class IngestService {
     const startedAt = Date.now();
     const trace: TraceState = { correlationId: generateCorrelationId() };
     const result = await this.ingestCore(req, trace);
+    this.recordMetrics(req.provider, trace, result.status, startedAt);
     // Chỉ phát khi ĐÃ BIẾT tenant (source tồn tại) — 404/400/413 không phát gì. Best-effort.
     if (trace.tenantId && trace.outcome && this.notifier) {
       try {
@@ -64,6 +66,26 @@ export class IngestService {
       }
     }
     return result;
+  }
+
+  /**
+   * S3-4: đếm trong bộ nhớ (0 lệnh Redis). Nhãn `provider` chỉ nhận provider ĐÃ ĐĂNG KÝ — path
+   * `/hooks/:provider` do client gửi, để nguyên thì kẻ xấu làm nổ số chuỗi thời gian (cardinality).
+   */
+  private recordMetrics(provider: string, trace: TraceState, status: number, startedAt: number) {
+    try {
+      let label = 'unknown';
+      try {
+        label = ProviderRegistry.get(provider as ProviderType).provider;
+      } catch {
+        /* provider lạ -> 'unknown' */
+      }
+      const outcome = trace.outcome ?? (status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
+      ingestRequests.inc({ provider: label, outcome });
+      ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
+    } catch {
+      /* metric không bao giờ làm hỏng ingest */
+    }
   }
 
   private async ingestCore(req: RawWebhookRequest, trace: TraceState): Promise<{ status: number; body: unknown }> {
@@ -105,7 +127,8 @@ export class IngestService {
 
     // 2b. Rate limit theo source (cửa sổ cố định 60s, INCR+EXPIRE)
     const rateLimitKey = `rate:source:${source.id}`;
-    const allowed = await this.redis.checkRateLimit(rateLimitKey, 100, 60); // 100 req/phút
+    // S3-4: trần cấu hình được (`INGEST_RATE_LIMIT_PER_MIN`, mặc định 100/phút/source) — k6 cần nâng trần.
+    const allowed = await this.redis.checkRateLimit(rateLimitKey, ingestRateLimitPerMin(), 60);
     if (!allowed) {
       log.warn('Bị chặn bởi Rate Limit theo Source');
       trace.outcome = 'RATE_LIMITED';
@@ -252,4 +275,10 @@ export class IngestService {
       isDuplicate: false,
     });
   }
+}
+
+/** Trần request/phút/source (mặc định 100). Giá trị không hợp lệ -> 100. */
+export function ingestRateLimitPerMin(v: string | undefined = process.env.INGEST_RATE_LIMIT_PER_MIN): number {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : 100;
 }

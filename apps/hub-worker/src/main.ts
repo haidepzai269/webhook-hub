@@ -1,3 +1,4 @@
+import { startMetricsServer } from './metrics';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
 import { setupRabbitMQTopology, QUEUES } from '@hub/messaging';
@@ -57,6 +58,9 @@ async function bootstrap() {
   assertMasterKeyConfigured();
 
   const app = await NestFactory.createApplicationContext(WorkerModule);
+  // S3-4: /metrics trên WORKER_METRICS_PORT (mặc định 9101, 0 = tắt) — chỉ mạng nội bộ.
+  const metricsServer = startMetricsServer();
+  if (metricsServer) logger.info({ port: process.env.WORKER_METRICS_PORT ?? 9101 }, 'Worker /metrics đang lắng nghe');
   const outboxRelay = app.get(OutboxRelay);
   const sweeper = app.get(DeliverySweeper);
   const cleanup = app.get(CleanupJob);
@@ -150,6 +154,7 @@ async function bootstrap() {
           await deliveryChannel.close();
           await confirmChannel.close();
           await connection.close();
+          metricsServer?.close();
           await app.close();
           logger.info('Graceful shutdown hoàn tất thành công!');
         })(),

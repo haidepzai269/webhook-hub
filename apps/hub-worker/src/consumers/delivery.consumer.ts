@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { deliveriesTotal, deliveryDuration } from '../metrics';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { Prisma } from '@prisma/client';
 import { CIRCUIT_OPEN_MS, CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
@@ -150,6 +151,9 @@ export class DeliveryConsumer {
           ...n,
         };
         this.redisPub.publish('hub:realtime:deliveries', JSON.stringify(notice)).catch(() => {});
+        // S3-4: metric trong bộ nhớ (0 lệnh Redis), chỉ sau khi kết quả đã ghi DB.
+        deliveriesTotal.inc({ destination_type: destinationType, status: n.status });
+        if (n.ms > 0) deliveryDuration.observe({ destination_type: destinationType }, n.ms / 1000);
       };
 
       // 1. Circuit breaker 3 trạng thái (S2-1, §5.4). Redis là nguồn chạy; DB chỉ để hiển thị.

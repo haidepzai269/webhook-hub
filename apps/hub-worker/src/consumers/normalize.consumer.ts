@@ -20,7 +20,7 @@ import {
   classifyNormalizeError,
   readNormalizeRetryCount,
 } from './normalize-errors';
-import { normalizeSchemaErrors } from '../metrics';
+import { normalizeRetries, normalizeSchemaErrors } from '../metrics';
 
 /**
  * S3-2 (ADR-053): adapter phát kiểu thuộc không gian dành riêng (`payment.*`, `repo.*`) mà `data`
@@ -217,6 +217,7 @@ export class NormalizeConsumer {
         { err: err?.message, code: err?.code, [NORMALIZE_RETRY_HEADER]: retries + 1 },
         'Lỗi tạm ở normalize -> q.normalize.retry.30s',
       );
+      normalizeRetries.inc();
       channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, {
         persistent: true,
         headers: { ...(msg.properties.headers || {}), [NORMALIZE_RETRY_HEADER]: retries + 1 },

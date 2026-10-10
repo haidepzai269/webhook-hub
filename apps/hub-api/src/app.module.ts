@@ -9,13 +9,14 @@ import { RealtimeGateway } from './modules/realtime/realtime.gateway';
 import { ApiController } from './modules/api/api.controller';
 import { MockController } from './modules/mock/mock.controller';
 import { AuthModule } from './modules/auth/auth.module';
+import { MetricsController } from './modules/metrics/metrics.controller';
 
 /**
  * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
  * production — trên Render nó là một endpoint công khai không xác thực, ai cũng gọi được.
  */
 export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE_ENV) {
-  const base = [IngestController, HealthController, ApiController];
+  const base = [IngestController, HealthController, ApiController, MetricsController];
   return nodeEnv === 'production' ? base : [...base, MockController];
 }
 

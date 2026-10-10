@@ -1,0 +1,287 @@
+{
+  "uid": "webhook-hub",
+  "title": "Webhook Hub",
+  "tags": [
+    "webhook-hub"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "RPS ingest theo provider",
+      "description": "Request /hooks mỗi giây (mọi kết quả).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (provider) (rate(hub_ingest_requests_total[1m]))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Độ trễ ingest p50 / p95 / p99",
+      "description": "Nhận -> verify -> COMMIT -> ACK. Số liệu báo cáo lấy ở LOCAL (ADR-019).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(hub_ingest_duration_seconds_bucket[1m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hub_ingest_duration_seconds_bucket[1m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(hub_ingest_duration_seconds_bucket[1m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Kết quả ingest (ACCEPTED / REJECTED / DUPLICATE …)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(hub_ingest_requests_total[1m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Delivery theo trạng thái",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (status, destination_type) (rate(hub_deliveries_total[1m]))",
+          "legendFormat": "{{destination_type}} {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Outbox lag",
+      "description": "Tuổi dòng outbox chưa publish lâu nhất (relay đo mỗi lượt).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "max(hub_outbox_lag_seconds)",
+          "legendFormat": "lag"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Circuit đổi trạng thái",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (to) (increase(hub_circuit_transitions_total[5m]))",
+          "legendFormat": "-> {{to}}"
+        }
+      ]
+    }
+  ]
+}

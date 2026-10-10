@@ -1,3 +1,4 @@
+import { circuitTransitions } from '../metrics';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
@@ -203,6 +204,7 @@ export class CircuitBreakerService {
         .forTenant(target.tenantId)
         .updateDestinationCircuitState(target.destinationId, to);
       if (changed !== 1) return;
+      circuitTransitions.inc({ to });
       const msg = { tenantId: target.tenantId, destinationId: target.destinationId, from, to, failures, at: new Date().toISOString() };
       await this.redis.publish(CIRCUIT_CHANNEL, JSON.stringify(msg)).catch(() => {});
       logger.info(msg, 'Circuit đổi trạng thái');

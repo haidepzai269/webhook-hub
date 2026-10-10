@@ -1,3 +1,4 @@
+import { outboxLag } from '../metrics';
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { EXCHANGES, ROUTING_KEYS } from '@hub/messaging';
@@ -93,9 +94,9 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
         async (tx) => {
           // Đọc outbox với FOR UPDATE SKIP LOCKED
           // Dùng raw query để đảm bảo chính xác ngữ nghĩa SKIP LOCKED của PostgreSQL
-          const unpulished: Array<{ id: bigint; topic: string; payload: any }> =
+          const unpulished: Array<{ id: bigint; topic: string; payload: any; age_s: number }> =
             await tx.$queryRawUnsafe(`
-              SELECT id, topic, payload
+              SELECT id, topic, payload, EXTRACT(EPOCH FROM (now() - created_at))::float8 AS age_s
               FROM hub.outbox
               WHERE published_at IS NULL
               ORDER BY id ASC
@@ -103,6 +104,8 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
               FOR UPDATE SKIP LOCKED;
             `);
 
+          // S3-4: lag = tuổi dòng chưa publish cũ nhất trong lượt này (ORDER BY id ~ thứ tự tạo). 0 khi rỗng.
+          outboxLag.set(unpulished.length === 0 ? 0 : Math.max(0, Number(unpulished[0].age_s) || 0));
           if (unpulished.length === 0) {
             return 0;
           }

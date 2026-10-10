@@ -243,3 +243,9 @@ docker compose exec prometheus wget -qO- hub-worker:9101/metrics | grep -c hub_d
   - Lỗi 400 trả object `{error:'invalid_event_pattern', message, fix}` (kiểu ADR-055) thay vì chuỗi; `eventTypes` bắt buộc 1–50 mẫu và khử trùng lặp (trước đây POST cho mảng rỗng).
   - Telegram seed `['payment.*']` (không có `bank.transfer.received` như SPEC-3 gốc — kiểu đó không còn, DINH-CHINH §0); Shop `['payment.received']`, không `payment.*` (Shop không xử lý failed/sent/refunded).
   - Form UI kiểm cùng regex phía client + gợi ý `payment.*`/`*`. ADR-060.
+- **S3-4 (2026-10-10):**
+  - Thêm `INGEST_RATE_LIMIT_PER_MIN` (mặc định 100): trần cứng 100/phút/source làm k6 chỉ nhận 429. Đo xong trả về mặc định.
+  - k6 dùng event `k6_load` (không khớp subscription) để không gửi Discord/Telegram thật; thời lượng bậc chỉnh bằng `STAGE_S` (mặc định 60s). Trên Docker Desktop Windows dùng `--network webhook-hub_default` + `HUB_URL=http://hub-api:4000` (vẫn là local) thay cho `--network host`.
+  - Nhãn outcome thêm `NOT_FOUND`/`TOO_LARGE`/`INVALID` cho request không tới được bước verify; `provider` lạ gom về `unknown`.
+  - Phát hiện khi đo: ở bậc 100 RPS outbox lag lên ~21s (relay 50 dòng/500ms, một transaction, publish tuần tự có confirm) — chưa tối ưu trong đợt này.
+  - Image Prometheus/Grafana ghim đúng phiên bản đang chạy local (đã `docker tag` từ `:latest`, không pull lại).

@@ -1,0 +1,10 @@
+# S3-4: nạp dashboard JSON trong cùng thư mục (repo là nguồn sự thật, sửa trên UI không được lưu).
+apiVersion: 1
+providers:
+  - name: webhook-hub
+    folder: Webhook Hub
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

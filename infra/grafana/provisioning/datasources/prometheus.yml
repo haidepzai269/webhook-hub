@@ -1,0 +1,10 @@
+# S3-4: datasource Prometheus trong mạng compose (uid cố định để dashboard tham chiếu).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: hub-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

@@ -11,7 +11,7 @@ import { MockController, maskToken } from '../src/modules/mock/mock.controller';
 describe('MockController — chỉ ngoài production, không lộ token', () => {
   it('NODE_ENV=production -> không đăng ký MockController', () => {
     expect(hubApiControllers('production')).not.toContain(MockController);
-    expect(hubApiControllers('production')).toHaveLength(3);
+    expect(hubApiControllers('production')).toHaveLength(4); // + MetricsController (S3-4)
   });
 
   it.each(['development', 'test', undefined])('NODE_ENV=%s -> có MockController', (env) => {
