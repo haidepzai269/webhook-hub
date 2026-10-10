@@ -217,6 +217,13 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(readPayment({ type: 'payment.received', source: 'generic', data: core }, ['generic'])).toEqual({ orderCode: 'DH123456', amount: 50000 });
     });
 
+    it('R-1: có danh sách sourceId tin cậy (từ ensure) -> event từ source khác (dù tên sepay) IGNORED', () => {
+      const ok = { type: 'payment.received', source: 'sepay', sourceId: 'S-OP', data: core };
+      expect(readPayment(ok, undefined, ['S-OP'])).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      expect(readPayment({ ...ok, sourceId: 'S-ATTACKER' }, undefined, ['S-OP'])).toEqual({ skip: 'IGNORED' });
+      expect(readPayment({ ...ok, sourceId: undefined }, undefined, ['S-OP'])).toEqual({ skip: 'IGNORED' });
+    });
+
     it('payload cũ (payment.succeeded + transferAmount/orderCode) không còn được đọc', () => {
       expect(readPayment({ type: 'payment.succeeded', data: { orderCode: 'DH1', transferAmount: 1000 } })).toEqual({ skip: 'IGNORED' });
       const src = require('fs').readFileSync(require('path').join(__dirname, '../src/main.ts'), 'utf8');

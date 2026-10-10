@@ -29,6 +29,8 @@ export class WebhookSender implements DestinationSender {
         id: event.id,
         type: event.type,
         source: event.source,
+        // R-1 (ADR-094): id source CỤ THỂ — bên nhận so với sourceIds đã ghim (tên provider không phải danh tính).
+        sourceId: event.sourceId || null,
         subject: event.subject,
         // S3-2 (ADR-053): true = `data` theo catalog kiểu chuẩn (docs/EVENT-CATALOG.md); false = `{ raw }`.
         normalized: event.normalized !== false,

@@ -227,11 +227,14 @@ model Destination {
   verification          EndpointVerification @default(VERIFIED)
   verifiedAt            DateTime?       @map("verified_at") @db.Timestamptz(6)
   verificationError     String?         @map("verification_error") @db.VarChar(64)
+  /// R-1/R-2 (ADR-094): API key tạo endpoint qua /v1/p — chỉ key này quản endpoint ở /v1/p. NULL = đích của operator.
+  createdByKeyId        String?         @map("created_by_key_id") @db.Uuid
   createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
 
   subscriptions Subscription[]
 
   @@unique([id, tenantId]) // đích của khoá ngoại ghép subscriptions(destination_id, tenant_id)
+  @@index([tenantId, createdByKeyId])
   @@map("destinations")
   @@schema("hub")
 }

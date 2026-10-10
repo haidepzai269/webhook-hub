@@ -61,5 +61,10 @@ describe('WebhookSender — body có `normalized`', () => {
     expect(last.headers['webhook-timestamp']).toMatch(/^\d+$/);
     expect(last.headers['webhook-signature']).toBeUndefined();
   });
+
+  it('R-1: body push mang sourceId (id source của project) để bên nhận tự kiểm nguồn', async () => {
+    await new WebhookSender().send({ url: `${base}/hook` }, '', { id: 'evt_s', type: 'payment.received', source: 'sepay', sourceId: 'src-uuid-1', data: {} } as any, 'secret');
+    expect(bodies[bodies.length - 1]).toMatchObject({ source: 'sepay', sourceId: 'src-uuid-1' });
+  });
 });
 

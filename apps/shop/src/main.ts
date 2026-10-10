@@ -21,6 +21,8 @@ if (!SIGNING_SECRET) {
 // Shop là SERVICE dùng hub: connection string chứa API key `shop` (manage:endpoints, read:events).
 const hub = process.env.HUB_URL ? createHubClient(process.env.HUB_URL) : null;
 const PAYMENT_SOURCE_KEYS = (process.env.SHOP_PAYMENT_SOURCE_KEYS || 'src_payos_main,src_sepay_main').split(',').map((k) => k.trim()).filter(Boolean);
+/** sourceId của subscription đã ghim (từ ensure) — bằng chứng tiền đến từ ĐÚNG source của operator. */
+let trustedSourceIds: string[] = [];
 const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
 
@@ -124,7 +126,10 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
   if (challenge) return res.status(200).json(challenge);
 
   // 4.3. Chỉ nhận kiểu chuẩn `payment.received` (VND); mã đơn DH\d+ trong data.memo rồi data.reference
-  const p = readPayment(req.body);
+  // R-1 (ADR-094): chỉ tin sourceId của subscription đã ghim. Chưa ghim xong (ensure chưa thành công) -> 503 để hub
+  // retry sau, không xử lý tiền khi chưa biết nguồn nào tin được (R-8).
+  if (hub && trustedSourceIds.length === 0) return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
+  const p = readPayment(req.body, undefined, hub ? trustedSourceIds : undefined);
   if ('skip' in p || !eventId) {
     if ('skip' in p && p.skip === 'UNMATCHED') logger.warn({ eventId }, '[Shop] Không tìm thấy mã đơn DHxxx trong memo/reference');
     return res.status(200).json({ success: true, status: 'skip' in p ? p.skip : 'IGNORED' });
@@ -206,7 +211,8 @@ async function registerWithHub(attempt = 1): Promise<void> {
   try {
     // MS-P2-1: chỉ nhận tiền từ ĐÚNG các source của operator (không phải mọi source tên "sepay"); tắt sub cũ không ghim.
     const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys: PAYMENT_SOURCE_KEYS, exclusive: true });
-    logger.info({ endpointId: r.endpoint.id, created: r.created, hub }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
+    trustedSourceIds = r.subscription.sourceIds ?? [];
+    logger.info({ endpointId: r.endpoint.id, created: r.created, hub, trustedSourceIds }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
   } catch (e: any) {
     logger.warn({ err: e?.message, code: e?.code, attempt }, '[Shop] Đăng ký endpoint với hub lỗi');
     if (attempt < 6) setTimeout(() => void registerWithHub(attempt + 1), 10_000);

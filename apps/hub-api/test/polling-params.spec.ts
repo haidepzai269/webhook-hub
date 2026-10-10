@@ -7,7 +7,7 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
   const EA = '11111111-1111-1111-1111-111111111111';
   function setup(rows: any[] = [], readTypes: string[] = []) {
     const pollEvents = jest.fn().mockResolvedValue(rows);
-    const findDestinationById = jest.fn(async (id: string) => (id === EA ? { id: EA } : null));
+    const findDestinationById = jest.fn(async (id: string) => (id === EA ? { id: EA, type: 'webhook', createdByKeyId: 'k' } : null));
     const prisma: any = { forTenant: jest.fn(() => ({ pollEvents, findDestinationById })) };
     const ctrl = new ServiceResourcesController(prisma, {} as any);
     const req: any = { tenantId: PA, apiKey: { id: 'k', tenantId: PA, readTypes } };

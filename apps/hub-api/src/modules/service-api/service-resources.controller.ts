@@ -109,6 +109,11 @@ export class WindowLimiter {
   }
 }
 
+/** R-1/R-2 (ADR-094): endpoint là webhook VÀ do chính key đang gọi tạo (NULL = đích operator, /v1/p không quản). */
+function ownsEndpoint(d: any, req: RequestWithPrincipal): boolean {
+  return !!d && d.type === 'webhook' && !!d.createdByKeyId && d.createdByKeyId === req.apiKey?.id;
+}
+
 /** Mẫu `r` phủ mẫu `p`? `*` phủ mọi thứ; `a.*` phủ `a.x`, `a.x.*`; còn lại phải bằng nhau. */
 export function patternCovers(r: string, p: string): boolean {
   if (r === '*' || r === p) return true;
@@ -183,6 +188,7 @@ export class ServiceResourcesController {
         signingSecretEncrypted: aesGcmEncrypt(signingSecret, masterKey),
         rateLimitRps: 0,
         verification: 'PENDING',
+        createdByKeyId: req.apiKey!.id, // R-1 (ADR-094): endpoint có chủ
       });
       await repo.createAuditLog({ action: 'endpoint.create', entityType: 'destination', entityId: d.id, actor: `key:${req.apiKey!.id}`, metadata: { name: d.name } });
       return d;
@@ -199,7 +205,7 @@ export class ServiceResourcesController {
   async verifyEndpoint(@Req() req: RequestWithPrincipal, @Param('id') id: string, @Body() body?: any) {
     const tenantId = req.tenantId!;
     const d = UUID_RE.test(id) ? await this.prisma.forTenant(tenantId).findDestinationById(id) : null;
-    if (!d || d.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
+    if (!ownsEndpoint(d, req)) throw new NotFoundException(NOT_FOUND);
     // MS-R1 (ADR-083): /verify là một POST ra ngoài theo URL do service khai — giới hạn để không thành máy dò cổng.
     if (!this.verifyLimiter.tryAcquire(d.id)) {
       throw new HttpException({ error: 'rate_limited', message: 'Tối đa 5 lần /verify mỗi phút cho một endpoint' }, HttpStatus.TOO_MANY_REQUESTS);
@@ -254,7 +260,7 @@ export class ServiceResourcesController {
   @Get('endpoints')
   @RequireScope('manage:endpoints')
   async listEndpoints(@Req() req: RequestWithPrincipal) {
-    const rows = await this.prisma.forTenant(req.tenantId!).findDestinations({ type: 'webhook' });
+    const rows = await this.prisma.forTenant(req.tenantId!).findDestinations({ type: 'webhook', createdByKeyId: req.apiKey!.id });
     return rows.map((d) => publicEndpoint(d, endpointUrl(d.configEncrypted)));
   }
 
@@ -266,8 +272,9 @@ export class ServiceResourcesController {
     // Endpoint phải thuộc project (404 giống hệt "không tồn tại"); khoá ngoại ghép là lưới cuối (S1).
     const endpointId = body?.endpointId;
     const endpoint = typeof endpointId === 'string' && UUID_RE.test(endpointId) ? await repo.findDestinationById(endpointId) : null;
-    // MS-R3: service chỉ gắn vào ENDPOINT (webhook) — đích Telegram/Discord của operator coi như không tồn tại.
-    if (!endpoint || endpoint.type !== 'webhook') throw new NotFoundException(NOT_FOUND);
+    // MS-R3: chỉ ENDPOINT (webhook); R-1 (ADR-094): và chỉ endpoint do CHÍNH key này tạo — endpoint của service khác
+    // (vd Shop) coi như không tồn tại, nên không gắn được subscription không ghim nguồn vào đó.
+    if (!ownsEndpoint(endpoint, req)) throw new NotFoundException(NOT_FOUND);
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     if (!name || name.length > 255) unprocessable({ error: 'validation_failed', field: 'name', message: 'name là chuỗi 1–255 ký tự' });
     const eventTypes = parseEventTypes422(body?.eventTypes);
@@ -314,7 +321,7 @@ export class ServiceResourcesController {
   @RequireScope('manage:endpoints')
   async listSubscriptions(@Req() req: RequestWithPrincipal) {
     // MS-R3: chỉ subscription tới endpoint (webhook) — không lộ đích Telegram/Discord của operator.
-    const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions({ destination: { type: 'webhook' } });
+    const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions({ destination: { type: 'webhook', createdByKeyId: req.apiKey!.id } });
     return this.withSourceKeys(req.tenantId!, rows);
   }
 
@@ -336,7 +343,7 @@ export class ServiceResourcesController {
     if (types?.some((t) => !isValidEventPattern(t))) unprocessable({ error: 'validation_failed', field: 'types', message: 'types là danh sách mẫu cách nhau dấu phẩy (vd order.*,payment.received)' });
     if (q.status !== undefined && q.status !== 'failed') unprocessable({ error: 'validation_failed', field: 'status', message: 'status chỉ nhận "failed"' });
     const repo = this.prisma.forTenant(req.tenantId!);
-    if (q.endpointId !== undefined && !(UUID_RE.test(q.endpointId) && (await repo.findDestinationById(q.endpointId)))) {
+    if (q.endpointId !== undefined && !(UUID_RE.test(q.endpointId) && ownsEndpoint(await repo.findDestinationById(q.endpointId), req))) {
       throw new NotFoundException(NOT_FOUND);
     }
     const readTypes = req.apiKey!.readTypes ?? [];

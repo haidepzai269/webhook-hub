@@ -13,7 +13,8 @@ Body hub gửi tới đích webhook (`apps/hub-worker/src/senders/webhook.sender
 {
   "id": "evt_01K…",            // id event của hub — dùng để chống trùng phía bạn
   "type": "payment.received",  // kiểu chuẩn, hoặc <provider>.<kiểu gốc>
-  "source": "sepay",           // provider đã nhận (payos | sepay | stripe | github)
+  "source": "sepay",           // TÊN provider (payos | sepay | stripe | github | generic | api) — KHÔNG phải danh tính
+  "sourceId": "9b5c…",         // id source CỤ THỂ trong project (R-1, ADR-094) — so với sourceIds đã ghim để tin nguồn
   "subject": "payment:92704",  // payment:<providerTxnId> | repo:<fullName>
   "normalized": true,          // true = data theo catalog dưới đây; false = data = { raw }
   "data": { … },

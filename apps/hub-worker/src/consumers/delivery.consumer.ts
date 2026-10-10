@@ -73,7 +73,7 @@ function toNormalizedEvent(row: DeliveryForSend): NormalizedEvent {
     tenantId: e.tenantId,
     type: e.type,
     source: e.source as NormalizedEvent['source'],
-    sourceId: e.rawEvent?.sourceId ?? '',
+    sourceId: (e as { sourceId?: string | null }).sourceId ?? e.rawEvent?.sourceId ?? '',
     subject: e.subject ?? undefined,
     data: (e.data ?? {}) as Record<string, any>,
     occurredAt: e.occurredAt.toISOString(),

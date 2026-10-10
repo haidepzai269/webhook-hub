@@ -42,9 +42,11 @@ export const PAYMENT_SOURCES: readonly string[] = (process.env.SHOP_PAYMENT_SOUR
  * `payment.received` (`data.amount` số nguyên đơn vị nhỏ nhất, `data.currency`). Không còn `if`
  * theo provider (trường riêng của SePay/PayOS chỉ còn trong `data.raw`). Mã đơn tìm trong `memo`, rồi `reference`.
  */
-export function readPayment(body: any, allowed: readonly string[] = PAYMENT_SOURCES): { orderCode: string; amount: number } | { skip: 'IGNORED' | 'UNMATCHED' } {
+export function readPayment(body: any, allowed: readonly string[] = PAYMENT_SOURCES, trustedSourceIds?: readonly string[]): { orderCode: string; amount: number } | { skip: 'IGNORED' | 'UNMATCHED' } {
   const d = body?.data || {};
   if (body?.type !== 'payment.received' || d.currency !== 'VND' || !allowed.includes(body?.source)) return { skip: 'IGNORED' };
+  // R-1 (ADR-094): có danh sách source tin cậy (sourceIds của subscription đã ghim lúc ensure) -> phải khớp ĐÚNG id.
+  if (trustedSourceIds && !trustedSourceIds.includes(body?.sourceId)) return { skip: 'IGNORED' };
   const match = `${d.memo ?? ''}`.match(/DH\d+/) ?? `${d.reference ?? ''}`.match(/DH\d+/);
   if (!match) return { skip: 'UNMATCHED' };
   const amount = Number(d.amount);

@@ -186,6 +186,7 @@ export async function seedDemoProjects(env: NodeJS.ProcessEnv = process.env): Pr
         signingSecretEncrypted: aesGcmEncrypt(signingSecret, masterKey),
         verification: 'VERIFIED',
         verifiedAt: new Date(),
+        createdByKeyId: k.id, // R-1: endpoint demo thuộc key demo của project
       });
       await repo.createSubscription({ destinationId: dest.id, name: `${p.slug}: mọi thanh toán`, eventTypes: ['payment.*'], isActive: true });
       await repo.createAuditLog({ action: 'project.created', entityType: 'project', entityId: projectId, actor: 'seed', metadata: { slug: p.slug } });

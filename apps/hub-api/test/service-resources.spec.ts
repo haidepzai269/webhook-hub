@@ -21,8 +21,8 @@ describe('Service API — endpoint + subscription (S5)', () => {
 
   function build() {
     const destinations: any[] = [
-      { id: EA, tenantId: PA, name: 'A', type: 'webhook', configEncrypted: aesGcmEncrypt(JSON.stringify({ url: 'https://a.example/h' }), getMasterKey()), signingSecretEncrypted: aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey()), verification: 'VERIFIED' },
-      { id: EB, tenantId: PB, name: 'B', type: 'webhook', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED' },
+      { id: EA, tenantId: PA, name: 'A', type: 'webhook', configEncrypted: aesGcmEncrypt(JSON.stringify({ url: 'https://a.example/h' }), getMasterKey()), signingSecretEncrypted: aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey()), verification: 'VERIFIED', createdByKeyId: 'key-1' },
+      { id: EB, tenantId: PB, name: 'B', type: 'webhook', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED', createdByKeyId: 'key-b' },
       { id: ETG, tenantId: PA, name: 'Telegram Ops', type: 'telegram', configEncrypted: 'enc', signingSecretEncrypted: null, verification: 'VERIFIED' },
     ];
     const sources = [
@@ -69,7 +69,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
         findMany: jest.fn(async ({ where }: any) =>
           subs
             .filter((s) => s.tenantId === where.tenantId)
-            .filter((s) => !where.destination?.type || destinations.find((d) => d.id === s.destinationId)?.type === where.destination.type),
+            .filter((s) => !where.destination || match(destinations.find((d) => d.id === s.destinationId) ?? {}, where.destination)),
         ),
       },
       auditLog: { create: jest.fn(async ({ data }: any) => audits.push(data)) },
@@ -78,7 +78,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
       forTenant: (tenantId: string, c?: any) => new TenantScopedRepository(c ?? client, tenantId),
       $transaction: async (fn: any) => fn(client),
     };
-    const req = (tenantId: string, readTypes: string[] = []) => ({ tenantId, apiKey: { id: 'key-1', tenantId, serviceName: 'cafe-be', readTypes } }) as any;
+    const req = (tenantId: string, readTypes: string[] = [], keyId = 'key-1') => ({ tenantId, apiKey: { id: keyId, tenantId, serviceName: 'cafe-be', readTypes } }) as any;
     const verifier = { challenge: jest.fn(async (): Promise<any> => verdict.next) };
     const verdict: { next: any } = { next: { verification: 'VERIFIED', verificationError: null } };
     return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, subs, audits, req, verifier, verdict };
@@ -239,5 +239,19 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(await status(controller.updateSubscription(req(PB), subs[0].id, { isActive: true }))).toMatchObject({ status: 404 });
     expect(await status(controller.updateSubscription(req(PA), subs[0].id, { isActive: 'x' }))).toMatchObject({ status: 422 });
   });
+
+  it('R-1: endpoint có chủ — key KHÁC cùng project không thấy, không gắn subscription, không /verify endpoint của key khác (404 như không tồn tại)', async () => {
+    const { controller, req, subs, verifier } = build();
+    const other = req(PA, [], 'key-attacker');
+    expect(await status(controller.createSubscription(other, { endpointId: EA, name: 'x', eventTypes: ['payment.received'] }))).toEqual({ status: 404, body: { error: 'not_found' } });
+    expect(subs).toHaveLength(0);
+    expect(await status(controller.verifyEndpoint(other, EA))).toMatchObject({ status: 404 });
+    expect(verifier.challenge).not.toHaveBeenCalled();
+    expect((await controller.listEndpoints(other)).map((e: any) => e.id)).toEqual([]);
+    expect((await controller.listEndpoints(req(PA))).map((e: any) => e.id)).toEqual([EA]);
+    const created: any = await controller.createEndpoint(other, { name: 'own', url: 'https://own.example/h' });
+    expect((await controller.listEndpoints(other)).map((e: any) => e.id)).toEqual([created.id]);
+  });
+
 });
 
