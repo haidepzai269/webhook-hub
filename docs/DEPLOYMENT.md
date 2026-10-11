@@ -79,7 +79,7 @@ Lệch một cái — ví dụ Render Singapore mà Neon US-East — thì mỗi 
 vẫn giữ — vẫn hai process, mỗi process một AMQP connection + một pool Prisma riêng; local/hubv vẫn chạy hai service tách rời.
 - `docker-entrypoint.sh hub-all`: chạy bước chuẩn bị của hub-api MỘT lần (`prisma migrate deploy` bằng `DIRECT_URL` = owner),
   rồi `exec node docker/hub-all.js` (PID 1) sinh hai con: `hub-api` (nghe `$PORT`) và `hub-worker` (`WORKER_METRICS_PORT=0`).
-- SIGTERM/SIGINT → chuyển cho cả hai, chờ drain trong `SHUTDOWN_TIMEOUT_MS` (25 s; Render SIGKILL ~30 s), quá hạn → SIGKILL.
+- SIGTERM/SIGINT → chuyển cho cả hai; supervisor chờ tối đa `SHUTDOWN_TIMEOUT_MS` (25 s; Render SIGKILL ~30 s) rồi SIGKILL, con nhận hạn 22 s (D-6). Chỉ **worker** drain; **hub-api thoát ngay** (chưa có shutdown hook) — request đang dở bị cắt trước khi trả 2xx, provider gửi lại, BB-2/BB-3 bảo đảm không mất/không đôi (D-2).
   Một con thoát ngoài ý muốn → SIGTERM con kia → container thoát ≠ 0 → Render khởi động lại (không có trạng thái nửa sống).
 - Log: dòng JSON giữ nguyên + trường `"proc":"api"|"worker"|"supervisor"`.
 - Pool: supervisor đặt `connection_limit` trong `DATABASE_URL` cho từng con — `HUB_ALL_API_DB_CONNECTIONS` (mặc định 5) +

@@ -52,3 +52,4 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 - Phần 2 web: xong. Phần 3 fake-google + e2e GO9: xong (xem commit). Dev stack :3000 build lại 11/10: /login có nút Google, /auth/google qua proxy :3000 -> 503 google_oauth_disabled (chưa có GOOGLE_OAUTH_* trong .env), cột google_sub đã migrate. Admin điền GOOGLE_OAUTH_CLIENT_ID/SECRET vào .env rồi `docker compose up -d hub-api` (tạo lại để nhận env).
 - Review AU5b GO-1..GO-5: xong (commit GO), ADR-128.
 - Story hub-all (ADR-129): xong (commit hub-all). scripts/hub-all-e2e.sh = HA4.
+- Review hub-all D-1..D-6: xong (0ad7ce1 + commit docs D-2/D-3), ADR-130.

@@ -84,9 +84,13 @@ Khi có 2 dòng trên, nhắn: **"sinh env deploy"**. Coordinator sẽ:
 | Auto-Deploy                  | Yes                                                                 |
 
 3. **Environment** → **Add from .env** → dán **khối `[hub-api]` RỒI khối `[hub-worker]`** trong `.env.deploy.local` (hợp của hai khối — trùng tên thì giữ giá trị của `[hub-api]`; `DIRECT_URL` phải là **owner** vì container này chạy migrate, worker vẫn dùng `DATABASE_URL` = hub_app). Thêm `WORKER_METRICS_PORT=0`. Supervisor tự đặt `connection_limit` = 5 cho mỗi tiến trình (ghi đè `connection_limit=1` trong chuỗi; đổi bằng `HUB_ALL_API_DB_CONNECTIONS` / `HUB_ALL_WORKER_DB_CONNECTIONS`). Khối `[hub-api]` gồm:
-   `NODE_ENV=production` · `TRUST_PROXY=1` · `DATABASE_URL` (hub*app, pooler, có `&pgbouncer=true&connection_limit=1`) · `DIRECT_URL` (owner) · `REDIS_URL` · `RABBITMQ_URL` · `MASTER_KEY` · `HUB_SIGNING_SECRET` · `JWT_SECRET` · `CSRF_SECRET` · `SOCKET_TICKET_SECRET` · `OAUTH_COOKIE_SECRET` · `WEB_PROXY_SECRET` · `WEB_PUBLIC_URL` · `CORS_ORIGINS` · `OPERATOR_EMAIL` · `OPERATOR_PASSWORD_HASH` · `MAIL_DRIVER=gmail` · `MAIL_FROM` · `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` · `GOOGLE_OAUTH_CLIENT_ID/SECRET` · `GITHUB_OAUTH_CLIENT_ID/SECRET` · `METRICS_TOKEN` · `INTERNAL_TOKEN` · `SHUTDOWN_TIMEOUT_MS=25000` · `INGEST_RATE_LIMIT_PER_MIN=100` · `PAYOS*_`·`SEPAY*API_KEY`·`GITHUB_WEBHOOK_SECRET`.
-**KHÔNG đặt:** `PORT`(Render tự cấp),`HUB_APP_DB_PASSWORD`, `RUN_SEED`, `GOOGLE_OAUTH_FAKE_BASE_URL`, `GITHUB_OAUTH_BASE_URL`, `MOCK_BASE_URL`, `DEMO*_`, `NEXT*PUBLIC*\*`.
-`WEB_PUBLIC_URL`/`CORS_ORIGINS`chưa có URL Vercel thì tạm để`https://placeholder.vercel.app` — bước 6 sửa lại.
+   `NODE_ENV=production` · `TRUST_PROXY=1` · `DATABASE_URL` (`hub_app`, pooler, có `&pgbouncer=true&connection_limit=1`) · `DIRECT_URL` (owner) · `REDIS_URL` · `RABBITMQ_URL` · `MASTER_KEY` · `HUB_SIGNING_SECRET` · `JWT_SECRET` · `CSRF_SECRET` · `SOCKET_TICKET_SECRET` · `OAUTH_COOKIE_SECRET` · `WEB_PROXY_SECRET` · `WEB_PUBLIC_URL` · `CORS_ORIGINS` · `OPERATOR_EMAIL` · `OPERATOR_PASSWORD_HASH` · `MAIL_DRIVER=gmail` · `MAIL_FROM` · `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` · `GOOGLE_OAUTH_CLIENT_ID/SECRET` · `GITHUB_OAUTH_CLIENT_ID/SECRET` · `METRICS_TOKEN` · `INTERNAL_TOKEN` · `SHUTDOWN_TIMEOUT_MS=25000` · `INGEST_RATE_LIMIT_PER_MIN=100` · `PAYOS_CLIENT_ID` · `PAYOS_API_KEY` · `PAYOS_CHECKSUM_KEY` · `SEPAY_API_KEY` · `GITHUB_WEBHOOK_SECRET`.
+
+   **KHÔNG đặt:** `PORT` (Render tự cấp) · `HUB_APP_DB_PASSWORD` · `RUN_SEED` · `GOOGLE_OAUTH_FAKE_BASE_URL` · `GITHUB_OAUTH_BASE_URL` · `MOCK_BASE_URL` · mọi biến `DEMO_…` · mọi biến `NEXT_PUBLIC_…`.
+
+   `WEB_PUBLIC_URL` / `CORS_ORIGINS` chưa có URL Vercel thì tạm để `https://placeholder.vercel.app` — bước 6 sửa lại.
+
+   **Khi deploy lại / Render dừng container (D-2, ADR-129):** chỉ **worker** drain (xử lý xong message đang chạy, tối đa 22 s); **hub-api thoát ngay** khi nhận SIGTERM (chưa có shutdown hook). Request webhook đang dở bị cắt TRƯỚC khi trả 2xx → provider tự gửi lại; chống trùng (BB-2) và "không ACK trước COMMIT" (BB-3) bảo đảm không mất, không đôi sự kiện.
 4. **Create Web Service**. Build lần đầu **5–10 phút** (image build cả monorepo). Nếu build lỗi ở `next build` do tải Google Fonts → bấm **Manual Deploy → Clear build cache & deploy** lần nữa (lỗi mạng đã gặp ở local, không phải code).
 
 **✅ Kiểm:**

@@ -15,7 +15,8 @@ const HUB_URL = __ENV.HUB_URL || 'http://hub-api:4000';
 const PROJECT = __ENV.PROJECT || 'cafe';
 const RPS = parseInt(__ENV.RPS || '30', 10);
 const DURATION_S = parseInt(__ENV.DURATION_S || '60', 10);
-const RUN = __ENV.RUN || `${Date.now().toString(36)}`;
+// RUN chốt MỘT lần trong setup() rồi truyền qua `data` — mỗi VU tự tính Date.now() sẽ ra RUN khác nhau.
+const RUN_ENV = __ENV.RUN;
 const JSON_H = { 'content-type': 'application/json' };
 
 export const options = {
@@ -37,6 +38,7 @@ export function setup() {
     JSON.stringify({ email: __ENV.OPERATOR_EMAIL || 'operator@verify.local', password: __ENV.OPERATOR_PASSWORD || 'VERIFY_ONLY_admin_password' }),
     { headers: JSON_H },
   );
+  const RUN = RUN_ENV || Date.now().toString(36);
   if (login.status !== 200) throw new Error(`login ${login.status} ${login.body}`);
   const cookie = cookieHeader(login);
   const csrf = login.cookies.hub_csrf[0].value;
@@ -59,14 +61,14 @@ export function setup() {
   );
   if (sub.status !== 201) throw new Error(`subscription ${sub.status} ${sub.body}`);
   console.log(`RUN=${RUN}`);
-  return { key, sub: JSON.parse(sub.body).id };
+  return { key, sub: JSON.parse(sub.body).id, run: RUN };
 }
 
 export default function (data) {
-  const id = `${RUN}-${__VU}-${__ITER}`;
+  const id = `${data.run}-${__VU}-${__ITER}`;
   const res = http.post(
     `${HUB_URL}/v1/p/${PROJECT}/events`,
-    JSON.stringify({ type: 'k6.delivered', idempotencyKey: id, data: { run: RUN, id } }),
+    JSON.stringify({ type: 'k6.delivered', idempotencyKey: id, data: { run: data.run, id } }),
     { headers: { ...JSON_H, authorization: `Bearer ${data.key}` } },
   );
   check(res, { '202': (r) => r.status === 202 });
@@ -76,5 +78,5 @@ export function teardown(data) {
   http.patch(`${HUB_URL}/v1/p/${PROJECT}/subscriptions/${data.sub}`, JSON.stringify({ isActive: false }), {
     headers: { ...JSON_H, authorization: `Bearer ${data.key}` },
   });
-  console.log(`RUN=${RUN} — đo: bash scripts/delivery-latency.sh ${RUN}`);
+  console.log(`RUN=${data.run} — đo: bash scripts/delivery-latency.sh ${data.run}`);
 }
