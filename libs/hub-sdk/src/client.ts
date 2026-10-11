@@ -68,6 +68,8 @@ export interface Endpoint {
   url: string | null;
   verification: 'PENDING' | 'VERIFIED' | 'FAILED';
   verificationError: string | null;
+  /** DX1 §2.3: gợi ý sửa tương ứng `verificationError` (null khi VERIFIED). */
+  verificationFix?: string | null;
   signingSecret?: string;
 }
 export interface Subscription {
@@ -149,7 +151,7 @@ export class HubClient {
     list: (): Promise<Endpoint[]> => this.request('GET', '/endpoints'),
     create: (input: { name: string; url: string; signingSecret?: string }): Promise<Endpoint> => this.request('POST', '/endpoints', input),
     /** Chạy lại challenge. Kèm `signingSecret` = xoay secret có chứng minh (chỉ lưu khi endpoint verify được bằng secret mới). */
-    verify: (id: string, opts: { signingSecret?: string } = {}): Promise<{ verification: Endpoint['verification']; verificationError: string | null; secretRotated?: boolean }> =>
+    verify: (id: string, opts: { signingSecret?: string } = {}): Promise<{ verification: Endpoint['verification']; verificationError: string | null; verificationFix?: string | null; secretRotated?: boolean }> =>
       this.request('POST', `/endpoints/${encodeURIComponent(id)}/verify`, opts.signingSecret ? { signingSecret: opts.signingSecret } : undefined),
     /**
      * Idempotent (gọi mỗi lần service khởi động): tìm endpoint theo `url`; chưa có thì tạo; chưa VERIFIED thì
@@ -170,7 +172,8 @@ export class HubClient {
         endpoint = { ...endpoint, ...(await this.endpoints.verify(endpoint.id)) };
       }
       if (endpoint.verification !== 'VERIFIED') {
-        throw new HubError(409, 'endpoint_not_verified', `Endpoint ${url} chưa VERIFIED (${endpoint.verificationError ?? 'không rõ'})`);
+        const fix = (endpoint as Endpoint).verificationFix ? ` — fix: ${(endpoint as Endpoint).verificationFix}` : '';
+        throw new HubError(409, 'endpoint_not_verified', `Endpoint ${url} chưa VERIFIED (${endpoint.verificationError ?? 'không rõ'})${fix}`);
       }
       const byKeys = !!input.sourceKeys?.length;
       const wanted = [...((byKeys ? input.sourceKeys : input.sourceIds) ?? [])].sort().join(',');
@@ -234,7 +237,10 @@ export class HubClient {
     }
     if (!res.ok) {
       const code = typeof parsed?.error === 'string' ? parsed.error : `http_${res.status}`;
-      throw new HubError(res.status, code, `Hub trả HTTP ${res.status} (${code}) cho ${method} ${path.split('?')[0]}`, parsed);
+      // DX1: kèm `fix` + `requestId` của hub (không chứa key/secret — luật catalog) để log của service tự giải thích.
+      const fix = typeof parsed?.fix === 'string' ? ` — fix: ${parsed.fix}` : '';
+      const rid = typeof parsed?.requestId === 'string' ? ` [requestId ${parsed.requestId}]` : '';
+      throw new HubError(res.status, code, `Hub trả HTTP ${res.status} (${code}) cho ${method} ${path.split('?')[0]}${fix}${rid}`, parsed);
     }
     return parsed as T;
   }

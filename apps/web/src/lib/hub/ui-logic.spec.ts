@@ -5,6 +5,7 @@ import {
   AUDIT_KEY,
   countdownTicker,
   describeDeleteConflict,
+  errorMessageOf,
   emptyToastCursor,
   keysAfterAudited,
   stepToasts,
@@ -94,5 +95,18 @@ describe("describeDeleteConflict — thông báo 409 dễ hiểu", () => {
   it("không phải 409 -> null", () => {
     expect(describeDeleteConflict({ status: 500 })).toBeNull();
     expect(describeDeleteConflict(new Error("x"))).toBeNull();
+  });
+});
+
+describe("errorMessageOf — DX1: console giữ câu tiếng Việt (ADR-136)", () => {
+  it("ưu tiên detail; thiếu detail -> câu Việt theo mã; mã lạ -> message; 5xx kèm requestId", () => {
+    expect(errorMessageOf({ error: "bad_request", message: "The request is invalid.", detail: "range phải là '24h' hoặc '7d'" })).toBe(
+      "range phải là '24h' hoặc '7d'",
+    );
+    expect(errorMessageOf({ error: "not_found", message: "The resource was not found." })).toMatch(/Không tìm thấy/);
+    expect(errorMessageOf({ error: "internal_error", message: "Internal error.", requestId: "r-123" })).toMatch(/r-123/);
+    expect(errorMessageOf({ error: "zzz", message: "Plain" })).toBe("Plain");
+    expect(errorMessageOf({ message: ["a", "b"] })).toBe("a, b");
+    expect(errorMessageOf(null)).toBe("");
   });
 });

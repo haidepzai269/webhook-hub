@@ -12,3 +12,7 @@
 - Đo `hub listen` LOCAL (stack dev localhost:4000, image API cũ — dùng `--from <cursor>`), SePay mock cafe → app local, N=10:
   p50 619 ms · p95 1699 ms · max 1699 ms · 10/10 nhận, 0 chữ ký sai; khởi động CLI 0,9 s (ts-node). Key tạm `dx-latency-measure` đã revoke.
   Script: scratchpad `measure-listen.js` (không in key).
+- DX1-lite xong (sau commit C-1 72ee8a7): catalog `libs/common/src/errors/catalog.ts` (mọi mã đang ném + mã suy từ status),
+  `apps/hub-api/src/modules/errors/*` (filter + x-request-id + hubError + install), `verificationFix`, Generic buildAck `fix`,
+  web `errorMessageOf` (detail → câu Việt theo mã → message), SDK HubError kèm fix/requestId, `docs/ERRORS.md`, U22 sửa chữ.
+  Test UX1–UX6 xanh. ADR-136 (ADR-135 là VF4). Câu hỏi Admin: CAN-ADMIN-QUYET-DX.md Q1 (fix Generic 401/422 qua lõi ingest).

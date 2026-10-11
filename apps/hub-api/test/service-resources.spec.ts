@@ -185,7 +185,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(await status(controller.verifyEndpoint(req(PA), EB))).toEqual({ status: 404, body: { error: 'not_found' } });
     expect(await status(controller.verifyEndpoint(req(PA), 'khong-phai-uuid'))).toEqual({ status: 404, body: { error: 'not_found' } });
     verdict.next = { verification: 'FAILED', verificationError: 'timeout' };
-    await expect(controller.verifyEndpoint(req(PA), EA)).resolves.toEqual({ verification: 'FAILED', verificationError: 'timeout' });
+    await expect(controller.verifyEndpoint(req(PA), EA)).resolves.toEqual({ verification: 'FAILED', verificationError: 'timeout', verificationFix: expect.stringMatching(/10s/) });
     expect(destinations.find((d) => d.id === EA)).toMatchObject({ verification: 'FAILED', verificationError: 'timeout' });
   });
 
@@ -235,11 +235,11 @@ describe('Service API — endpoint + subscription (S5)', () => {
     const NEW = 'whsec_bmV3LXNlY3JldC1mb3ItbXMtcjQtdGVzdA==';
     const before = destinations.find((d) => d.id === EA).signingSecretEncrypted;
     verdict.next = { verification: 'FAILED', verificationError: 'http_401' };
-    expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'http_401', secretRotated: false });
+    expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'http_401', verificationFix: expect.stringMatching(/HTTP 401/), secretRotated: false });
     expect(verifier.challenge).toHaveBeenLastCalledWith('https://a.example/h', NEW);
     expect(destinations.find((d) => d.id === EA)).toMatchObject({ signingSecretEncrypted: before, verification: 'VERIFIED' });
     verdict.next = { verification: 'VERIFIED', verificationError: null };
-    expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'VERIFIED', verificationError: null, secretRotated: true });
+    expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'VERIFIED', verificationError: null, verificationFix: null, secretRotated: true });
     const after = destinations.find((d) => d.id === EA).signingSecretEncrypted;
     expect(after).not.toBe(before);
     expect(require('@hub/crypto').aesGcmDecrypt(after, getMasterKey())).toBe(NEW);
@@ -345,7 +345,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
       const { controller, req, verdict, destinations, audits } = build();
       const before = destinations.find((d) => d.id === EA).signingSecretEncrypted;
       verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
-      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'ssrf_blocked', secretRotated: false });
+      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'ssrf_blocked', verificationFix: expect.stringMatching(/hub listen/), secretRotated: false }); // [DX:UX6]
       expect(destinations.find((d) => d.id === EA)).toMatchObject({ signingSecretEncrypted: before, verification: 'VERIFIED' });
       expect(failedAudits(audits)).toHaveLength(1);
       expect(failedAudits(audits)[0]).toMatchObject({
@@ -397,7 +397,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
     it('url hỏng khi xoay secret (invalid_url) -> vẫn có audit, không gọi challenge', async () => {
       const { controller, req, audits, destinations, verifier } = build();
       destinations.find((d) => d.id === EA).configEncrypted = 'hong';
-      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'invalid_url', secretRotated: false });
+      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'invalid_url', verificationFix: expect.any(String), secretRotated: false });
       expect(verifier.challenge).not.toHaveBeenCalled();
       expect(failedAudits(audits)[0].metadata).toEqual({ verificationError: 'invalid_url', attempt: 'rotate', secretRotated: false });
     });

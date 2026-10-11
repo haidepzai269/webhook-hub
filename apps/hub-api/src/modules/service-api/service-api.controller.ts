@@ -34,7 +34,7 @@ export function validatePublishBody(body: any): void {
   }
   if (isReservedType(body.type)) {
     const r = validateCanonical(body.type, body.data);
-    if (!r.ok) unprocessable({ error: 'schema_mismatch', field: r.field });
+    if (!r.ok) unprocessable({ error: 'schema_mismatch', type: body.type, field: r.field });
   }
 }
 
@@ -81,6 +81,13 @@ export class ServiceApiController {
       ip: req.ip,
     };
     const result = await this.ingest.publishFromService(key.tenantId, key.sourceId!, rawReq);
+    // DX1: lỗi từ lõi ingest (source tắt, rate limit, lỗi lưu) đi qua exception filter như mọi lỗi khác của /v1/p
+    // (khuôn {error, message, fix, docsUrl, requestId}); 2xx giữ nguyên ack của ApiAdapter.
+    if (result.status >= 400) {
+      const b = (result.body ?? {}) as { error?: unknown };
+      const code = typeof b.error === 'string' && /^[a-z][a-z0-9_]*$/.test(b.error) ? b.error : undefined;
+      throw new HttpException({ ...(code ? { error: code } : {}), ...(!code && typeof b.error === 'string' ? { message: b.error } : {}) }, result.status);
+    }
     return res.status(result.status).json(result.body);
   }
 }

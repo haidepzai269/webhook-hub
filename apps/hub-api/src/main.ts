@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { authSecretProblems } from './modules/auth/auth-config';
+import { installErrorHandling } from './modules/errors/install';
 
 function assertMasterKeyConfigured(): void {
   const masterKey = process.env.MASTER_KEY;
@@ -63,6 +64,8 @@ async function bootstrap() {
   // vẫn gọi /hooks/* được.
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cookieParser());
+  // DX1 (SPEC-dev-experience §2): x-request-id + khuôn lỗi {error, message, fix, docsUrl, requestId} cho /v1/p/* và /api/v1/*.
+  installErrorHandling(app);
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
   app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials

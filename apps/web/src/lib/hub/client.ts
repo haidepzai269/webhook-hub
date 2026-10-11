@@ -1,4 +1,5 @@
 import { currentProjectId } from "./project-store";
+import { errorMessageOf } from "./ui-logic";
 
 export class HubApiError extends Error {
   constructor(
@@ -95,10 +96,7 @@ export async function hubFetch<T>(path: string, init: RequestInit = {}, retried 
     throw new HubApiError(401, "Phiên đăng nhập đã hết hạn hoặc không hợp lệ.", body);
   }
   if (!res.ok) {
-    const apiMessage =
-      body !== null && typeof body === "object" && "message" in body ? (body as { message: unknown }).message : null;
-    const message = Array.isArray(apiMessage) ? apiMessage.join(", ") : apiMessage ? String(apiMessage) : "";
-    throw new HubApiError(res.status, message || `HTTP ${res.status}`, body);
+    throw new HubApiError(res.status, errorMessageOf(body) || `HTTP ${res.status}`, body);
   }
   return body as T;
 }

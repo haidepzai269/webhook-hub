@@ -638,7 +638,7 @@ Phiên test tự viết server này, khoảng 20 dòng.
 | U19 | 〃 | validate type `*`, `*.paid`, `payment.*.x`, `Payment.*` | 422 cả 4 |
 | U20 | `apps/hub-api/test/api-key.guard.spec.ts` | key hợp lệ, project đúng | qua, `request.tenantId` = project |
 | U21 | 〃 | key revoke | 401 |
-| U22 | 〃 | key project A gọi path project B **có tồn tại** vs path project **không tồn tại** | cả hai 404, **body giống hệt** |
+| U22 | 〃 | key project A gọi path project B **có tồn tại** vs path project **không tồn tại** | cả hai 404, **body giống hệt trừ `requestId`** (DX1: filter thêm `requestId` khác nhau mỗi request — UX2) |
 | U23 | 〃 | thiếu scope | 403 `missing_scope` |
 | U24 | `apps/hub-api/test/polling.spec.ts` | event `received_at = now()-1s` | **không** trả (cửa sổ lắng) |
 | U25 | 〃 | 3 event seq 1, 2, 3; `after=1` | trả 2, 3 **theo thứ tự tăng dần**; `nextCursor="3"` |

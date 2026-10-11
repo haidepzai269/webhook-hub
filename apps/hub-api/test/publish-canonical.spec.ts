@@ -31,7 +31,7 @@ describe('POST /v1/p/:project/events (S4)', () => {
     const { call, ingest } = setup();
     const data = { amount: 50000, currency: 'VND', method: 'bank_transfer', reference: null, memo: null, counterparty: null, account: null, raw: {}, paidAt: '2026-10-10T00:00:00.000Z' };
     const bad = await call({ type: 'payment.received', data, idempotencyKey: 'p1' });
-    expect(bad).toEqual({ status: 422, body: { error: 'schema_mismatch', field: 'providerTxnId' } });
+    expect(bad).toEqual({ status: 422, body: { error: 'schema_mismatch', type: 'payment.received', field: 'providerTxnId' } });
     expect(ingest.publishFromService).not.toHaveBeenCalled();
     const ok = await call({ type: 'order.created', data: { anything: [1, 2] }, idempotencyKey: 'o1' });
     expect(ok.status).toBe(202);

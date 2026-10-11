@@ -151,7 +151,17 @@ describe('GenericAdapter — normalize (S8, S14 mapping)', () => {
   it('S8: buildAck — 200 {ok:true} / trùng {ok:true,duplicate:true} / lỗi {ok:false,error}', () => {
     expect(a.buildAck({ accepted: true, status: 200, rawEventId: 'r', idempotencyKey: 'k', isDuplicate: false })).toEqual({ status: 200, body: { ok: true } });
     expect(a.buildAck({ accepted: true, status: 200, idempotencyKey: 'k', isDuplicate: true })).toEqual({ status: 200, body: { ok: true, duplicate: true } });
-    expect(a.buildAck({ accepted: false, status: 401, message: 'sai chữ ký' } as any)).toEqual({ status: 401, body: { ok: false, error: 'sai chữ ký' } });
+    expect(a.buildAck({ accepted: false, status: 401, message: 'sai chữ ký' } as any)).toEqual({
+      status: 401,
+      body: { ok: false, error: 'sai chữ ký', fix: expect.stringMatching(/verificationConfig/) },
+    });
+  });
+
+  it('[DX:UX6] DX1 §2.1: lỗi của nguồn tuỳ chỉnh kèm `fix` cho dev (401 chữ ký, 422 idempotency) — không chứa secret', () => {
+    const r401 = a.buildAck({ accepted: false, status: 401, message: 'x' } as any) as any;
+    expect(r401.body.fix).toMatch(/raw body bytes/);
+    const r422 = a.buildAck({ accepted: false, status: 422, message: 'missing_idempotency_key' } as any) as any;
+    expect(r422.body.fix).toMatch(/idempotency/);
   });
 });
 

@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, NotFoundExc
 import { Response } from 'express';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmDecrypt, aesGcmEncrypt, generateWhsecSecret } from '@hub/crypto';
-import { isValidEventPattern } from '@hub/common';
+import { isValidEventPattern, verificationFix } from '@hub/common';
 import { ProviderRegistry } from '@hub/providers';
 import { ApiKeyGuard } from './api-key.guard';
 import { RequireScope } from './require-scope.decorator';
@@ -71,6 +71,11 @@ function parseEndpointUrl(v: unknown): string {
 }
 
 /** Bản công khai của endpoint: KHÔNG bao giờ có config/secret mã hoá. */
+/** DX1 §2.3: kết quả challenge kèm `verificationFix`. */
+function withFix<T extends { verificationError: string | null }>(o: T): T & { verificationFix: string | null } {
+  return { ...o, verificationFix: verificationFix(o.verificationError) };
+}
+
 function publicEndpoint(d: any, url: string | null) {
   return {
     id: d.id,
@@ -78,6 +83,8 @@ function publicEndpoint(d: any, url: string | null) {
     url,
     verification: d.verification,
     verificationError: d.verificationError ?? null,
+    // DX1 §2.3: gợi ý sửa ngay cạnh lý do (null khi VERIFIED).
+    verificationFix: verificationFix(d.verificationError),
     verifiedAt: d.verifiedAt ?? null,
     createdAt: d.createdAt,
   };
@@ -304,10 +311,10 @@ export class ServiceResourcesController {
       if (o.verification !== 'VERIFIED') {
         // C-1 (ADR-131): trạng thái + secret cũ GIỮ NGUYÊN (MS-R4), nhưng lần thất bại phải thấy được trong audit.
         await this.withAudit(tenantId, (repo) => auditVerificationFailure(repo, d.id, o.verificationError, 'rotate', `key:${req.apiKey!.id}`, { secretRotated: false }));
-        return { ...o, secretRotated: false };
+        return { ...withFix(o), secretRotated: false };
       }
       await this.recordVerification(tenantId, d.id, o, `key:${req.apiKey!.id}`, 'rotate', aesGcmEncrypt(next, getMasterKey()));
-      return { ...o, secretRotated: true };
+      return { ...withFix(o), secretRotated: true };
     }
     let secret: string | null = null;
     try {
@@ -318,7 +325,7 @@ export class ServiceResourcesController {
     const outcome: VerificationOutcome =
       url && secret ? await this.verifier.challenge(url, secret) : { verification: 'FAILED', verificationError: url ? 'no_signing_secret' : 'invalid_url' };
     await this.recordVerification(tenantId, d.id, outcome, `key:${req.apiKey!.id}`, 'verify');
-    return outcome;
+    return withFix(outcome);
   }
 
   /**

@@ -170,9 +170,22 @@ export class GenericAdapter implements ProviderAdapter {
 
   buildAck(result: IngestResult): { status: number; body: unknown } {
     if (result.isDuplicate) return { status: 200, body: { ok: true, duplicate: true } };
-    if (!result.accepted) return { status: result.status, body: { ok: false, error: result.message ?? 'rejected' } };
+    // DX1 §2.1 (ngoại lệ duy nhất ở /hooks): người đọc ack của nguồn tuỳ chỉnh là DEV đang cấu hình -> kèm `fix`.
+    if (!result.accepted) return { status: result.status, body: { ok: false, error: result.message ?? 'rejected', fix: genericAckFix(result.status) } };
     return { status: 200, body: { ok: true } };
   }
+}
+
+/** Gợi ý sửa cho dev cấu hình nguồn tuỳ chỉnh — chỉ theo status, KHÔNG chứa giá trị header/secret/body. */
+export function genericAckFix(status: number): string {
+  if (status === 401) {
+    return 'Signature/token did not verify. Check the source verificationConfig (scheme, header, encoding) and the secret; HMAC is computed over the raw body bytes. Use the source listening mode (console → Sources → Inspect) to see the diagnosis.';
+  }
+  if (status === 422) return 'No idempotency key: configure "idempotency" (a body field or header that is unique per event) on the source.';
+  if (status === 413) return 'Body too large: send at most 1MB per request.';
+  if (status === 429) return 'Rate limited: slow down and retry later.';
+  if (status === 404) return 'Unknown or disabled source: check the webhook URL (/hooks/generic/<sourceKey>) in the console.';
+  return 'See docs/ERRORS.md and the source listening mode in the console.';
 }
 
 const SW_SIGNATURE_HEADER = 'webhook-signature';
