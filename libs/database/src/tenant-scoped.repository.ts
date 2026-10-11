@@ -18,6 +18,24 @@ const SYNC_METHODS = new Set(['constructor', 'extend']);
 const ORCHESTRATED_METHODS = new Set(['latestPollCursor']);
 
 /**
+ * R3-M1 (review DX-A vòng 3): `this` của phương thức điều phối — gọi phương thức repo đi qua proxy như thường, nhưng ĐỌC
+ * `this.prisma` thì NÉM (client gốc ở đó chưa đặt `app.project_id`: dưới hub_app RLS trả rỗng -> cursor 0 / dội lịch sử
+ * mà không ai biết). Chỉ áp cho ORCHESTRATED_METHODS; phương thức khác không đổi.
+ */
+function orchestratorView<T extends object>(repoProxy: T, method: string): T {
+  return new Proxy(repoProxy, {
+    get(target, prop, receiver) {
+      if (prop === 'prisma') {
+        throw new Error(
+          `TenantScopedRepository.${method} is an ORCHESTRATED method: it must not touch this.prisma (unscoped root client) — call other repository methods instead`,
+        );
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
+/**
  * R-4 (review AU, ADR-119): phương thức NÓNG của đường giao, mỗi cái là MỘT câu truy vấn trả `PrismaPromise` (lười, KHÔNG
  * `async`). Trên client gốc chạy bằng batch transaction `[set_config, truy vấn]` — một lần gửi thay vì transaction tương
  * tác (BEGIN, set_config, truy vấn, COMMIT là 4 lượt) — giống tra source lúc ingest (ADR-108).
@@ -53,7 +71,7 @@ function scopeToTenant<T extends TenantScopedRepository>(repo: T): T {
       if (typeof value !== 'function' || typeof prop !== 'string' || SYNC_METHODS.has(prop) || Object.prototype.hasOwnProperty.call(Object.prototype, prop)) {
         return value;
       }
-      if (ORCHESTRATED_METHODS.has(prop)) return (value as (...a: unknown[]) => unknown).bind(receiver);
+      if (ORCHESTRATED_METHODS.has(prop)) return (value as (...a: unknown[]) => unknown).bind(orchestratorView(receiver as T, prop));
       const client = (target as unknown as { prisma: PrismaClientOrTx }).prisma;
       const tenantId = target.tenantId;
       if (isRootClient(client) && BATCH_METHODS.has(prop) && batchEnabled() && typeof client.$executeRaw === 'function') {
