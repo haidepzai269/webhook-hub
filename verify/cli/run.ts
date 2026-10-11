@@ -10,6 +10,8 @@
  *   npm run verify                 L0 + L1 + L2.
  *   npm run verify:chaos           L3 — kill/restart/pause container hubv (VF5, verify/scenarios/chaos-l3.ts).
  *   npm run verify:all             L0 → L3.
+ *   npm run verify:probe -- P-BB3-01 | --all [--overlay a,b]   probe §6.3 trong git worktree tạm (VF6).
+ *   npm run verify:bb              bảng 5 bất biến: test BB:n xanh + probe đỏ (§8.2).
  *   npm run verify:map [-- --story VF2]   sinh docs/TEST-MAP.md; mồ côi / ma / trùng → ĐỎ.
  *   npm run verify -- --evidence   in khối "Verify:" cho commit từ lần chạy cuối (không chạy lại).
  *
@@ -25,6 +27,7 @@ import { hostUrls, loadVerifyEnv, ROOT } from '../lib/compose';
 import { analyzeMap, declaredCodes, MapResult, scanTags, SourcesConfig } from '../lib/map';
 import { layerVerdict, ratchet, relFile, Summary, summarizeJest, unreachableSummary } from '../lib/results';
 import { CHAOS_MODULES, L2Options, runL2 } from '../lib/e2e-runner';
+import { applyProbe, BB_PROBES, judgeProbe, loadProbes, Probe } from '../lib/probe';
 
 const VERIFY_DIR = path.join(ROOT, 'verify');
 const RESULTS_DIR = path.join(VERIFY_DIR, '.results');
@@ -87,21 +90,47 @@ function tcpReachable(url: string, timeoutMs = 2000): Promise<boolean> {
   });
 }
 
-function runJest(layer: Layer, files: string[], env: NodeJS.ProcessEnv): { summary: Summary; ms: number } {
+function runJest(layer: Layer, files: string[], env: NodeJS.ProcessEnv, cwd = ROOT, tag: string = layer): { summary: Summary; ms: number } {
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
-  const out = path.join(RESULTS_DIR, `${layer}.json`);
+  const out = path.join(RESULTS_DIR, `${tag}.json`);
   if (fs.existsSync(out)) fs.unlinkSync(out);
   const workers = process.env.VERIFY_JEST_WORKERS || '2';
   const jestBin = path.join(ROOT, 'node_modules', 'jest', 'bin', 'jest.js');
   const args = [jestBin, `--maxWorkers=${workers}`, '--json', `--outputFile=${out}`, '--runTestsByPath', ...files];
   console.log(`\n▶ ${layer}: jest --maxWorkers=${workers} (${files.length} file)`);
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, args, { cwd: ROOT, env, stdio: ['ignore', 'inherit', 'inherit'] });
+  const r = spawnSync(process.execPath, args, { cwd, env, stdio: ['ignore', 'inherit', 'inherit'] });
   const ms = Date.now() - t0;
   if (!fs.existsSync(out)) {
     return { summary: { pass: 0, fail: 1, skip: 0, tests: [], note: `jest không ghi kết quả (exit ${r.status})` }, ms };
   }
-  return { summary: summarizeJest(JSON.parse(fs.readFileSync(out, 'utf8')), ROOT), ms };
+  return { summary: summarizeJest(JSON.parse(fs.readFileSync(out, 'utf8')), cwd), ms };
+}
+
+/** Env của L1 (Postgres/Redis hubv, role hub_app cho code đang test, owner chỉ cho fixture — §4.3). */
+function l1Env(): { env: NodeJS.ProcessEnv; dbUrl: string; redisUrl: string } {
+  const hv = hostUrls();
+  const dbUrl = process.env.VERIFY_DATABASE_URL || hv.DATABASE_URL;
+  const redisUrl = process.env.VERIFY_REDIS_URL || hv.REDIS_URL;
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    RUN_DB_TESTS: '1',
+    DATABASE_URL: dbUrl,
+    // AU6: owner chỉ cho fixture (newTestPrisma('owner')) + migrate; code đang test chạy bằng DATABASE_URL (hub_app).
+    DIRECT_URL: process.env.VERIFY_DB_OWNER_URL || hv.DIRECT_URL,
+    REDIS_URL: redisUrl,
+    VERIFY_DB_OWNER_URL: process.env.VERIFY_DB_OWNER_URL || hv.DIRECT_URL,
+    // S12 (ADR-082): dữ liệu mã hoá mà L1 ghi vào DB hubv phải đọc được bởi hub-api hubv (và ngược lại) -> cùng
+    // MASTER_KEY của .env.verify. Không đặt thì seed.ts (dotenv) lấy MASTER_KEY của .env DEV -> lệch khoá.
+    MASTER_KEY: process.env.VERIFY_MASTER_KEY || loadVerifyEnv().MASTER_KEY,
+  };
+  return { env, dbUrl, redisUrl };
+}
+
+function l0Env(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.RUN_DB_TESTS; // L0 không bao giờ chạm DB
+  return env;
 }
 
 async function runLayer(layer: Layer, l2: L2Options = defaultL2()): Promise<{ summary: Summary; ms: number }> {
@@ -121,25 +150,8 @@ async function runLayer(layer: Layer, l2: L2Options = defaultL2()): Promise<{ su
     return { summary, ms: Date.now() - t0 };
   }
   const files = specFiles().filter((f) => layerOfFile(f) === layer);
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (layer === 'L0') {
-    delete env.RUN_DB_TESTS; // L0 không bao giờ chạm DB
-    return runJest('L0', files, env);
-  }
-  const hv = hostUrls();
-  const dbUrl = process.env.VERIFY_DATABASE_URL || hv.DATABASE_URL;
-  const redisUrl = process.env.VERIFY_REDIS_URL || hv.REDIS_URL;
-  Object.assign(env, {
-    RUN_DB_TESTS: '1',
-    DATABASE_URL: dbUrl,
-    // AU6: owner chỉ cho fixture (newTestPrisma('owner')) + migrate; code đang test chạy bằng DATABASE_URL (hub_app).
-    DIRECT_URL: process.env.VERIFY_DB_OWNER_URL || hv.DIRECT_URL,
-    REDIS_URL: redisUrl,
-    VERIFY_DB_OWNER_URL: process.env.VERIFY_DB_OWNER_URL || hv.DIRECT_URL,
-    // S12 (ADR-082): dữ liệu mã hoá mà L1 ghi vào DB hubv phải đọc được bởi hub-api hubv (và ngược lại) -> cùng
-    // MASTER_KEY của .env.verify. Không đặt thì seed.ts (dotenv) lấy MASTER_KEY của .env DEV -> lệch khoá.
-    MASTER_KEY: process.env.VERIFY_MASTER_KEY || loadVerifyEnv().MASTER_KEY,
-  });
+  if (layer === 'L0') return runJest('L0', files, l0Env());
+  const { env, dbUrl, redisUrl } = l1Env();
   const [pgOk, redisOk] = await Promise.all([tcpReachable(dbUrl), tcpReachable(redisUrl)]);
   if (!pgOk || !redisOk) {
     const baseline = readJson<Record<string, number>>(BASELINE, {});
@@ -342,6 +354,137 @@ function evidence(): number {
   return 0;
 }
 
+// ---------------------------------------------------------------- probe (VF6, §6.3)
+
+const PROBES_DIR = path.join(VERIFY_DIR, 'probes');
+const PROBE_WT_DIR = path.join(ROOT, '.claude', 'worktrees');
+
+/**
+ * Một probe: git worktree tạm từ HEAD (dưới `.claude/worktrees/` — jest.config đã bỏ qua thư mục này, và node_modules
+ * của repo vẫn tìm được khi đi ngược lên), chép đè các đường `overlay` + test đích từ cây làm việc (test chưa commit),
+ * áp đột biến, chạy test đích ở đúng tầng, phán, rồi XOÁ worktree. Cây làm việc thật không bị sửa (VT11).
+ */
+async function runProbe(p: Probe, overlay: string[]): Promise<{ p: Probe; ok: boolean; detail: string[]; ms: number }> {
+  const t0 = Date.now();
+  const wt = path.join(PROBE_WT_DIR, `probe-${p.id}-${process.pid}`);
+  const add = spawnSync('git', ['worktree', 'add', '--detach', '--force', wt, 'HEAD'], { cwd: ROOT, encoding: 'utf8' });
+  if (add.status !== 0) return { p, ok: false, detail: [`git worktree add lỗi: ${add.stderr.trim()}`], ms: 0 };
+  try {
+    const targets = ([] as string[]).concat(p.testFile ?? []);
+    for (const rel of new Set([...overlay, ...targets])) {
+      const src = path.join(ROOT, rel);
+      if (fs.existsSync(src)) fs.cpSync(src, path.join(wt, rel), { recursive: true });
+    }
+    if (p.file) {
+      const target = path.join(wt, p.file);
+      if (!fs.existsSync(target)) return { p, ok: false, detail: [`probe MỤC: không còn file ${p.file}`], ms: Date.now() - t0 };
+      const applied = applyProbe(fs.readFileSync(target, 'utf8'), p);
+      if ('reason' in applied) return { p, ok: false, detail: [applied.reason], ms: Date.now() - t0 };
+      fs.writeFileSync(target, applied.text);
+    }
+    let files = targets;
+    if (files.length === 0) files = specFiles().filter((f) => fs.existsSync(path.join(wt, f)) && layerOfFile(f) === p.layer);
+    let env: NodeJS.ProcessEnv;
+    if (p.layer === 'L1') {
+      const l1 = l1Env();
+      if (!(await tcpReachable(l1.dbUrl)) || !(await tcpReachable(l1.redisUrl))) {
+        return { p, ok: false, detail: ['L1: Postgres/Redis hubv không kết nối được — chưa `npm run verify:up`?'], ms: Date.now() - t0 };
+      }
+      env = l1.env;
+      // VT12: code đang test chạy bằng owner -> test RLS phải tự đỏ ở assert tiền đề (không pass âm thầm).
+      if (p.ownerAsApp) env = { ...env, DATABASE_URL: env.VERIFY_DB_OWNER_URL };
+    } else {
+      env = l0Env();
+    }
+    const r = runJest(p.layer, files, env, wt, `probe-${p.id}`);
+    const verdict = judgeProbe(p, r.summary.tests);
+    return { p, ok: verdict.ok, detail: verdict.detail, ms: Date.now() - t0 };
+  } finally {
+    const rm = spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: ROOT, encoding: 'utf8' });
+    if (rm.status !== 0) {
+      fs.rmSync(wt, { recursive: true, force: true });
+      spawnSync('git', ['worktree', 'prune'], { cwd: ROOT });
+    }
+  }
+}
+
+async function probeCmd(ids: string[], overlay: string[]): Promise<number> {
+  const all = loadProbes(PROBES_DIR);
+  const unknown = ids.filter((i) => !all.some((p) => p.id === i));
+  if (unknown.length) {
+    console.error(`không có probe: ${unknown.join(', ')}`);
+    return 2;
+  }
+  const chosen = ids.length ? all.filter((p) => ids.includes(p.id)) : all;
+  // VT11: probe không được rò ra cây làm việc thật. Cây có thể đang được phiên khác sửa song song, nên KHÔNG so cả
+  // `git status`: kiểm (1) file bị nhắm KHÔNG mang đúng nội dung đã phá, (2) không còn worktree probe-* sót lại.
+  const before = new Map(chosen.filter((p) => p.file).map((p) => [p.id, fs.existsSync(path.join(ROOT, p.file)) ? fs.readFileSync(path.join(ROOT, p.file), 'utf8') : '']));
+  const rows: Awaited<ReturnType<typeof runProbe>>[] = [];
+  for (const p of chosen) {
+    console.log(`\n■ ${p.id} — ${p.claim}`);
+    const r = await runProbe(p, overlay);
+    for (const d of r.detail) console.log(`    ${d}`);
+    rows.push(r);
+  }
+  const leftover = git(['worktree', 'list']).split(/\r?\n/).filter((l) => /probe-P-/.test(l));
+  const leaked = chosen.filter((p) => {
+    if (!p.file || !fs.existsSync(path.join(ROOT, p.file))) return false;
+    const mutated = applyProbe(before.get(p.id) ?? '', p);
+    return mutated.ok && fs.readFileSync(path.join(ROOT, p.file), 'utf8') === mutated.text;
+  });
+  console.log('\n| probe | phá gì | test mục tiêu | kết quả |\n|---|---|---|---|');
+  for (const r of rows) {
+    const want = [...(r.p.expectRed ?? []).map((x) => `${x} → đỏ`), ...(r.p.expectGreen ?? []).map((x) => `${x} → xanh`)].join('<br>');
+    const res = r.ok ? '✅' : '❌ ' + r.detail.filter((d) => !d.startsWith('✓')).join('; ');
+    console.log(`| ${r.p.id} | ${r.p.claim} | ${want} | ${res} |`);
+  }
+  const bad = rows.filter((r) => !r.ok);
+  const treeChanged = leaked.length > 0 || leftover.length > 0;
+  const vt11 = treeChanged ? `✗ VT11: đột biến rò ra cây thật (${leaked.map((p) => p.id).join(', ')}) / worktree sót: ${leftover.length}` : 'cây làm việc không bị đột biến, không worktree sót (VT11)';
+  console.log(`\nprobe: ${rows.length - bad.length}/${rows.length} đúng kỳ vọng · ${vt11}`);
+  return bad.length > 0 || treeChanged ? 1 : 0;
+}
+
+/** §8.2: bảng 5 bất biến — test mang mã BB:n xanh trên code thật + probe làm đỏ. */
+async function bbCmd(overlay: string[]): Promise<number> {
+  const tagged = specFiles().filter((f) => /\[BB:\d\]/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+  const l0 = tagged.filter((f) => layerOfFile(f) === 'L0');
+  const l1 = tagged.filter((f) => layerOfFile(f) === 'L1');
+  const tests: Summary['tests'] = [];
+  if (l0.length) tests.push(...runJest('L0', l0, l0Env(), ROOT, 'bb-L0').summary.tests);
+  if (l1.length) tests.push(...runJest('L1', l1, l1Env().env, ROOT, 'bb-L1').summary.tests);
+  const probes = loadProbes(PROBES_DIR);
+  const scenarioText = walk(path.join(VERIFY_DIR, 'scenarios'), (f) => f.endsWith('.ts'))
+    .map((f) => fs.readFileSync(f, 'utf8'))
+    .join('\n');
+  const rows: string[] = [];
+  let ok = true;
+  for (const n of ['1', '2', '3', '4', '5']) {
+    const mine = tests.filter((t) => t.name.includes(`[BB:${n}]`));
+    const green = mine.length > 0 && mine.every((t) => t.status === 'passed');
+    const l23 = (scenarioText.match(new RegExp(`\\[BB:${n}\\]`, 'g')) ?? []).length;
+    const pr: string[] = [];
+    for (const id of BB_PROBES[n]) {
+      const p = probes.find((x) => x.id === id);
+      if (!p) {
+        pr.push(`${id} ❌ thiếu`);
+        ok = false;
+        continue;
+      }
+      const r = await runProbe(p, overlay);
+      const good = p.expectGreen?.length ? '✅ sống sót đúng (lớp sau vẫn chặn)' : '✅ đỏ';
+      pr.push(`${id} ${r.ok ? good : '❌ ' + r.detail.join('; ')}`);
+      if (!r.ok) ok = false;
+    }
+    if (!green) ok = false;
+    const testCol = `${mine.length} test L0/L1${l23 ? ` + ${l23} kịch bản L2/L3` : ''}`;
+    rows.push(`| BB-${n} | ${testCol} | ${green ? '✅' : '❌'} | ${pr.join('<br>') || '— (hình dạng hệ thống, không có nhánh code để phá)'} |`);
+  }
+  console.log('\n| bất biến | test | xanh trên code thật | đỏ khi probe |\n|---|---|---|---|');
+  for (const r of rows) console.log(r);
+  return ok ? 0 : 1;
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const flag = (n: string) => rest.includes(n);
@@ -377,10 +520,16 @@ async function main() {
       const mapCode = mapCmd();
       process.exit(code || mapCode);
     }
+    case 'probe': {
+      const ids = rest.filter((x, i) => /^P-/.test(x) && rest[i - 1] !== '--overlay');
+      process.exit(await probeCmd(flag('--all') ? [] : ids, (opt('--overlay') ?? '').split(',').filter(Boolean)));
+    }
+    case 'bb':
+      process.exit(await bbCmd((opt('--overlay') ?? '').split(',').filter(Boolean)));
     case 'map':
       process.exit(mapCmd(opt('--story')));
     default:
-      console.error('Dùng: run.ts unit|db|e2e [--tag x]|deployed|chaos|all|all-l3|map [--story X] [--evidence]');
+      console.error('Dùng: run.ts unit|db|e2e [--tag x]|deployed|chaos|all|all-l3|probe [P-…|--all] [--overlay a,b]|bb|map [--story X] [--evidence]');
       process.exit(2);
   }
 }

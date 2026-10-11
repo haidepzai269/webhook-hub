@@ -1,0 +1,11 @@
+{
+  "id": "P-VT12-01",
+  "claim": "Test RLS chạy bằng chuỗi kết nối OWNER (superuser/BYPASSRLS) thay vì hub_app -> phải tự ĐỎ ở assert tiền đề, không pass âm thầm (SPEC-verification §4.3, VT12)",
+  "ownerAsApp": true,
+  "expectRed": [
+    "[AU:TA12][BB:5] (phần a)"
+  ],
+  "layer": "L1",
+  "testFile": "libs/database/test/rls-db.spec.ts",
+  "note": "Probe đổi MÔI TRƯỜNG, không đổi code: DATABASE_URL = VERIFY_DB_OWNER_URL."
+}

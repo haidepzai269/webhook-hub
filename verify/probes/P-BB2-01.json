@@ -1,0 +1,13 @@
+{
+  "id": "P-BB2-01",
+  "claim": "Bắt lỗi trùng của Postgres (P2002) rồi tạo bản ghi mới với khoá khác — chỉ còn Redis chặn trùng; Redis trống thì gửi lại = 2 sự kiện (BB-2)",
+  "file": "apps/hub-api/src/modules/ingest/ingest.service.ts",
+  "find": "        log.info({ idempotencyKey }, 'Chống trùng lớp 2 (PostgreSQL Unique Violation): bỏ qua bản trùng');\n        return { kind: 'duplicate' };",
+  "replace": "        return this.persistAccepted(source, req, `${idempotencyKey}:lan-2`, correlationId, stored);",
+  "expectRed": [
+    "[BB:2] (phần a)"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-api/test/ingest-invariants.spec.ts",
+  "note": "Spec §6.3 gợi ý bỏ unique của raw_events — migration không áp được vào DB hubv đã migrate trong worktree tạm, nên probe phá ở code: nuốt P2002 rồi ghi bản thứ hai. Bản L3 (Redis tắt/FLUSHALL → vẫn 1 event) ở chaos-l3.ts."
+}

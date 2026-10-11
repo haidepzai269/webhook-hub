@@ -231,6 +231,8 @@
     }
   ],
   "acceptedOrphans": {
+    "VF:VT11": "Chứng minh bằng chính lệnh `npm run verify:probe -- --all` (bảng probe + kiểm VT11: đột biến không rò ra cây thật, không worktree sót) — job CI chaos chạy đêm; 35/35 đúng kỳ vọng 2026-10-11",
+    "VF:VT12": "Probe P-VT12-01 (ownerAsApp): chạy rls-db.spec bằng DATABASE_URL owner → [AU:TA12][BB:5] (phần a) đỏ ở assert tiền đề; kiểm bằng verify:probe, không phải tên test",
     "AF:#1": "Kiểm bằng ls libs/*/dist + đổi tên export rồi khởi động container (docker) — chờ VF4/VF5 nhập vào runner L2",
     "AF:#2": "Kiểm bằng grep docker-entrypoint.sh + thư mục migrations — không phải test jest",
     "AF:#13": "Kiểm bằng grep seed.ts — không phải test jest",
@@ -240,6 +242,7 @@
     "VF:VT15": "Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local)",
     "AU:TA14": "Trình duyệt thật (Chrome + Firefox ở http://localhost:3000): F5 vẫn đăng nhập, document.cookie không thấy __Host-hub_at/rt — phiên TEST làm tay (SPEC-auth §10.2); phía server đã có TA1/TA5/TA6 tự động",
     "AU:TA11": "Thủ công, cần GitHub OAuth App thật (DINH-CHINH-AUTH §4 #9: TA11 để sau); fake-github là VF4. Logic phủ bằng github-oauth-db.spec (UA23-UA25, PKCE, operator, unlink) với fetch giả",
+    "KN:T4": "L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv). Cô lập project phủ ở L1 [KN2] project khác → 404 giống hệt + RLS (source-connections-db.spec.ts).",
     "KN:T1": "L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv — VF đang chạy chaos). Logic phủ ở L1 [KN:U1]-[KN:U4] (console-endpoints-db.spec.ts)."
   }
 }

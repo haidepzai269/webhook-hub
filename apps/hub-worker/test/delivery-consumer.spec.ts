@@ -122,6 +122,18 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(channel.nack).not.toHaveBeenCalled();
   });
 
+  it('[BB:3] (phần c) gửi xong nhưng GHI KẾT QUẢ lỗi (transaction ném) -> nack requeue, KHÔNG ack (ack trước khi lưu = mất bằng chứng giao, message không quay lại)', async () => {
+    const { prisma } = buildFakePrisma();
+    const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'));
+    jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn().mockResolvedValue({ status: 200, body: 'ok', durationMs: 5 }) } as any);
+    prisma.$transaction = jest.fn().mockRejectedValue(new Error('Postgres mất kết nối giữa transaction'));
+
+    const channel = buildChannel();
+    await consumer.handleMessage(toAmqpMsg(buildSlimMsg()), channel);
+    expect(channel.ack).not.toHaveBeenCalled();
+    expect(channel.nack).toHaveBeenCalledWith(expect.anything(), false, true);
+  });
+
   it('vẫn gửi lại ở tầng retry kế tiếp trong cùng generation (message_id khác), message retry GỌN', async () => {
     const { prisma } = buildFakePrisma();
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'));

@@ -1,0 +1,12 @@
+{
+  "id": "P-BB3-02",
+  "claim": "Consumer delivery ack TRƯỚC khi ghi kết quả — ghi lỗi thì message đã mất, không ai giao lại/ghi lại",
+  "file": "apps/hub-worker/src/consumers/delivery.consumer.ts",
+  "find": "        await this.circuitBreaker.recordSuccess(circuit, view);",
+  "replace": "        channel.ack(msg);\n        await this.circuitBreaker.recordSuccess(circuit, view);",
+  "expectRed": [
+    "[BB:3] (phần c)"
+  ],
+  "layer": "L0",
+  "testFile": "apps/hub-worker/test/delivery-consumer.spec.ts"
+}

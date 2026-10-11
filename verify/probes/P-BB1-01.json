@@ -1,0 +1,12 @@
+{
+  "id": "P-BB1-01",
+  "claim": "Thêm orderCode vào hub-worker → gate BB-1 đỏ (hub không biết đơn hàng)",
+  "file": "apps/hub-worker/src/main.ts",
+  "find": "import { startMetricsServer } from './metrics';",
+  "replace": "import { startMetricsServer } from './metrics';\nexport const orderCode = 'DH1';",
+  "expectRed": [
+    "[BB:1]"
+  ],
+  "layer": "L0",
+  "testFile": "verify/test/bb-invariants.spec.ts"
+}

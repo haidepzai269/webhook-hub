@@ -1,0 +1,16 @@
+{
+  "id": "P-SIG-01",
+  "claim": "So sánh chữ ký luôn true (bỏ timingSafeEqual) → mọi adapter nhận chữ ký sai",
+  "file": "libs/crypto/src/hmac.ts",
+  "find": "  if (bufA.length !== bufB.length) {\n    return false;\n  }\n  return timingSafeEqual(bufA, bufB);",
+  "replace": "  return true;",
+  "expectRed": [
+    "payos/bad-sig",
+    "[MS:U10]"
+  ],
+  "layer": "L0",
+  "testFile": [
+    "verify/test/hub-sim-adapters.spec.ts",
+    "libs/providers/test/generic.adapter.spec.ts"
+  ]
+}

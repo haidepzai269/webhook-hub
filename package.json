@@ -32,6 +32,8 @@
     "verify:deployed": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts deployed",
     "verify:chaos": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts chaos",
     "verify:all": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts all-l3",
+    "verify:probe": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts probe",
+    "verify:bb": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts bb",
     "verify:selftest": "ts-node --transpile-only -P tsconfig.json verify/scenarios/stack-isolation.ts",
     "verify:gates": "ts-node --transpile-only -P tsconfig.json verify/cli/gates.ts",
     "verify:e2e:auth": "ts-node --transpile-only -P tsconfig.json verify/scenarios/auth-e2e.ts",

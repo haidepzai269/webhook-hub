@@ -1,0 +1,16 @@
+{
+  "id": "P-SSRF-01",
+  "claim": "Bỏ chặn IP nội bộ/riêng tư ngoài development → endpoint trỏ 10.x/127.x đi được",
+  "file": "libs/crypto/src/ssrf.ts",
+  "find": "  if (!allowPrivate && !isDev && isPrivateIp(ip)) {",
+  "replace": "  if (false) {",
+  "expectRed": [
+    "không cho phép dải riêng",
+    "IP private thường (10.x)"
+  ],
+  "layer": "L0",
+  "testFile": [
+    "libs/crypto/test/ssrf-axios.spec.ts",
+    "libs/crypto/test/ssrf-metadata.spec.ts"
+  ]
+}

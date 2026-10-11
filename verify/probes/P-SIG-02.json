@@ -1,0 +1,13 @@
+{
+  "id": "P-SIG-02",
+  "claim": "Tính HMAC GitHub trên JSON.stringify(body đã parse) thay vì bytes gốc → fixture \"bytes lạ\" bị 401",
+  "file": "libs/providers/src/github.adapter.ts",
+  "find": "    const payload = req.rawBody.toString('utf8');",
+  "replace": "    const payload = JSON.stringify(req.body);",
+  "expectRed": [
+    "github/push"
+  ],
+  "layer": "L0",
+  "testFile": "verify/test/hub-sim-adapters.spec.ts",
+  "note": "Test \"P-SIG-02\" trong hub-sim-adapters đưa body ĐÃ stringify vào adapter — với probe, adapter cũng stringify nên vẫn từ chối (xanh): test đó chứng minh chiều ngược lại, không phải đích của probe này."
+}
