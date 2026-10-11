@@ -77,7 +77,8 @@ const file: ScenarioFile = {
           w.sent[id] = u;
           const r = await sendFixture(id, w.sources[f.provider].webhookUrl, u);
           if (r.status !== f.expect.status) bad.push(`${id}: ${r.status} (mong ${f.expect.status}) ${r.text.slice(0, 120)}`);
-          if (f.expect.status === 200 && f.expect.type) want.push(`${w.sources[f.provider].id}|${f.expect.type}|${f.expect.normalized}`);
+          // Probe của provider (ADR-159) không bao giờ hiện ở polling — kiểm riêng ở kịch bản [KN:U16] (phần o).
+          if (f.expect.status === 200 && f.expect.type && !f.expect.probe) want.push(`${w.sources[f.provider].id}|${f.expect.type}|${f.expect.normalized}`);
         }
         expect(bad.length === 0, `sai status:\n    ${bad.join('\n    ')}`);
         const got = await waitFor('đủ event của 14 fixture ở polling', async () => {
@@ -181,6 +182,41 @@ const file: ScenarioFile = {
         expect(p.status === 202, `publish → ${p.status} ${p.text}`);
         await waitFor(`event ${type} ở polling`, async () => (await poll(after)).some((e) => e.type === type));
         console.log(`  ${API}: publish → poll OK`);
+      },
+    },
+    {
+      name: '[KN:U16] (phần o) PayOS confirm probe (hub-sim, bộ mẫu tài liệu) qua HTTP, image thật: 200 hai lần (lần 2 duplicate), 1 raw + 1 event payos.webhook_test probe=true, 0 delivery dù subscription `*` đang bật, vắng ở polling',
+      tags: ['VF4', 'KN3'],
+      fn: async () => {
+        // Source + subscription RIÊNG (sourceIds chỉ source này): probe phải đi qua normalize khi `*` đã bật, và không
+        // làm lệch số delivery của các kịch bản khác.
+        expect(w.endpoint, 'chưa có endpoint (setup)');
+        const src = await createSource(w.key, w.slug, 'payos');
+        const sub = await svc(w.key, w.slug, 'POST', '/subscriptions', { endpointId: w.endpoint!.id, name: `probe-all ${RUN}`, eventTypes: ['*'], sourceIds: [src.id] });
+        expect(sub.status === 201, `tạo subscription * → ${sub.status} ${sub.text}`);
+        const before = await svc(w.key, w.slug, 'GET', '/events?after=latest');
+        const after = before.status === 200 && before.body?.nextCursor ? before.body.nextCursor : '0';
+        for (let i = 0; i < 2; i++) {
+          const r = await sendFixture('payos/confirm-probe', src.webhookUrl, '0');
+          expect(r.status === 200, `probe lần ${i + 1} → ${r.status} ${r.text} (PayOS coi khác 2xx là xác nhận thất bại)`);
+        }
+        const ev = await waitFor('event probe đã normalize', async () => {
+          const row = psql(
+            `select count(*), count(*) filter (where e.probe), string_agg(distinct e.type, ','), (select count(*) from hub.raw_events r where r.source_id = '${src.id}')
+               from hub.events e where e.source_id = '${src.id}'`,
+          );
+          const [n, probes, types, raws] = row.split('|');
+          return n === '1' ? { probes, types, raws } : null;
+        });
+        expect(ev.raws === '1', `raw_events của source probe = ${ev.raws} (mong 1: lần 2 là duplicate)`);
+        expect(ev.probes === '1' && ev.types === 'payos.webhook_test', `event probe: probe=${ev.probes} type=${ev.types}`);
+        await sleep(1500); // nếu lõi lỡ định tuyến, delivery tạo cùng transaction normalize — chờ thêm cho chắc
+        const dl = psql(`select count(*) from hub.deliveries d join hub.events e on e.id = d.event_id where e.source_id = '${src.id}'`);
+        expect(dl === '0', `probe sinh ${dl} delivery (mong 0 dù subscription * đang bật)`);
+        const evs = await poll(after);
+        const leaked = evs.filter((e) => e.sourceId === src.id || e.type === 'payos.webhook_test');
+        expect(leaked.length === 0, `polling lộ ${leaked.length} event probe`);
+        console.log('  probe: 200×2 · 1 raw · 1 event payos.webhook_test probe=true · 0 delivery · vắng ở polling');
       },
     },
   ],

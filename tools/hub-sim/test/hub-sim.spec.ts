@@ -5,6 +5,7 @@ import { sign as octokitSign, verify as octokitVerify } from '@octokit/webhooks-
 import { bodyOf, isOddBytes, listFixtures, loadFixture, prepare } from '../src/fixture';
 import { githubSignature256, payosSignature, stripeSignatureHeader, swSign, swVerify, tamperOneChar } from '../src/sign';
 import { findSuspiciousNumbers, scrubText } from '../src/scrub';
+import { GATES } from '../../../verify/lib/gates';
 
 /**
  * VF3 (SPEC-verification §5): bộ giả lập ký ĐỘC LẬP. Test này chỉ dùng SDK CHÍNH CHỦ của provider (node_modules) để
@@ -82,8 +83,30 @@ describe('hub-sim — fixture §5.4', () => {
     expect([...odd].sort()).toEqual(['generic', 'github', 'payos', 'sepay', 'stripe']);
   });
 
-  it('VF3 (§14.3): body đã giải mã của mọi fixture không có dãy 9–14 chữ số (trừ epoch sau created/timestamp)', () => {
-    for (const id of ids) expect({ id, hits: findSuspiciousNumbers(bodyOf(loadFixture(id)).toString('utf8')) }).toEqual({ id, hits: [] });
+  it('VF3 (§14.3): body đã giải mã của mọi fixture không có dãy 9–14 chữ số (trừ epoch sau created/timestamp; trừ đúng dòng có ngoại lệ của gate fixture-account)', () => {
+    // Ngoại lệ chỉ khai ở MỘT chỗ (verify/lib/gates.ts, file + regex theo dòng) — test này không tự nới.
+    const ex = GATES.find((g) => g.id === 'fixture-account')?.exceptions ?? [];
+    for (const id of ids) {
+      const file = `tools/hub-sim/fixtures/${id}.json`;
+      const hits = bodyOf(loadFixture(id))
+        .toString('utf8')
+        .split(/\r?\n/)
+        .filter((ln) => findSuspiciousNumbers(ln).length > 0)
+        .filter((ln) => !ex.some((e) => e.file === file && e.match && new RegExp(e.match).test(ln)));
+      expect({ id, hits }).toEqual({ id, hits: [] });
+    }
+  });
+
+  it('[KN:U16] (phần n) fixture payos/confirm-probe: đúng bộ mẫu tài liệu, dòng reference không chứa dãy số nào khác, mong 200 + payos.webhook_test + probe', () => {
+    const f = loadFixture('payos/confirm-probe');
+    expect(f.expect).toMatchObject({ status: 200, type: 'payos.webhook_test', normalized: false, probe: true });
+    const body = bodyOf(f).toString('utf8');
+    const d = JSON.parse(body.replace('__SIG__', 'x')).data;
+    expect([d.orderCode, d.description, d.reference]).toEqual([123, 'VQRIO123', 'TF230204212323']);
+    const refLine = body.split(/\r?\n/).filter((ln) => ln.includes('TF230204212323'));
+    expect(refLine).toHaveLength(1);
+    expect(refLine[0].replace('TF230204212323', '')).not.toMatch(/\d/);
+    expect(body).not.toContain('__U__'); // khoá chống trùng cố định — không làm "mới" bằng --unique
   });
 
   it('VF3: ký lại lúc phát — PayOS thay đúng chỗ giữ, mọi byte khác giữ nguyên; tamper đổi đúng 1 ký tự', () => {

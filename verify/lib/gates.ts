@@ -6,6 +6,8 @@
  * Các chuỗi mẫu dưới đây được ghép để chính file này không tự vi phạm khi quét repo.
  */
 
+import { findSuspiciousNumbers } from '../../tools/hub-sim/src/scrub';
+
 export interface GateException {
   file: string;
   /** Regex trên dòng vi phạm; bỏ trống = mọi dòng của file. */
@@ -52,6 +54,30 @@ function grepLines(re: RegExp, opts: { skipComments?: boolean; transform?: (ln: 
     });
     return out;
   };
+}
+
+const ACCOUNT_RE = /(?<![\d.])\d{9,14}(?![\d.])/;
+
+/**
+ * §14.3: dãy 9–14 chữ số trong fixture — quét text file VÀ body đã giải mã (`bodyBase64`), từng dòng body
+ * (body viết JSON nhiều dòng để ngoại lệ theo dòng hẹp được). Body dùng CÙNG luật với hub-sim (`findSuspiciousNumbers`:
+ * epoch sau `created`/`timestamp` và số giả đã scrub `90…` được giữ). Hit của body báo ở dòng `bodyBase64` của file.
+ */
+function fixtureAccountCheck(text: string): { line: number; text: string }[] {
+  const out = grepLines(ACCOUNT_RE)(text);
+  let body: string | undefined;
+  try {
+    const j = JSON.parse(text) as { bodyBase64?: unknown };
+    if (typeof j?.bodyBase64 === 'string') body = Buffer.from(j.bodyBase64, 'base64').toString('utf8');
+  } catch {
+    return out;
+  }
+  if (body === undefined) return out;
+  const at = Math.max(1, text.split(/\r?\n/).findIndex((ln) => ln.includes('"bodyBase64"')) + 1);
+  body.split(/\r?\n/).forEach((ln, i) => {
+    if (findSuspiciousNumbers(ln).length) out.push({ line: at, text: `body:${i + 1}: ${ln.trim().slice(0, 180)}` });
+  });
+  return out;
 }
 
 /** Bảng nghiệp vụ / bảng có lối thoát có tên — mọi truy vấn ngoài libs/database/src phải đi qua repo (BB-5). */
@@ -224,7 +250,15 @@ export const GATES: Gate[] = [
     rule: 'Fixture không chứa số tài khoản thật (9–14 chữ số liền) trong tools/hub-sim/fixtures',
     source: 'SPEC-verification §14.3',
     include: (f) => f.startsWith('tools/hub-sim/fixtures/'),
-    check: grepLines(/(?<![\d.])\d{9,14}(?![\d.])/),
+    check: fixtureAccountCheck,
+    exceptions: [
+      {
+        file: 'tools/hub-sim/fixtures/payos/confirm-probe.json',
+        match: '"reference":\\s*"TF230204212323"',
+        reason:
+          'Hằng số CÔNG KHAI trong tài liệu PayOS (bộ mẫu confirm-webhook, payos.vn/docs), không phải số tài khoản thật; nhận diện request kiểm tra đòi đúng nguyên văn — ADR-159. Chỉ dòng `reference` của đúng file này; dãy số khác trong file vẫn đỏ.',
+      },
+    ],
   },
   {
     id: 'shop-size',

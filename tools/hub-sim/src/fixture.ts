@@ -28,6 +28,11 @@ export interface FixtureExpect {
   /** Kiểu chuẩn sau normalize (khi 200). */
   type?: string;
   normalized?: boolean;
+  /**
+   * Request kiểm tra của provider (ADR-159): hub lưu event nhưng KHÔNG định tuyến, KHÔNG trả ở polling — runner L2
+   * kiểm 0 delivery + vắng ở polling thay vì chờ event hiện ra.
+   */
+  probe?: boolean;
   /** Ghi chú cho người đọc. */
   why?: string;
 }

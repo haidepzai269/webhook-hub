@@ -1,0 +1,22 @@
+{
+  "provider": "payos",
+  "case": "confirm-probe",
+  "origin": "synthetic",
+  "description": "PayOS confirm-webhook: request kiểm tra = đúng bộ mẫu tài liệu (orderCode 123, VQRIO123, reference TF… của tài liệu) ký hợp lệ -> 200, payos.webhook_test, probe (không định tuyến, không polling) — ADR-159",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "ewogICJjb2RlIjogIjAwIiwKICAiZGVzYyI6ICJzdWNjZXNzIiwKICAic3VjY2VzcyI6IHRydWUsCiAgImRhdGEiOiB7CiAgICAib3JkZXJDb2RlIjogMTIzLAogICAgImFtb3VudCI6IDMwMDAsCiAgICAiZGVzY3JpcHRpb24iOiAiVlFSSU8xMjMiLAogICAgImFjY291bnROdW1iZXIiOiAiMTIzNDU2NzgiLAogICAgInJlZmVyZW5jZSI6ICJURjIzMDIwNDIxMjMyMyIsCiAgICAidHJhbnNhY3Rpb25EYXRlVGltZSI6ICIyMDIzLTAyLTA0IDE4OjI1OjAwIiwKICAgICJjdXJyZW5jeSI6ICJWTkQiLAogICAgInBheW1lbnRMaW5rSWQiOiAiMTI0YzMzMjkzYzQzNDE3YWI3ODc5ZTE0YzhkOWViMTgiLAogICAgImNvZGUiOiAiMDAiLAogICAgImRlc2MiOiAiVGjDoG5oIGPDtG5nIiwKICAgICJjb3VudGVyQWNjb3VudEJhbmtJZCI6ICIiLAogICAgImNvdW50ZXJBY2NvdW50QmFua05hbWUiOiAiIiwKICAgICJjb3VudGVyQWNjb3VudE5hbWUiOiAiIiwKICAgICJjb3VudGVyQWNjb3VudE51bWJlciI6ICIiLAogICAgInZpcnR1YWxBY2NvdW50TmFtZSI6ICIiLAogICAgInZpcnR1YWxBY2NvdW50TnVtYmVyIjogIiIKICB9LAogICJzaWduYXR1cmUiOiAiX19TSUdfXyIKfQo=",
+  "signature": {
+    "scheme": "payos-body-field",
+    "timestamped": false
+  },
+  "expect": {
+    "status": 200,
+    "type": "payos.webhook_test",
+    "normalized": false,
+    "probe": true,
+    "why": "Khoá chống trùng cố định (orderCode + reference mẫu) — gửi lại cùng source = duplicate 200. Event probe lưu nhưng 0 delivery, không có ở polling."
+  }
+}

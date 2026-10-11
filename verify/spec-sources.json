@@ -176,7 +176,7 @@
           "KN4": "U14,U15"
         }
       },
-      "note": "SPEC-ket-noi §8.1 (ADR-138). L0/L1."
+      "note": "SPEC-ket-noi §8.1 (ADR-138). L0/L1. Riêng [KN:U16] (phần o) là L2 trên hubv (verify/scenarios/ingest-e2e.ts, fixture hub-sim payos/confirm-probe, ngoại lệ hẹp gate fixture-account) — CHƯA CHẠY: image hub-api/hub-worker của hubv dựng trước KQ1 (cần rebuild, phiên dev không rebuild/restart container); phần a–n chạy ở L0/L1."
     },
     {
       "ns": "KN",

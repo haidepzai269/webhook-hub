@@ -95,6 +95,33 @@ const r = new Base(p, t);`,
     ]);
   });
 
+  it('§14.3: fixture-account quét cả BODY đã giải mã (bodyBase64), không chỉ text file', () => {
+    const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+    const f = files({
+      'tools/hub-sim/fixtures/payos/x.json': JSON.stringify({ bodyBase64: b64('{\n  "accountNumber": "0123456789012"\n}') }, null, 2),
+      'tools/hub-sim/fixtures/payos/ok.json': JSON.stringify({ bodyBase64: b64('{\n  "amount": 69000\n}') }, null, 2),
+    });
+    const r = runGates([byId('fixture-account')], f.list, f.read);
+    expect(r[0].violations.map((v) => v.file)).toEqual(['tools/hub-sim/fixtures/payos/x.json']);
+    expect(r[0].violations[0].text).toContain('"accountNumber": "0123456789012"');
+  });
+
+  it('§14.3 / ADR-159: ngoại lệ probe PayOS HẸP — đúng một file + đúng dòng reference hằng số tài liệu; số khác cùng file vẫn đỏ', () => {
+    const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+    const PROBE = 'tools/hub-sim/fixtures/payos/confirm-probe.json';
+    const ok = files({ [PROBE]: JSON.stringify({ bodyBase64: b64('{\n  "reference": "TF230204212323",\n  "amount": 3000\n}') }) });
+    const r1 = runGates([byId('fixture-account')], ok.list, ok.read);
+    expect(r1[0].violations).toEqual([]);
+    expect(r1[0].excepted.map((v) => v.file)).toEqual([PROBE]);
+    expect(r1[0].excepted[0].reason).toMatch(/ADR-159/);
+    // Cùng file, dãy số khác (số tài khoản) → vẫn vi phạm.
+    const leak = files({ [PROBE]: JSON.stringify({ bodyBase64: b64('{\n  "reference": "TF230204212323",\n  "accountNumber": "0123456789012"\n}') }) });
+    expect(runGates([byId('fixture-account')], leak.list, leak.read)[0].violations).toHaveLength(1);
+    // Cùng dòng reference nhưng ở file KHÁC → vẫn vi phạm.
+    const other = files({ 'tools/hub-sim/fixtures/payos/paid-69000.json': JSON.stringify({ bodyBase64: b64('{\n  "reference": "TF230204212323"\n}') }) });
+    expect(runGates([byId('fixture-account')], other.list, other.read)[0].violations).toHaveLength(1);
+  });
+
   it('Shop: TỔNG apps/shop/src ≤ 600 dòng (ADR-156), không chỉ main.ts', () => {
     const big = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(300), 'apps/shop/src/settings.ts': 'x\n'.repeat(301), 'apps/shop/test/a.spec.ts': 'x\n'.repeat(999) });
     expect(runGates([byId('shop-size')], big.list, big.read)[0].violations).toHaveLength(1);
