@@ -118,11 +118,11 @@
 2. Mở https://webhook-hub-rouge.vercel.app/shop (hoặc bấm **Mở Shop** trên console).
 3. Ở thực đơn, bấm nút **+** (*"Thêm 1 phần … vào giỏ"*) trên một món. Có thể bấm vào món để mở chi tiết, rồi bấm nút thêm vào giỏ cho tới khi thấy *"Đã thêm vào giỏ!"*.
 4. Bấm **Giỏ hàng** → kiểm **Tạm tính** → bấm **Thanh toán**.
-5. Trong cửa sổ thanh toán (các bước **Thông tin → Chuyển khoản → Hoàn tất**), điền **Họ tên \***, **Số điện thoại \***, và nếu muốn thì **Địa chỉ giao hàng**, **Ghi chú** → bấm **Tạo đơn & lấy mã QR**.
-6. Thấy **"Quét mã để chuyển khoản"**, **mã đơn** dạng `DH` + 10 chữ số (dưới dòng *"Nội dung chuyển khoản (ghi ĐÚNG mã này)"*), **Số tiền**, và trạng thái *"Đang chờ thanh toán…"*. **Ghi lại mã đơn và số tiền.**
-7. Sang my.payos.vn, tạo một yêu cầu/link thanh toán với **số tiền = đúng số tiền của đơn** và **nội dung/mô tả = mã đơn** (ví dụ `DH1234567890`). *Tên menu cụ thể trên PayOS chưa được kiểm, vì mình không đăng nhập PayOS. Tìm mục tạo link thanh toán thủ công.*
-8. Dùng app ngân hàng của bạn thanh toán link đó (tiền vào tài khoản của chính bạn).
-9. **Giữ nguyên cửa sổ Shop.** Cửa sổ tự hỏi lại trạng thái đơn vài giây một lần, trong tối đa 15 phút.
+5. Trong cửa sổ thanh toán (các bước **Thông tin → Chuyển khoản → Hoàn tất**), điền **Họ tên \***, **Số điện thoại \***, và nếu muốn thì **Địa chỉ giao hàng**, **Ghi chú**. Ở mục **Cách thanh toán** để **PayOS** (mặc định khi Shop đã có khoá PayOS) → bấm **Tạo đơn & lấy mã QR**.
+6. Thấy **"Quét VietQR bằng app ngân hàng"** với mã QR thật do PayOS cấp, nút **Mở trang thanh toán PayOS**, **mã đơn** dạng `DH` + 7 chữ số, **Số tiền**, và trạng thái *"Đang chờ thanh toán…"*. **Ghi lại mã đơn và số tiền.** (Shop đã tự tạo link PayOS với mô tả = mã đơn, ADR-141 — không cần tạo link thủ công trên my.payos.vn nữa.)
+7. Mở app ngân hàng → quét QR (hoặc bấm **Mở trang thanh toán PayOS** rồi quét ở đó). Số tiền và nội dung đã điền sẵn.
+8. Xác nhận chuyển khoản (tiền vào tài khoản của chính bạn).
+9. **Giữ nguyên cửa sổ Shop.** Cửa sổ tự hỏi lại trạng thái đơn vài giây một lần, tới hết hạn đơn (mặc định 30 phút, `SHOP_ORDER_TTL_MIN`).
 
 **Bạn sẽ thấy:**
 - Trên Shop: thấy dòng **"Đã thanh toán!"** và *"Đơn DH… đã nhận … Bếp đang chuẩn bị món cho bạn."* Thanh bước nhảy sang **Hoàn tất**.
@@ -134,7 +134,8 @@
 **Nếu không thấy:**
 - Shop vẫn *"Đang chờ thanh toán…"* và delivery tới `shop` ở trạng thái **RETRYING** (503): Shop đang ngủ hoặc chưa đăng ký xong với hub. Hub tự gửi lại (10 giây → 1 phút → 5 phút…), chỉ cần chờ.
 - Có sự kiện nhưng đơn không đổi: nội dung PayOS không chứa đúng mã `DH…` (Shop ghi *UNMATCHED*), hoặc số tiền nhỏ hơn giá đơn (đơn thành **UNDERPAID**, Shop hiện *"Đã nhận …, còn thiếu …"*).
-- Đơn ghi *"Đơn đã hết hạn"*: đã quá 15 phút. Tạo đơn mới rồi trả tiền nhanh hơn.
+- Đơn ghi *"Đơn đã hết hạn"*: đã quá hạn đơn (mặc định 30 phút). Link PayOS cũng hết hạn cùng lúc nên PayOS không cho trả nữa. Tạo đơn mới. Nếu tiền vẫn về sau hạn (chuyển khoản thẳng), Shop ghi nhận và hiện *"Đơn đã hết hạn nhưng Shop đã nhận …"* (không mất tiền, ADR-141).
+- Bấm **Tạo đơn** báo *"Không tạo được link thanh toán PayOS"*: khoá PayOS trên service `shop` sai/thiếu (log shop có `PayOS <mã lỗi>`). Chọn **Chuyển khoản ngân hàng** để tiếp tục.
 - Không có sự kiện nào: PayOS chưa trỏ đúng URL, hoặc hub vừa ngủ dậy và PayOS gọi trượt (PayOS sẽ tự gọi lại).
 
 ### 2.2. Cách thay thế không tốn tiền — Playground bắn webhook PayOS đã ký

@@ -121,18 +121,18 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       });
     });
 
-    it('UNDERPAID không tự hết hạn (đã có tiền vào), dù đã quá 15 phút', () => {
-      expect(EXPIRE_AFTER_MS).toBe(15 * 60 * 1000);
+    it('UNDERPAID không tự hết hạn (đã có tiền vào), dù đã quá hạn (mặc định 30 phút, SHOP_ORDER_TTL_MIN)', () => {
+      expect(EXPIRE_AFTER_MS).toBe(30 * 60 * 1000);
       expect(applyPayment(order('UNDERPAID', 100000, 60), 38000n).status).toBe('PAID');
     });
 
-    it('PENDING quá 15 phút mà cron reconcile CHƯA chạy: vẫn coi là EXPIRED (hết hạn lười)', () => {
+    it('PENDING quá hạn mà cron reconcile CHƯA chạy: vẫn coi là EXPIRED (hết hạn lười)', () => {
       expect(applyPayment(order('PENDING', 0, 40), 138000n)).toEqual({
         status: 'EXPIRED',
         paidAmount: 138000n,
         outcome: 'LATE_PAYMENT',
       });
-      expect(applyPayment(order('PENDING', 0, 14), 138000n).status).toBe('PAID');
+      expect(applyPayment(order('PENDING', 0, 29), 138000n).status).toBe('PAID');
     });
   });
 

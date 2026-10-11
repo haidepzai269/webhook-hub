@@ -1,12 +1,12 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import { randomInt } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { timingSafeCompare } from '@hub/crypto';
 import { createHubClient, challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
-import { applyPayment, EXPIRE_AFTER_MS, readPayment } from './payment';
+import { applyPayment, bankQrUrl, EXPIRE_AFTER_MS, newOrderCode, payosOrderNumber, qrImage, readPayment } from './payment';
+import { createPaymentLink, payosConfig } from './payos';
 import { HubRegistration } from './hub-registration';
 
 const expressFactory = typeof express === 'function' ? express : (express as any).default || require('express');
@@ -24,24 +24,20 @@ const hub = process.env.HUB_URL ? createHubClient(process.env.HUB_URL) : null;
 const PAYMENT_SOURCE_KEYS = (process.env.SHOP_PAYMENT_SOURCE_KEYS || 'src_payos_main,src_sepay_main').split(',').map((k) => k.trim()).filter(Boolean);
 const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
+// P1 (ADR-141): PayOS thật (cùng kênh với source của hub) + trang Shop để PayOS đưa khách quay lại sau khi trả.
+const payos = payosConfig();
+const SHOP_WEB_URL = (process.env.SHOP_WEB_URL || 'http://localhost:3000/shop').replace(/\/$/, '');
 
 app.use(cors());
 // Giữ rawBody để kiểm tra chữ ký HMAC
-app.use(
-  express.json({
-    verify: (req: any, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
+app.use(express.json({ verify: (req: any, _res, buf) => (req.rawBody = buf) }));
 app.use((err: any, _req: Request, res: Response, next: any) =>
   err?.type === 'entity.parse.failed' ? res.status(400).json({ error: 'JSON không hợp lệ' }) : next(err),
 );
 
 // 1. GET /products — Menu đồ ăn, giá thật VND (ADR-027)
-app.get('/products', (_req: Request, res: Response) => {
-  res.json(MENU);
-});
+app.get('/products', (_req: Request, res: Response) => res.json(MENU));
+app.get('/payment-options', (_req: Request, res: Response) => res.json({ payos: !!payos, bankQr: !!bankQrUrl(process.env, 1, 'DH') }));
 
 // 2. POST /orders — Tạo đơn từ giỏ hàng. Server tự tính tổng, KHÔNG đọc `amount` từ body (ADR-024)
 app.post('/orders', async (req: Request, res: Response) => {
@@ -49,39 +45,36 @@ app.post('/orders', async (req: Request, res: Response) => {
     const priced = priceOrder(req.body);
     if ('error' in priced) return res.status(400).json({ error: priced.error });
     const paymentProvider = req.body.paymentProvider === 'payos' ? 'payos' : 'sepay';
+    if (paymentProvider === 'payos' && !payos) return res.status(400).json({ error: 'Shop chưa cấu hình PayOS — chọn chuyển khoản ngân hàng' });
 
-    // Mã đơn DH + 10 chữ số; trùng @unique (P2002) thì sinh lại, tối đa 3 lần
+    // Mã đơn DH + 7 chữ số (ADR-141); trùng @unique (P2002) thì sinh lại, tối đa 3 lần
     let order;
     for (let attempt = 0; !order; attempt++) {
-      const orderCode = `DH${Date.now().toString().slice(-6)}${randomInt(10000).toString().padStart(4, '0')}`;
       try {
-        order = await prisma.order.create({
-          data: {
-            orderCode,
-            amount: BigInt(priced.amount),
-            status: 'PENDING',
-            paymentProvider,
-            payosPaymentLinkId: `link_${orderCode}`,
-            items: priced.items as unknown as Prisma.InputJsonValue,
-            customer: priced.customer as unknown as Prisma.InputJsonValue,
-          },
-        });
+        const json = (v: unknown) => v as Prisma.InputJsonValue;
+        order = await prisma.order.create({ data: { orderCode: newOrderCode(), amount: BigInt(priced.amount), status: 'PENDING', paymentProvider, items: json(priced.items), customer: json(priced.customer) } });
       } catch (e: any) {
         if (e?.code !== 'P2002' || attempt >= 2) throw e;
       }
     }
+    const expiresAt = new Date(order.createdAt.getTime() + EXPIRE_AFTER_MS);
 
-    res.json({
-      success: true,
-      order: {
-        id: order.id,
-        orderCode: order.orderCode,
-        amount: Number(order.amount),
-        status: order.status,
-        items: priced.items,
-        qrCodeUrl: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${order.orderCode}%20${order.amount}`,
-      },
-    });
+    // PayOS: link thật, hết hạn CÙNG lúc đơn (PayOS từ chối trả muộn). SePay: VietQR của tài khoản nhận (hoặc null).
+    let payment: { qrImageUrl: string | null; qrCode?: string; checkoutUrl?: string } = { qrImageUrl: bankQrUrl(process.env, priced.amount, order.orderCode) };
+    if (paymentProvider === 'payos' && payos) {
+      const back = `${SHOP_WEB_URL}?order=${order.orderCode}`;
+      try {
+        const link = await createPaymentLink(payos, { orderCode: payosOrderNumber(order.orderCode), amount: priced.amount, description: order.orderCode, returnUrl: back, cancelUrl: `${back}&cancel=1`, expiredAt: Math.floor(expiresAt.getTime() / 1000) });
+        await prisma.order.update({ where: { id: order.id }, data: { payosPaymentLinkId: link.paymentLinkId } });
+        payment = { qrImageUrl: qrImage(link.qrCode), qrCode: link.qrCode, checkoutUrl: link.checkoutUrl };
+      } catch (e: any) {
+        logger.error({ err: e?.message, orderCode: order.orderCode }, '[Shop] Không tạo được link PayOS (đơn để PENDING, tự hết hạn)');
+        return res.status(502).json({ error: 'Không tạo được link thanh toán PayOS — thử lại hoặc chọn chuyển khoản ngân hàng' });
+      }
+    }
+
+    const { id, orderCode, status } = order;
+    res.json({ success: true, order: { id, orderCode, amount: priced.amount, status, items: priced.items, paymentProvider, expiresAt, payment } });
   } catch (err: any) {
     logger.error({ err: err.message }, '[Shop] Lỗi tạo đơn');
     res.status(500).json({ error: 'Không tạo được đơn hàng' });
@@ -91,22 +84,11 @@ app.post('/orders', async (req: Request, res: Response) => {
 // 3. GET /orders/:code — Lấy thông tin & trạng thái đơn hàng
 app.get('/orders/:code', async (req: Request, res: Response) => {
   try {
-    const codeParam = String(req.params.code);
-    // Cột id là @db.Uuid: so chuỗi không phải UUID sẽ làm Prisma ném P2023
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(codeParam);
-    const order = await prisma.order.findFirst({
-      where: isUuid ? { OR: [{ id: codeParam }, { orderCode: codeParam }] } : { orderCode: codeParam },
-    });
+    const order = await prisma.order.findUnique({ where: { orderCode: String(req.params.code) } });
     if (!order) return res.status(404).json({ error: 'Không tìm thấy đơn hàng' });
-    res.json({
-      orderCode: order.orderCode,
-      status: order.status,
-      amount: Number(order.amount),
-      paidAmount: Number(order.paidAmount),
-      items: order.items,
-      customer: maskCustomer(order.customer as unknown as Customer | null),
-      createdAt: order.createdAt,
-    });
+    const { orderCode, status, items, createdAt } = order;
+    const customer = maskCustomer(order.customer as unknown as Customer | null);
+    res.json({ orderCode, status, amount: Number(order.amount), paidAmount: Number(order.paidAmount), expiresAt: new Date(createdAt.getTime() + EXPIRE_AFTER_MS), items, customer, createdAt });
   } catch (err: any) {
     logger.error({ err: err.message }, '[Shop] Lỗi đọc đơn');
     res.status(500).json({ error: 'Không đọc được đơn hàng' });
@@ -175,7 +157,7 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
   }
 });
 
-// 5. Đối soát: đơn PENDING quá 15 phút -> EXPIRED. UNDERPAID giữ nguyên (đã có tiền vào).
+// 5. Đối soát: đơn PENDING quá hạn -> EXPIRED. UNDERPAID giữ nguyên (đã có tiền vào).
 async function expireStaleOrders() {
   const { count } = await prisma.order.updateMany({
     where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - EXPIRE_AFTER_MS) } },
@@ -193,7 +175,9 @@ app.post('/api/internal/reconcile', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Sai X-Internal-Token' });
   }
   try {
-    res.json({ expiredCount: await expireStaleOrders() });
+    // ADR-141: tiền về đơn đã hết hạn KHÔNG mất âm thầm — đối soát báo số đơn EXPIRED có tiền (cần giao/hoàn tiền).
+    const expiredCount = await expireStaleOrders();
+    res.json({ expiredCount, lateMoneyOrders: await prisma.order.count({ where: { status: 'EXPIRED', paidAmount: { gt: 0 } } }) });
   } catch (err: any) {
     logger.error({ err: err?.message }, '[Shop] Lỗi reconcile');
     res.status(500).json({ error: 'Reconcile thất bại' });
@@ -216,7 +200,7 @@ const registration = new HubRegistration(async () => {
 }, logger);
 
 app.listen(PORT, () => {
-  logger.info(`🛒 Demo Shop API đang chạy trên cổng ${PORT} (trần ~300 dòng)`);
+  logger.info(`🛒 Demo Shop API đang chạy trên cổng ${PORT} (trần ~450 dòng, ADR-141)`);
   if (hub) registration.start();
   else logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
 });

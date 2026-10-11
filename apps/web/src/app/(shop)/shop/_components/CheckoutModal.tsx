@@ -8,16 +8,20 @@ import {
   createOrder,
   DEMO_SIMULATE,
   fetchOrder,
+  fetchPaymentOptions,
   formatVnd,
   type OrderState,
   type OrderStatus,
+  type PaymentOptions,
+  type PaymentProvider,
   simulateSepayTransfer,
 } from "@/lib/shop/api";
 import { cartSubtotal, useCart } from "@/lib/shop/cart";
 import { useShopUi } from "@/lib/shop/ui";
 
 const POLL_MS = 2000;
-const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+const POLL_TIMEOUT_MS = 30 * 60 * 1000; // dự phòng khi server không trả expiresAt
+const EXPIRY_GRACE_MS = 60 * 1000; // hỏi thêm 1 phút sau hạn: webhook có thể tới trễ vài giây
 const TERMINAL: OrderStatus[] = ["PAID", "EXPIRED", "CANCELLED"];
 const PHONE_RE = /^[0-9+\s.-]{8,20}$/; // khớp validate của apps/shop
 
@@ -49,19 +53,35 @@ export function CheckoutModal() {
   const [timedOut, setTimedOut] = useState(false);
   const [simBusy, setSimBusy] = useState(false);
   const [simError, setSimError] = useState<string | null>(null);
+  // P1 (ADR-141): khách chọn PayOS (link + VietQR do PayOS cấp) hay chuyển khoản thẳng (SePay đọc biến động số dư).
+  const [options, setOptions] = useState<PaymentOptions | null>(null);
+  const [provider, setProvider] = useState<PaymentProvider>("payos");
   const submittingRef = useRef(false); // chặn double-submit trong cùng một frame
 
   const status: OrderStatus | null = state?.status ?? order?.status ?? null;
   const finished = status !== null && TERMINAL.includes(status);
   const orderCode = order?.orderCode;
 
-  // Poll GET /orders/:code mỗi 2s. Dừng khi: trạng thái cuối, đóng modal, hoặc quá 15 phút.
+  // Mở modal -> hỏi Shop có PayOS không; mặc định PayOS nếu Shop đã cấu hình, không thì chuyển khoản.
+  useEffect(() => {
+    if (!open || options) return;
+    fetchPaymentOptions()
+      .then((o) => {
+        setOptions(o);
+        setProvider(o.payos ? "payos" : "sepay");
+      })
+      .catch(() => setProvider("sepay"));
+  }, [open, options]);
+
+  const deadline = order?.expiresAt ? Date.parse(order.expiresAt) + EXPIRY_GRACE_MS : pollStartedAt + POLL_TIMEOUT_MS;
+
+  // Poll GET /orders/:code mỗi 2s. Dừng khi: trạng thái cuối, đóng modal, hoặc quá hạn đơn (+1 phút).
   useEffect(() => {
     if (!open || !orderCode || finished || timedOut) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
-      if (Date.now() - pollStartedAt > POLL_TIMEOUT_MS) {
+      if (Date.now() > deadline) {
         setTimedOut(true);
         return;
       }
@@ -80,7 +100,7 @@ export function CheckoutModal() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [open, orderCode, finished, timedOut, pollStartedAt]);
+  }, [open, orderCode, finished, timedOut, deadline]);
 
   // PAID → xoá giỏ (một lần)
   useEffect(() => {
@@ -123,12 +143,16 @@ export function CheckoutModal() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const created = await createOrder(items, {
-        name: customer.name.trim(),
-        phone: customer.phone.trim(),
-        address: customer.address?.trim() || undefined,
-        note: customer.note?.trim() || undefined,
-      });
+      const created = await createOrder(
+        items,
+        {
+          name: customer.name.trim(),
+          phone: customer.phone.trim(),
+          address: customer.address?.trim() || undefined,
+          note: customer.note?.trim() || undefined,
+        },
+        provider,
+      );
       setOrder(created);
       setState(null);
       setTimedOut(false);
@@ -228,6 +252,31 @@ export function CheckoutModal() {
                 <textarea id="ckNote" className="form-control" rows={2} maxLength={300} {...field("note")} />
               </div>
             </div>
+            <fieldset className="mt-3">
+              <legend className="cklabel">Cách thanh toán</legend>
+              <label className="d-flex gap-2 align-items-center">
+                <input
+                  type="radio"
+                  name="ckProvider"
+                  value="payos"
+                  checked={provider === "payos"}
+                  disabled={options !== null && !options.payos}
+                  onChange={() => setProvider("payos")}
+                />
+                PayOS — quét VietQR hoặc mở trang thanh toán
+                {options !== null && !options.payos && <small className="ckerr">(Shop chưa cấu hình PayOS)</small>}
+              </label>
+              <label className="d-flex gap-2 align-items-center">
+                <input
+                  type="radio"
+                  name="ckProvider"
+                  value="sepay"
+                  checked={provider === "sepay"}
+                  onChange={() => setProvider("sepay")}
+                />
+                Chuyển khoản ngân hàng (SePay xác nhận)
+              </label>
+            </fieldset>
             <div className="cartsum mt-3">
               <span>Tạm tính ({items.length} món)</span>
               <strong>{formatVnd(cartSubtotal(items, products))}</strong>
@@ -249,15 +298,36 @@ export function CheckoutModal() {
 
         {order && status !== "PAID" && (
           <div className="ckpay">
-            <h4 className="cktitle">Quét mã để chuyển khoản</h4>
-            <img
-              className="ckqr"
-              src={order.qrCodeUrl}
-              alt={`Mã QR thanh toán đơn ${order.orderCode}`}
-              width={220}
-              height={220}
-            />
-            <div className="ckcode-lbl">Nội dung chuyển khoản (ghi ĐÚNG mã này)</div>
+            <h4 className="cktitle">Quét VietQR bằng app ngân hàng</h4>
+            {order.payment.qrImageUrl ? (
+              <img
+                className="ckqr"
+                src={order.payment.qrImageUrl}
+                alt={`Mã VietQR thanh toán đơn ${order.orderCode}`}
+                width={220}
+                height={220}
+              />
+            ) : (
+              <p className="ckerr">
+                Shop chưa cấu hình tài khoản ngân hàng nhận tiền nên không có mã QR. Hãy chọn PayOS, hoặc chuyển khoản
+                thủ công với nội dung bên dưới.
+              </p>
+            )}
+            {order.payment.checkoutUrl && (
+              <a
+                className="mpaddcart mt-2 d-inline-block"
+                href={order.payment.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <i className="fas fa-external-link-alt" /> Mở trang thanh toán PayOS
+              </a>
+            )}
+            <div className="ckcode-lbl">
+              {order.paymentProvider === "payos"
+                ? "Mã đơn (đã có sẵn trong mã QR PayOS)"
+                : "Nội dung chuyển khoản (ghi ĐÚNG mã này)"}
+            </div>
             <div className="ckcode">{order.orderCode}</div>
             <div className="ckamount">
               Số tiền: <strong>{formatVnd(amount)}</strong>
@@ -279,14 +349,20 @@ export function CheckoutModal() {
             >
               {timedOut ? (
                 <>
-                  <i className="fas fa-hourglass-end" /> Đã hết thời gian chờ (15 phút). Nếu bạn đã chuyển khoản, vui
-                  lòng liên hệ hotline với mã {order.orderCode}.
+                  <i className="fas fa-hourglass-end" /> Đã hết thời gian chờ. Nếu bạn đã chuyển khoản, vui lòng liên hệ
+                  hotline với mã {order.orderCode}.
                 </>
               ) : status === "UNDERPAID" ? (
                 <>
                   <i className="fas fa-exclamation-triangle" /> Đã nhận {formatVnd(paid)}, còn thiếu{" "}
                   <strong>{formatVnd(Math.max(0, amount - paid))}</strong>. Vui lòng gọi hotline 1900 6868 kèm mã{" "}
-                  {order.orderCode} để được hỗ trợ (hệ thống chưa cộng dồn nhiều lần chuyển).
+                  {order.orderCode} hoặc chuyển thêm phần còn thiếu với cùng nội dung (Shop cộng dồn các lần chuyển).
+                </>
+              ) : status === "EXPIRED" && paid > 0 ? (
+                <>
+                  <i className="fas fa-exclamation-triangle" /> Đơn đã hết hạn nhưng Shop đã nhận{" "}
+                  <strong>{formatVnd(paid)}</strong>. Gọi hotline 1900 6868 kèm mã {order.orderCode} để được giao món
+                  hoặc hoàn tiền.
                 </>
               ) : status === "EXPIRED" || status === "CANCELLED" ? (
                 <>

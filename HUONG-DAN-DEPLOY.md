@@ -196,7 +196,12 @@ Nhắn: **"seed neon"**. Agent chạy seed từ máy local với khối `[hub-ap
 | `HUB_SIGNING_SECRET`                   | giống hub-api                                                             |
 | `SHOP_PUBLIC_URL`                      | `https://shop-xxxx.onrender.com`                                          |
 | `INTERNAL_TOKEN`                       | giống hub-api                                                             |
-| `PAYOS_CLIENT_ID/API_KEY/CHECKSUM_KEY` | key PayOS (tạo link thanh toán)                                           |
+| `PAYOS_CLIENT_ID/API_KEY/CHECKSUM_KEY` | CÙNG kênh PayOS với source `src_payos_main` — Shop tạo link thật (ADR-141)|
+| `SHOP_WEB_URL`                         | `https://webhook-hub-xxxx.vercel.app/shop` — PayOS đưa khách về đây sau khi trả |
+| `SHOP_BANK_CODE`, `SHOP_BANK_ACCOUNT`, `SHOP_BANK_ACCOUNT_NAME` | tài khoản nhận tiền (VietQR cho lựa chọn SePay). Trống = không hiện QR SePay |
+| `SHOP_ORDER_TTL_MIN`                   | (tuỳ chọn) hạn đơn, phút — mặc định `30`; link PayOS hết hạn cùng lúc |
+
+   > Không đặt `PAYOS_BASE_URL` / `SHOP_PAYOS_API_BASE` trên Render (mặc định là API thật của PayOS). PayOS gửi webhook thanh toán về **hub** (URL đặt ở §9), không về Shop — Shop biết đơn đã trả qua `payment.received` hub giao tới.
 
 3. Create → sau khi lên, quay lại **Vercel** điền `NEXT_PUBLIC_SHOP_API_URL=https://shop-xxxx.onrender.com` → **Redeploy** (biến `NEXT_PUBLIC_` nhúng lúc build).
 
@@ -212,6 +217,8 @@ URL webhook: `https://hub-api-xxxx.onrender.com/hooks/<provider>/<sourceKey>`
 | -------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | SePay    | my.sepay.vn → WebHooks → thêm, kiểu xác thực **API Key** = `SEPAY_API_KEY`                                                       | `.../hooks/sepay/src_sepay_main`   |
 | PayOS    | my.payos.vn → Kênh thanh toán → Webhook URL. **Đặt SAU khi hub-api đã chạy** — PayOS bắn request kiểm tra đòi 200 (cạm bẫy 4)    | `.../hooks/payos/src_payos_main`   |
+
+Web (Vercel, §5) **không** cần biến mới cho thanh toán thật: lựa chọn PayOS/SePay và QR do Shop trả về (`GET /payment-options`, `POST /orders`).
 | GitHub   | repo → Settings → Webhooks → Add: Content type `application/json`, Secret = `GITHUB_WEBHOOK_SECRET`, events Push + Pull requests | `.../hooks/github/src_github_main` |
 
 ---

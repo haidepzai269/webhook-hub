@@ -1,7 +1,9 @@
+import { randomInt } from 'crypto';
+
 // Máy trạng thái đơn hàng (ADR-034). PAID và EXPIRED là trạng thái CUỐI: không webhook nào kéo đơn ra khỏi đó.
-//   PENDING   -> UNDERPAID | PAID | EXPIRED (quá 15 phút)
+//   PENDING   -> UNDERPAID | PAID | EXPIRED (quá SHOP_ORDER_TTL_MIN, mặc định 30 phút — ADR-141)
 //   UNDERPAID -> UNDERPAID | PAID            (đã có tiền vào: không tự hết hạn)
-export const EXPIRE_AFTER_MS = 15 * 60 * 1000; // khớp 15 phút ngừng poll ở modal thanh toán
+export const EXPIRE_AFTER_MS = (Number(process.env.SHOP_ORDER_TTL_MIN) > 0 ? Number(process.env.SHOP_ORDER_TTL_MIN) : 30) * 60_000;
 const TERMINAL = new Set(['PAID', 'EXPIRED']);
 
 export type PaymentOutcome = 'PAID' | 'UNDERPAID' | 'LATE_PAYMENT' | 'EXTRA_PAYMENT';
@@ -52,4 +54,17 @@ export function readPayment(body: any, allowed: readonly string[] = PAYMENT_SOUR
   const amount = Number(d.amount);
   if (!Number.isSafeInteger(amount) || amount <= 0) return { skip: 'IGNORED' };
   return { orderCode: match[0], amount };
+}
+
+/** ADR-141: DH + 7 chữ số = 9 ký tự — vừa giới hạn `description` của PayOS; phần số là `orderCode` (kiểu SỐ) của PayOS. */
+export const newOrderCode = () => `DH${randomInt(1_000_000, 10_000_000)}`;
+export const payosOrderNumber = (orderCode: string) => Number(orderCode.slice(2));
+export const qrImage = (data: string) => `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(data)}`;
+
+/** SePay: VietQR THẬT của tài khoản nhận (img.vietqr.io), nội dung = mã đơn. Thiếu cấu hình -> null (không QR giả). */
+export function bankQrUrl(env: NodeJS.ProcessEnv, amount: number, orderCode: string): string | null {
+  const { SHOP_BANK_CODE: bank, SHOP_BANK_ACCOUNT: acc, SHOP_BANK_ACCOUNT_NAME: name } = env;
+  if (!bank || !acc) return null;
+  const q = new URLSearchParams({ amount: String(amount), addInfo: orderCode, ...(name ? { accountName: name } : {}) });
+  return `https://img.vietqr.io/image/${encodeURIComponent(bank)}-${encodeURIComponent(acc)}-compact2.png?${q}`;
 }

@@ -31,12 +31,28 @@ export interface OrderLine {
   qty: number;
 }
 
+export type PaymentProvider = "payos" | "sepay";
+
+/** P1 (ADR-141): PayOS = link + VietQR thật do PayOS cấp; SePay = VietQR của tài khoản Shop (null nếu Shop chưa cấu hình). */
+export interface OrderPayment {
+  qrImageUrl: string | null;
+  qrCode?: string;
+  checkoutUrl?: string;
+}
+
 export interface CreatedOrder {
   orderCode: string;
   amount: number;
   status: OrderStatus;
   items: OrderLine[];
-  qrCodeUrl: string;
+  paymentProvider: PaymentProvider;
+  expiresAt: string;
+  payment: OrderPayment;
+}
+
+export interface PaymentOptions {
+  payos: boolean;
+  bankQr: boolean;
 }
 
 export interface OrderState {
@@ -44,6 +60,7 @@ export interface OrderState {
   status: OrderStatus;
   amount: number;
   paidAmount: number;
+  expiresAt?: string;
 }
 
 export interface CustomerInput {
@@ -71,14 +88,21 @@ export async function fetchProducts(): Promise<Product[]> {
 }
 
 /** Chỉ gửi {id, qty}. Không bao giờ gửi amount/price — server tự tính (ADR-024). */
+export async function fetchPaymentOptions(): Promise<PaymentOptions> {
+  const res = await fetch(`${SHOP_API}/payment-options`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function createOrder(
   items: { id: string; qty: number }[],
   customer: CustomerInput,
+  paymentProvider: PaymentProvider,
 ): Promise<CreatedOrder> {
   const res = await fetch(`${SHOP_API}/orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items: items.map(({ id, qty }) => ({ id, qty })), customer, paymentProvider: "sepay" }),
+    body: JSON.stringify({ items: items.map(({ id, qty }) => ({ id, qty })), customer, paymentProvider }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()).order;
