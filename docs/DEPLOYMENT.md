@@ -432,6 +432,18 @@ INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
 RUN_SEED=                # deployed: ĐỂ TRỐNG (không tự seed). docker-compose local mặc định true (ADR-066)
 SEED_TELEGRAM_ACTIVE=    # seed tạo subscription Telegram `payment.*` BẬT hay TẮT. Không đặt: bật khi có đủ
                          # TELEGRAM_BOT_TOKEN thật + TELEGRAM_CHAT_ID (hành vi cũ). Compose local mặc định false.
+HUB_PUBLIC_URL=          # hub-api: URL https CÔNG KHAI của CHÍNH hub-api, vd https://hub-api-xxxx.onrender.com (không phải
+                         # URL Vercel, không đuôi /). "Kết nối provider" (SPEC-ket-noi, ADR-138/151) đăng ký
+                         # <HUB_PUBLIC_URL>/hooks/<provider>/<sourceKey> tại PayOS/Stripe. Thiếu / localhost / IP nội bộ ->
+                         # 422 public_url_required (app vẫn chạy). Đổi domain -> kết nối báo DRIFTED, bấm "Kết nối lại".
+
+# --- KHÔNG BAO GIỜ đặt trên production (hub-api VÀ hub-worker) — chỉ cho stack kiểm chứng / test ---
+# *_FAKE_BASE_URL (PAYOS_/STRIPE_/GITHUB_/GOOGLE_OAUTH_…)  -> NODE_ENV=production + có giá trị: app THOÁT lúc khởi động
+# CONNECTOR_INGEST_BASE_URL                                -> như trên (URL ingest của stack hubv)
+# PAYOS_BASE_URL            -> connector bỏ qua (URL PayOS cứng), nhưng SDK @payos/node tự đọc biến này: đừng đặt
+# VERIFY_ONLY_* / VERIFY_DB_OWNER_URL                       -> biến của phiên kiểm chứng, không thuộc deploy
+# MAIL_DRIVER=capture       -> production + capture: app THOÁT (mail kiểm chứng)
+# GITHUB_OAUTH_BASE_URL, MOCK_BASE_URL, NEXT_PUBLIC_DEMO_*  -> chỉ local
 
 # --- web (Vercel) — build-time, Next inline vào bundle → KHÔNG đặt secret ở đây ---
 NEXT_PUBLIC_HUB_API_URL=   # https://hub-api.onrender.com — Socket.IO (vé) + URL /hooks hiển thị cho người dùng

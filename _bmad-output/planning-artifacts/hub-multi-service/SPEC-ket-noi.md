@@ -290,6 +290,12 @@ Mỗi story theo vòng đời RED → GREEN → GATED → PROBED → REVIEWED (S
 | `[KN:U16]` | Request kiểm tra của PayOS (theo bằng chứng KQ1) được lưu `raw_events`, trả 200, **không** sinh delivery `payment.received` |
 | `[KN:U17]` | `xoá credentials` → cột null, `retry` trả 422 `credentials_required` |
 | `[KN:U18]` | Thành viên không có `manage:sources` → 403 `missing_scope` ở mọi route §4.4 |
+| `[KN:U19]` | (H-1) "Kết nối nguồn có sẵn": không tạo source mới, URL đăng ký = `/hooks/<provider>/<sourceKey cũ>`, checksumKey trùng bản hiện hành → không thêm version |
+| `[KN:U20]` | (H-1) nguồn có sẵn với checksumKey khác → SourceSecret version mới TRƯỚC khi gọi provider, bản cũ còn 24 giờ |
+| `[KN:U21]` | (H-1) nguồn có sẵn của project khác → 404 giống hệt id lạ; thiếu `acknowledgeOverwrite` / provider khác source → 422; không gọi provider |
+| `[KN:U22]` | (L-1) sourceKey trùng → 409 `conflict` GIỐNG HỆT dù key thuộc project nào; không tạo gì |
+| `[KN:U23]` | (L-3) kết nối đang PENDING → retry / gắn lại 409 `connection_in_progress`; PENDING kẹt (> 60 s) → cho chạy lại |
+| `[KN:U24]` | (M-1) TX lưu kết quả kết nối lại lỗi → `we_` cũ còn nguyên, DB trỏ `we_` cũ, `we_` mới mồ côi bị dọn; lần sau thành công mới gỡ `we_` cũ (sau COMMIT) |
 
 ### 8.2 E2E trên hubv (`npm run verify`, L2)
 
@@ -309,8 +315,8 @@ Mỗi story theo vòng đời RED → GREEN → GATED → PROBED → REVIEWED (S
 
 ### 8.4 Người thật (Admin, trên bản deployed)
 
-1. "Kết nối PayOS" bằng kênh thật → thấy tên tài khoản thật.
-2. Thanh toán 2.000đ → event tới Shop.
+1. Sources → "Kết nối provider" → PayOS → **"Kết nối nguồn có sẵn" = `src_payos_main`** (nguồn Shop ghim trong `SHOP_PAYMENT_SOURCE_KEYS`; KHÔNG chọn "Tạo nguồn mới" — URL của kênh sẽ dời sang source Shop không tin, ADR-151) → dán kênh thật → thấy tên tài khoản thật.
+2. Thanh toán 2.000đ → event tới Shop (đơn PAID).
 3. Vào dashboard PayOS **chỉ để xem**: URL webhook đúng là URL của hub.
 
 Ghi kết quả vào §12.
@@ -321,7 +327,7 @@ Ghi kết quả vào §12.
 
 **Hồi 3** (thật và cô lập), thay bước "tạo source PayOS rồi sang PayOS dán URL":
 
-> Admin mở hub → Sources → **Kết nối PayOS** → dán 3 ô của kênh → tick "Tôi hiểu URL cũ sẽ bị thay" → bấm.
+> Admin mở hub → Sources → **Kết nối provider** → PayOS → **"Kết nối nguồn có sẵn": `src_payos_main`** (mặc định khi đã có nguồn PayOS; Shop ghim đúng nguồn này) → dán 3 ô của kênh → tick "Tôi hiểu URL cũ sẽ bị thay" → bấm.
 > Màn hình hiện **"✅ CAFE … · ****…"**. Admin thanh toán 2.000đ thật → event chạy tới Shop.
 > Admin không mở dashboard PayOS trước mặt hội đồng.
 
@@ -363,6 +369,12 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
   - `enabled_events[]` = đúng 3 kiểu trong `STRIPE_PAYMENT_TYPES` (bảng tách ra `libs/providers/src/stripe-types.ts`, adapter + connector dùng chung).
   - `status?` nhận `ingestUrl` để so URL; `gone` (404) → kết nối FAILED `remote_gone` (spec không nói map vào đâu); `drifted` → DRIFTED. `disconnect` gặp 404 coi như đã ngắt.
   - Display `Stripe (test|live) · we_…` (chế độ suy từ tiền tố key). Kết nối lại: khung KN2 gỡ `we_` cũ (probe `P-KN4-01`), secret cũ còn hiệu lực 24 giờ.
+
+- **Sau REVIEW-KN (ADR-151):**
+  - H-1: `POST /api/v1/sources/:id/connect` (hoặc `sourceId` trong body `sources/connect`) gắn connector vào source có sẵn — không tạo source, giữ sourceKey. Đã có kết nối → kết nối lại trên chính source đó. So secret ký với bản HIỆN HÀNH (không hạn), không phải mọi bản còn hiệu lực (bản đang bị thay mà trùng vẫn thêm version, không thì 24 giờ sau verify hỏng — áp cho cả retry).
+  - Secret do provider sinh (Stripe) luôn đặt các version đang hiệu lực hết hạn +24h (source có sẵn có thể đang giữ secret dán tay).
+  - M-1: gỡ cấu hình cũ ở provider SAU COMMIT; TX lỗi → dọn cấu hình mới + FAILED `save_failed`; gỡ cũ lỗi → `last_error=previous_remote_not_removed`, vẫn CONNECTED.
+  - L-1: P2002 → 409 `conflict` (`field:sourceKey`, `code:source_key_taken`); L-3: 409 `conflict` `code:connection_in_progress` (PENDING < 60 s).
 
 ## 12. Checklist và kết quả
 
