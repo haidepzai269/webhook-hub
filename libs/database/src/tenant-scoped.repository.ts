@@ -325,6 +325,21 @@ export class TenantScopedRepository {
       LIMIT ${o.limit}`;
   }
 
+  /**
+   * DX3 (`?after=latest`, SPEC-dev-experience §4.5): cursor lớn nhất ĐÃ CẤP của tenant, sau khi cấp cho mọi event đã
+   * COMMIT (cùng `assignPollSeq` với pollEvents) -> event commit SAU lần gọi này luôn có cursor lớn hơn, không bị bỏ
+   * sót. Chưa có event nào -> 0n. Không lọc theo types/readTypes: cursor chỉ là vị trí, không lộ nội dung.
+   */
+  async latestPollCursor(): Promise<bigint> {
+    // Gán hết phần tồn (mỗi lần ≤ 1000 dòng) để "latest" thật sự là cuối dãy.
+    while ((await this.assignPollSeq()) >= 1000) {
+      /* tiếp tục lô sau */
+    }
+    const [{ max }] = await this.prisma.$queryRaw<{ max: bigint | null }[]>`
+      SELECT max(poll_seq) AS max FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid`;
+    return max ?? 0n;
+  }
+
   /** R-3: gán `poll_seq` cho event đã commit của tenant (≤ 1000/lần), nối tiếp nhau nhờ advisory lock theo tenant. */
   async assignPollSeq(batch = 1000): Promise<number> {
     // R2-4: đa số lần poll (nhất là mỗi giây của long-poll) không có dòng mới -> một SELECT rẻ trên index một phần

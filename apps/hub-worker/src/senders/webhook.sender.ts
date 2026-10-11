@@ -1,5 +1,5 @@
 import { DestinationSender, SendResult } from './sender.interface';
-import { DestinationType, NormalizedEvent } from '@hub/common';
+import { DestinationType, NormalizedEvent, toWebhookBody } from '@hub/common';
 import { createSsrfSafeAxiosConfig, swHeaders } from '@hub/crypto';
 import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
 
@@ -25,22 +25,9 @@ export class WebhookSender implements DestinationSender {
       const ssrfConfig = await createSsrfSafeAxiosConfig(rawUrl);
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const body = {
-        id: event.id,
-        type: event.type,
-        source: event.source,
-        // R-1 (ADR-094): id source CỤ THỂ — bên nhận so với sourceIds đã ghim (tên provider không phải danh tính).
-        sourceId: event.sourceId || null,
-        subject: event.subject,
-        // S3-2 (ADR-053): true = `data` theo catalog kiểu chuẩn (docs/EVENT-CATALOG.md); false = `{ raw }`.
-        normalized: event.normalized !== false,
-        data: event.data,
-        occurredAt: event.occurredAt,
-        receivedAt: event.receivedAt,
-        renderedContent: renderedContent || undefined,
-      };
-
-      const bodyString = JSON.stringify(body);
+      // DX3 (luật Parity): phong bì do `toWebhookBody` dựng — NGUỒN DUY NHẤT, `hub listen` dùng chung nên body
+      // byte-identical (docs/EVENT-CATALOG.md §1: sourceId = id source cụ thể R-1; normalized S3-2/ADR-053).
+      const bodyString = toWebhookBody(event, renderedContent);
       // 2. Standard Webhooks (S6, ADR-040): `webhook-id` = event.id — GIỮ NGUYÊN qua mọi retry/replay để đích
       // chống trùng; chữ ký `v1,<base64>` trên `${id}.${ts}.${body}`. KHÔNG còn X-Hub-* (không gửi song song).
       const headers: Record<string, string> = signingSecret

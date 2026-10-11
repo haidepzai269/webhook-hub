@@ -4,6 +4,9 @@
   "description": "SDK Node cho Webhook Hub: connection string, publish, poll, endpoints.ensure, verifyWebhook (Standard Webhooks). Không phụ thuộc runtime.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "hub": "bin/hub.js"
+  },
   "scripts": {
     "build": "tsc"
   },

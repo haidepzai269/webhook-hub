@@ -11,3 +11,4 @@ export * from './api-key';
 export * from './redis-options';
 export * from './auth';
 export * from './mail';
+export * from './webhook-body';

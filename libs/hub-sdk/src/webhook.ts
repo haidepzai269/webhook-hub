@@ -13,6 +13,21 @@ function headerOf(headers: Record<string, unknown>, name: string): string | unde
   return typeof s === 'string' ? s : undefined;
 }
 
+function secretKey(signingSecret: string): Buffer {
+  return signingSecret.startsWith('whsec_') ? Buffer.from(signingSecret.slice(6), 'base64') : Buffer.from(signingSecret, 'utf8');
+}
+
+/**
+ * DX3: ba header Standard Webhooks cho `body` (bytes sẽ gửi) — `hub listen` ký y như hub push thật
+ * (cùng thuật toán libs/crypto `swHeaders`, test đối chiếu chéo).
+ */
+export function signWebhook(signingSecret: string, msgId: string, body: string | Buffer, ts = Math.floor(Date.now() / 1000)): Record<string, string> {
+  const mac = createHmac('sha256', secretKey(signingSecret));
+  mac.update(`${msgId}.${ts}.`);
+  mac.update(body);
+  return { 'webhook-id': msgId, 'webhook-timestamp': String(ts), 'webhook-signature': `v1,${mac.digest('base64')}` };
+}
+
 /**
  * `rawBody` là BYTES gốc của request (express: `express.json({ verify: (req, _res, buf) => req.rawBody = buf })`),
  * KHÔNG phải JSON.stringify của body đã parse. Thiếu header / lệch > 300s / sai chữ ký -> false.
@@ -29,8 +44,7 @@ export function verifyWebhook(
   if (!id || !ts || !sigs || !/^\d{1,12}$/.test(ts) || !signingSecret) return false;
   const now = opts.nowSec ?? Math.floor(Date.now() / 1000);
   if (Math.abs(now - Number(ts)) > (opts.toleranceSec ?? WEBHOOK_TOLERANCE_SEC)) return false;
-  const key = signingSecret.startsWith('whsec_') ? Buffer.from(signingSecret.slice(6), 'base64') : Buffer.from(signingSecret, 'utf8');
-  const mac = createHmac('sha256', key);
+  const mac = createHmac('sha256', secretKey(signingSecret));
   mac.update(`${id}.${ts}.`);
   mac.update(rawBody);
   const expected = Buffer.from(`v1,${mac.digest('base64')}`);

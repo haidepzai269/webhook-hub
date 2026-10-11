@@ -111,6 +111,9 @@ Không chép email của author vào phần chung (dữ liệu cá nhân); email
 **COMMIT** (poll_seq) — dùng đúng giá trị `nextCursor` / `cursor` làm `after` lần sau. **Không** dùng `seq` thấy trên
 dashboard (`/api/v1/events?after=<seq>` là thứ tự INSERT, chỉ để xem) — hai dãy số khác nhau.
 
+`after=latest` (DX3, ADR-132) trả `{ events: [], nextCursor: "<cursor cuối đã cấp>" }` — bắt đầu từ "bây giờ" (dùng cho
+`hub listen`). `after` không phải số và không phải `latest` → **400** `invalid_cursor`.
+
 ## 5b. Service tự phát và nguồn tuỳ chỉnh (đa service)
 
 - **`POST /v1/p/:project/events`** (ADR-074): `type` thuộc không gian dành riêng (`payment.*`, `repo.*`) phải đúng khuôn catalog — sai → **422** `{"error":"schema_mismatch","field":"<tên trường>"}` NGAY lúc gọi, trước khi ghi. Kiểu riêng của service (vd `order.created`) là hợp đồng của chính service: `normalized: true`, `data` giữ nguyên.

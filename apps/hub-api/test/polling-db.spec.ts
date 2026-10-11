@@ -58,6 +58,17 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     expect((await repo().pollEvents({ after: seqOf(c.id), limit: 100 })).map((r) => r.id)).not.toContain(c.id);
   });
 
+  it('[DX:UX11] latestPollCursor = cursor lớn nhất sau khi cấp cho event đã commit; poll từ đó chỉ thấy event MỚI', async () => {
+    const old = await mk('order.before_latest', ago(10));
+    const latest = await repo().latestPollCursor();
+    const all = await repo().pollEvents({ after: 0n, limit: 1000 });
+    expect(all.find((r) => r.id === old.id)!.cursor).toBeLessThanOrEqual(latest);
+    expect(all.every((r) => r.cursor <= latest)).toBe(true);
+    const fresh = await mk('order.after_latest', ago(0));
+    expect((await repo().pollEvents({ after: latest, limit: 100 })).map((r) => r.id)).toEqual([fresh.id]);
+    expect(await new TenantScopedRepository(appDb, randomUUID()).latestPollCursor()).toBe(0n); // project trống
+  });
+
   it('S7: types (wildcard) giao với readTypes; project khác không thấy', async () => {
     const p = await mk('payment.received', ago(10));
     const r = await mk('repo.push', ago(10));

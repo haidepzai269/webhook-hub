@@ -7,8 +7,9 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
   const EA = '11111111-1111-1111-1111-111111111111';
   function setup(rows: any[] = [], readTypes: string[] = []) {
     const pollEvents = jest.fn().mockResolvedValue(rows);
+    const latestPollCursor = jest.fn().mockResolvedValue(4n);
     const findDestinationById = jest.fn(async (id: string) => (id === EA ? { id: EA, type: 'webhook', createdByKeyId: 'k' } : null));
-    const prisma: any = { forTenant: jest.fn(() => ({ pollEvents, findDestinationById })) };
+    const prisma: any = { forTenant: jest.fn(() => ({ pollEvents, latestPollCursor, findDestinationById })) };
     const ctrl = new ServiceResourcesController(prisma, {} as any);
     const req: any = { tenantId: PA, apiKey: { id: 'k', tenantId: PA, readTypes } };
     const res: any = { on: jest.fn(), writableEnded: false };
@@ -20,7 +21,7 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
         throw e;
       }
     };
-    return { call, pollEvents };
+    return { call, pollEvents, latestPollCursor };
   }
 
   it('[MS:U25] (phần b) cursor ra JSON là CHUỖI, nextCursor = cursor cuối; rỗng -> giữ nguyên after', async () => {
@@ -33,17 +34,26 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
     expect((await setup([]).call({})).body).toEqual({ events: [], nextCursor: '0' });
   });
 
-  it('R3-2: thông điệp 422 của after nói `cursor` (không phải seq của dashboard)', async () => {
+  it('R3-2: thông điệp lỗi của after nói `cursor` (không phải seq của dashboard)', async () => {
     const r = await setup().call({ after: 'abc' });
     expect(r.body.message).toMatch(/cursor/);
-    expect(r.body.message).not.toMatch(/seq/);
+    expect(r.body.message).not.toMatch(/\bseq\b/);
   });
 
-  it('S7: tham số sai -> 422 field (after, limit, types, status, wait)', async () => {
+  it('[DX:UX11] after=latest -> {events: [], nextCursor: cursor cuối đã cấp} (không poll); after rác -> 400 invalid_cursor', async () => {
+    const { call, pollEvents, latestPollCursor } = setup([{ id: 'e', cursor: 9n }]);
+    expect(await call({ after: 'latest', wait: '20' })).toEqual({ status: 200, body: { events: [], nextCursor: '4' } });
+    expect(latestPollCursor).toHaveBeenCalledTimes(1);
+    expect(pollEvents).not.toHaveBeenCalled();
+    for (const after of ['abc', '-1', '1.5', 'LATEST', '99999999999999999999']) {
+      const r = await call({ after });
+      expect([after, r.status, r.body.error, r.body.field]).toEqual([after, 400, 'invalid_cursor', 'after']);
+    }
+  });
+
+  it('S7: tham số sai -> 422 field (limit, types, status, wait); after sai -> 400 xem UX11', async () => {
     const { call } = setup();
     for (const [q, field] of [
-      [{ after: '-1' }, 'after'],
-      [{ after: 'abc' }, 'after'],
       [{ limit: '0' }, 'limit'],
       [{ limit: '101' }, 'limit'],
       [{ types: 'payment.*,*.paid' }, 'types'],

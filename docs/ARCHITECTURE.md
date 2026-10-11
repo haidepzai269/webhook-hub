@@ -563,6 +563,7 @@ GET /v1/p/:project/events?after=<cursor>&limit=50&types=payment.*,repo.push&stat
 
 - Cursor = `events.poll_seq`, trả ra API dưới tên **`cursor`** (R2-3, ADR-099 — không lẫn với `seq` của dashboard), **không** ULID và **không** `seq` lúc INSERT (R-3, ADR-095): transaction có seq nhỏ có thể COMMIT sau transaction có seq lớn — cursor theo seq sẽ vượt qua và mất vĩnh viễn sự kiện đó.
 - `poll_seq` cấp **lúc poll** cho dòng **đã commit**, dưới `pg_advisory_xact_lock` theo tenant → các lần cấp nối tiếp, giá trị sau luôn lớn hơn mọi giá trị đã thấy. Không cần cửa sổ lắng (bỏ 2s của ADR-077).
+- `after=latest` → `{events: [], nextCursor: <cursor cuối đã cấp>}` (DX3, ADR-132 — điểm bắt đầu của `hub listen`); `after` rác → 400 `invalid_cursor`.
 - `types` giao với `readTypes` của key; `status=failed` = có delivery DEAD/RETRYING ở generation mới nhất (tới `endpointId`); long-poll `wait` truy vấn lại mỗi 1s, 0 lệnh Redis.
 - Dashboard `GET /api/v1/events`: `before=<id>` (cũ hơn, giảm dần), `after=<seq>` (mới hơn, tăng dần).
 - Lấy lại được trong `EVENT_RETENTION_DAYS` ngày; raw ACCEPTED giữ vô hạn (ADR-045).

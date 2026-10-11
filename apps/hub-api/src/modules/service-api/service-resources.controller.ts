@@ -420,14 +420,25 @@ export class ServiceResourcesController {
   /**
    * S7 (SPEC §4.5, ADR-077/095/099): polling (A) + long-poll. `?after=<cursor>&limit=1..100&types=a.*,b&status=failed
    * &endpointId=&wait=0..20`. Kết quả `{events, nextCursor}` — cursor (poll_seq, thứ tự COMMIT) là CHUỖI; rỗng thì
-   * nextCursor = after.
+   * nextCursor = after. `after=latest` (DX3) -> rỗng + cursor cuối; cursor rác -> 400 `invalid_cursor`.
    * `types` giao với `readTypes` của key. 0 lệnh Redis.
    */
   @Get('events')
   @RequireScope('read:events')
   async pollEvents(@Req() req: RequestWithPrincipal, @Res({ passthrough: true }) res: Response, @Query() q: Record<string, string>) {
     const after = q.after ?? '0';
-    if (!/^\d{1,19}$/.test(after) || BigInt(after) > 9223372036854775807n) unprocessable({ error: 'validation_failed', field: 'after', message: 'after là cursor polling (chuỗi số ≥ 0, lấy từ nextCursor)' });
+    // DX3 (SPEC-dev-experience §4.5): `after=latest` -> `{events: [], nextCursor: <cursor lớn nhất đã cấp>}` — `hub listen`
+    // bắt đầu từ "bây giờ" mà không phải tải lại lịch sử. Event commit sau đó luôn có cursor lớn hơn (poll_seq, ADR-095).
+    if (after === 'latest') {
+      return { events: [], nextCursor: (await this.prisma.forTenant(req.tenantId!).latestPollCursor()).toString() };
+    }
+    // DX3/UX11: cursor rác là lỗi của cursor (400 `invalid_cursor`), không phải 422 trường dữ liệu.
+    if (!/^\d{1,19}$/.test(after) || BigInt(after) > 9223372036854775807n) {
+      throw new HttpException(
+        { error: 'invalid_cursor', field: 'after', message: 'after là cursor polling (chuỗi số ≥ 0, lấy từ nextCursor) hoặc "latest"' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const limit = q.limit === undefined ? 50 : Number(q.limit);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) unprocessable({ error: 'validation_failed', field: 'limit', message: 'limit là số nguyên 1–100' });
     const wait = q.wait === undefined ? 0 : Number(q.wait);
