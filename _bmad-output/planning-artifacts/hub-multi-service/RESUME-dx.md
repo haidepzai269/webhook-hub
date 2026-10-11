@@ -33,3 +33,8 @@
   `github/ping` → 401 (mong 200) vì secret GitHub của stack dev ≠ secret giả `.env.verify` — KHÔNG phải hồi quy, status/body GitHub
   giữ `{error}`. Stripe/Generic không có source ở stack dev → chỉ kiểm bằng unit (`ingest-reject-ack.spec.ts`). Fixture hub-sim chỉ
   kỳ vọng status nên không cần VF sửa.
+- Review DX-A: M-1 + L-5 (ADR-143), M-2 (QUICKSTART + ARCHITECTURE §18), L-3 (`HUB_DOCS_URL` gợi ý ở .env.example + HUONG-DAN-DEPLOY).
+  SỰ CỐ index dùng chung: mình đã stage (update-index) file của M-1 vào `.git/index` thì agent KN1 commit `c888ef6` → commit đó
+  chứa luôn thay đổi M-1/L-5 + ADR-143 của mình, và các file controller/catalog/ADR trong `c888ef6` là bản HEAD+mình (THIẾU hunk
+  KN1: mã `use_endpoints_route`/`endpoint_owned_by_service`… trong catalog, refactor controller, ADR-142 — vẫn nằm ở working tree
+  của họ). Commit `80a98bd` của mình vì thế RỖNG (cùng tree). Từ đây mình chỉ commit qua GIT_INDEX_FILE riêng + commit-tree.

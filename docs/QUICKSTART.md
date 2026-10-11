@@ -54,5 +54,9 @@ Không có `publish:events`? Bắn mock SePay vào source của project (vd `doc
 - **Bản deploy (`hubs://…`)**: bước 3–5 y hệt — `listen` kéo sự kiện qua https về máy bạn, không cần mở cổng. Khi service
   của bạn đã có URL công khai thì đăng ký endpoint thật (`hub.endpoints.ensure`, push Standard Webhooks) và đổi
   `HUB_LISTEN_SECRET` thành `HUB_SIGNING_SECRET` của endpoint. Đừng đăng ký `localhost` — hub chặn (`ssrf_blocked`).
+- **`listen` giống production ở PHONG BÌ, không ở BỘ LỌC:** body + header ký byte-identical với push thật, nhưng `listen`
+  không biết subscription của bạn — nó forward MỌI event key được đọc (không áp `eventTypes`/`sourceIds` của subscription)
+  và không có `renderedContent` (chỉ có khi subscription có template). Lọc ở local bằng `--types payment.*`; handler xử lý
+  tiền vẫn phải tự kiểm `source`/`sourceId` như ở production.
 - Gặp lỗi: mọi lỗi có `error` + `fix` + `requestId` — tra `docs/ERRORS.md`.
 - Tò mò bên trong: `docs/ARCHITECTURE.md` (mục "Trải nghiệm dev").
