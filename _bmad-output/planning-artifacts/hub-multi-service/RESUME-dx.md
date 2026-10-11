@@ -16,3 +16,8 @@
   `apps/hub-api/src/modules/errors/*` (filter + x-request-id + hubError + install), `verificationFix`, Generic buildAck `fix`,
   web `errorMessageOf` (detail → câu Việt theo mã → message), SDK HubError kèm fix/requestId, `docs/ERRORS.md`, U22 sửa chữ.
   Test UX1–UX6 xanh. ADR-136 (ADR-135 là VF4). Câu hỏi Admin: CAN-ADMIN-QUYET-DX.md Q1 (fix Generic 401/422 qua lõi ingest).
+- DX2 rút gọn xong: `examples/quickstart-node/index.js` (34 dòng, node:http + SDK) + `package.json` (`@hub/sdk: file:../../libs/hub-sdk`
+  → `npx hub` có bin link trong thư mục app mẫu) + `docs/QUICKSTART.md` (5 bước, hub:// local, ghi chú hubs:// deployed).
+  Kiểm thật LOCAL (stack dev, image API cũ, `--from <cursor>`): app mẫu in `payment.received 50000 evt_…` sau ~1,05 s;
+  đổi secret app → listen in `→ 401 … invalid signature`; không lộ key. KHÔNG build lại image (ổ C còn 16 GB/97%) —
+  `after=latest` chỉ kiểm bằng unit + DB thật (UX11). Chạy hub-api từ source không được: `.env` dev dùng role superuser (AU6 chặn).

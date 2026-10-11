@@ -1,0 +1,12 @@
+{
+  "name": "hub-quickstart-node",
+  "private": true,
+  "description": "App mẫu 40 dòng nhận webhook của Webhook Hub (docs/QUICKSTART.md).",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@hub/sdk": "file:../../libs/hub-sdk"
+  }
+}
