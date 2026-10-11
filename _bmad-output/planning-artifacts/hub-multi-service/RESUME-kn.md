@@ -13,6 +13,13 @@ Spec: `SPEC-ket-noi.md` (ADR-138). Câu hỏi cho Admin: `CAN-ADMIN-QUYET-KN.md`
 - Commit KN2 trở đi: index TẠM (`GIT_INDEX_FILE`, script scratchpad `commit-kn.sh`): file của mình lấy nguyên bản, `docs/adr/README.md` = HEAD + đúng khối ADR của mình (phiên khác đang có ADR chưa commit trong cùng file); sau đó `git reset -q -- <paths>` để index dùng chung khớp HEAD.
 - **Luật từ giờ:** chỉ commit bằng `git commit -m … -- <path…>` (chỉ các đường dẫn đó, bất kể index đang có gì). Không `git add` rồi commit trơn.
 
+## SỰ CỐ NGHIÊM TRỌNG (cuối phiên, ~19:00 2026-10-11) — node_modules + apps/ libs/ bị xoá
+- Phiên KN tạo worktree tạm `scratchpad/headwt` (kiểm HEAD sau sự cố c888ef6) với **junction** `node_modules` → `C:\webhook-hub
+ode_modules`. `git worktree remove --force` đi XUYÊN junction: xoá sạch `node_modules` gốc, và qua các link workspace của npm (`node_modules/@hub/*`, `hub-api`…) xoá luôn file trong `apps/*`, `libs/*`.
+- Đã khôi phục: `git checkout HEAD -- apps libs` (mọi file tracked; lúc đó không có file nào trong apps/libs ở trạng thái "M" — chỉ "D"), `npm ci` (946 gói), `prisma generate`, `npm run build:libs`. Sau đó L0 789/0/0, tsc hub-api/web xanh.
+- **MẤT KHÔNG KHÔI PHỤC ĐƯỢC:** file KHÔNG tracked bên trong `apps/*` và `libs/*` của mọi phiên (vd file mới chưa `git add`, `.env*` cục bộ trong apps nếu có, `apps/web/.next`), và mọi thay đổi chưa commit trong apps/libs tại thời điểm đó (status ngay trước chỉ còn các file của phiên khác ngoài apps/libs: `verify/lib/probe.ts`, `verify/test/probe.spec.ts`, … — chúng còn nguyên).
+- **Luật:** KHÔNG BAO GIỜ tạo junction/symlink `node_modules` vào worktree tạm; muốn kiểm HEAD thì `git stash`-free: dùng `git archive` + `npm ci` riêng, hoặc chỉ `tsc` với `--baseUrl` trỏ về repo gốc.
+
 ## Trạng thái
 | Story | Trạng thái | Commit |
 |---|---|---|
