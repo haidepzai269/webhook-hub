@@ -107,12 +107,17 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(run([58000n, 50000n, 30000n])).toMatchObject({ status: 'PAID', paidAmount: 138000n });
     });
 
-    it('tiền về đơn EXPIRED (trả SAU hạn): ghi nhận nhưng KHÔNG hồi sinh', () => {
-      expect(applyPayment(order('EXPIRED', 0, TTL_MIN + 10), 138000n)).toEqual({
-        status: 'EXPIRED',
-        paidAmount: 138000n,
-        outcome: 'LATE_PAYMENT',
-      });
+    it('Q1 (ADR-154): trả ĐỦ sau hạn -> đơn EXPIRED thành PAID (LATE_PAID); thiếu -> ghi nhận, giữ EXPIRED', () => {
+      expect(applyPayment(order('EXPIRED', 0, TTL_MIN + 10), 138000n)).toEqual({ status: 'PAID', paidAmount: 138000n, outcome: 'LATE_PAID' });
+      expect(applyPayment(order('EXPIRED', 0, TTL_MIN + 10), 200000n)).toMatchObject({ status: 'PAID', outcome: 'LATE_PAID' });
+      expect(applyPayment(order('EXPIRED', 0, TTL_MIN + 10), 100000n)).toEqual({ status: 'EXPIRED', paidAmount: 100000n, outcome: 'LATE_PAYMENT' });
+    });
+
+    it('Q1 (ADR-154): các khoản trễ CỘNG DỒN — tổng đủ thì PAID, thứ tự không quan trọng', () => {
+      const run = (amounts: bigint[]) => amounts.reduce((o, a) => ({ ...o, ...applyPayment(o, a) }), order('EXPIRED', 0, TTL_MIN + 10) as any);
+      expect(run([100000n])).toMatchObject({ status: 'EXPIRED', outcome: 'LATE_PAYMENT' });
+      expect(run([100000n, 38000n])).toMatchObject({ status: 'PAID', paidAmount: 138000n, outcome: 'LATE_PAID' });
+      expect(run([38000n, 100000n])).toMatchObject({ status: 'PAID', paidAmount: 138000n, outcome: 'LATE_PAID' });
     });
 
     it('tiền về thêm khi đã PAID: giữ PAID, báo EXTRA_PAYMENT', () => {
@@ -121,6 +126,8 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
         paidAmount: 139000n,
         outcome: 'EXTRA_PAYMENT',
       });
+      // CANCELLED (đóng tay) không bị hồi sinh — ADR-154 chỉ áp cho EXPIRED
+      expect(applyPayment(order('CANCELLED'), 138000n)).toEqual({ status: 'CANCELLED', paidAmount: 138000n, outcome: 'LATE_PAYMENT' });
     });
 
     it('UNDERPAID không tự hết hạn (đã có tiền vào), dù đã quá hạn', () => {
@@ -134,12 +141,13 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
     });
 
     it('PENDING quá hạn mà cron reconcile CHƯA chạy: vẫn coi là EXPIRED (hết hạn lười)', () => {
-      expect(applyPayment(order('PENDING', 0, TTL_MIN + 10), 138000n)).toEqual({
+      expect(applyPayment(order('PENDING', 0, TTL_MIN + 10), 100000n)).toEqual({
         status: 'EXPIRED',
-        paidAmount: 138000n,
+        paidAmount: 100000n,
         outcome: 'LATE_PAYMENT',
       });
-      expect(applyPayment(order('PENDING', 0, TTL_MIN - 1), 138000n).status).toBe('PAID');
+      expect(applyPayment(order('PENDING', 0, TTL_MIN + 10), 138000n)).toMatchObject({ status: 'PAID', outcome: 'LATE_PAID' });
+      expect(applyPayment(order('PENDING', 0, TTL_MIN - 1), 138000n)).toMatchObject({ status: 'PAID', outcome: 'PAID' });
     });
 
     it('M-1: trả ĐÚNG hạn (paidAt của provider) nhưng webhook tới SAU hạn (cold start) -> vẫn PAID', () => {
@@ -151,10 +159,16 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(applyPayment({ ...o, status: 'EXPIRED' }, 100000n, paidAt)).toMatchObject({ status: 'UNDERPAID' });
     });
 
-    it('M-1: paidAt sau hạn -> LATE_PAYMENT; paidAt ở tương lai (lệch đồng hồ) bị chặn bởi now', () => {
+    it('M-1: paidAt sau hạn -> trễ (LATE_PAID đủ / LATE_PAYMENT thiếu); paidAt ở tương lai (lệch đồng hồ) bị chặn bởi now', () => {
       const o = order('PENDING', 0, TTL_MIN + 10);
-      expect(applyPayment(o, 138000n, new Date(o.createdAt.getTime() + EXPIRE_AFTER_MS + 60_000)).outcome).toBe('LATE_PAYMENT');
-      expect(applyPayment(o, 138000n, new Date(Date.now() + 3_600_000)).outcome).toBe('LATE_PAYMENT');
+      expect(applyPayment(o, 138000n, new Date(o.createdAt.getTime() + EXPIRE_AFTER_MS + 60_000)).outcome).toBe('LATE_PAID');
+      expect(applyPayment(o, 100000n, new Date(o.createdAt.getTime() + EXPIRE_AFTER_MS + 60_000)).outcome).toBe('LATE_PAYMENT');
+      expect(applyPayment(o, 100000n, new Date(Date.now() + 3_600_000)).outcome).toBe('LATE_PAYMENT');
+    });
+
+    it('Q3 (ADR-154): Shop không gửi chuỗi QR thanh toán cho bên thứ ba (qrserver) — web tự vẽ từ qrCode', () => {
+      const src = ['main.ts', 'payment.ts'].map((f) => require('fs').readFileSync(require('path').join(__dirname, '../src', f), 'utf8')).join('');
+      expect(src).not.toMatch(/qrserver/);
     });
 
     it('L-2: GET /orders hiển thị hết hạn lười (PENDING quá hạn = EXPIRED, UNDERPAID không)', () => {

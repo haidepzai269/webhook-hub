@@ -333,6 +333,19 @@ button.sovcat {
   border-radius: 14px;
   border: 6px solid var(--cream2);
   margin-bottom: 14px;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+}
+.ckqrbox {
+  margin: 0 0 6px;
+}
+.ckqrbox .ckqr {
+  margin-bottom: 4px;
+}
+.ckqrcap {
+  font-size: 0.95rem;
+  color: var(--dark);
 }
 .ckcode-lbl {
   font-size: 0.75rem;

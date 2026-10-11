@@ -5,7 +5,7 @@ import { timingSafeCompare } from '@hub/crypto';
 import { createHubClient, challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
-import { applyPayment, bankQrUrl, creditsOrder, EXPIRE_AFTER_MS, isExpired, newOrderCode, pickOrderCode, qrImage, readPayment } from './payment';
+import { applyPayment, bankQrUrl, creditsOrder, EXPIRE_AFTER_MS, isExpired, newOrderCode, pickOrderCode, readPayment } from './payment';
 import { createPaymentLink, PAYOS_DUPLICATE_ORDER, payosConfig, payosLinkInput } from './payos';
 import { HubRegistration } from './hub-registration';
 
@@ -74,7 +74,7 @@ app.post('/orders', async (req: Request, res: Response) => {
           }
         }
         await prisma.order.update({ where: { id: order.id }, data: { payosPaymentLinkId: link.paymentLinkId } });
-        payment = { qrImageUrl: qrImage(link.qrCode), qrCode: link.qrCode, checkoutUrl: link.checkoutUrl };
+        payment = { qrImageUrl: null, qrCode: link.qrCode, checkoutUrl: link.checkoutUrl }; // ADR-154: web tự vẽ QR
       } catch (e: any) {
         logger.error({ err: e?.message, orderCode: order.orderCode }, '[Shop] Không tạo được link PayOS (đơn để PENDING, tự hết hạn)');
         return res.status(502).json({ error: 'Không tạo được link thanh toán PayOS — thử lại hoặc chọn chuyển khoản ngân hàng' });

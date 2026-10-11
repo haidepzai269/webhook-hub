@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { QRCodeSVG } from "qrcode.react";
+
 import {
   type CreatedOrder,
   type CustomerInput,
@@ -17,7 +19,7 @@ import {
   simulateSepayTransfer,
 } from "@/lib/shop/api";
 import { cartSubtotal, useCart } from "@/lib/shop/cart";
-import { isFinalStatus, pollDeadline } from "@/lib/shop/order-status";
+import { isFinalStatus, paymentQr, pollDeadline } from "@/lib/shop/order-status";
 import { useShopUi } from "@/lib/shop/ui";
 
 const POLL_MS = 2000;
@@ -61,6 +63,7 @@ export function CheckoutModal() {
   // R2-L1: EXPIRED chưa cuối trong cửa sổ grace — khoản trả đúng hạn có webhook tới muộn vẫn thành PAID (ADR-144).
   const finished = status !== null && isFinalStatus(status, order?.expiresAt, Date.now());
   const orderCode = order?.orderCode;
+  const qr = order ? paymentQr(order.payment) : null;
 
   // Mở modal -> hỏi Shop có PayOS không; mặc định PayOS nếu Shop đã cấu hình, không thì chuyển khoản.
   useEffect(() => {
@@ -299,13 +302,30 @@ export function CheckoutModal() {
         {order && status !== "PAID" && (
           <div className="ckpay">
             <h4 className="cktitle">Quét VietQR bằng app ngân hàng</h4>
-            {order.payment.qrImageUrl ? (
+            {qr?.kind === "code" ? (
+              // Q3 (ADR-154): vẽ VietQR của PayOS ngay tại trình duyệt — dữ liệu thanh toán không đi qua bên thứ ba
+              <figure className="ckqrbox">
+                <QRCodeSVG
+                  className="ckqr"
+                  value={qr.value}
+                  size={280}
+                  level="M"
+                  marginSize={3}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  title={`Mã VietQR thanh toán đơn ${order.orderCode}`}
+                />
+                <figcaption className="ckqrcap">
+                  <strong>{formatVnd(amount)}</strong> · {order.orderCode}
+                </figcaption>
+              </figure>
+            ) : qr?.kind === "image" ? (
               <img
                 className="ckqr"
-                src={order.payment.qrImageUrl}
+                src={qr.url}
                 alt={`Mã VietQR thanh toán đơn ${order.orderCode}`}
-                width={220}
-                height={220}
+                width={260}
+                height={260}
               />
             ) : (
               <p className="ckerr">
@@ -360,9 +380,10 @@ export function CheckoutModal() {
                 </>
               ) : status === "EXPIRED" && paid > 0 ? (
                 <>
-                  <i className="fas fa-exclamation-triangle" /> Đơn đã hết hạn nhưng Shop đã nhận{" "}
-                  <strong>{formatVnd(paid)}</strong>. Gọi hotline 1900 6868 kèm mã {order.orderCode} để được giao món
-                  hoặc hoàn tiền.
+                  <i className="fas fa-exclamation-triangle" /> Đơn đã hết hạn, Shop đã nhận{" "}
+                  <strong>{formatVnd(paid)}</strong>, còn thiếu <strong>{formatVnd(Math.max(0, amount - paid))}</strong>
+                  . Chuyển thêm phần còn thiếu với cùng nội dung để hoàn tất đơn, hoặc gọi hotline 1900 6868 kèm mã{" "}
+                  {order.orderCode} để được hoàn tiền.
                 </>
               ) : status === "EXPIRED" && !finished && !timedOut ? (
                 <>

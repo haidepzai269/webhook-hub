@@ -1,6 +1,6 @@
 # Cần Admin quyết — P1/P2 (2026-10-11)
 
-## Q1 — Đơn đã hết hạn mà tiền ĐỦ vẫn về: hồi sinh thành PAID?
+## Q1 — Đơn đã hết hạn mà tiền ĐỦ vẫn về: hồi sinh thành PAID? — **ĐÃ QUYẾT (Admin 2026-10-12): CÓ → PAID (`LATE_PAID`); thiếu thì giữ EXPIRED, cộng dồn tới đủ thì PAID. ADR-154.**
 - Hiện tại (giữ ADR-034, Admin đã chốt "không hồi sinh"): đơn ở EXPIRED, `paidAmount` được cộng (không mất), log cảnh báo,
   khách thấy "đã hết hạn nhưng Shop đã nhận X — gọi hotline", reconcile trả `lateMoneyOrders`.
 - ~~Link PayOS hết hạn cùng lúc với đơn, nên trả muộn chỉ còn xảy ra với SePay~~ — SAI (review M-1). Đã sửa ở ADR-144:
@@ -13,11 +13,11 @@
 - PayOS giới hạn `description` 9 ký tự với tài khoản KHÔNG liên kết → mã đơn đã rút còn `DH` + 7 số (9 ký tự) để chắc chắn chạy.
 - Nếu lúc trả tiền thật thấy memo của webhook (console → sự kiện → `data.memo`) có tiền tố lạ, gửi lại để kiểm regex `DH\d+`.
 
-## Q3 — Ảnh QR PayOS vẽ qua api.qrserver.com
+## Q3 — Ảnh QR PayOS vẽ qua api.qrserver.com — **ĐÃ QUYẾT (Admin 2026-10-12): vẽ tại trình duyệt bằng `qrcode.react@4.2.0`, bỏ qrserver; VietQR SePay (img.vietqr.io) giữ nguyên. ADR-154.**
 - Chuỗi VietQR (số tài khoản, số tiền, nội dung) đi qua bên thứ ba để vẽ ảnh. Muốn vẽ tại trình duyệt thì thêm thư viện QR
   vào `apps/web` (đụng package-lock — chưa làm vì agent khác đang chạy song song).
 
-## Q4 — Hai kênh cùng một tài khoản (ADR-144, M-2)
+## Q4 — Hai kênh cùng một tài khoản (ADR-144, M-2) — **ĐÃ QUYẾT (Admin 2026-10-12): không đổi code; dùng CÙNG tài khoản ngân hàng cho PayOS và SHOP_BANK_* (ghi ở HUONG-DAN-DEPLOY §8). ADR-154.**
 - Shop giờ chỉ cộng tiền từ đúng kênh khách chọn (`OTHER_CHANNEL` = bỏ qua + log). Nếu PayOS và SePay là HAI tài khoản
   khác nhau và khách cố ý chuyển sang kênh kia, khoản đó phải đối soát tay. Chấp nhận?
 

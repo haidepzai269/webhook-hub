@@ -1,4 +1,4 @@
-import { isFinalStatus, LATE_WEBHOOK_GRACE_MS, pollDeadline } from "./order-status";
+import { isFinalStatus, LATE_WEBHOOK_GRACE_MS, paymentQr, pollDeadline } from "./order-status";
 
 /**
  * R2-L1 (ADR-144): EXPIRED chưa phải trạng thái cuối ngay tại hạn — khoản trả ĐÚNG hạn có webhook tới muộn (cold start)
@@ -26,5 +26,22 @@ describe("isFinalStatus / pollDeadline — checkout Shop", () => {
     expect(LATE_WEBHOOK_GRACE_MS).toBeGreaterThan(5 * 60_000);
     expect(pollDeadline(expiresAt, 123)).toBe(at(LATE_WEBHOOK_GRACE_MS));
     expect(pollDeadline(undefined, 123)).toBe(123);
+  });
+});
+
+/** Q3 (ADR-154): QR PayOS vẽ TẠI TRÌNH DUYỆT từ chuỗi VietQR — không gửi dữ liệu thanh toán cho bên thứ ba vẽ ảnh. */
+describe("paymentQr — chọn cách hiển thị QR", () => {
+  it("có qrCode (PayOS) -> vẽ tại chỗ từ chuỗi, kể cả khi server cũ còn gửi qrImageUrl", () => {
+    expect(paymentQr({ qrImageUrl: null, qrCode: "000201abc" })).toEqual({ kind: "code", value: "000201abc" });
+    expect(paymentQr({ qrImageUrl: "https://api.qrserver.com/x", qrCode: "000201abc" })).toEqual({ kind: "code", value: "000201abc" });
+  });
+
+  it("SePay: ảnh VietQR chuẩn của ngân hàng (img.vietqr.io); thiếu cả hai -> null", () => {
+    expect(paymentQr({ qrImageUrl: "https://img.vietqr.io/image/x.png" })).toEqual({ kind: "image", url: "https://img.vietqr.io/image/x.png" });
+    expect(paymentQr({ qrImageUrl: null })).toBeNull();
+  });
+
+  it("không bao giờ dùng ảnh của qrserver", () => {
+    expect(paymentQr({ qrImageUrl: "https://api.qrserver.com/v1/create-qr-code/?data=x" })).toBeNull();
   });
 });
