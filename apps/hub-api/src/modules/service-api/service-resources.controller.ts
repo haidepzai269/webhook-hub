@@ -10,6 +10,7 @@ import { RequestWithPrincipal } from './principal';
 import { unprocessable } from './service-api.controller';
 import { EndpointVerifier, VerificationOutcome } from './endpoint-verifier';
 import { longPoll } from './polling';
+import { hubError } from '../errors/hub-error';
 import { parseSourceInput } from './source-input';
 import { ulid } from 'ulidx';
 
@@ -437,7 +438,10 @@ export class ServiceResourcesController {
     // DX3 (SPEC-dev-experience §4.5): `after=latest` -> `{events: [], nextCursor: <cursor lớn nhất đã cấp>}` — `hub listen`
     // bắt đầu từ "bây giờ" mà không phải tải lại lịch sử. Event commit sau đó luôn có cursor lớn hơn (poll_seq, ADR-095).
     if (after === 'latest') {
-      return { events: [], nextCursor: (await this.prisma.forTenant(req.tenantId!).latestPollCursor()).toString() };
+      const latest = await this.prisma.forTenant(req.tenantId!).latestPollCursor();
+      // M-1: backlog cấp cursor vượt trần một request -> 503 có retryAfter; gọi lại sẽ tiến tiếp (không sai, chỉ chậm).
+      if (latest === null) throw hubError('service_unavailable', { retryAfter: 1 }, 'Đang cấp cursor cho event tồn của project — thử lại sau 1 giây');
+      return { events: [], nextCursor: latest.toString() };
     }
     // DX3/UX11: cursor rác là lỗi của cursor (400 `invalid_cursor`), không phải 422 trường dữ liệu.
     if (!/^\d{1,19}$/.test(after) || BigInt(after) > 9223372036854775807n) {

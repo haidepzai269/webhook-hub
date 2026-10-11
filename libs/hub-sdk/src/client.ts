@@ -11,6 +11,8 @@ export class HubError extends Error {
     readonly code: string,
     message?: string,
     readonly body?: unknown,
+    /** Giây chờ trước khi thử lại (header Retry-After hoặc `retryAfter` của body), nếu hub/proxy gửi. */
+    readonly retryAfter?: number,
   ) {
     super(message ?? `Hub trả HTTP ${status} (${code})`);
     this.name = 'HubError';
@@ -94,7 +96,7 @@ export interface EnsureEndpointInput {
   signingSecret?: string;
 }
 
-type FetchLike = (url: string, init?: any) => Promise<{ status: number; ok: boolean; text(): Promise<string> }>;
+type FetchLike = (url: string, init?: any) => Promise<{ status: number; ok: boolean; text(): Promise<string>; headers?: { get(name: string): string | null } }>;
 
 export class HubClient {
   readonly baseUrl: string;
@@ -240,7 +242,8 @@ export class HubClient {
       // DX1: kèm `fix` + `requestId` của hub (không chứa key/secret — luật catalog) để log của service tự giải thích.
       const fix = typeof parsed?.fix === 'string' ? ` — fix: ${parsed.fix}` : '';
       const rid = typeof parsed?.requestId === 'string' ? ` [requestId ${parsed.requestId}]` : '';
-      throw new HubError(res.status, code, `Hub trả HTTP ${res.status} (${code}) cho ${method} ${path.split('?')[0]}${fix}${rid}`, parsed);
+      const ra = Number(res.headers?.get?.('retry-after') ?? parsed?.retryAfter);
+      throw new HubError(res.status, code, `Hub trả HTTP ${res.status} (${code}) cho ${method} ${path.split('?')[0]}${fix}${rid}`, parsed, Number.isFinite(ra) && ra >= 0 ? ra : undefined);
     }
     return parsed as T;
   }

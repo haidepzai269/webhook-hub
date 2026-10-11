@@ -51,6 +51,14 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
     }
   });
 
+  it('[DX:UX11] M-1: backlog cấp cursor chưa xong (repo trả null) -> 503 service_unavailable kèm retryAfter (client thử lại)', async () => {
+    const { call, latestPollCursor } = setup();
+    latestPollCursor.mockResolvedValueOnce(null);
+    const r = await call({ after: 'latest' });
+    expect(r.status).toBe(503);
+    expect(r.body).toMatchObject({ error: 'service_unavailable', retryAfter: 1 });
+  });
+
   it('S7: tham số sai -> 422 field (limit, types, status, wait); after sai -> 400 xem UX11', async () => {
     const { call } = setup();
     for (const [q, field] of [

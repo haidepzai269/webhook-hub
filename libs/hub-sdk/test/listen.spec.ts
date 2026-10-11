@@ -27,11 +27,14 @@ const ev = (cursor: string, id: string) => ({
  * Hub giả: /me + /events. `batches` trả lần lượt cho mỗi lần poll (after ≠ latest); hết batch -> abort phiên
  * (giả Ctrl+C) và trả rỗng. Ghi lại mọi `after` đã poll để kiểm cursor tiến.
  */
-function fakeHub(batches: any[][], opts: { scopes?: string[]; latest?: string; failFirst?: number } = {}) {
+function fakeHub(batches: any[][], opts: { scopes?: string[]; latest?: string; failFirst?: number; latestFails?: number; limited?: { retryAfter?: number; header?: string }[] } = {}) {
   const ac = new AbortController();
   const afters: string[] = [];
   let i = 0;
   let fails = opts.failFirst ?? 0;
+  let latestFails = opts.latestFails ?? 0;
+  const limited = [...(opts.limited ?? [])];
+  let headers: Record<string, string> = {};
   const fetch = jest.fn(async (url: string, init: any) => {
     if (init?.signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     const u = new URL(url);
@@ -41,7 +44,17 @@ function fakeHub(batches: any[][], opts: { scopes?: string[]; latest?: string; f
     if (path === '/me') body = { project: { slug: 'cafe', name: 'Cafe', environment: 'test' }, serviceName: 'cafe-svc', scopes: opts.scopes ?? ['read:events'] };
     else if (path === '/events') {
       const after = u.searchParams.get('after')!;
-      if (after === 'latest') body = { events: [], nextCursor: opts.latest ?? '4' };
+      if (after === 'latest' && latestFails > 0) {
+        latestFails--;
+        status = 503;
+        body = { error: 'service_unavailable', retryAfter: 1 };
+      } else if (after === 'latest') body = { events: [], nextCursor: opts.latest ?? '4' };
+      else if (limited.length) {
+        const l = limited.shift()!;
+        status = 429;
+        body = { error: 'rate_limited', ...(l.retryAfter !== undefined ? { retryAfter: l.retryAfter } : {}) };
+        headers = l.header ? { 'retry-after': l.header } : {};
+      }
       else if (fails > 0) {
         fails--;
         status = 503;
@@ -58,7 +71,9 @@ function fakeHub(batches: any[][], opts: { scopes?: string[]; latest?: string; f
       status = 404;
       body = { error: 'not_found' };
     }
-    return { status, ok: status < 300, text: async () => JSON.stringify(body) };
+    const h = headers;
+    headers = {};
+    return { status, ok: status < 300, headers: { get: (n: string) => h[n.toLowerCase()] ?? null }, text: async () => JSON.stringify(body) };
   });
   return { fetch, ac, afters };
 }
@@ -207,5 +222,25 @@ describe('[DX] hub listen', () => {
     t.io.sleep = async (ms: number) => void sleeps.push(ms);
     expect(await runCli(['listen', '--forward', 'http://localhost:3000/w', '--from', '0'], t.io)).toBe(0);
     expect(sleeps).toEqual([1000, 2000, 5000, 5000]);
+  });
+
+  it('M-1: after=latest trả 503 (đang cấp cursor) -> backoff rồi thử lại, KHÔNG thoát', async () => {
+    const hub = fakeHub([], { latestFails: 2 });
+    const sleeps: number[] = [];
+    const t = io(hub, { HUB_LISTEN_SECRET: SECRET });
+    t.io.sleep = async (ms: number) => void sleeps.push(ms);
+    expect(await runCli(['listen', '--forward', 'http://localhost:3000/w'], t.io)).toBe(0);
+    expect(sleeps).toEqual([1000, 1000]); // theo retryAfter: 1 của hub
+    expect(hub.afters[0]).toBe('4');
+  });
+
+  it('L-5: poll 429 -> backoff theo Retry-After (body retryAfter hoặc header), có trần 30s, KHÔNG thoát', async () => {
+    const hub = fakeHub([], { limited: [{ retryAfter: 3 }, { header: '7' }, { retryAfter: 999 }, {}] });
+    const sleeps: number[] = [];
+    const t = io(hub, { HUB_LISTEN_SECRET: SECRET });
+    t.io.sleep = async (ms: number) => void sleeps.push(ms);
+    expect(await runCli(['listen', '--forward', 'http://localhost:3000/w', '--from', '0'], t.io)).toBe(0);
+    expect(sleeps).toEqual([3000, 7000, 30000, 5000]); // không có Retry-After -> backoff thường (đã ở bậc 5s)
+    expect(t.lines.join(' ')).toMatch(/rate limited/);
   });
 });

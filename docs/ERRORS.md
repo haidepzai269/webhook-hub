@@ -311,6 +311,58 @@ curl -si -X POST $API/v1/p/cafe/endpoints -H "Authorization: Bearer $KEY_MOI" -d
 for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/v1/p/cafe/endpoints/$EID/verify -H "Authorization: Bearer $KEY"; done
 ```
 
+## use_endpoints_route
+
+**422.** `POST /api/v1/destinations` với `type:"webhook"`. Endpoint webhook tạo ở route riêng để hub sinh `whsec_`,
+chạy challenge và tạo subscription cùng lúc (SPEC-ket-noi KN1, ADR-138). `/destinations` còn dùng cho telegram/discord.
+**Sửa:** gọi `POST /api/v1/endpoints`.
+```bash
+curl -si -X POST "$API/api/v1/endpoints?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"name":"shop","url":"https://shop.example.com/webhooks","eventTypes":["payment.*"]}'
+```
+
+## endpoint_owned_by_service
+
+**409.** Console xoay secret của endpoint do một API key (service) tạo. Service đang giữ secret đó; xoay từ console
+làm service ngừng verify được.
+**Sửa:** xoay từ phía service (`/v1/p/:project/endpoints/:id/verify` kèm `signingSecret`, SDK `ensure()` làm việc này).
+```bash
+curl -si -X POST $API/v1/p/cafe/endpoints/$EID/verify -H "Authorization: Bearer $KEY" -d '{"signingSecret":"whsec_..."}'
+```
+
+## connector_unsupported
+
+**422.** Provider không có connector (hub không tự đăng ký URL được), vd `sepay`, `generic`. Tham số: `provider`.
+**Sửa:** tạo source bằng `POST /api/v1/sources` rồi dán URL ingest vào dashboard của provider.
+```bash
+curl -si -X POST "$API/api/v1/sources/connect?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"provider":"sepay","name":"x","credentials":{}}'
+```
+
+## public_url_required
+
+**422.** `HUB_PUBLIC_URL` là localhost / IP nội bộ: provider ngoài internet không gọi vào được, nên hub không đăng ký.
+Không có lời gọi nào tới provider.
+**Sửa:** dùng named tunnel (cloudflared) hoặc bản deployed, đặt `HUB_PUBLIC_URL` là URL https công khai.
+```bash
+HUB_PUBLIC_URL=https://hub.example.com npm run start:api
+```
+
+## overwrite_not_acknowledged
+
+**422.** Kết nối PayOS **thay** webhook URL hiện tại của kênh (mỗi kênh chỉ có một URL). Body phải có
+`acknowledgeOverwrite: true`. Tham số: `field`.
+**Sửa:** xác nhận không còn backend nào nhận PayOS trực tiếp qua URL cũ, rồi gửi lại kèm `"acknowledgeOverwrite": true`.
+```bash
+curl -si -X POST "$API/api/v1/sources/connect?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"provider":"payos","name":"PayOS","acknowledgeOverwrite":true,"credentials":{"clientId":"…","apiKey":"…","checksumKey":"…"}}'
+```
+
+## credentials_required
+
+**422.** Credentials của kết nối đã bị xoá (nút "Xoá credentials"), nên "Thử lại" không có gì để gửi provider.
+**Sửa:** gửi lại credentials trong body của `retry`.
+```bash
+curl -si -X POST "$API/api/v1/sources/$SID/connection/retry?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"credentials":{"secretKey":"rk_…"}}'
+```
+
 ## internal_error
 
 **500.** Lỗi phía hub. Body **không** chứa chi tiết (không stack, không message gốc) — chỉ `requestId`.

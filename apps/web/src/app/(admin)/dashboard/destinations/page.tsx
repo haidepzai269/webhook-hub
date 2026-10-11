@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Trash2 } from "lucide-react";
+import { Eye, Plus, Trash2, Webhook } from "lucide-react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -18,9 +18,18 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/hub/format";
-import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
 import { useCreateDestination, useDeleteDestination, useDestinations } from "@/lib/hub/queries";
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
+import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
+
+import { CreateEndpointDialog, EndpointDetailDialog } from "./endpoint-dialogs";
+
+/** KN1 (ADR-138): webhook tạo qua "Tạo endpoint webhook" (hub sinh secret + challenge); form này còn telegram/discord. */
+const FORM_TYPES = DESTINATION_TYPES.filter((t) => t !== "webhook") as unknown as readonly [
+  DestinationType,
+  ...DestinationType[],
+];
+const OpenDetail = createContext<(id: string) => void>(() => undefined);
 
 /** Khung config mẫu theo đúng key mà sender trong hub-worker đọc. */
 const CONFIG_TEMPLATE: Record<DestinationType, string> = {
@@ -31,7 +40,7 @@ const CONFIG_TEMPLATE: Record<DestinationType, string> = {
 
 const schema = z.object({
   name: z.string().trim().min(1, "Nhập tên đích.").max(255),
-  type: z.enum(DESTINATION_TYPES),
+  type: z.enum(FORM_TYPES),
   config: z.string().refine((s) => {
     try {
       const v: unknown = JSON.parse(s);
@@ -63,7 +72,11 @@ function VerificationCell({ dest }: { dest: Destination }) {
   const v = describeVerification(dest.verification, dest.verificationError);
   return (
     <div className="flex max-w-xs flex-col gap-0.5">
-      <Badge variant="outline" className={`w-fit font-mono text-[11px] ${VERIFY_STYLE[v.tone]}`} title={dest.verificationFix ?? undefined}>
+      <Badge
+        variant="outline"
+        className={`w-fit font-mono text-[11px] ${VERIFY_STYLE[v.tone]}`}
+        title={dest.verificationFix ?? undefined}
+      >
         {v.label}
       </Badge>
       {v.reason && <span className="text-muted-foreground text-xs">{v.reason}</span>}
@@ -85,6 +98,7 @@ const CIRCUIT_HINT = {
 /** Xoá đích — server chặn 409 khi còn subscription trỏ vào (ADR-054); toast nói rõ phải tắt/xoá subscription trước. */
 function DestinationActions({ dest }: { dest: Destination }) {
   const del = useDeleteDestination();
+  const openDetail = useContext(OpenDetail);
   const remove = () => {
     if (!window.confirm(`Xoá đích "${dest.name}"? Chỉ xoá được khi không còn subscription nào trỏ vào.`)) return;
     del.mutate(dest.id, {
@@ -98,7 +112,25 @@ function DestinationActions({ dest }: { dest: Destination }) {
   };
   return (
     <div className="flex justify-end">
-      <Button size="sm" variant="ghost" disabled={del.isPending} onClick={remove} aria-label={`Xoá ${dest.name}`} title="Xoá (bị chặn nếu còn subscription)">
+      {dest.type === "webhook" && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => openDetail(dest.id)}
+          aria-label={`Chi tiết ${dest.name}`}
+          title="Chi tiết: delivery gần đây, verify lại, xoay secret"
+        >
+          <Eye />
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={del.isPending}
+        onClick={remove}
+        aria-label={`Xoá ${dest.name}`}
+        title="Xoá (bị chặn nếu còn subscription)"
+      >
         <Trash2 />
       </Button>
     </div>
@@ -181,9 +213,17 @@ export default function DestinationsPage() {
   const { data, isLoading, error } = useDestinations();
   const create = useCreateDestination();
   const [open, setOpen] = useState(false);
+  const [endpointOpen, setEndpointOpen] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const form = useForm<FormIn, unknown, FormOut>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", type: "webhook", config: CONFIG_TEMPLATE.webhook, signingSecret: "", rateLimitRps: "0" },
+    defaultValues: {
+      name: "",
+      type: "telegram",
+      config: CONFIG_TEMPLATE.telegram,
+      signingSecret: "",
+      rateLimitRps: "0",
+    },
   });
 
   const onSubmit = (v: FormOut) =>
@@ -210,21 +250,31 @@ export default function DestinationsPage() {
         title="Đích (Destinations)"
         description="Nơi hub giao sự kiện tới. Config và signing secret được mã hoá, không hiển thị lại sau khi tạo."
         actions={
-          <Button onClick={() => setOpen(true)}>
-            <Plus />
-            Thêm đích
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setEndpointOpen(true)}>
+              <Webhook />
+              Tạo endpoint webhook
+            </Button>
+            <Button variant="outline" onClick={() => setOpen(true)}>
+              <Plus />
+              Thêm đích Telegram/Discord
+            </Button>
+          </div>
         }
       />
-      <DataTable
-        data={data}
-        columns={columns}
-        getRowId={(d) => d.id}
-        isLoading={isLoading}
-        error={error}
-        searchPlaceholder="Lọc theo tên, loại…"
-        emptyText="Chưa có đích nào."
-      />
+      <CreateEndpointDialog open={endpointOpen} onOpenChange={setEndpointOpen} />
+      <EndpointDetailDialog id={detailId} onClose={() => setDetailId(null)} />
+      <OpenDetail.Provider value={setDetailId}>
+        <DataTable
+          data={data}
+          columns={columns}
+          getRowId={(d) => d.id}
+          isLoading={isLoading}
+          error={error}
+          searchPlaceholder="Lọc theo tên, loại…"
+          emptyText="Chưa có đích nào."
+        />
+      </OpenDetail.Provider>
 
       <FormDialog
         open={open}
@@ -272,7 +322,7 @@ export default function DestinationsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {DESTINATION_TYPES.map((t) => (
+                      {FORM_TYPES.map((t) => (
                         <SelectItem key={t} value={t}>
                           {t}
                         </SelectItem>

@@ -375,7 +375,8 @@ async function main() {
     const acc = await B.s.post('/auth/invitations/accept', { token: tokenOf(ilink) });
     expect(acc.status === 200 && acc.body?.membership?.role === 'viewer', `accept → ${acc.status} ${acc.text}`);
     expect((await B.s.get(`/api/v1/events?projectId=${pa.projectId}`)).status === 200, 'B (viewer) xem events');
-    const dest = { name: `ta9-${RUN}`, type: 'webhook', config: { url: 'http://sink:4100/ta9' } };
+    // KN1 (ADR-138): đích webhook đi POST /api/v1/endpoints; /destinations còn cho telegram/discord — scope y hệt.
+    const dest = { name: `ta9-${RUN}`, type: 'discord', config: { webhookUrl: 'http://sink:4100/ta9' } };
     const d1 = await B.s.post(`/api/v1/destinations?projectId=${pa.projectId}`, dest);
     expect(d1.status === 403 && d1.body?.error === 'missing_scope' && d1.body?.required === 'manage:endpoints', `viewer tạo đích → ${d1.status} ${d1.text}`);
     const i2 = await B.s.post(`/api/v1/projects/${pa.projectId}/invitations`, { email: `x-${RUN}@e2e.test`, role: 'viewer' });

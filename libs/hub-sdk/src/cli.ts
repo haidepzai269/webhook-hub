@@ -61,6 +61,22 @@ function fixOf(e: unknown): string | null {
   return typeof b?.fix === 'string' ? b.fix : null;
 }
 
+/** Trần chờ theo Retry-After (L-5): hub/proxy xin chờ lâu hơn thì vẫn thử lại sau 30s. */
+export const MAX_RETRY_AFTER_MS = 30_000;
+
+const describe = (he: HubError) => (he?.status ? `HTTP ${he.status}` : he?.code ?? 'error');
+
+/**
+ * Lỗi tạm thời (mất mạng, 5xx, 429) -> số ms chờ; lỗi khác -> null (thoát, in fix). 429/503 có Retry-After thì theo
+ * nó (trần 30s), không thì bậc 1s -> 2s -> 5s.
+ */
+function retryDelayMs(he: HubError, attempt: number): number | null {
+  const transient = he?.status === 0 || he?.status === 429 || he?.status >= 500;
+  if (!transient) return null;
+  if ((he.status === 429 || he.status === 503) && typeof he.retryAfter === 'number') return Math.min(he.retryAfter * 1000, MAX_RETRY_AFTER_MS);
+  return BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
+}
+
 export interface ForwardResult {
   status?: number;
   durationMs: number;
@@ -202,19 +218,31 @@ async function listen(args: string[], io: CliIO): Promise<number> {
   }
 
   const types = values.types ? String(values.types).split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+  const sleep = io.sleep ?? defaultSleep;
   let cursor: string;
   if (values.from === 'latest') {
-    try {
-      cursor = (await client.poll({ after: 'latest' })).nextCursor;
-    } catch (e) {
-      if (signal?.aborted) return 0;
-      printHubError(io, 'Reading latest cursor', e);
-      return 1;
+    // M-1: hub có thể trả 503 khi đang cấp cursor cho event tồn — thử lại có backoff, không thoát.
+    let attempt = 0;
+    for (;;) {
+      try {
+        cursor = (await client.poll({ after: 'latest' })).nextCursor;
+        break;
+      } catch (e) {
+        if (signal?.aborted) return 0;
+        const ms = retryDelayMs(e as HubError, attempt);
+        if (ms === null) {
+          printHubError(io, 'Reading latest cursor', e);
+          return 1;
+        }
+        attempt++;
+        io.err(`${hhmmss()}  hub busy (${describe(e as HubError)}) — retrying in ${ms / 1000}s`);
+        await sleep(ms, signal);
+        if (signal?.aborted) return 0;
+      }
     }
   } else cursor = values.from;
   io.out(`Ready. Forwarding ${types ? types.join(',') : 'all readable'} events to ${target.toString()} from cursor ${cursor}. Ctrl+C to stop.`);
 
-  const sleep = io.sleep ?? defaultSleep;
   const fwdFetch = io.forwardFetch ?? (globalThis as any).fetch;
   let forwarded = 0;
   let failed = 0;
@@ -228,9 +256,11 @@ async function listen(args: string[], io: CliIO): Promise<number> {
     } catch (e: any) {
       if (signal?.aborted) break;
       const he = e as HubError;
-      if (he?.status === 0 || he?.status >= 500) {
-        const ms = BACKOFF_MS[Math.min(backoff++, BACKOFF_MS.length - 1)];
-        io.err(`${hhmmss()}  hub unavailable (${he.status ? `HTTP ${he.status}` : he.code}) — retrying in ${ms / 1000}s`);
+      const ms = retryDelayMs(he, backoff);
+      if (ms !== null) {
+        backoff++;
+        const what = he?.status === 429 ? 'rate limited' : 'hub unavailable';
+        io.err(`${hhmmss()}  ${what} (${describe(he)}) — retrying in ${ms / 1000}s`);
         await sleep(ms, signal);
         continue;
       }

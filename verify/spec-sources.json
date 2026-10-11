@@ -162,6 +162,36 @@
           "VF8": "VT14"
         }
       }
+    },
+    {
+      "ns": "KN",
+      "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-ket-noi.md",
+      "pattern": "^\\|\\s*`\\[KN:(U\\d+)\\]`\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (KN\\d+b?)",
+        "groups": {
+          "KN1": "U1-U5",
+          "KN2": "U6-U12,U17,U18",
+          "KN3": "U13,U16",
+          "KN4": "U14,U15"
+        }
+      },
+      "note": "SPEC-ket-noi §8.1 (ADR-138). L0/L1."
+    },
+    {
+      "ns": "KN",
+      "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-ket-noi.md",
+      "pattern": "^\\|\\s*`\\[KN:(T\\d+)\\]`\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (KN\\d+b?)",
+        "groups": {
+          "KN1": "T1",
+          "KN2": "T4",
+          "KN3": "T2",
+          "KN4": "T3"
+        }
+      },
+      "note": "SPEC-ket-noi §8.2 — L2 trên hubv."
     }
   ],
   "inline": [
@@ -209,6 +239,7 @@
     "AF:#41": "PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test",
     "VF:VT15": "Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local)",
     "AU:TA14": "Trình duyệt thật (Chrome + Firefox ở http://localhost:3000): F5 vẫn đăng nhập, document.cookie không thấy __Host-hub_at/rt — phiên TEST làm tay (SPEC-auth §10.2); phía server đã có TA1/TA5/TA6 tự động",
-    "AU:TA11": "Thủ công, cần GitHub OAuth App thật (DINH-CHINH-AUTH §4 #9: TA11 để sau); fake-github là VF4. Logic phủ bằng github-oauth-db.spec (UA23-UA25, PKCE, operator, unlink) với fetch giả"
+    "AU:TA11": "Thủ công, cần GitHub OAuth App thật (DINH-CHINH-AUTH §4 #9: TA11 để sau); fake-github là VF4. Logic phủ bằng github-oauth-db.spec (UA23-UA25, PKCE, operator, unlink) với fetch giả",
+    "KN:T1": "L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv — VF đang chạy chaos). Logic phủ ở L1 [KN:U1]-[KN:U4] (console-endpoints-db.spec.ts)."
   }
 }

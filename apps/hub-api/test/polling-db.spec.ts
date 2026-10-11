@@ -69,6 +69,19 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     expect(await new TenantScopedRepository(appDb, randomUUID()).latestPollCursor()).toBe(0n); // project trống
   });
 
+  it('[DX:UX11] M-1: latestPollCursor có TRẦN số lô — backlog lớn hơn trần -> null (chưa xong, không vòng vô hạn); gọi lại thì tiến tiếp và xong', async () => {
+    const t2 = randomUUID();
+    const r2 = () => new TenantScopedRepository(appDb, t2);
+    for (let i = 0; i < 5; i++) await mk(`order.backlog_${i}`, ago(10), t2);
+    expect(await r2().latestPollCursor({ maxRounds: 2, batch: 2 })).toBeNull(); // cấp 4/5, còn 1 -> null
+    const latest = await r2().latestPollCursor({ maxRounds: 2, batch: 2 });
+    expect(typeof latest).toBe('bigint');
+    const all = await r2().pollEvents({ after: 0n, limit: 100 });
+    expect(all).toHaveLength(5);
+    expect(all.every((e) => e.cursor <= latest!)).toBe(true); // "latest" = sau MỌI event đã commit, không sót
+    await raw.event.deleteMany({ where: { tenantId: t2 } });
+  });
+
   it('S7: types (wildcard) giao với readTypes; project khác không thấy', async () => {
     const p = await mk('payment.received', ago(10));
     const r = await mk('repo.push', ago(10));

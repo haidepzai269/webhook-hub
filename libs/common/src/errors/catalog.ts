@@ -206,7 +206,8 @@ export const ERROR_CATALOG = {
   service_unavailable: {
     status: 503,
     message: 'The service is temporarily unavailable.',
-    fix: () => 'Retry with backoff. If it persists, send the requestId to the hub admin.',
+    params: ['retryAfter'],
+    fix: (p) => (Number.isFinite(p.retryAfter) ? `Retry in ${p.retryAfter}s (with backoff). If it persists, send the requestId to the hub admin.` : 'Retry with backoff. If it persists, send the requestId to the hub admin.'),
   },
 } as const satisfies Record<string, ErrorDef>;
 

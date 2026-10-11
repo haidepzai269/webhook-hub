@@ -6,6 +6,7 @@
 import { CanonicalResult, FAIL } from './result';
 import { paymentKeys, validatePayment } from './payment';
 import { repoKeys, validateRepo } from './repo';
+import { SAMPLE_TYPES } from './samples';
 
 export type { CanonicalResult } from './result';
 export * from './payment';
@@ -35,4 +36,20 @@ export function validateCanonical(type: string, data: unknown): CanonicalResult 
   if (!isReservedType(type)) return { ok: true };
   if (type.startsWith('payment')) return paymentKeys(type) ? validatePayment(type, data) : FAIL('type');
   return repoKeys(type) ? validateRepo(type, data) : FAIL('type');
+}
+
+/** Kiểu cụ thể đại diện của catalog — dùng để hỏi "mẫu wildcard này có phủ kiểu chuẩn nào không". */
+const CATALOG_REPRESENTATIVES = [...SAMPLE_TYPES, 'repo.pull_request.closed', 'repo.issue.closed'];
+
+/**
+ * KN1 (SPEC-ket-noi §3.1): mẫu `eventTypes` của endpoint console có khớp catalog không. Mẫu NGOÀI không gian dành
+ * riêng (vd `order.*`, `*`) -> luôn ok (hub không cam kết kiểu của service). Trong `payment.*` / `repo.*`: mẫu cụ thể
+ * phải là kiểu có trong catalog (`payment.recieved` gõ sai -> false); wildcard phải phủ ít nhất một kiểu chuẩn.
+ */
+export function catalogCoversPattern(p: string): boolean {
+  if (typeof p !== 'string') return false;
+  if (!p.endsWith('.*')) return !isReservedType(p) || canonicalKeys(p) !== null;
+  const prefix = p.slice(0, -1); // 'payment.' / 'repo.pull_request.'
+  if (!isReservedType(prefix.slice(0, -1))) return true;
+  return CATALOG_REPRESENTATIVES.some((t) => t.startsWith(prefix));
 }

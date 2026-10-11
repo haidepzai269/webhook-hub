@@ -24,9 +24,12 @@ export class ServiceExceptionFilter extends BaseExceptionFilter {
     const requestId = ensureRequestId(req, res);
     const { status, body, original } = toErrorBody(exception, requestId);
     const where = { requestId, method: req.method, path: (req.originalUrl ?? req.url ?? '').split('?')[0], status, error: body.error };
-    if (status >= 500) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
+    if (status >= 500 && status !== 503) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
+    else if (status >= 500) logger.warn({ ...where, original }, 'Tạm thời không phục vụ được (503)');
     else logger.info(where, 'Trả lỗi cho client');
     if (res.headersSent) return;
+    // 429/503 có retryAfter -> header chuẩn Retry-After cho client/proxy.
+    if (typeof body.retryAfter === 'number' && Number.isFinite(body.retryAfter)) res.setHeader('Retry-After', String(body.retryAfter));
     res.status(status).json(body);
   }
 }

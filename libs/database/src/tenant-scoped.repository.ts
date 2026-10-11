@@ -329,11 +329,26 @@ export class TenantScopedRepository {
    * DX3 (`?after=latest`, SPEC-dev-experience §4.5): cursor lớn nhất ĐÃ CẤP của tenant, sau khi cấp cho mọi event đã
    * COMMIT (cùng `assignPollSeq` với pollEvents) -> event commit SAU lần gọi này luôn có cursor lớn hơn, không bị bỏ
    * sót. Chưa có event nào -> 0n. Không lọc theo types/readTypes: cursor chỉ là vị trí, không lộ nội dung.
+   *
+   * M-1 (review DX-A): project chỉ dùng push (vd Shop) tích luỹ event `poll_seq IS NULL` (chỉ cấp khi có người poll).
+   * Trần `maxRounds` lô × `batch` dòng mỗi request (mặc định 10 × 1000): còn tồn sau trần -> `null` (CHƯA xong — controller
+   * trả 503 + retryAfter, client gọi lại và tiến tiếp). KHÔNG trả max tạm: event tồn cấp sau sẽ có cursor lớn hơn và bị coi
+   * là "mới" (dội lịch sử). Mỗi lô vẫn là một transaction ngắn dưới advisory lock theo tenant (như pollEvents).
    */
-  async latestPollCursor(): Promise<bigint> {
-    // Gán hết phần tồn (mỗi lần ≤ 1000 dòng) để "latest" thật sự là cuối dãy.
-    while ((await this.assignPollSeq()) >= 1000) {
-      /* tiếp tục lô sau */
+  async latestPollCursor(opts: { maxRounds?: number; batch?: number } = {}): Promise<bigint | null> {
+    const maxRounds = opts.maxRounds ?? 10;
+    const batch = opts.batch ?? 1000;
+    let rounds = 0;
+    let n: number;
+    do {
+      n = await this.assignPollSeq(batch);
+      rounds++;
+    } while (n >= batch && rounds < maxRounds);
+    if (n >= batch) {
+      // Lô cuối đầy: có thể còn tồn -> kiểm rẻ (index một phần poll_seq IS NULL).
+      const [{ pending }] = await this.prisma.$queryRaw<{ pending: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid AND poll_seq IS NULL) AS pending`;
+      if (pending) return null;
     }
     const [{ max }] = await this.prisma.$queryRaw<{ max: bigint | null }[]>`
       SELECT max(poll_seq) AS max FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid`;

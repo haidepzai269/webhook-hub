@@ -338,11 +338,18 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
 ## 11. Lệch so với spec (phiên DEV ghi)
 
 - KQ1, bằng chứng request kiểm tra PayOS: …
-- …
+- **KN1 (ADR-142):**
+  - Route console nằm ở controller riêng `apps/hub-api/src/modules/console/endpoints.controller.ts` (không sửa `ApiController` ngoài 1 dòng 422 `use_endpoints_route`). Thêm `GET /api/v1/endpoints/:id` (trang chi tiết) và `GET /api/v1/catalog/event-types` (UI tick theo catalog — một nguồn ở `libs/common/src/canonical`).
+  - "eventTypes kiểm theo catalog": chỉ siết trong không gian dành riêng `payment.*`/`repo.*` (`payment.recieved` → 422 `validation_failed`); kiểu riêng của service (`order.*`) vẫn hợp lệ — service publish kiểu riêng qua `/v1/p/:project/events`.
+  - `sourceIds` sai khuôn / không tồn tại / khác project → cùng **404 `not_found`** (spec cũ của `/subscriptions` là 422 `unknown_source`; console endpoints theo §3.1 là 404). Kiểm nằm TRONG tx tạo endpoint nên lỗi rollback cả endpoint (U2).
+  - `rotate-secret` chỉ cho endpoint do console tạo (`createdByKeyId` NULL). Endpoint của service → 409 `endpoint_owned_by_service` (service xoay qua `/v1/p/.../verify` + `signingSecret`, SDK `ensure()`). Xoay KHÔNG challenge lại (service chưa có secret mới — challenge sẽ FAILED và normalize bỏ qua endpoint); trạng thái verification giữ nguyên.
+  - U4 "đếm pool": kiểm bằng **tính thấy được** — trong lúc challenge treo 3 s, một kết nối khác đã thấy endpoint + subscription + audit (tx đã COMMIT ⇒ kết nối đã trả về pool). Ổn định hơn đếm `pg_stat_activity` khi nhiều test chạy song song.
+  - `WindowLimiter(5/phút)` của console là instance riêng (không chung bộ đếm với `/v1/p`).
+  - UI: nút "Tạo endpoint webhook" + hộp chi tiết (delivery gần đây, Verify lại, Xoay secret) ở trang Đích; form cũ chỉ còn telegram/discord. Chưa có trang route riêng `endpoints`.
 
 ## 12. Checklist và kết quả
 
-- [ ] KN1 · [ ] KN1b (tuỳ chọn) · [ ] KN2 · [ ] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
+- [x] KN1 · [ ] KN1b (tuỳ chọn) · [ ] KN2 · [ ] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
 - ADR mới: …
 
 | Kịch bản | PASS/FAIL | Ghi chú | Ngày |

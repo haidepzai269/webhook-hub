@@ -23,6 +23,7 @@ import { SessionGuard } from '../auth/session.guard';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
+import { hubError } from '../errors/hub-error';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
@@ -208,6 +209,8 @@ export class ApiController {
   @Post('destinations')
   @RequireScope('manage:endpoints')
   async createDestination(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
+    // KN1 (SPEC-ket-noi §3.1, ADR-138): endpoint webhook đi route riêng — hub sinh whsec_, challenge, subscription cùng tx.
+    if (body?.type === 'webhook') throw hubError('use_endpoints_route', {}, 'Endpoint webhook tạo bằng POST /api/v1/endpoints (hub sinh secret + challenge)');
     const masterKey = getMasterKey();
     return this.withAudit(tenantId, async (repo) => {
       const created = await repo.createDestination({

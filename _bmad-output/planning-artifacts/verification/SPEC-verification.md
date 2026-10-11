@@ -85,6 +85,7 @@ Tiền tố không gian tên **giữ nguyên số gốc** (không đánh số l�
 | `DX:` | SPEC-dev-experience (UX*, TX*) |
 | `AU:` | SPEC-auth (UA*, TA*) |
 | `VF:` | spec này (VT*, §12) |
+| `KN:` | SPEC-ket-noi (U*, T*) — kết nối hai đầu: console endpoint + connector provider (ADR-138) |
 | `BB:` | bằng chứng bất biến (§8.2), có thể **trùng** với một mã khác: một test mang hai mã thì ghi `[AU:TA12][BB:5]` |
 
 Test cũ không có mã thì **không phải sửa ngay**. VF2 thêm mã cho những test đã ứng với một dòng spec. Test không ứng với dòng spec nào thì để nguyên, `verify:map` liệt kê là "không mã".
