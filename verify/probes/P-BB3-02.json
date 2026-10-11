@@ -7,6 +7,7 @@
   "expectRed": [
     "[BB:3] (phần c)"
   ],
+  "expectFailure": "not.toHaveBeenCalled",
   "layer": "L0",
   "testFile": "apps/hub-worker/test/delivery-consumer.spec.ts"
 }

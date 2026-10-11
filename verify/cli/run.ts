@@ -364,23 +364,76 @@ const PROBE_WT_DIR = path.join(ROOT, '.claude', 'worktrees');
  * của repo vẫn tìm được khi đi ngược lên), chép đè các đường `overlay` + test đích từ cây làm việc (test chưa commit),
  * áp đột biến, chạy test đích ở đúng tầng, phán, rồi XOÁ worktree. Cây làm việc thật không bị sửa (VT11).
  */
-async function runProbe(p: Probe, overlay: string[]): Promise<{ p: Probe; ok: boolean; detail: string[]; ms: number }> {
+/** Test phụ chỉ chạy ở lượt đối chứng: mọi @hub/* phải trỏ vào worktree đang probe. */
+const RESOLVE_SPEC = 'verify/test/zz-probe-resolve.spec.ts';
+const RESOLVE_SPEC_SRC = [
+  "import * as path from 'path';",
+  "it('probe-resolve: @hub/* phân giải vào worktree', () => {",
+  "  const root = path.resolve(__dirname, '..', '..');",
+  "  for (const m of ['@hub/common', '@hub/crypto', '@hub/messaging', '@hub/database', '@hub/providers', '@hub/sdk']) {",
+  "    expect(require.resolve(m).startsWith(root + path.sep)).toBe(true);",
+  "  }",
+  "});",
+  '',
+].join('\n');
+
+/** Worktree probe đang mở — Ctrl-C (SIGINT/SIGTERM) dọn trước khi thoát (L-6). */
+const openWorktrees = new Set<string>();
+
+function removeWorktree(wt: string): void {
+  const rm = spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: ROOT, encoding: 'utf8' });
+  if (rm.status !== 0) {
+    fs.rmSync(wt, { recursive: true, force: true });
+    spawnSync('git', ['worktree', 'prune'], { cwd: ROOT });
+  }
+  openWorktrees.delete(wt);
+}
+
+/** L-6: worktree `probe-P-*` sót từ lượt bị giết (pid không còn sống) -> dọn trước khi chạy. */
+function cleanStaleProbeWorktrees(): void {
+  spawnSync('git', ['worktree', 'prune'], { cwd: ROOT });
+  if (!fs.existsSync(PROBE_WT_DIR)) return;
+  for (const name of fs.readdirSync(PROBE_WT_DIR)) {
+    const m = /^probe-P-.+-(\d+)$/.exec(name);
+    if (!m) continue;
+    let alive = false;
+    try {
+      process.kill(Number(m[1]), 0);
+      alive = Number(m[1]) !== process.pid;
+    } catch {
+      alive = false;
+    }
+    if (!alive) {
+      console.log(`  dọn worktree sót: ${name}`);
+      removeWorktree(path.join(PROBE_WT_DIR, name));
+    }
+  }
+}
+
+let signalHooked = false;
+function hookSignals(): void {
+  if (signalHooked) return;
+  signalHooked = true;
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      for (const wt of [...openWorktrees]) removeWorktree(wt);
+      process.exit(130);
+    });
+  }
+}
+
+async function runProbe(p: Probe, overlay: string[]): Promise<{ p: Probe; ok: boolean; invalid: boolean; detail: string[]; ms: number }> {
   const t0 = Date.now();
+  hookSignals();
   const wt = path.join(PROBE_WT_DIR, `probe-${p.id}-${process.pid}`);
   const add = spawnSync('git', ['worktree', 'add', '--detach', '--force', wt, 'HEAD'], { cwd: ROOT, encoding: 'utf8' });
-  if (add.status !== 0) return { p, ok: false, detail: [`git worktree add lỗi: ${add.stderr.trim()}`], ms: 0 };
+  if (add.status !== 0) return { p, ok: false, invalid: true, detail: [`git worktree add lỗi: ${add.stderr.trim()}`], ms: 0 };
+  openWorktrees.add(wt);
   try {
     const targets = ([] as string[]).concat(p.testFile ?? []);
     for (const rel of new Set([...overlay, ...targets])) {
       const src = path.join(ROOT, rel);
       if (fs.existsSync(src)) fs.cpSync(src, path.join(wt, rel), { recursive: true });
-    }
-    if (p.file) {
-      const target = path.join(wt, p.file);
-      if (!fs.existsSync(target)) return { p, ok: false, detail: [`probe MỤC: không còn file ${p.file}`], ms: Date.now() - t0 };
-      const applied = applyProbe(fs.readFileSync(target, 'utf8'), p);
-      if ('reason' in applied) return { p, ok: false, detail: [applied.reason], ms: Date.now() - t0 };
-      fs.writeFileSync(target, applied.text);
     }
     let files = targets;
     if (files.length === 0) files = specFiles().filter((f) => fs.existsSync(path.join(wt, f)) && layerOfFile(f) === p.layer);
@@ -388,23 +441,37 @@ async function runProbe(p: Probe, overlay: string[]): Promise<{ p: Probe; ok: bo
     if (p.layer === 'L1') {
       const l1 = l1Env();
       if (!(await tcpReachable(l1.dbUrl)) || !(await tcpReachable(l1.redisUrl))) {
-        return { p, ok: false, detail: ['L1: Postgres/Redis hubv không kết nối được — chưa `npm run verify:up`?'], ms: Date.now() - t0 };
+        return { p, ok: false, invalid: true, detail: ['L1: Postgres/Redis hubv không kết nối được — chưa `npm run verify:up`?'], ms: Date.now() - t0 };
       }
       env = l1.env;
-      // VT12: code đang test chạy bằng owner -> test RLS phải tự đỏ ở assert tiền đề (không pass âm thầm).
-      if (p.ownerAsApp) env = { ...env, DATABASE_URL: env.VERIFY_DB_OWNER_URL };
     } else {
       env = l0Env();
     }
-    const r = runJest(p.layer, files, env, wt, `probe-${p.id}`);
-    const verdict = judgeProbe(p, r.summary.tests);
-    return { p, ok: verdict.ok, detail: verdict.detail, ms: Date.now() - t0 };
-  } finally {
-    const rm = spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: ROOT, encoding: 'utf8' });
-    if (rm.status !== 0) {
-      fs.rmSync(wt, { recursive: true, force: true });
-      spawnSync('git', ['worktree', 'prune'], { cwd: ROOT });
+    // H-1: ĐỐI CHỨNG — test đích trên worktree CHƯA phá (cùng overlay, môi trường bình thường) phải XANH, và mọi
+    // `@hub/*` phải phân giải VÀO worktree (jest moduleNameMapper rootDir = worktree). node_modules/@hub/* của repo là
+    // link workspace trỏ cây CHÍNH — nếu jest rơi về đó, đột biến ở libs/ sẽ không bao giờ được chạy.
+    fs.mkdirSync(path.join(wt, 'verify', 'test'), { recursive: true });
+    fs.writeFileSync(path.join(wt, RESOLVE_SPEC), RESOLVE_SPEC_SRC);
+    const control = runJest(p.layer, [...files, RESOLVE_SPEC], env, wt, `probe-${p.id}-control`).summary.tests;
+    const resolveRow = control.find((t) => t.name.includes('probe-resolve'));
+    if (!resolveRow || resolveRow.status !== 'passed') {
+      return { p, ok: false, invalid: true, detail: [`✗ INVALID: @hub/* không phân giải vào worktree — ${(resolveRow?.failure ?? 'không chạy').replace(/\s+/g, ' ').slice(0, 200)}`], ms: Date.now() - t0 };
     }
+    fs.rmSync(path.join(wt, RESOLVE_SPEC));
+    if (p.file) {
+      const target = path.join(wt, p.file);
+      if (!fs.existsSync(target)) return { p, ok: false, invalid: false, detail: [`probe MỤC: không còn file ${p.file}`], ms: Date.now() - t0 };
+      const applied = applyProbe(fs.readFileSync(target, 'utf8'), p);
+      if ('reason' in applied) return { p, ok: false, invalid: false, detail: [applied.reason], ms: Date.now() - t0 };
+      fs.writeFileSync(target, applied.text);
+    }
+    // VT12: code đang test chạy bằng owner -> test RLS phải tự đỏ ở assert tiền đề (không pass âm thầm).
+    if (p.ownerAsApp) env = { ...env, DATABASE_URL: env.VERIFY_DB_OWNER_URL };
+    const r = runJest(p.layer, files, env, wt, `probe-${p.id}`);
+    const verdict = judgeProbe(p, r.summary.tests, control);
+    return { p, ok: verdict.ok, invalid: verdict.invalid, detail: verdict.detail, ms: Date.now() - t0 };
+  } finally {
+    removeWorktree(wt);
   }
 }
 
@@ -416,6 +483,7 @@ async function probeCmd(ids: string[], overlay: string[]): Promise<number> {
     return 2;
   }
   const chosen = ids.length ? all.filter((p) => ids.includes(p.id)) : all;
+  cleanStaleProbeWorktrees();
   // VT11: probe không được rò ra cây làm việc thật. Cây có thể đang được phiên khác sửa song song, nên KHÔNG so cả
   // `git status`: kiểm (1) file bị nhắm KHÔNG mang đúng nội dung đã phá, (2) không còn worktree probe-* sót lại.
   const before = new Map(chosen.filter((p) => p.file).map((p) => [p.id, fs.existsSync(path.join(ROOT, p.file)) ? fs.readFileSync(path.join(ROOT, p.file), 'utf8') : '']));
@@ -435,7 +503,7 @@ async function probeCmd(ids: string[], overlay: string[]): Promise<number> {
   console.log('\n| probe | phá gì | test mục tiêu | kết quả |\n|---|---|---|---|');
   for (const r of rows) {
     const want = [...(r.p.expectRed ?? []).map((x) => `${x} → đỏ`), ...(r.p.expectGreen ?? []).map((x) => `${x} → xanh`)].join('<br>');
-    const res = r.ok ? '✅' : '❌ ' + r.detail.filter((d) => !d.startsWith('✓')).join('; ');
+    const res = r.ok ? '✅' : (r.invalid ? '⚠ INVALID ' : '❌ ') + r.detail.filter((d) => !d.startsWith('✓')).join('; ');
     console.log(`| ${r.p.id} | ${r.p.claim} | ${want} | ${res} |`);
   }
   const bad = rows.filter((r) => !r.ok);
@@ -473,7 +541,7 @@ async function bbCmd(overlay: string[]): Promise<number> {
       }
       const r = await runProbe(p, overlay);
       const good = p.expectGreen?.length ? '✅ sống sót đúng (lớp sau vẫn chặn)' : '✅ đỏ';
-      pr.push(`${id} ${r.ok ? good : '❌ ' + r.detail.join('; ')}`);
+      pr.push(`${id} ${r.ok ? good : (r.invalid ? '⚠ INVALID ' : '❌ ') + r.detail.join('; ')}`);
       if (!r.ok) ok = false;
     }
     if (!green) ok = false;

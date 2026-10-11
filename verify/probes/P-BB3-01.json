@@ -7,6 +7,7 @@
   "expectRed": [
     "[BB:3] (phần a)"
   ],
+  "expectFailure": "toBeGreaterThanOrEqual",
   "layer": "L0",
   "testFile": "apps/hub-api/test/ingest-invariants.spec.ts",
   "note": "Spec §6.3 nhắm chaos L3 \"kill hub-api giữa ingest\" — L3 cần build lại image hubv từ worktree cho mỗi probe (CAN-ADMIN-QUYET-VF Q1). Ở đây test đích L0. Biến thể \"transaction chạy nền không await\" làm tiến trình jest chết vì unhandled rejection (không đọc được kết quả) nên chọn biến thể \"lỗi vẫn ACK\" — cùng hậu quả: 2xx khi chưa COMMIT."

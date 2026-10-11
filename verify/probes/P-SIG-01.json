@@ -8,6 +8,7 @@
     "payos/bad-sig",
     "[MS:U10]"
   ],
+  "expectFailure": "Expected: false",
   "layer": "L0",
   "testFile": [
     "verify/test/hub-sim-adapters.spec.ts",

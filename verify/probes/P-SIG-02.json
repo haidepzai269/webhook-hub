@@ -7,6 +7,7 @@
   "expectRed": [
     "github/push"
   ],
+  "expectFailure": "Expected: true",
   "layer": "L0",
   "testFile": "verify/test/hub-sim-adapters.spec.ts",
   "note": "Test \"P-SIG-02\" trong hub-sim-adapters đưa body ĐÃ stringify vào adapter — với probe, adapter cũng stringify nên vẫn từ chối (xanh): test đó chứng minh chiều ngược lại, không phải đích của probe này."

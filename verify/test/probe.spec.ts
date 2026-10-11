@@ -25,12 +25,14 @@ describe('verify:probe — áp + phán', () => {
 
   it('VF6: phán — expectRed cần ít nhất một test khớp ĐỎ; expectGreen cần mọi test khớp XANH; không khớp test nào = đỏ', () => {
     const row = (name: string, status: 'passed' | 'failed') => ({ name, file: 'f', status });
-    expect(judgeProbe(p, [row('a [ZZ:9] x', 'failed')]).ok).toBe(true);
-    expect(judgeProbe(p, [row('a [ZZ:9] x', 'passed')]).ok).toBe(false);
-    expect(judgeProbe(p, [row('khác', 'failed')]).ok).toBe(false);
+    const ctl = [row('a [ZZ:9] x', 'passed')];
+    expect(judgeProbe(p, [row('a [ZZ:9] x', 'failed')], ctl).ok).toBe(true);
+    expect(judgeProbe(p, [row('a [ZZ:9] x', 'passed')], ctl).ok).toBe(false);
+    expect(judgeProbe(p, [row('khác', 'failed')], ctl).ok).toBe(false);
     const g: Probe = { ...p, expectRed: undefined, expectGreen: ['[ZZ:5]'] };
-    expect(judgeProbe(g, [row('[ZZ:5] a', 'passed'), row('[ZZ:5] b', 'passed')]).ok).toBe(true);
-    expect(judgeProbe(g, [row('[ZZ:5] a', 'passed'), row('[ZZ:5] b', 'failed')]).ok).toBe(false);
+    const gc = [row('[ZZ:5] a', 'passed'), row('[ZZ:5] b', 'passed')];
+    expect(judgeProbe(g, gc, gc).ok).toBe(true);
+    expect(judgeProbe(g, [row('[ZZ:5] a', 'passed'), row('[ZZ:5] b', 'failed')], gc).ok).toBe(false);
   });
 
   it('VF6: mọi probe trong verify/probes nạp được (id = tên file, có kỳ vọng); đủ 12 probe khởi điểm §6.3 và probe của verify:bb', () => {
@@ -39,5 +41,34 @@ describe('verify:probe — áp + phán', () => {
       expect(all).toContain(id);
     }
     for (const ids of Object.values(BB_PROBES)) for (const id of ids) expect(all).toContain(id);
+  });
+
+  // H-1 (REVIEW-VF-2026-10-11): đỏ phải đỏ ĐÚNG LÝ DO và test đích phải XANH trên code chưa phá (đối chứng).
+  describe('H-1: đối chứng + lý do đỏ', () => {
+    const row = (name: string, status: 'passed' | 'failed', failure?: string) => ({ name, file: 'f', status, failure });
+    const red = (failure: string) => [row('a [ZZ:9] x', 'failed', failure)];
+    const green = [row('a [ZZ:9] x', 'passed')];
+
+    it('VF6 (H-1): KHÔNG có lượt đối chứng, hoặc đối chứng không xanh (test đích vốn đỏ / môi trường hỏng) -> INVALID, không phải ✅', () => {
+      expect(judgeProbe(p, red('Expected: 1 Received: 2'), undefined)).toMatchObject({ ok: false, invalid: true });
+      expect(judgeProbe(p, red('Expected: 1 Received: 2'), red('vốn đã đỏ'))).toMatchObject({ ok: false, invalid: true });
+      expect(judgeProbe(p, red('Expected: 1 Received: 2'), green)).toMatchObject({ ok: true, invalid: false });
+    });
+
+    it('VF6 (H-1): đỏ vì môi trường (ECONNREFUSED, Invalid URL, Cannot find module, TypeError, timeout) -> ✗ "đỏ sai lý do"', () => {
+      for (const msg of ['connect ECONNREFUSED 127.0.0.1:15433', 'TypeError: Invalid URL', "Cannot find module '@hub/x'", 'TypeError: x is not a function', 'Exceeded timeout of 5000 ms']) {
+        const v = judgeProbe(p, red(msg), green);
+        expect([msg, v.ok]).toEqual([msg, false]);
+        expect(v.detail.join(' ')).toMatch(/sai lý do/);
+      }
+    });
+
+    it('VF6 (H-1): expectFailure (regex) phải khớp thông điệp lỗi của test đỏ; mã màu ANSI được bỏ trước khi so', () => {
+      const q: Probe = { ...p, expectFailure: 'toBeGreaterThanOrEqual' };
+      expect(judgeProbe(q, red('\u001b[2mexpect(\u001b[22mr.status).toBeGreaterThanOrEqual(500)'), green).ok).toBe(true);
+      expect(judgeProbe(q, red('expect(x).toBe(1)'), green).ok).toBe(false);
+      const env: Probe = { ...p, expectFailure: 'ECONNREFUSED' };
+      expect(judgeProbe(env, red('connect ECONNREFUSED'), green).ok).toBe(true); // lý do môi trường được chấp nhận khi probe KHAI rõ
+    });
   });
 });

@@ -19,6 +19,11 @@ export interface Probe {
   expectRed?: string[];
   expectGreen?: string[];
   layer: 'L0' | 'L1';
+  /**
+   * H-1: regex (chuỗi) mà thông điệp lỗi của test đích PHẢI khớp khi bị phá — chứng minh đỏ ĐÚNG LÝ DO (vd câu assert
+   * của chính nhánh bị phá), không phải vì môi trường. Không khai thì vẫn bị chặn bởi WRONG_REASON.
+   */
+  expectFailure?: string;
   /** File test đích (một hoặc nhiều); bỏ trống = mọi file của tầng. */
   testFile?: string | string[];
   note?: string;
@@ -54,27 +59,73 @@ export function applyProbe(text: string, p: Pick<Probe, 'find' | 'replace'>): { 
 
 export interface ProbeVerdict {
   ok: boolean;
+  /** Đối chứng không xanh / thiếu: kết quả probe KHÔNG có nghĩa (không phải ✅, cũng không phải "test không bắt được"). */
+  invalid: boolean;
   detail: string[];
 }
 
-/** So kết quả test (đã chạy trên code BỊ PHÁ) với kỳ vọng của probe. Tên test khớp theo chuỗi con. */
-export function judgeProbe(p: Probe, tests: TestRow[]): ProbeVerdict {
+/**
+ * H-1: lỗi kiểu MÔI TRƯỜNG — đỏ vì những lý do này không chứng minh test bắt được đột biến. Probe muốn chấp nhận
+ * (hiếm) thì phải KHAI `expectFailure` khớp chính lý do đó.
+ */
+export const WRONG_REASON = /ECONNREFUSED|ENOTFOUND|Invalid URL|Cannot find module|TypeError|ReferenceError|SyntaxError|Exceeded timeout|Test suite failed to run|P1001|Can't reach database/i;
+
+const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, '');
+
+/**
+ * So kết quả test. `control` = lượt chạy test đích trên worktree CHƯA phá (bắt buộc): needle phải XANH ở đó, không
+ * thì INVALID. `mutated` = lượt trên code BỊ PHÁ: expectRed cần ≥ 1 test khớp ĐỎ và ĐỎ ĐÚNG LÝ DO (khớp
+ * `expectFailure` nếu khai; không khai thì không được khớp WRONG_REASON); expectGreen cần mọi test khớp XANH.
+ */
+export function judgeProbe(p: Probe, mutated: TestRow[], control: TestRow[] | undefined): ProbeVerdict {
   const detail: string[] = [];
   let ok = true;
-  const check = (needle: string, want: 'failed' | 'passed') => {
-    const hits = tests.filter((t) => t.name.includes(needle));
+  let invalid = false;
+  const needles = [...(p.expectRed ?? []), ...(p.expectGreen ?? [])];
+  if (!control) {
+    return { ok: false, invalid: true, detail: ['✗ INVALID: không có lượt đối chứng trên code chưa phá'] };
+  }
+  for (const n of needles) {
+    const hits = control.filter((t) => t.name.includes(n));
+    if (hits.length === 0 || !hits.every((t) => t.status === 'passed')) {
+      invalid = true;
+      detail.push(`✗ INVALID ${n}: đối chứng (code chưa phá) ${hits.length ? hits.map((t) => t.status).join(',') : 'không thấy test'} — phải XANH trước khi phá`);
+    }
+  }
+  if (invalid) return { ok: false, invalid, detail };
+  const want = p.expectFailure ? new RegExp(p.expectFailure, 'i') : null;
+  for (const n of p.expectRed ?? []) {
+    const hits = mutated.filter((t) => t.name.includes(n));
     if (hits.length === 0) {
       ok = false;
-      detail.push(`✗ ${needle}: không tìm thấy test nào (đổi tên test? suite không chạy?)`);
-      return;
+      detail.push(`✗ ${n}: không tìm thấy test nào khi phá (suite không chạy?)`);
+      continue;
     }
-    const good = want === 'failed' ? hits.some((t) => t.status === 'failed') : hits.every((t) => t.status === 'passed');
+    const failed = hits.filter((t) => t.status === 'failed');
+    if (failed.length === 0) {
+      ok = false;
+      detail.push(`✗ ${n}: ${hits.map((t) => t.status).join(',')} (mong ĐỎ)`);
+      continue;
+    }
+    const right = failed.filter((t) => {
+      const msg = stripAnsi(t.failure ?? '');
+      return want ? want.test(msg) : !WRONG_REASON.test(msg);
+    });
+    if (right.length === 0) {
+      ok = false;
+      const msg = stripAnsi(failed[0].failure ?? '').replace(/\s+/g, ' ').slice(0, 160);
+      detail.push(`✗ ${n}: đỏ sai lý do${want ? ` (không khớp expectFailure /${p.expectFailure}/)` : ' (lỗi môi trường)'} — ${msg}`);
+      continue;
+    }
+    detail.push(`✓ ${n}: đối chứng xanh → phá thì đỏ đúng lý do${want ? ` /${p.expectFailure}/` : ''}`);
+  }
+  for (const n of p.expectGreen ?? []) {
+    const hits = mutated.filter((t) => t.name.includes(n));
+    const good = hits.length > 0 && hits.every((t) => t.status === 'passed');
     if (!good) ok = false;
-    detail.push(`${good ? '✓' : '✗'} ${needle}: ${hits.map((t) => t.status).join(',')} (mong ${want === 'failed' ? 'ĐỎ' : 'XANH'})`);
-  };
-  for (const n of p.expectRed ?? []) check(n, 'failed');
-  for (const n of p.expectGreen ?? []) check(n, 'passed');
-  return { ok, detail };
+    detail.push(`${good ? '✓' : '✗'} ${n}: ${hits.map((t) => t.status).join(',') || 'không thấy'} (mong XANH khi phá)`);
+  }
+  return { ok, invalid: false, detail };
 }
 
 /** BB-n → probe chứng minh "đỏ khi phá" (§8.2). BB-4 không có probe trong spec (hình dạng, không phải nhánh code). */

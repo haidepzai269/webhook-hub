@@ -8,6 +8,7 @@
     "không cho phép dải riêng",
     "IP private thường (10.x)"
   ],
+  "expectFailure": "resolved instead of rejected",
   "layer": "L0",
   "testFile": [
     "libs/crypto/test/ssrf-axios.spec.ts",

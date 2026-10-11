@@ -5,6 +5,7 @@
   "expectRed": [
     "[AU:TA12][BB:5] (phần a)"
   ],
+  "expectFailure": "\"current_user\": \"hub_user\"",
   "layer": "L1",
   "testFile": "libs/database/test/rls-db.spec.ts",
   "note": "Probe đổi MÔI TRƯỜNG, không đổi code: DATABASE_URL = VERIFY_DB_OWNER_URL."
