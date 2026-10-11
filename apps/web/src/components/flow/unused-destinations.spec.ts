@@ -30,4 +30,24 @@ describe("unusedDestinationIds — đích không có subscription đang bật", 
     expect(unusedDestinationIds({ nodes: [dst("dst:a")], edges: [edge("dst:a", 3)] }).size).toBe(0);
     expect(unusedDestinationIds({ nodes: [dst("dst:a", "warning", { retrying: 2 })], edges: [] }).size).toBe(0);
   });
+
+  it("M-B1: còn delivery DEAD trong DLQ (không subscription bật, không traffic) -> đang dùng, giữ badge CRASHED", () => {
+    const ids = unusedDestinationIds({
+      nodes: [dst("dst:a", "crashed", { dead: 4, circuitState: "CLOSED" }), sub("sub:1", "a", false)],
+      edges: [],
+    });
+    expect(ids.size).toBe(0);
+  });
+
+  it("M-B1: circuit OPEN hoặc HALF_OPEN (không subscription bật) -> đang dùng", () => {
+    for (const circuitState of ["OPEN", "HALF_OPEN"]) {
+      const ids = unusedDestinationIds({ nodes: [dst("dst:a", "crashed", { dead: 0, circuitState })], edges: [] });
+      expect(ids.size).toBe(0);
+    }
+  });
+
+  it("M-B1: dead=0 và circuit CLOSED, không subscription bật -> vẫn không dùng", () => {
+    const ids = unusedDestinationIds({ nodes: [dst("dst:a", "idle", { dead: 0, circuitState: "CLOSED" })], edges: [] });
+    expect([...ids]).toEqual(["dst:a"]);
+  });
 });
