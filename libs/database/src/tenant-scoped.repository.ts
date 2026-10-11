@@ -10,6 +10,12 @@ type PrismaClientOrTx = PrismaClient | Prisma.TransactionClient;
 
 /** Phương thức đồng bộ — KHÔNG bọc transaction (trả về ngay). Mọi phương thức khác của repo là async. */
 const SYNC_METHODS = new Set(['constructor', 'extend']);
+/**
+ * R2-M1 (review DX-A vòng 2): phương thức ĐIỀU PHỐI — proxy KHÔNG bọc chúng trong một transaction; chúng chạy với
+ * `this` = proxy nên MỖI lời gọi repo bên trong là một transaction riêng (có `app.project_id`, RLS, advisory lock riêng).
+ * Chỉ được gọi phương thức repo khác, KHÔNG đụng `this.prisma` trực tiếp (sẽ là client trần, không scope).
+ */
+const ORCHESTRATED_METHODS = new Set(['latestPollCursor']);
 
 /**
  * R-4 (review AU, ADR-119): phương thức NÓNG của đường giao, mỗi cái là MỘT câu truy vấn trả `PrismaPromise` (lười, KHÔNG
@@ -47,6 +53,7 @@ function scopeToTenant<T extends TenantScopedRepository>(repo: T): T {
       if (typeof value !== 'function' || typeof prop !== 'string' || SYNC_METHODS.has(prop) || Object.prototype.hasOwnProperty.call(Object.prototype, prop)) {
         return value;
       }
+      if (ORCHESTRATED_METHODS.has(prop)) return (value as (...a: unknown[]) => unknown).bind(receiver);
       const client = (target as unknown as { prisma: PrismaClientOrTx }).prisma;
       const tenantId = target.tenantId;
       if (isRootClient(client) && BATCH_METHODS.has(prop) && batchEnabled() && typeof client.$executeRaw === 'function') {
@@ -333,7 +340,10 @@ export class TenantScopedRepository {
    * M-1 (review DX-A): project chỉ dùng push (vd Shop) tích luỹ event `poll_seq IS NULL` (chỉ cấp khi có người poll).
    * Trần `maxRounds` lô × `batch` dòng mỗi request (mặc định 10 × 1000): còn tồn sau trần -> `null` (CHƯA xong — controller
    * trả 503 + retryAfter, client gọi lại và tiến tiếp). KHÔNG trả max tạm: event tồn cấp sau sẽ có cursor lớn hơn và bị coi
-   * là "mới" (dội lịch sử). Mỗi lô vẫn là một transaction ngắn dưới advisory lock theo tenant (như pollEvents).
+   * là "mới" (dội lịch sử).
+   * R2-M1: phương thức ĐIỀU PHỐI (ORCHESTRATED_METHODS) — mỗi `assignPollSeq` là MỘT transaction riêng qua proxy (đặt
+   * `app.project_id`, advisory lock theo tenant chỉ giữ trong lô đó, commit ngay) -> không có tx dài 10 lô chạm timeout
+   * 5 s của Prisma, poller cùng tenant chỉ chờ một lô. Gọi trong tx có sẵn thì vẫn chạy trong tx đó (không tránh được).
    */
   async latestPollCursor(opts: { maxRounds?: number; batch?: number } = {}): Promise<bigint | null> {
     const maxRounds = opts.maxRounds ?? 10;
@@ -344,12 +354,20 @@ export class TenantScopedRepository {
       n = await this.assignPollSeq(batch);
       rounds++;
     } while (n >= batch && rounds < maxRounds);
-    if (n >= batch) {
-      // Lô cuối đầy: có thể còn tồn -> kiểm rẻ (index một phần poll_seq IS NULL).
-      const [{ pending }] = await this.prisma.$queryRaw<{ pending: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid AND poll_seq IS NULL) AS pending`;
-      if (pending) return null;
-    }
+    // Lô cuối đầy: có thể còn tồn -> kiểm rẻ (index một phần poll_seq IS NULL).
+    if (n >= batch && (await this.hasUnassignedPollSeq())) return null;
+    return this.maxPollCursor();
+  }
+
+  /** Còn event đã commit chưa có `poll_seq` (index một phần) — một câu, chạy trong tx có scope của proxy. */
+  async hasUnassignedPollSeq(): Promise<boolean> {
+    const [{ pending }] = await this.prisma.$queryRaw<{ pending: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid AND poll_seq IS NULL) AS pending`;
+    return pending;
+  }
+
+  /** Cursor lớn nhất đã cấp của tenant (index `(tenant_id, poll_seq)`); chưa có -> 0n. */
+  async maxPollCursor(): Promise<bigint> {
     const [{ max }] = await this.prisma.$queryRaw<{ max: bigint | null }[]>`
       SELECT max(poll_seq) AS max FROM "hub"."events" WHERE tenant_id = ${this.tenantId}::uuid`;
     return max ?? 0n;

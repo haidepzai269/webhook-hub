@@ -82,6 +82,26 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     await raw.event.deleteMany({ where: { tenantId: t2 } });
   });
 
+  it('[DX:UX11] R2-M1: mỗi lô của latestPollCursor COMMIT riêng — kết nối khác thấy tiến độ giữa hai lô (không một tx dài giữ lock)', async () => {
+    const t3 = randomUUID();
+    for (let i = 0; i < 5; i++) await mk(`order.batch_${i}`, ago(10), t3);
+    const nulls = () => raw.event.count({ where: { tenantId: t3, pollSeq: null } as any });
+    const seen: number[] = [];
+    const orig = TenantScopedRepository.prototype.assignPollSeq;
+    const spy = jest.spyOn(TenantScopedRepository.prototype, 'assignPollSeq').mockImplementation(async function (this: any, batch?: number) {
+      seen.push(await nulls()); // kết nối owner KHÁC: chỉ thấy dữ liệu đã commit
+      return orig.call(this, batch);
+    });
+    try {
+      expect(typeof (await new TenantScopedRepository(appDb, t3).latestPollCursor({ maxRounds: 5, batch: 2 }))).toBe('bigint');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(seen).toEqual([5, 3, 1]); // trước lô 2 đã thấy 3 (lô 1 đã commit), trước lô 3 thấy 1
+    expect(await nulls()).toBe(0);
+    await raw.event.deleteMany({ where: { tenantId: t3 } });
+  });
+
   it('S7: types (wildcard) giao với readTypes; project khác không thấy', async () => {
     const p = await mk('payment.received', ago(10));
     const r = await mk('repo.push', ago(10));
