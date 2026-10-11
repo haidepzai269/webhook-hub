@@ -838,6 +838,30 @@ service ◀──push──  hoặc  ──GET /v1/p/cafe/events?after=<cursor>&
 - **Chế độ lắng nghe**: `GET …/sources/:id/inspect` chẩn đoán raw_event đã lưu (`missing_header` + tên header ứng viên, `signature_mismatch`, `missing_idempotency_key`, `mapping_field_missing`…), không bao giờ trả giá trị (ADR-080).
 - Demo hai project `cafe`/`bookstore`: `docs/DEMO-MULTI-PROJECT.md`, `scripts/demo-multi-project.sh`.
 
+## 18. Trải nghiệm dev — `hub listen`, lỗi có hướng dẫn sửa, Quickstart (ADR-055, ADR-133, ADR-134, ADR-136)
+
+**`hub listen` = polling (A) + ký phía client. Không thêm hạ tầng server nào** — không WebSocket, không tunnel, không route mới
+ngoài `after=latest`. Đây là ứng dụng trực tiếp của quyết định polling (§8.1):
+
+```
+laptop dev:  hub listen ──GET /v1/p/cafe/events?after=<cursor>&wait=20──▶ hub-api (long-poll, 0 lệnh Redis)
+                 │  với từng event (thứ tự cursor): body = toWebhookBody(event)   ◀── CÙNG hàm với WebhookSender
+                 │  ký Standard Webhooks bằng secret phiên (whsec_…)
+                 └──POST──▶ http://localhost:3000/webhooks  (app của dev; mặc định CHỈ localhost/127.0.0.1/::1/host.docker.internal)
+```
+
+- **Parity:** `toWebhookBody` (`libs/common/src/webhook-body.ts`) là nguồn duy nhất của phong bì webhook — push thật và
+  `listen` cho body **byte-identical** (UX9). Code dev thử ở local chạy y như production.
+- **Chỉ đọc:** `listen` không tạo delivery, không chạm endpoint/circuit breaker; không retry (cursor tiến kể cả khi app local
+  lỗi); hub 5xx/mất mạng → backoff 1/2/5 s. Hub không gọi được `localhost` của dev (SSRF guard + NAT) — `listen` đi chiều ngược lại.
+- **`hub trigger <type>`**: mẫu kiểu chuẩn (`canonicalSample`, cạnh validator catalog) → `POST /events` → `validateCanonical` + đường ingest bình thường.
+- **Lỗi có hướng dẫn sửa:** `/v1/p/*` và `/api/v1/*` trả `{error, message, fix, docsUrl, requestId}` + header `x-request-id`
+  (catalog `libs/common/src/errors/catalog.ts`, giải thích tiếng Việt `docs/ERRORS.md`); lỗi lạ → `internal_error` không lộ
+  chi tiết, log đủ theo `requestId`. Challenge endpoint thất bại kèm `verificationFix` (`ssrf_blocked` → URL công khai khi
+  deploy, `hub listen` khi local). `/hooks/*` giữ định dạng ack của provider.
+- **Quickstart:** `docs/QUICKSTART.md` (5 bước) + `examples/quickstart-node` (34 dòng). Độ trễ `listen` đo local: p50 ≈ 0,6 s,
+  p95 ≈ 1,7 s (vòng long-poll truy vấn lại mỗi 1 s + normalize).
+
 ## Tham khảo
 
 PayOS https://payos.vn/docs · SePay https://developer.sepay.vn · SePay Test Mode https://docs.sepay.vn/test-mode.html · GitHub Webhooks https://docs.github.com/en/webhooks · Standard Webhooks https://www.standardwebhooks.com · CloudEvents https://cloudevents.io · RabbitMQ DLX https://www.rabbitmq.com/docs/dlx · Transactional Outbox https://microservices.io/patterns/data/transactional-outbox.html

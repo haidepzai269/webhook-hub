@@ -310,9 +310,22 @@ HUB_URL=$HUB_URL_KA HUB_LISTEN_SECRET=whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3R0ZXN0 npx
 
 ## 8. Checklist (phiên DEV đánh dấu)
 
-- [ ] DX1 · [ ] DX2 · [ ] DX3 · [ ] DX3b (tuỳ chọn)
-- ADR mới: …
-- Lệch so với spec (kèm lý do): …
+> **Phương án A (Admin duyệt 11/10) — bản cắt gọn.** Thứ tự làm: DX3 → DX3b → DX1-lite → DX2 rút gọn → docs. Nhật ký: `RESUME-dx.md`.
+
+- [x] DX1 (lite, `74bf617`) · [x] DX2 (rút gọn, `6c5b78a`) · [x] DX3 (`fc40e29`) · [x] DX3b (`d6b1a00`)
+- ADR mới: ADR-133 (`hub listen`, `toWebhookBody`, `after=latest`), ADR-134 (`hub trigger`, mẫu cạnh catalog), ADR-136 (khuôn lỗi + `detail` cho console). (ADR-132/135 là VF3/VF4 của phiên khác.)
+- Test: UX1–UX6, UX9–UX16 có tag `[DX:UXn]`; UX7/UX8 KHÔNG làm (thuộc phần DX2 bị cắt).
+- Lệch so với spec (kèm lý do):
+  1. **DX2 cắt theo phương án A:** không `buildQuickstart`, không trường `quickstart` khi tạo key, không route GET quickstart, không 3 ô copy, không `HUB_SDK_INSTALL`/`.env.example` (để phương án B). Chỉ `examples/quickstart-node` (34 dòng) + `docs/QUICKSTART.md`. Thêm `examples/quickstart-node/package.json` (`@hub/sdk: file:../../libs/hub-sdk`) để `npx hub` có bin link — gọi `npx hub` ở thư mục không có bin link sẽ tải gói tên `hub` của npm (không phải của mình).
+  2. **`after=latest`:** spec viết "seq lớn nhất đã qua cửa sổ lắng" — cửa sổ lắng đã bỏ ở ADR-095; `latest` = max `poll_seq` SAU `assignPollSeq` (event commit sau đó luôn có cursor lớn hơn). UX11 kiểm theo nghĩa mới (unit + Postgres thật). Cursor rác: 422 `validation_failed` cũ → **400 `invalid_cursor`**.
+  3. **Đóng gói CLI:** CLI nạp `toWebhookBody` + mẫu từ `@hub/common` lúc chạy → chạy trong monorepo / cài bằng đường dẫn; thư viện chính SDK vẫn 0 phụ thuộc runtime. Bin dùng `dist/cli.js` nếu đã build, không thì ts-node.
+  4. **Catalog lỗi = mọi mã đang ném** (giữ `slug_taken`, `outside_read_types`, `unknown_source`, `project_required`… — đổi mã là breaking) + mã suy từ status (`bad_request`, `forbidden`, `conflict`, `unauthenticated`, `service_unavailable`). Bỏ `reserved_type` và `endpoint_unreachable` (không đường nào ném; tạo endpoint FAILED vẫn 201 kèm `verificationError` + `verificationFix`). `verificationError` thật là `unreachable` (không tách `dns_error`/`connection_refused`), thêm `invalid_json`, `invalid_url`, `no_signing_secret`.
+  5. **Không viết lại mọi chỗ ném lỗi bằng `hubError`:** filter chuẩn hoá body cũ (mã có sẵn hoặc suy từ status, tham số lọc theo catalog). Có `hubError()` cho code mới; test quét `apps/hub-api/src` đỏ nếu ném mã chưa có trong catalog.
+  6. **`detail`:** câu gốc tiếng Việt của hub ra `detail` (không có ở `not_found`/5xx) để console giữ tiếng Việt (web `errorMessageOf` ưu tiên `detail` → câu Việt theo mã). Spec không có trường này (ADR-136).
+  7. **`ssrf_blocked` fix** nêu cả hai đường: deployed → đăng ký URL công khai (vd `SHOP_PUBLIC_URL`); local → `hub listen` (yêu cầu của Admin, rộng hơn §2.3).
+  8. **GenericAdapter.buildAck `fix`** đã có, nhưng 401/422 của `/hooks` do lõi ingest trả thẳng (không qua `buildAck`) → chưa tới tay dev. Chờ Admin: `CAN-ADMIN-QUYET-DX.md` Q1.
+  9. `hub trigger`: idempotencyKey `trigger-<base36 thời gian + 10 hex>` thay vì ulid (SDK không thêm phụ thuộc).
+  10. Không build lại image Docker (ổ C còn ~16 GB, 97%) → TX1/TX3 với `after=latest` chưa chạy trên stack; độ trễ đo trên stack dev với `--from <cursor>` (xem §9 / RESUME-dx).
 
 ## 9. Kết quả test (phiên TEST điền)
 
@@ -321,7 +334,7 @@ HUB_URL=$HUB_URL_KA HUB_LISTEN_SECRET=whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3R0ZXN0 npx
 | UX1–UX16 | | | |
 | TX1 | | | |
 | TX2 | | **số giây:** … · chỗ bị khựng: … · ai thắng cược ☕: … | |
-| TX3 | | độ trễ đo được: … s | |
+| TX3 | (một phần, phiên DEV) | độ trễ đo được (local, stack dev, SePay mock → app local, N=10): p50 0,62 s · p95 1,70 s · max 1,70 s; app mẫu in event sau ~1,05 s; secret sai → `→ 401`. Chưa chạy `--from latest` (image API cũ) | 2026-10-11 |
 | TX4 | | | |
 | TX5 | | | |
 | Demo bước 0 | | | |

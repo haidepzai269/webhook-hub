@@ -21,3 +21,5 @@
   Kiểm thật LOCAL (stack dev, image API cũ, `--from <cursor>`): app mẫu in `payment.received 50000 evt_…` sau ~1,05 s;
   đổi secret app → listen in `→ 401 … invalid signature`; không lộ key. KHÔNG build lại image (ổ C còn 16 GB/97%) —
   `after=latest` chỉ kiểm bằng unit + DB thật (UX11). Chạy hub-api từ source không được: `.env` dev dùng role superuser (AU6 chặn).
+- Docs xong: ARCHITECTURE §18 "Trải nghiệm dev", CLAUDE.md Trạng thái, SPEC-dev-experience §8 (checklist + 10 lệch) + §9 TX3 (một phần).
+  Toàn bộ L0 `npx jest -w 2`: 98 suite pass, 736 test pass, 0 fail (DB suite skip ở L0; UX11 DB chạy riêng: xanh).
