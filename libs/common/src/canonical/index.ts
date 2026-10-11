@@ -11,6 +11,7 @@ export type { CanonicalResult } from './result';
 export * from './payment';
 export * from './repo';
 export * from './time';
+export * from './samples';
 
 /** Không gian tên dành riêng cho kiểu chuẩn: `payment.*`, `repo.*`. */
 export const RESERVED_NAMESPACES = ['payment', 'repo'] as const;

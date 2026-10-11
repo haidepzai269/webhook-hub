@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { parseArgs } from 'util';
-import { toWebhookBody } from '@hub/common';
+import { SAMPLE_TYPES, canonicalSample, isReservedType, toWebhookBody } from '@hub/common';
 import { HubClient, HubError, HubEvent, maskKey, parseConnectionString } from './client';
 import { signWebhook } from './webhook';
 
@@ -263,10 +263,72 @@ async function listen(args: string[], io: CliIO): Promise<number> {
   return exit;
 }
 
+/** id ngắn, tăng theo thời gian, duy nhất mỗi lần gọi (idempotencyKey + providerTxnId của mẫu). */
+const triggerId = () => `${Date.now().toString(36)}${randomBytes(5).toString('hex')}`;
+
+/**
+ * DX3b (§4.4): `hub trigger <type> [--data '{…}']` — mẫu của catalog (kiểu chuẩn) ghép `--data`, rồi
+ * `hub.publish` như mọi service: hub chạy validateCanonical + đường ingest bình thường (không lối tắt).
+ */
+async function trigger(args: string[], io: CliIO): Promise<number> {
+  let values: Record<string, any>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = parseArgs({ args, options: { data: { type: 'string' }, url: { type: 'string' } }, allowPositionals: true, strict: true }));
+  } catch (e: any) {
+    io.err(`${e?.message ?? 'Invalid arguments'}
+${USAGE}`);
+    return 2;
+  }
+  const type = positionals[0];
+  if (!type || positionals.length > 1) {
+    io.err(`Usage: hub trigger <type> [--data '{"amount":50000}']. Types with a built-in sample: ${SAMPLE_TYPES.join(', ')}`);
+    return 2;
+  }
+  let extra: Record<string, unknown> = {};
+  if (values.data !== undefined) {
+    try {
+      extra = JSON.parse(values.data);
+    } catch {
+      extra = undefined as any;
+    }
+    if (extra === null || typeof extra !== 'object' || Array.isArray(extra)) {
+      io.err(`--data must be a JSON object, e.g. --data '{"amount":50000}'`);
+      return 2;
+    }
+  }
+  const id = triggerId();
+  const sample = canonicalSample(type, new Date(), id);
+  if (!sample && isReservedType(type)) {
+    io.err(`No sample for "${type}" (reserved namespace). Types with a built-in sample: ${SAMPLE_TYPES.join(', ')}`);
+    return 2;
+  }
+  const conn = connect(values, io, io.fetch ?? (globalThis as any).fetch);
+  if (typeof conn === 'number') return conn;
+  const { client } = conn;
+  try {
+    const me = await client.me();
+    if (!me.scopes?.includes('publish:events')) {
+      io.err(`This key lacks scope "publish:events" (has: ${(me.scopes ?? []).join(', ') || 'none'}).`);
+      io.err('  fix: Create a key with scope "publish:events" in the console (Project → Keys), or ask the hub admin.');
+      return 1;
+    }
+    const r = await client.publish(type, { ...(sample ?? {}), ...extra }, { idempotencyKey: `trigger-${id}` });
+    io.out(`Published ${type} (rawEventId ${r.rawEventId ?? '-'}${r.duplicate ? ', duplicate' : ''}). It reaches subscribers / hub listen after normalize.`);
+    return 0;
+  } catch (e) {
+    const b = (e as HubError)?.body as { field?: unknown } | undefined;
+    printHubError(io, `Publishing ${type}`, e);
+    if (typeof b?.field === 'string') io.err(`  field: ${b.field}`);
+    return 1;
+  }
+}
+
 /** `hub <command> …` -> mã thoát. Không bao giờ in key thô (connection string chỉ được parse, không echo). */
 export async function runCli(argv: string[], io: CliIO): Promise<number> {
   const [cmd, ...rest] = argv;
   if (cmd === 'listen') return listen(rest, io);
+  if (cmd === 'trigger') return trigger(rest, io);
   if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
     io.out(USAGE);
     return cmd ? 0 : 2;

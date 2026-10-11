@@ -8,3 +8,7 @@
 - DX3 xong: `toWebhookBody` (libs/common/src/webhook-body.ts) dùng bởi WebhookSender + CLI; `libs/hub-sdk/src/cli.ts` + `bin/hub.js`; `after=latest` (repo.latestPollCursor) + 400 invalid_cursor. Test UX9–UX15 xanh (UX11 cả DB thật hubv). ADR-133 (ADR-132 là VF3 của agent kia).
   - Chạy test DB một file: `node <scratchpad>/dbjest.js <file>` (env giống verify:db).
   - Sửa kèm: polling-params.spec có regex `/\bseq\b/` bị lưu thành ký tự backspace (test luôn xanh) -> sửa lại.
+- DX3b xong: `hub trigger` + `libs/common/src/canonical/samples.ts`; UX16 xanh. ADR-134.
+- Đo `hub listen` LOCAL (stack dev localhost:4000, image API cũ — dùng `--from <cursor>`), SePay mock cafe → app local, N=10:
+  p50 619 ms · p95 1699 ms · max 1699 ms · 10/10 nhận, 0 chữ ký sai; khởi động CLI 0,9 s (ts-node). Key tạm `dx-latency-measure` đã revoke.
+  Script: scratchpad `measure-listen.js` (không in key).
