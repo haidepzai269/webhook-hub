@@ -48,7 +48,7 @@ function showTraceToast(t: TraceIngestedNotice, more: number) {
  * `trace.ingested` (S2-2): chặng ①–④ ở hub-api, phát in-process. Request bị chặn (REJECTED) hay
  * trùng (DUPLICATE) KHÔNG sinh event nên không bao giờ hiện trong bảng — dải này + toast cho thấy chúng.
  */
-export function TraceFeed() {
+export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {}) {
   const traces = useRealtimeStore((s) => s.traces);
   // Tăng để chạy lại effect khi tới lượt xả phần toast đang dồn.
   const [flushTick, setFlushTick] = useState(0);
@@ -66,7 +66,8 @@ export function TraceFeed() {
     return () => clearTimeout(t);
   }, [traces, flushTick]);
 
-  if (traces.length === 0) return null;
+  // Bản đồ luồng (toàn màn hình): chỉ toast, không chiếm chỗ của canvas.
+  if (toastsOnly || traces.length === 0) return null;
 
   return (
     <Card className="py-3">

@@ -5,6 +5,7 @@ import {
   AUDIT_KEY,
   countdownTicker,
   describeDeleteConflict,
+  describeVerification,
   errorMessageOf,
   emptyToastCursor,
   keysAfterAudited,
@@ -108,5 +109,23 @@ describe("errorMessageOf — DX1: console giữ câu tiếng Việt (ADR-136)", 
     expect(errorMessageOf({ error: "zzz", message: "Plain" })).toBe("Plain");
     expect(errorMessageOf({ message: ["a", "b"] })).toBe("a, b");
     expect(errorMessageOf(null)).toBe("");
+  });
+});
+
+describe("describeVerification — cột Xác minh của trang Đích (P2, ADR-140)", () => {
+  it("FAILED ssrf_blocked -> nhãn đỏ + lý do tiếng Việt nêu địa chỉ nội bộ", () => {
+    const v = describeVerification("FAILED", "ssrf_blocked");
+    expect(v.label).toBe("FAILED");
+    expect(v.tone).toBe("bad");
+    expect(v.reason).toMatch(/nội bộ/);
+  });
+  it("http_502 -> nêu mã HTTP; mã lạ -> vẫn hiện mã gốc", () => {
+    expect(describeVerification("FAILED", "http_502").reason).toMatch(/HTTP 502/);
+    expect(describeVerification("FAILED", "weird_code").reason).toMatch(/weird_code/);
+  });
+  it("VERIFIED -> tốt, không có lý do; PENDING -> đang chờ; thiếu trường (API cũ) -> coi như VERIFIED", () => {
+    expect(describeVerification("VERIFIED", null)).toMatchObject({ tone: "ok", reason: null });
+    expect(describeVerification("PENDING", null)).toMatchObject({ tone: "wait", label: "PENDING" });
+    expect(describeVerification(undefined, undefined)).toMatchObject({ tone: "ok" });
   });
 });

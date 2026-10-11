@@ -22,6 +22,7 @@ import { useDestinations, useExecutions, useFlowProjectStore, useSources } from 
 
 import { EventSheet } from "./_components/event-sheet";
 import { OrphanBanner } from "./_components/orphan-banner";
+import { TraceFeed } from "./_components/trace-feed";
 import { useRealtimeProject } from "@/lib/hub/socket";
 
 const TABS: { id: ExecutionStatus | "all"; label: string }[] = [
@@ -102,6 +103,10 @@ function ExecutionsView() {
         }
       />
       <OrphanBanner />
+      {/* P2: request trùng (DUPLICATE) / chữ ký sai (REJECTED) không sinh event -> chỉ thấy ở dải trực tiếp này. */}
+      <div className="mb-3">
+        <TraceFeed />
+      </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border p-0.5" role="tablist">

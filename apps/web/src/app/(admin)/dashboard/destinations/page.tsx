@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/hub/format";
-import { describeDeleteConflict } from "@/lib/hub/ui-logic";
+import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
 import { useCreateDestination, useDeleteDestination, useDestinations } from "@/lib/hub/queries";
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
 
@@ -51,6 +51,28 @@ const CIRCUIT_STYLE = {
   HALF_OPEN: "border-amber-500/40 text-amber-700 dark:text-amber-300",
   OPEN: "border-rose-500/40 text-rose-700 dark:text-rose-300",
 } as const;
+
+const VERIFY_STYLE = {
+  ok: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
+  wait: "border-amber-500/40 text-amber-700 dark:text-amber-300",
+  bad: "border-rose-500/40 text-rose-700 dark:text-rose-300",
+} as const;
+
+/** P2 (ADR-140): đích FAILED (vd ssrf_blocked) phải thấy được — hub KHÔNG giao tới đích chưa VERIFIED. */
+function VerificationCell({ dest }: { dest: Destination }) {
+  const v = describeVerification(dest.verification, dest.verificationError);
+  return (
+    <div className="flex max-w-xs flex-col gap-0.5">
+      <Badge variant="outline" className={`w-fit font-mono text-[11px] ${VERIFY_STYLE[v.tone]}`} title={dest.verificationFix ?? undefined}>
+        {v.label}
+      </Badge>
+      {v.reason && <span className="text-muted-foreground text-xs">{v.reason}</span>}
+      {dest.verification === "FAILED" && dest.verificationError && (
+        <span className="font-mono text-[11px] text-rose-700 dark:text-rose-300">{dest.verificationError}</span>
+      )}
+    </div>
+  );
+}
 
 const CIRCUIT_DOT = { CLOSED: "bg-emerald-500", HALF_OPEN: "bg-amber-500", OPEN: "bg-rose-500" } as const;
 
@@ -96,6 +118,12 @@ const columns: HubColumn<Destination>[] = [
     header: "Loại",
     accessorFn: (d) => d.type,
     cell: ({ row }) => <Badge variant="secondary">{row.original.type}</Badge>,
+  },
+  {
+    id: "verification",
+    header: "Xác minh",
+    accessorFn: (d) => `${d.verification ?? "VERIFIED"} ${d.verificationError ?? ""}`,
+    cell: ({ row }) => <VerificationCell dest={row.original} />,
   },
   {
     id: "circuit",

@@ -138,3 +138,31 @@ export function errorMessageOf(body: unknown): string {
   }
   return text;
 }
+
+/**
+ * P2 (ADR-140): cột "Xác minh" của trang Đích. Endpoint webhook phải trả lời challenge (ADR-040) trước khi hub giao;
+ * FAILED (vd `ssrf_blocked`) trước đây không thấy được trên console. Lý do viết tiếng Việt theo MÃ của hub.
+ */
+export type VerificationTone = "ok" | "wait" | "bad";
+
+const VI_VERIFICATION: Record<string, string> = {
+  ssrf_blocked: "URL trỏ vào địa chỉ nội bộ/riêng — hub chặn (SSRF). Đăng ký URL công khai (https) của service.",
+  timeout: "Endpoint không trả lời challenge trong 10 giây.",
+  challenge_mismatch: 'Endpoint trả lời sai challenge — phải trả đúng {"challenge": "<giá trị nhận được>"}.',
+  invalid_json: "Endpoint trả về nội dung không phải JSON.",
+  unreachable: "Hub không kết nối được (DNS, từ chối kết nối hoặc lỗi TLS).",
+  invalid_url: "Endpoint không có URL http(s) hợp lệ.",
+  no_signing_secret: "Endpoint chưa có signing secret.",
+};
+
+export function describeVerification(
+  verification: string | undefined | null,
+  code: string | undefined | null,
+): { label: string; tone: VerificationTone; reason: string | null } {
+  if (verification === "PENDING") return { label: "PENDING", tone: "wait", reason: "Đang chờ endpoint trả lời challenge." };
+  if (verification !== "FAILED") return { label: "VERIFIED", tone: "ok", reason: null };
+  if (!code) return { label: "FAILED", tone: "bad", reason: "Xác minh thất bại." };
+  const http = /^http_(\d{3})$/.exec(code);
+  const reason = http ? `Endpoint trả HTTP ${http[1]} cho challenge (phải trả 200).` : (VI_VERIFICATION[code] ?? `Lỗi xác minh: ${code}`);
+  return { label: "FAILED", tone: "bad", reason };
+}

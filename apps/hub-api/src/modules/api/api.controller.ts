@@ -27,6 +27,7 @@ import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
 import { parseSourceInput } from '../service-api/source-input';
+import { consoleDestination } from './destination-view';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -200,7 +201,8 @@ export class ApiController {
   @RequireScope('read:project')
   async listDestinations(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
-    return repo.findDestinations();
+    // P2 (ADR-140): bản công khai — không trả config/secret mã hoá; có trạng thái xác minh.
+    return (await repo.findDestinations()).map(consoleDestination);
   }
 
   @Post('destinations')
@@ -223,7 +225,7 @@ export class ApiController {
         actor,
         metadata: { name: created.name, type: created.type },
       });
-      return created;
+      return consoleDestination(created);
     });
   }
 
@@ -265,7 +267,7 @@ export class ApiController {
         reason: optionalReason(body?.reason),
         metadata: { fields: changed },
       });
-      return u;
+      return consoleDestination(u);
     });
   }
 

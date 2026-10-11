@@ -45,6 +45,12 @@ export interface Destination {
   rateLimitRps: number;
   circuitState: "CLOSED" | "OPEN" | "HALF_OPEN";
   hasSigningSecret?: boolean;
+  /** P2 (ADR-140): trạng thái challenge (ADR-040). Thiếu = API cũ, coi như VERIFIED. */
+  verification?: "PENDING" | "VERIFIED" | "FAILED";
+  verificationError?: string | null;
+  verificationFix?: string | null;
+  verifiedAt?: string | null;
+  managedByService?: boolean;
   createdAt: string;
 }
 

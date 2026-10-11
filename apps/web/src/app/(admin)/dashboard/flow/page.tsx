@@ -28,6 +28,8 @@ import { useTopology } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 
+import { TraceFeed } from "../events/_components/trace-feed";
+
 const WINDOW_BTN: Record<TopologyWindow, string> = { "15m": "15M", "1h": "1H", "24h": "24H" };
 
 /**
@@ -52,6 +54,8 @@ export default function FlowMapPage() {
 
   return (
     <div className="-m-4 md:-m-6 flex h-[calc(100svh-3rem)] flex-col gap-3 p-3 md:p-4">
+      {/* P2: webhook trùng / chữ ký sai không thành chấm trên bản đồ -> toast trực tiếp từ trace.ingested. */}
+      <TraceFeed toastsOnly />
       <div className="flow-canvas relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border" style={{ borderColor: "var(--flow-card-border)" }}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: "var(--flow-card-border)", background: "color-mix(in oklch, var(--flow-card-solid) 70%, transparent)" }}>
           <div className="flex flex-wrap items-center gap-3">
