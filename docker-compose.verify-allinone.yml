@@ -1,0 +1,23 @@
+# =====================================================================================
+# ADR-129: biến thể `hubv` chạy hub-api + hub-worker trong MỘT container (`docker-entrypoint.sh hub-all`) — giống Render
+# free (không có Background Worker, RAM 512 MB). CHỈ để kiểm chứng chế độ deploy; local/dev vẫn HAI service (BB-4).
+#
+#   bash scripts/hub-all-e2e.sh        # dựng biến thể, đo RSS, smoke + Shop PAID, crash/SIGTERM, rồi trả hubv về 2 service
+# =====================================================================================
+services:
+  hub-api:
+    command: ["hub-all"]
+    mem_limit: 512m
+    environment:
+      # Biến riêng của worker (khối hub-worker trong docker-compose.yml); DATABASE_URL dùng chung (hub_app),
+      # supervisor đặt connection_limit cho từng tiến trình (HUB_ALL_*_DB_CONNECTIONS, mặc định 5 + 5).
+      - WORKER_METRICS_PORT=0
+      - DELIVERY_TIMEOUT_MS=${DELIVERY_TIMEOUT_MS:-5000}
+      - DELIVERY_SWEEP_AFTER_MS=${DELIVERY_SWEEP_AFTER_MS:-600000}
+      - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-7}
+      - EVENT_RETENTION_DAYS=${EVENT_RETENTION_DAYS:-}
+      - NORMALIZE_FAULT_FIRST_N=0
+      - SHUTDOWN_TIMEOUT_MS=25000
+
+  hub-worker:
+    profiles: ["two-services"] # tắt: worker chạy BÊN TRONG container hub-api

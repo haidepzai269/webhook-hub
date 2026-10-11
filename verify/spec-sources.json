@@ -172,6 +172,12 @@
       "codes": "GO1-GO9",
       "requireTest": true,
       "note": "Đăng nhập Google AU5b (ADR-127): GO1 ID token · GO2 JWKS/xoay kid · GO3 start (PKCE/state/nonce/next) · GO4 callback · GO5 ghép theo sub/email · GO6 chiếm trước (N-1) · GO7 callback song song · GO8 fake-google chỉ ngoài production + gỡ liên kết · GO9 e2e fake-google."
+    },
+    {
+      "ns": "AU",
+      "codes": "HA1-HA4",
+      "requireTest": true,
+      "note": "Chế độ hub-all (ADR-129): HA1 con chết -> dừng hết, exit≠0 · HA2 SIGTERM drain cả hai, exit 0, log gắn proc · HA3 SIGKILL sau hạn · HA4 e2e hubv image thật."
     }
   ],
   "doneOverrides": [

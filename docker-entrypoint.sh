@@ -6,15 +6,8 @@ SERVICE="$1"
 
 echo "==> [Webhook Hub Entrypoint] Starting service: $SERVICE"
 
-if [ "$SERVICE" = "seed" ]; then
-  # Lệnh seed thủ công riêng: docker-entrypoint.sh seed [--sync-destinations]
-  #   seed                      : idempotent, chỉ tạo dữ liệu nếu DB đang rỗng
-  #   seed --sync-destinations  : mã hoá lại config các đích seed từ env hiện tại (S1-7), không đụng bảng khác.
-  #                               Thiếu HUB_SIGNING_SECRET/SHOP_WEBHOOK_URL/MOCK_BASE_URL... -> exit 2, trừ khi thêm --allow-defaults
-  # Gọi thẳng workspace để cờ đi tới ts-node, không bị npm gốc nuốt mất.
-  echo "==> [seed] Chạy seed thủ công $*"
-  npm run prisma:seed --workspace=libs/database -- "$@"
-elif [ "$SERVICE" = "hub-api" ]; then
+# Bước chuẩn bị CHUNG của hub-api và hub-all (ADR-129): role hub_app (local), migrate deploy, seed tuỳ chọn.
+hub_prestart() {
   # S1-6 (ADR-047): migrations có phiên bản, KHÔNG BAO GIỜ `db push` (cờ chấp nhận mất dữ liệu) — lệnh đó
   # từng xoá dữ liệu khi image nạp nhầm bản build cũ (BB09 P0-1). migrate deploy chỉ chạy migration
   # chưa áp dụng, không tự sinh thay đổi phá dữ liệu. Neon: dùng DIRECT_URL (directUrl trong schema).
@@ -37,12 +30,31 @@ elif [ "$SERVICE" = "hub-api" ]; then
   else
     echo "==> [hub-api] Bỏ qua seed (RUN_SEED không phải 'true'). Dùng RUN_SEED=true hoặc 'docker-entrypoint.sh seed' để seed thủ công."
   fi
+}
+
+if [ "$SERVICE" = "seed" ]; then
+  # Lệnh seed thủ công riêng: docker-entrypoint.sh seed [--sync-destinations]
+  #   seed                      : idempotent, chỉ tạo dữ liệu nếu DB đang rỗng
+  #   seed --sync-destinations  : mã hoá lại config các đích seed từ env hiện tại (S1-7), không đụng bảng khác.
+  #                               Thiếu HUB_SIGNING_SECRET/SHOP_WEBHOOK_URL/MOCK_BASE_URL... -> exit 2, trừ khi thêm --allow-defaults
+  # Gọi thẳng workspace để cờ đi tới ts-node, không bị npm gốc nuốt mất.
+  echo "==> [seed] Chạy seed thủ công $*"
+  npm run prisma:seed --workspace=libs/database -- "$@"
+elif [ "$SERVICE" = "hub-api" ]; then
+  hub_prestart
   echo "==> [hub-api] Starting Webhook Hub API..."
   # Chạy bản đã build (dist/main.js) chứ không phải `npm run start:api` (root script
   # đó trỏ ts-node/start:dev, dùng cho hot-reload LOCAL ngoài container) -- container
   # đã build sẵn ở bước docker build, chạy dev server lại vừa lãng phí vừa sai tinh
   # thần "image production, mở lên là chạy".
   exec npm run start --workspace=apps/hub-api
+elif [ "$SERVICE" = "hub-all" ]; then
+  # ADR-129 (DEPLOYMENT §3.2 phương án D, Render free không có Background Worker): MỘT container, HAI tiến trình Node
+  # (hub-api + hub-worker) dưới supervisor docker/hub-all.js — BB-4 vẫn giữ (hai process, hai AMQP connection, hai pool).
+  # Chuẩn bị (migrate) chạy MỘT lần ở đây, rồi supervisor là PID 1: nhận SIGTERM, chuyển cho cả hai, chờ drain.
+  hub_prestart
+  echo "==> [hub-all] Starting hub-api + hub-worker (2 tiến trình, supervisor docker/hub-all.js)..."
+  exec node docker/hub-all.js
 elif [ "$SERVICE" = "hub-worker" ]; then
   echo "==> [hub-worker] Starting Webhook Hub Worker..."
   # node phai la PID 1 de NHAN SIGTERM truc tiep (graceful shutdown cho handler dang chay xong,

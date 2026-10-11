@@ -73,7 +73,22 @@ Lệch một cái — ví dụ Render Singapore mà Neon US-East — thì mỗi 
 | **B** | Cả hai Starter trả phí | ~$14/tháng | An toàn nhất, không lo quota giờ |
 | **C** | Cả hai là Web Service free, cùng bị UptimeRobot ping | $0 | ⚠️ **Vượt hạn mức giờ instance** → service bị dừng giữa tháng. Và `hub-worker` phải mọc thêm một HTTP `/health` giả chỉ để được ping. Mong manh |
 
-> **Nếu buộc phải $0:** phương án D — chạy cả hai app trong **một container** (cùng image, hai tiến trình con). Code không đổi, chỉ đổi lệnh khởi động. Local vẫn chạy 2 service tách rời nên **BB-4 vẫn được chứng minh** — chỉ là chứng minh ở môi trường local. Ghi rõ vào báo cáo là lựa chọn vận hành do hạn mức, không phải do thiết kế.
+| **D** ✅ **đang dùng** (ADR-129) | MỘT Web Service free chạy `docker-entrypoint.sh hub-all`: hub-api + hub-worker là **hai tiến trình Node** dưới supervisor `docker/hub-all.js` | $0 | Hai tiến trình chung một container 512 MB và chung số phận (một con chết → supervisor dừng hết → Render khởi động lại). Xem chi tiết dưới |
+
+**Phương án D (ADR-129) — Admin chọn để không trả phí worker.** Lựa chọn TRIỂN KHAI do free tier, không phải kiến trúc: BB-4
+vẫn giữ — vẫn hai process, mỗi process một AMQP connection + một pool Prisma riêng; local/hubv vẫn chạy hai service tách rời.
+- `docker-entrypoint.sh hub-all`: chạy bước chuẩn bị của hub-api MỘT lần (`prisma migrate deploy` bằng `DIRECT_URL` = owner),
+  rồi `exec node docker/hub-all.js` (PID 1) sinh hai con: `hub-api` (nghe `$PORT`) và `hub-worker` (`WORKER_METRICS_PORT=0`).
+- SIGTERM/SIGINT → chuyển cho cả hai, chờ drain trong `SHUTDOWN_TIMEOUT_MS` (25 s; Render SIGKILL ~30 s), quá hạn → SIGKILL.
+  Một con thoát ngoài ý muốn → SIGTERM con kia → container thoát ≠ 0 → Render khởi động lại (không có trạng thái nửa sống).
+- Log: dòng JSON giữ nguyên + trường `"proc":"api"|"worker"|"supervisor"`.
+- Pool: supervisor đặt `connection_limit` trong `DATABASE_URL` cho từng con — `HUB_ALL_API_DB_CONNECTIONS` (mặc định 5) +
+  `HUB_ALL_WORKER_DB_CONNECTIONS` (mặc định 5) = 10 kết nối client tới pooler Neon (PgBouncer, giới hạn hàng nghìn — dư).
+- RAM (đo hubv, `mem_limit: 512m`, sau smoke + một đơn Shop PAID): xem ADR-129. Heap mỗi con giới hạn bằng
+  `--max-old-space-size` (`HUB_ALL_API_HEAP_MB` = 200, `HUB_ALL_WORKER_HEAP_MB` = 220).
+- Giờ instance free: Render cho 750 giờ/tháng/tài khoản. `hub-all` luôn thức (UptimeRobot ping `/health` 5 phút) ≈ 730 giờ;
+  `shop` free để NGỦ khi không dùng (đánh thức ~1 phút) — đừng ping shop liên tục, không thì vượt 750 giờ.
+- Kiểm chứng: `bash scripts/hub-all-e2e.sh` (image thật trên hubv, `docker-compose.verify-allinone.yml`).
 
 ### 3.3. `render.yaml` (Blueprint — hạ tầng bằng code, đưa vào phụ lục báo cáo)
 
@@ -89,6 +104,9 @@ services:
     plan: free
     envVars: [...]
 
+  # Phương án D (ĐANG DÙNG, ADR-129): KHÔNG có service worker riêng — service hub-api chạy
+  #   dockerCommand: docker-entrypoint.sh hub-all     (hub-api + hub-worker = 2 tiến trình trong 1 container)
+  # và env = HỢP của khối [hub-api] + [hub-worker]. Khối dưới chỉ dùng cho phương án A (worker Starter trả phí):
   - type: worker            # Starter trả phí (phương án A)
     name: hub-worker
     runtime: docker
