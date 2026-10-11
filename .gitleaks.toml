@@ -16,4 +16,14 @@ regexes = [
   '''whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''',
   # .env.verify: mọi secret của stack hubv là giá trị giả có tiền tố này (SPEC-verification §4.2).
   '''VERIFY_ONLY_[A-Za-z0-9_\-]*''',
+  # Dữ liệu giả trong test (đã xác minh 2026-10-11, không phải secret thật): chuỗi tuần tự / base64 của mô tả test.
+  # libs/common/test/auth-common.spec.ts — secret CSRF giả.
+  '''csrf-secret-0123456789-0123456789-abc''',
+  # apps/hub-api/test/service-resources.spec.ts — base64 của "sai-secret-cua-key-moi-test" / "new-secret-for-ms-r4-test".
+  '''whsec_c2FpLXNlY3JldC1jdWEta2V5LW1vaS10ZXN0''',
+  '''whsec_bmV3LXNlY3JldC1mb3ItbXMtcjQtdGVzdA==''',
+  # libs/database/test/seed-env.spec.ts, libs/hub-sdk/test/sdk.spec.ts — API key giả dạng bảng chữ cái tuần tự.
+  '''hk_(test|live)_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG''',
+  # apps/hub-api/test/service-sources.spec.ts — API key SePay giả.
+  '''apikey_123456''',
 ]
