@@ -5,7 +5,6 @@ import type { PrismaClient } from '@prisma/client';
 import { aesGcmDecrypt, aesGcmEncrypt, timingSafeCompare } from '@hub/crypto';
 import { createHubClient, HubClient, parseConnectionString } from '@hub/sdk';
 import { HubRegistration } from './hub-registration';
-
 /** Trường cài đặt -> biến env cũ. Giá trị đã gộp (DB thắng env) trả về DƯỚI DẠNG env để payos/VietQR/main không đổi. */
 export const FIELDS = {
   hubConnectionUrl: 'HUB_URL', paymentSourceKeys: 'SHOP_PAYMENT_SOURCE_KEYS', payosClientId: 'PAYOS_CLIENT_ID', payosApiKey: 'PAYOS_API_KEY',
@@ -115,12 +114,17 @@ export class HubLink {
     [this.apply(env), this.log.info({ project: this.client?.project }, '[Shop] Đồng bộ cấu hình hub từ shop.settings'), this.client && this.registration.start()];
     return true;
   }
+  /** M-3/N-5: vòng 60s (main, khi degraded) — lỗi chỉ log, không bao giờ để promise reject không ai bắt (Node ≥ 15 thoát tiến trình). */
+  resync = (s: Pick<ShopSettings, 'reload'>) => this.lock(async () => { const r = await s.reload(); if (r) this.sync(r.env); }).then(() => undefined, (e) => this.log.error({ err: e?.message }, '[Shop] Đồng bộ cài đặt định kỳ lỗi'));
   /** H-1 (ADR-160): KIỂM TRƯỚC, LƯU SAU — ensure trên client ỨNG VIÊN; VERIFIED mới `commit()` rồi thay client + nguồn tin cậy một lượt. FAILED: không đổi gì. */
   async reconnect(env: NodeJS.ProcessEnv, commit: () => Promise<unknown> = async () => undefined) {
     let ids: string[] = [];
     try { if (env.HUB_URL) ids = await this.run(this.make(env.HUB_URL), sourceKeysOf(env)); }
     catch (e: any) { const error = String(e?.message ?? e); return { status: 'FAILED', error, verificationFix: /— fix: (.+?)(?: \[requestId|$)/.exec(error)?.[1] ?? null }; }
-    [await commit(), this.apply(env, ids)];
+    try { await commit(); } catch (e: any) { // N-1: hub ĐÃ đổi mà DB không ghi -> ensure lại cấu hình CŨ (exclusive bật lại sub cũ), best effort
+      const restored = this.client ? await this.registration.ensureNow() : false;
+      return [this.log.error({ err: e?.message, restored }, '[Shop] Hub đã đăng ký cấu hình mới nhưng ghi shop.settings lỗi -> ensure lại cấu hình cũ'), { status: 'COMMIT_FAILED', error: String(e?.message ?? e), restored }][1] as { status: 'COMMIT_FAILED'; error: string; restored: boolean }; }
+    this.apply(env, ids);
     return this.client ? { status: 'VERIFIED', project: this.client.project, trustedSourceIds: ids } : { status: 'SKIPPED', error: 'Chưa có HUB_URL — Shop không nối hub' };
   }
 }
@@ -160,7 +164,11 @@ export function settingsRouter(d: { settings: ShopSettings; link: HubLink; env: 
   const r = Router().use('/settings', adminGate(d.env, d.log));
   const route = (fn: (req: Request) => Promise<Out>) => (req: Request, res: Response) =>
     fn(req).then((o) => res.status(o.status).json(o.body), (e) => [d.log.error({ err: e?.message }, '[Shop] Lỗi route cài đặt'), res.status(500).json({ error: 'Lỗi cài đặt' })]);
-  const badHost = (cs: unknown): Out | null => (typeof cs === 'string' && hostOf(cs) && !hubHostAllowed(cs, d.env) ? { status: 422, body: { error: 'Host hub không được phép', field: 'hubConnectionUrl', fix: hostFix(cs) } } : null);
+  const [prod, http] = [d.env.NODE_ENV === 'production', (u: unknown) => typeof u === 'string' && /^hub:\/\//.test(u)]; // N-3: hub:// = HTTP thường
+  if (prod && http(d.env.HUB_URL)) d.log.warn({}, '[Shop] HUB_URL env là hub:// (HTTP thường) trên production — HUB_SIGNING_SECRET đi không mã hoá; nên dùng hubs://');
+  const no = (error: string, fix: string): Out => ({ status: 422, body: { error, field: 'hubConnectionUrl', fix } });
+  const badHost = (cs: unknown): Out | null => (prod && http(cs) ? no('hub:// (HTTP thường) bị từ chối trên production', 'dùng hubs:// (HTTPS) — key và HUB_SIGNING_SECRET không đi qua HTTP thường')
+    : typeof cs === 'string' && hostOf(cs) && !hubHostAllowed(cs, d.env) ? no('Host hub không được phép', hostFix(cs)) : null);
   r.get('/settings', route(async () => ({ status: 200, body: publicView(await d.settings.get(), !!d.settings.key) })));
   r.post('/settings/test-hub', route(async (req) => badHost(req.body?.hubConnectionUrl) ?? testHub(String(req.body?.hubConnectionUrl ?? ''))));
   r.put('/settings', route((req) => d.link.lock(async () => {
@@ -174,6 +182,7 @@ export function settingsRouter(d: { settings: ShopSettings; link: HubLink; env: 
       d.log.warn({ fields: Object.keys(input), err: registration.error }, '[Shop] Cấu hình mới đăng ký FAILED -> KHÔNG lưu, giữ cấu hình đang chạy');
       return { status: 422, body: { error: 'Chưa lưu: đăng ký với cấu hình mới thất bại — Shop vẫn chạy cấu hình cũ', fix: registration.verificationFix, saved: [], registration, settings: publicView(await d.settings.get(), true) } };
     }
+    if (registration.status === 'COMMIT_FAILED') return { status: 500, body: { error: 'Hub đã nhận cấu hình mới nhưng Shop không ghi được DB — có thể đăng ký một phần', fix: 'Bấm Lưu lại (hoặc restart Shop), rồi đối soát log "KHÔNG tin cậy" theo orderCodes', registration } };
     d.log.info({ fields: Object.keys(input), ip: req.ip }, '[Shop] Đã kiểm + lưu cài đặt kết nối (không ghi giá trị)');
     return { status: 200, body: { saved: Object.keys(input), registration, settings: publicView(resolved, true) } };
   })));

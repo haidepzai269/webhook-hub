@@ -188,7 +188,7 @@ const hubLink = new HubLink(async (hub, sourceKeys) => {
 app.use(settingsRouter({ settings, link: hubLink, env: process.env, log: logger }));
 
 // Nạp cài đặt TRƯỚC khi nhận request: webhook không bao giờ tới lúc chưa biết hub/nguồn tin cậy. M-3: boot lúc DB lỗi -> env, 60s thử lại tới khi đọc được.
-setInterval(() => settings.degraded && void hubLink.lock(async () => { const r = await settings.reload(); if (r) hubLink.sync(r.env); }), 60_000).unref();
+setInterval(() => settings.degraded && void hubLink.resync(settings), 60_000).unref();
 void settings.get().then(({ env }) => {
   hubLink.apply(env);
   app.listen(PORT, () => {

@@ -386,6 +386,68 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect(JSON.stringify([noScope, revoked, ok, no403])).not.toContain(KEY_B);
   });
 
+  it('[SK:U3] N-5: vòng đồng bộ 60s (resync) lỗi -> bắt + log, KHÔNG để promise reject không ai bắt (tiến trình Shop không chết); khoá vẫn chạy tiếp', async () => {
+    const error = jest.fn();
+    const link = new HubLink(jest.fn(), { ...log, error }, ENV, () => { throw new Error('HUB_URL sai dạng'); });
+    const unhandled = jest.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      await expect(link.resync({ reload: async () => ({ env: E({ HUB_URL: 'hubs://broken' }) }) as any })).resolves.toBeUndefined();
+      await expect(link.resync({ reload: async () => Promise.reject(new Error('db down')) })).resolves.toBeUndefined();
+      await new Promise((r) => setImmediate(r));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledTimes(2);
+      expect(error.mock.calls[0][0]).toMatchObject({ err: 'HUB_URL sai dạng' });
+      expect(await link.lock(async () => 'next')).toBe('next');
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('[SK:U3] N-1: ensure cấu hình mới VERIFIED nhưng ghi DB lỗi -> ensure lại NGAY trên link cũ (hub bật lại sub cũ), 500 kèm fix, Shop giữ cấu hình cũ', async () => {
+    const { settings, mem, link, ensure } = setup();
+    mem.store.save = async () => { throw new Error('db down'); };
+    link.apply((await settings.get()).env);
+    expect(await link.registration.ensureNow()).toBe(true);
+    const srv = await serve(settingsRouter({ settings, link, env: ENV, log }));
+    try {
+      const r = await srv.call('PUT', '/settings', { hubConnectionUrl: CS_B, paymentSourceKeys: ['src_payos_b'] });
+      expect(r.status).toBe(500);
+      expect(r.body).toMatchObject({ registration: { status: 'COMMIT_FAILED', restored: true }, fix: expect.stringContaining('Lưu lại') });
+      expect(ensure).toHaveBeenCalledTimes(3); // cũ (boot) -> mới (proj-b) -> cũ lại (khôi phục)
+      expect(ensure).toHaveBeenLastCalledWith(expect.objectContaining({ project: 'proj-a' }), ['src_payos_main', 'src_sepay_main']);
+      expect(link.client?.project).toBe('proj-a');
+      expect(link.registration.trustedSourceIds).toEqual(['id:old']);
+      expect(mem.s.row).toBeNull();
+      expect((await settings.get()).env.HUB_URL).toBe(CS_A);
+      expect(JSON.stringify(r.body)).not.toContain(KEY_B);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('[SK:U5] N-3: production -> connection string hub:// (http thường) bị từ chối 422 + fix "dùng hubs://"; HUB_URL env http chỉ cảnh báo', async () => {
+    const PROD = E({ ...ENV, NODE_ENV: 'production' });
+    const HTTP_B = `hub://${KEY_B}@hub-b.example/proj-b`;
+    const { settings, mem, link, ensure, hub } = setup(PROD);
+    link.apply(PROD);
+    const srv = await serve(settingsRouter({ settings, link, env: PROD, log }));
+    try {
+      for (const [m, path] of [['POST', '/settings/test-hub'], ['PUT', '/settings']]) {
+        const r = await srv.call(m, path, { hubConnectionUrl: HTTP_B });
+        expect(r.status).toBe(422);
+        expect(r.body).toMatchObject({ field: 'hubConnectionUrl', fix: expect.stringContaining('hubs://') });
+      }
+      expect([mem.s.saves, ensure.mock.calls.length, hub.calls.length]).toEqual([0, 0, 0]);
+    } finally {
+      await srv.close();
+    }
+    const warn = jest.fn();
+    settingsRouter({ settings, link, env: E({ ...PROD, HUB_URL: `hub://${KEY_A}@hub-a.example/proj-a` }), log: { ...log, warn } });
+    expect(warn).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('hubs://'));
+    expect(parseInput({ hubConnectionUrl: HTTP_B })).toMatchObject({ hubConnectionUrl: HTTP_B }); // ngoài production: như cũ
+  });
+
   it('publicView: bí mật ngắn (< 12 ký tự) không lộ 4 ký tự cuối', () => {
     const v = publicView(resolveSettings(null, E({ PAYOS_API_KEY: 'short' }), null), true);
     expect(v.fields.payosApiKey).toEqual({ source: 'env', configured: true, last4: null });
