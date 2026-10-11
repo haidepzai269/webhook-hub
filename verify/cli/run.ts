@@ -8,6 +8,8 @@
  *                                  KHÔNG cập nhật bánh cóc (tập con).
  *   npm run verify:deployed        L2 chỉ kịch bản `@deployed-safe`, vào VERIFY_API_URL (bắt buộc). Không bánh cóc.
  *   npm run verify                 L0 + L1 + L2.
+ *   npm run verify:chaos           L3 — kill/restart/pause container hubv (VF5, verify/scenarios/chaos-l3.ts).
+ *   npm run verify:all             L0 → L3.
  *   npm run verify:map [-- --story VF2]   sinh docs/TEST-MAP.md; mồ côi / ma / trùng → ĐỎ.
  *   npm run verify -- --evidence   in khối "Verify:" cho commit từ lần chạy cuối (không chạy lại).
  *
@@ -22,7 +24,7 @@ import * as path from 'path';
 import { hostUrls, loadVerifyEnv, ROOT } from '../lib/compose';
 import { analyzeMap, declaredCodes, MapResult, scanTags, SourcesConfig } from '../lib/map';
 import { layerVerdict, ratchet, relFile, Summary, summarizeJest, unreachableSummary } from '../lib/results';
-import { L2Options, runL2 } from '../lib/e2e-runner';
+import { CHAOS_MODULES, L2Options, runL2 } from '../lib/e2e-runner';
 
 const VERIFY_DIR = path.join(ROOT, 'verify');
 const RESULTS_DIR = path.join(VERIFY_DIR, '.results');
@@ -34,7 +36,7 @@ const TEST_MAP = path.join(ROOT, 'docs', 'TEST-MAP.md');
 const SCAN_DIRS = ['apps', 'libs', 'verify', 'tools'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', '.results', '.git']);
 
-type Layer = 'L0' | 'L1' | 'L2';
+type Layer = 'L0' | 'L1' | 'L2' | 'L3';
 
 function walk(dir: string, match: (f: string) => boolean, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;
@@ -103,6 +105,14 @@ function runJest(layer: Layer, files: string[], env: NodeJS.ProcessEnv): { summa
 }
 
 async function runLayer(layer: Layer, l2: L2Options = defaultL2()): Promise<{ summary: Summary; ms: number }> {
+  if (layer === 'L3') {
+    if (l2.deployed) throw new Error('L3 chaos không bao giờ chạy vào deployed');
+    console.log(`
+▶ L3: chaos → ${l2.apiUrl} (docker compose -p hubv kill/restart/pause)`);
+    const t0 = Date.now();
+    const summary = await runL2({ ...l2, tags: l2.tags.length ? l2.tags : ['chaos'] }, CHAOS_MODULES, false);
+    return { summary, ms: Date.now() - t0 };
+  }
   if (layer === 'L2') {
     console.log(`
 ▶ L2: kịch bản e2e → ${l2.apiUrl}${l2.tags.length ? ` (tag ${l2.tags.join(', ')})` : ''}${l2.deployed ? ' [deployed: chỉ @deployed-safe]' : ''}`);
@@ -166,7 +176,7 @@ async function verify(layers: Layer[], l2: L2Options = defaultL2()): Promise<num
   for (const [layer, r] of Object.entries(results)) {
     if (r.summary.fail > 0 || r.summary.note) continue;
     // Tập con (lọc tag / deployed) không phải "số test của tầng" — không đụng bánh cóc.
-    if (layer === 'L2' && (l2.tags.length > 0 || l2.deployed)) continue;
+    if ((layer === 'L2' || layer === 'L3') && (l2.tags.length > 0 || l2.deployed)) continue;
     const rr = ratchet(baseline, layer, r.summary.pass, commitMsg);
     ratchetNotes.push(rr.message);
     if (!rr.ok) problems.push(rr.message);
@@ -205,7 +215,7 @@ async function verify(layers: Layer[], l2: L2Options = defaultL2()): Promise<num
   }
 
   console.log('\n' + fmtRow(['tầng', 'pass', 'fail', 'skip', 'thời gian']));
-  for (const layer of ['L0', 'L1', 'L2']) {
+  for (const layer of ['L0', 'L1', 'L2', 'L3']) {
     const r = results[layer];
     if (r) console.log(fmtRow([layer, r.summary.pass, r.summary.fail, r.summary.skip, `${Math.round(r.ms / 1000)}s`]) + (r.summary.note ? `   ${r.summary.note}` : ''));
   }
@@ -322,7 +332,7 @@ function evidence(): number {
     const code = /\[[A-Z]{2}:[^\]]+\]/.exec(f.name)?.[0] ?? f.name.slice(0, 60);
     lines.push(`  RED   ${code} ${(f.lines ?? []).join(' ').slice(0, 140)}   (${red.at}, ${red.commit})`);
   }
-  for (const layer of ['L0', 'L1', 'L2']) {
+  for (const layer of ['L0', 'L1', 'L2', 'L3']) {
     const l = last.layers?.[layer];
     if (l) lines.push(`  ${layer.padEnd(4)} ${String(l.pass).padStart(4)} pass / ${l.fail} fail / ${l.skip} skip  ${Math.round(l.ms / 1000)}s${l.note ? ` (${l.note})` : ''}`);
   }
@@ -354,6 +364,14 @@ async function main() {
       }
       process.exit(await verify(['L2'], { tags: [], deployed: true, apiUrl }));
     }
+    case 'chaos': {
+      const tags = rest.flatMap((x, i) => (rest[i - 1] === '--tag' ? x.split(',') : []));
+      process.exit(await verify(['L3'], { ...defaultL2(), tags }));
+    }
+    case 'all-l3': {
+      const code = await verify(['L0', 'L1', 'L2', 'L3']);
+      process.exit(code || mapCmd());
+    }
     case 'all': {
       const code = await verify(['L0', 'L1', 'L2']);
       const mapCode = mapCmd();
@@ -362,7 +380,7 @@ async function main() {
     case 'map':
       process.exit(mapCmd(opt('--story')));
     default:
-      console.error('Dùng: run.ts unit|db|e2e [--tag x]|deployed|all|map [--story X] [--evidence]');
+      console.error('Dùng: run.ts unit|db|e2e [--tag x]|deployed|chaos|all|all-l3|map [--story X] [--evidence]');
       process.exit(2);
   }
 }

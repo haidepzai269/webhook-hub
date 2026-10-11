@@ -25,7 +25,10 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let redis: Redis | null = null;
 export async function flushRateLimits(): Promise<void> {
-  redis ??= new Redis(process.env.VERIFY_REDIS_URL || hostUrls().REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
+  if (!redis) {
+    redis = new Redis(process.env.VERIFY_REDIS_URL || hostUrls().REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    redis.on('error', () => undefined); // chaos tắt Redis hubv: lỗi kết nối nền không phải lỗi kịch bản
+  }
   const keys = await redis.keys('rl:*');
   if (keys.length) await redis.del(...keys);
 }

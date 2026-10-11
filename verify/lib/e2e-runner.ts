@@ -17,6 +17,8 @@ export const EXTERNAL_SUITES: { file: string; tags: string[] }[] = [{ file: 'ver
 
 /** File kịch bản module — thêm file mới vào đây (mỗi spec tự thêm kịch bản của mình). */
 export const SCENARIO_MODULES = ['verify/scenarios/ingest-e2e.ts'];
+/** VF5: L3 chaos — kill/restart/pause container hubv. Không bao giờ trong verify:deployed. */
+export const CHAOS_MODULES = ['verify/scenarios/chaos-l3.ts'];
 
 export interface L2Options {
   tags: string[];
@@ -50,21 +52,21 @@ function reachable(url: string, timeoutMs = 2000): Promise<boolean> {
   });
 }
 
-export async function runL2(o: L2Options): Promise<Summary> {
+export async function runL2(o: L2Options, modules: string[] = SCENARIO_MODULES, withExternal = true): Promise<Summary> {
   if (!(await reachable(o.apiUrl))) {
     return { pass: 0, fail: 0, skip: 1, tests: [], note: `hub-api ${o.apiUrl} không kết nối được — chưa \`npm run verify:up\`?` };
   }
   const env = { ...process.env, VERIFY_API_URL: o.apiUrl, ...(o.deployed ? { VERIFY_DEPLOYED: '1' } : {}) };
   Object.assign(process.env, env);
   const files: ScenarioFile[] = [];
-  for (const m of SCENARIO_MODULES) {
+  for (const m of modules) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = require(path.join(ROOT, m));
     files.push((mod.default ?? mod) as ScenarioFile);
   }
   const s = await runScenarioFiles(files, o.tags, o.deployed);
   const tests = [...s.tests];
-  if (!o.deployed) {
+  if (!o.deployed && withExternal) {
     for (const ext of EXTERNAL_SUITES) {
       if (o.tags.length > 0 && !o.tags.some((t) => ext.tags.includes(t))) continue;
       console.log(`\n▶ L2 ${ext.file}`);

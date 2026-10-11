@@ -204,7 +204,6 @@
     "AF:#1": "Kiểm bằng ls libs/*/dist + đổi tên export rồi khởi động container (docker) — chờ VF4/VF5 nhập vào runner L2",
     "AF:#2": "Kiểm bằng grep docker-entrypoint.sh + thư mục migrations — không phải test jest",
     "AF:#13": "Kiểm bằng grep seed.ts — không phải test jest",
-    "AF:#20": "docker compose restart rabbitmq — kịch bản chaos, chờ VF5 (L3)",
     "AF:#27": "Kiểm tài liệu ARCHITECTURE (fixed window, không jitter) — không phải test",
     "AF:#32": "Badge dashboard đổi đỏ live (GIF) — kiểm tay trên trình duyệt",
     "AF:#41": "PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test",
