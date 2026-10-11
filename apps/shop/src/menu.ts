@@ -10,6 +10,7 @@ export const MENU: MenuItem[] = [
   { id: 'm4', name: 'Wrap gà Fajita', category: 'wraps', price: 59000, oldPrice: 75000, image: img(4), description: 'Gà nướng fajita, ớt chuông, hành tây, sốt kem chua cuộn bánh tortilla.', rating: 4, tags: ['Mới'] },
   { id: 'm5', name: 'Bánh Lava Nutella', category: 'desserts', price: 45000, oldPrice: 55000, image: img(5), description: 'Bánh sô-cô-la nóng, nhân Nutella chảy, kèm kem vani.', rating: 5, tags: ['Ngọt'] },
   { id: 'm6', name: 'Mì Ý nấm Truffle', category: 'pasta', price: 99000, oldPrice: 119000, image: img(6), description: 'Mì fettuccine sốt kem nấm, dầu truffle và phô mai Parmesan.', rating: 5, tags: ['Đặc biệt'] },
+  { id: 'm7', name: 'Trà đá thử nghiệm', category: 'desserts', price: 5000, oldPrice: 7000, image: img(5), description: 'Món giá thấp để thử thanh toán thật', rating: 5, tags: ['Thử nghiệm'] },
 ];
 
 export interface OrderLine { id: string; name: string; price: number; qty: number }
