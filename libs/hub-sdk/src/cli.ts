@@ -64,7 +64,10 @@ function fixOf(e: unknown): string | null {
 /** Trần chờ theo Retry-After (L-5): hub/proxy xin chờ lâu hơn thì vẫn thử lại sau 30s. */
 export const MAX_RETRY_AFTER_MS = 30_000;
 const MIN_RETRY_MS = 1000;
-/** R2-L2: số lần thử `after=latest` trước khi bỏ cuộc (≈ 40 s với backoff 1/2/5 s). */
+/**
+ * R2-L2: số lần thử `after=latest` trước khi bỏ cuộc. R3-L1: ≈ 10 s với 503 của `after=latest` (hub gửi `retryAfter: 1` -> 9
+ * lần chờ 1 s), ≈ 40 s với 5xx/mất mạng không có Retry-After (1 + 2 + 5 × 7 s).
+ */
 export const LATEST_MAX_ATTEMPTS = 10;
 
 const describe = (he: HubError) => (he?.status ? `HTTP ${he.status}` : he?.code ?? 'error');

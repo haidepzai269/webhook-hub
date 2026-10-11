@@ -43,13 +43,14 @@ npm run verify:map        # mở docs/TEST-MAP.md để biết test nào chứng
 Muốn **dùng** hub như một dev bên ngoài: xem `docs/QUICKSTART.md` — đăng ký trên web hubv `http://localhost:13000`
 (`COMPOSE_PROFILES=web` / `VERIFY_WITH_WEB=1 npm run verify:up`), tạo key, `npx hub listen`.
 
-### Năm lỗi hay gặp
+### Sáu lỗi hay gặp
 
 1. **Cổng 15433 (hoặc 14000, 16379…) bị chiếm** — một stack hubv cũ còn chạy: `npm run verify:down` rồi `verify:up`.
 2. **`no such file` khi container khởi động** — file `.sh` mang CRLF: `.gitattributes` đã ép LF; checkout lại (`git rm --cached -r . && git reset --hard` trên nhánh sạch) hoặc `dos2unix`.
 3. **Docker thiếu RAM: RabbitMQ bị OOM kill** — Docker Desktop ≥ 6 GB, hoặc tắt stack dev khi chạy hubv.
 4. **`PRECONDITION_FAILED` do queue cũ** — đổi `x-message-ttl` của queue đã tồn tại: `npm run verify:reset` (xoá volume hubv, không đụng stack dev).
 5. **`verify:db` báo `skip > 0`** — chưa `verify:up` (hoặc Postgres hubv chưa healthy): `npm run verify:ps`.
+6. **`hub listen --from latest` thoát mã 1 "gave up after 10 attempts"** trên project chỉ dùng push có backlog lớn (vd sau k6): mỗi lần chạy cấp cursor cho tối đa ~100k event tồn (10 request × 10 lô × 1000) rồi bỏ cuộc — tiến độ đã commit được giữ, cứ chạy lại lệnh (hoặc dùng `--from <cursor>`) (ADR-145).
 
 ## 3. Trước buổi bảo vệ
 
