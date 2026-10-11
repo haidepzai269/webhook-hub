@@ -77,6 +77,8 @@ Khi có 2 dòng trên, nhắn: **"sinh env deploy"**. Coordinator sẽ:
 | Region                       | **Singapore**                                                       |
 | Branch                       | `master`                                                            |
 | Runtime / Language           | **Docker**                                                          |
+| Root Directory               | (để trống — gốc repo; Dockerfile ở gốc và build cần cả `libs/`)     |
+| Docker Build Context Directory | `.` (mặc định)                                                    |
 | Dockerfile Path              | `./Dockerfile`                                                      |
 | Docker Command               | `docker-entrypoint.sh hub-all` (hub-api + hub-worker, ADR-129)      |
 | Instance Type                | **Free**                                                            |
@@ -118,18 +120,28 @@ Kiểm ở bước 3: log có cả `"proc":"api"` lẫn `"proc":"worker"`; Cloud
 | ------------------------------------ | ----------------------------------------------------------------- |
 | Project Name                         | vd `webhook-hub` → URL `https://webhook-hub.vercel.app` (ghi lại) |
 | Framework Preset                     | **Next.js**                                                       |
-| Root Directory                       | `apps/web` (bấm Edit)                                             |
+| Root Directory                       | `apps/web` (bấm Edit) — **BẮT BUỘC** (ngược với Render, nơi để trống) |
 | Build / Output                       | để mặc định                                                       |
 | Node.js Version (Settings → General) | **22.x**                                                          |
 
-3. **Environment Variables** — dán **khối `[web]`**:
+> ⚠️ **Root Directory khác Render:** Vercel PHẢI là `apps/web` (Next.js nằm ở đó); Render (§3, §8) để TRỐNG vì Dockerfile ở gốc repo và build cần cả `libs/`.
 
-| Biến                       | Giá trị                             | Ghi chú                                                    |
-| -------------------------- | ----------------------------------- | ---------------------------------------------------------- |
-| `HUB_API_INTERNAL_URL`     | `https://hub-api-xxxx.onrender.com` | Đích proxy `/api/*`, `/auth/*` — **đọc lúc BUILD**         |
-| `NEXT_PUBLIC_HUB_API_URL`  | `https://hub-api-xxxx.onrender.com` | Socket.IO + URL `/hooks` hiển thị                          |
-| `NEXT_PUBLIC_SHOP_API_URL` | `https://shop-xxxx.onrender.com`    | Chưa có (bước 8) → tạm để trống, điền sau rồi **Redeploy** |
-| `WEB_PROXY_SECRET`         | giống hệt hub-api                   | runtime, không phải `NEXT_PUBLIC_`                         |
+3. **Environment Variables** — dán **khối `[web]`**, làm HAI đợt:
+
+   **Đợt 1 — lần deploy đầu** (chưa có URL Render): chỉ biến đã biết.
+
+| Biến               | Giá trị           | Ghi chú                                         |
+| ------------------ | ----------------- | ----------------------------------------------- |
+| `WEB_PROXY_SECRET` | giống hệt hub-api | runtime (đọc lúc chạy), không phải `NEXT_PUBLIC_` |
+
+   **Đợt 2 — sau khi `hub-api` (§3) và `shop` (§8) đã có URL:** thêm ba biến URL rồi **Deployments → Redeploy**. Ba biến này được
+   **nhúng lúc BUILD** (`NEXT_PUBLIC_*` vào bundle trình duyệt; `HUB_API_INTERNAL_URL` vào `rewrites`) — đổi giá trị mà không Redeploy thì không có tác dụng.
+
+| Biến                       | Giá trị                             | Ghi chú                                       |
+| -------------------------- | ----------------------------------- | --------------------------------------------- |
+| `HUB_API_INTERNAL_URL`     | `https://hub-api-xxxx.onrender.com` | Đích proxy `/api/*`, `/auth/*` — **đọc lúc BUILD** |
+| `NEXT_PUBLIC_HUB_API_URL`  | `https://hub-api-xxxx.onrender.com` | Socket.IO + URL `/hooks` hiển thị — BUILD      |
+| `NEXT_PUBLIC_SHOP_API_URL` | `https://shop-xxxx.onrender.com`    | Storefront gọi backend shop — BUILD           |
 
 **KHÔNG đặt** `NEXT_PUBLIC_DEMO_SIMULATE`, `NEXT_PUBLIC_DEMO_SEPAY_APIKEY` (chỉ local, ADR-027).
 
@@ -165,6 +177,13 @@ Nhắn: **"seed neon"**. Agent chạy seed từ máy local với khối `[hub-ap
 ## 8. Render — `shop` (Web Service)
 
 1. **New → Web Service** → repo `webhook-hub` → Name `shop` · Region **Singapore** · Branch `master` · Runtime **Docker** · Docker Command `docker-entrypoint.sh shop` · Instance **Free** · Health Check Path `/products` (Shop không có route `/health`).
+
+| Ô                              | Giá trị                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| Root Directory                 | (để trống — gốc repo; Dockerfile ở gốc và build cần cả `libs/`) |
+| Docker Build Context Directory | `.` (mặc định)                                                  |
+| Dockerfile Path                | `./Dockerfile`                                                  |
+
 2. Environment — khối `[shop]`:
 
 | Biến                                   | Giá trị                                                                   |
