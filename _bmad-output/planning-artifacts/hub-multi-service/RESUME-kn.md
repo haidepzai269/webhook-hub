@@ -19,7 +19,7 @@ Spec: `SPEC-ket-noi.md` (ADR-138). Câu hỏi cho Admin: `CAN-ADMIN-QUYET-KN.md`
 | KN1 | xong (L0+L1 xanh, L2 [KN:T1] NOT RUN — hubv chưa rebuild) | c888ef6 + 3955b9f |
 | KN2 | xong (L0 772/0/0, L1 xanh sau chạy lại — lần đầu 21 đỏ do tranh chấp hubv/Redis rate-limit với phiên VF), probe P-KN1..4 đỏ ✓ | (commit KN2) |
 | KN3 | xong trừ KQ1 (U16 mồ côi có lý do, hook `isPayosConfirmProbe` TODO) — L0 786/0/0, L1 KN 14/14 | (commit KN3) |
-| KN4 | chưa | |
+| KN4 | xong — L1 stripe-connect-db 3/3, probe P-KN4-01 đỏ ✓ | (commit KN4) |
 
 ## KN1 — đã làm
 - `apps/hub-api/src/modules/service-api/endpoint.service.ts` (lõi chung), `console/endpoints.controller.ts`, 422 `use_endpoints_route` ở `api.controller.ts`.
@@ -37,5 +37,5 @@ Spec: `SPEC-ket-noi.md` (ADR-138). Câu hỏi cho Admin: `CAN-ADMIN-QUYET-KN.md`
 - KN3: `libs/providers/src/connectors/{http,payos.connector}.ts`, `PayosAdapter.connector`, hook KQ1 `isPayosConfirmProbe`. Test `payos-connector.spec.ts` (U12b, U13), `payos-connect-db.spec.ts` (U8b với fake PayOS + ingest tối thiểu). Docs: ARCHITECTURE §19, CLAUDE.md cạm bẫy 4 + Trạng thái, SPEC-verification §9.1 bước 10. ADR-149.
 
 ## Bước tiếp
-- KN4 Stripe: `libs/providers/src/connectors/stripe.connector.ts` (POST/GET/DELETE `{base}/v1/webhook_endpoints`, form-encoded, `enabled_events[]` = 3 kiểu trong STRIPE_PAYMENT_TYPES), `StripeAdapter.connector`; secret do Stripe sinh -> `result.sourceSecret` (khung KN2 đã lưu version + chồng 24h + gỡ we_ cũ). Test U14, U15 (+ L1 với fake Stripe của sink).
+- (XONG) KN4 Stripe: `libs/providers/src/connectors/stripe.connector.ts` (POST/GET/DELETE `{base}/v1/webhook_endpoints`, form-encoded, `enabled_events[]` = 3 kiểu trong STRIPE_PAYMENT_TYPES), `StripeAdapter.connector`; secret do Stripe sinh -> `result.sourceSecret` (khung KN2 đã lưu version + chồng 24h + gỡ we_ cũ). Test U14, U15 (+ L1 với fake Stripe của sink).
 - `KICH-BAN-TEST-DA-SERVICE.md` chặng C (theo route thật) — chưa làm.

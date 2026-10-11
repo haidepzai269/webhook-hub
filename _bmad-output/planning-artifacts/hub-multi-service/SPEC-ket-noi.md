@@ -359,11 +359,15 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
   - `remoteRef` = `****<4 số cuối>` (PayOS không có id webhook). Lỗi: HTTP 401/403 → `invalid_credentials`; còn lại → `webhook_rejected` (fix nhắc HUB_PUBLIC_URL công khai + Checksum Key đúng kênh); mạng → `provider_unreachable`/`provider_timeout`.
   - Retry với checksumKey khác → SourceSecret version mới TRƯỚC khi gọi PayOS (bản cũ còn verify 24 giờ).
   - Fake PayOS bắn request kiểm tra bằng đúng mẫu tài liệu (trên) — có chữ ký thật theo checksum của fake.
+- **KN4 (ADR-150):**
+  - `enabled_events[]` = đúng 3 kiểu trong `STRIPE_PAYMENT_TYPES` (bảng tách ra `libs/providers/src/stripe-types.ts`, adapter + connector dùng chung).
+  - `status?` nhận `ingestUrl` để so URL; `gone` (404) → kết nối FAILED `remote_gone` (spec không nói map vào đâu); `drifted` → DRIFTED. `disconnect` gặp 404 coi như đã ngắt.
+  - Display `Stripe (test|live) · we_…` (chế độ suy từ tiền tố key). Kết nối lại: khung KN2 gỡ `we_` cũ (probe `P-KN4-01`), secret cũ còn hiệu lực 24 giờ.
 
 ## 12. Checklist và kết quả
 
-- [x] KN1 · [ ] KN1b (tuỳ chọn) · [x] KN2 · [x] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
-- ADR mới: …
+- [x] KN1 · [ ] KN1b (tuỳ chọn) · [x] KN2 · [x] KN3 · [x] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
+- ADR mới: ADR-142 (KN1), ADR-146 (KN2), ADR-149 (KN3), ADR-150 (KN4).
 
 | Kịch bản | PASS/FAIL | Ghi chú | Ngày |
 |---|---|---|---|

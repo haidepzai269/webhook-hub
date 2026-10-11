@@ -1,0 +1,14 @@
+{
+  "id": "P-KN4-01",
+  "claim": "Kết nối lại Stripe mà không gỡ webhook endpoint cũ (we_ cũ vẫn bắn vào hub, hai secret song song mãi)",
+  "file": "apps/hub-api/src/modules/console/source-connection.service.ts",
+  "find": "if (result && previousRemoteRef && previousRemoteRef !== result.remoteRef && connector.disconnect) {",
+  "replace": "if (false && result && previousRemoteRef && connector.disconnect) {",
+  "expectRed": [
+    "[KN:U15]"
+  ],
+  "layer": "L1",
+  "testFile": [
+    "apps/hub-api/test/stripe-connect-db.spec.ts"
+  ]
+}

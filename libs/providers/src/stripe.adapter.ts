@@ -3,6 +3,8 @@ import { ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, parseProviderTime } from '@hub/common';
 import { NormalizeContext, amountOf, envelope, fallbackTxnId, receivedTime, str } from './normalize-helpers';
 import { bodyHashKey } from '@hub/crypto';
+import { STRIPE_PAYMENT_TYPES } from './stripe-types';
+import { stripeConnector } from './connectors/stripe.connector';
 
 /**
  * `stripe.webhooks.constructEvent()` chỉ tính HMAC-SHA256 cục bộ trên rawBody +
@@ -11,15 +13,10 @@ import { bodyHashKey } from '@hub/crypto';
  */
 const stripeClient = new Stripe('sk_placeholder_webhook_verify_only');
 
-/** Bảng ánh xạ Stripe -> catalog thanh toán (SPEC đa service §4.14.2). */
-const STRIPE_PAYMENT_TYPES: Record<string, { type: string; amountField: string; timeKey: string }> = {
-  'payment_intent.succeeded': { type: 'payment.received', amountField: 'amount_received', timeKey: 'paidAt' },
-  'payment_intent.payment_failed': { type: 'payment.failed', amountField: 'amount', timeKey: 'failedAt' },
-  'charge.refunded': { type: 'payment.refunded', amountField: 'amount_refunded', timeKey: 'refundedAt' },
-};
-
 export class StripeAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'stripe';
+  /** KN4 (SPEC-ket-noi §5.2): hub tự tạo webhook endpoint ở Stripe; Stripe sinh secret ký. */
+  readonly connector = stripeConnector;
 
   /**
    * `secrets` là mảng signing secret (`whsec_...`) giải mã từ `source_secrets`

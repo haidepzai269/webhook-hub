@@ -10,3 +10,4 @@ export * from './generic-config';
 export * from './errors';
 export * from './connector-base-url';
 export * from './connectors/payos.connector';
+export * from './connectors/stripe.connector';
