@@ -19,6 +19,10 @@ export const SECRET_OVERLAP_MS = 24 * 60 * 60_000;
  * PENDING cũ hơn = kẹt (tiến trình chết giữa chừng / TX ghi kết quả lỗi) -> cho bấm lại. Lớn hơn timeout `connectorFetch` (20s).
  */
 export const PENDING_STALE_MS = 60_000;
+/** H-R2-1: số raw_events gần nhất (từ lúc có secret do người dùng nhập) đem verify lại khi kiểm tình trạng. */
+export const SECRET_EVIDENCE_SAMPLE = 20;
+const SECRET_MISMATCH_FIX =
+  'checksumKey vừa nhập KHÔNG khớp webhook thật (provider vẫn ký bằng key cũ) — hub giữ cả hai key nên không mất sự kiện. Nhập lại đúng checksumKey rồi bấm "Thử lại".';
 
 const notFound = () => hubError('not_found', {}, 'Source không tồn tại');
 const inProgress = () => hubError('conflict', { code: 'connection_in_progress' }, 'Đang kết nối với provider (một lượt khác vừa bấm) — đợi kết quả rồi tải lại');
@@ -185,7 +189,7 @@ export class SourceConnectionService {
     const existing = await this.prisma.forTenant(tenantId).findSourceConnection(source.id);
     if (existing) {
       const r = await this.retry(tenantId, actor, source.id, { credentials });
-      return { source: publicSource(source), connection: r.connection };
+      return { source: publicSource(source), connection: r.connection, secretChanged: r.secretChanged };
     }
     const base = publicIngestBase(this.env);
     if (!base) throw hubError('public_url_required', {}, 'HUB_PUBLIC_URL là localhost/IP nội bộ — provider không gọi vào được');
@@ -193,10 +197,11 @@ export class SourceConnectionService {
     const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
     const masterKey = getMasterKey();
     // (3) TX: SourceSecret version mới (nếu cần) + kết nối PENDING -> COMMIT TRƯỚC khi gọi provider.
+    // H-R2-1: secret do NGƯỜI DÙNG nhập -> KHÔNG hẹn hết hạn bản cũ (PayOS confirm không kiểm checksumKey: key dán sai vẫn
+    // CONNECTED). Bản cũ chỉ bị retire khi webhook thật verify bằng key mới (`reconcileUserSecret`, lúc kiểm tình trạng).
+    const secretChanged = !!secretForSource && !this.currentSecrets(source).includes(secretForSource);
     await this.tx(tenantId, async (repo) => {
-      if (secretForSource && !this.currentSecrets(source).includes(secretForSource)) {
-        await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource, masterKey), new Date(Date.now() + SECRET_OVERLAP_MS));
-      }
+      if (secretChanged) await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource!, masterKey));
       await repo.createSourceConnection({
         sourceId: source.id,
         provider: source.provider,
@@ -210,7 +215,7 @@ export class SourceConnectionService {
       throw e;
     });
     const view = await this.callConnect(tenantId, actor, source.id, source.provider, connector, credentials, ingestUrl, 'source.connect', null);
-    return { source: publicSource(source), connection: view };
+    return { source: publicSource(source), connection: view, secretChanged };
   }
 
   /** "Thử lại" / kết nối lại: credentials trong body (đổi) hoặc bản đã lưu. Đã xoá credentials mà không gửi -> 422 `credentials_required`. */
@@ -227,6 +232,7 @@ export class SourceConnectionService {
     if (!base) throw hubError('public_url_required', {}, 'HUB_PUBLIC_URL là localhost/IP nội bộ — provider không gọi vào được');
     const ingestUrl = `${base}/hooks/${source.provider}/${source.sourceKey}`;
     const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
+    const secretChanged = !!secretForSource && !this.currentSecrets(source).includes(secretForSource);
     const masterKey = getMasterKey();
     await this.tx(tenantId, async (repo) => {
       // L-3: giành kết nối TRƯỚC (UPDATE có điều kiện) — lượt khác đang PENDING -> 409, không đụng secret.
@@ -236,13 +242,12 @@ export class SourceConnectionService {
       });
       if (!claimed) throw inProgress();
       // Secret ký do dev nhập đổi (vd checksumKey mới) -> version mới TRƯỚC khi gọi provider (request kiểm tra phải verify được).
-      if (secretForSource && !this.currentSecrets(source).includes(secretForSource)) {
-        await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource, masterKey), new Date(Date.now() + SECRET_OVERLAP_MS));
-      }
+      // H-R2-1: KHÔNG hẹn hết hạn bản cũ — xem connectExisting.
+      if (secretChanged) await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource!, masterKey));
     });
     const action = conn.status === 'CONNECTED' || conn.status === 'DRIFTED' ? 'source.reconnect' : 'source.connect';
     const view = await this.callConnect(tenantId, actor, source.id, source.provider, connector, credentials, ingestUrl, action, conn.remoteRef);
-    return { connection: view };
+    return { connection: view, secretChanged };
   }
 
   async status(tenantId: string, sourceId: string): Promise<ConnectionView> {
@@ -251,11 +256,14 @@ export class SourceConnectionService {
     const expected = base ? `${base}/hooks/${source.provider}/${source.sourceKey}` : null;
     const due = !conn.lastCheckedAt || Date.now() - new Date(conn.lastCheckedAt).getTime() >= STATUS_CHECK_INTERVAL_MS;
     let next = conn;
-    if (due && (conn.status === 'CONNECTED' || conn.status === 'DRIFTED')) {
+    if (due) {
       let status = conn.status;
       let lastError: string | null = conn.lastError;
       let lastFix: string | null = conn.lastFix;
-      if (expected && expected !== conn.ingestUrl) {
+      const live = conn.status === 'CONNECTED' || conn.status === 'DRIFTED';
+      if (!live) {
+        // FAILED / PENDING / DISCONNECTED: không hỏi provider; chỉ đối chiếu secret bên dưới.
+      } else if (expected && expected !== conn.ingestUrl) {
         // HUB_PUBLIC_URL đổi (đổi domain) -> provider vẫn gọi URL cũ.
         status = 'DRIFTED';
         lastError = 'public_url_changed';
@@ -272,6 +280,17 @@ export class SourceConnectionService {
             logger.warn({ sourceId, provider: source.provider, error: e instanceof ConnectorError ? e.code : 'status_failed' }, 'Kiểm tình trạng kết nối thất bại');
           }
         }
+      }
+      const evidence = await this.reconcileUserSecret(tenantId, source, conn, connector).catch((e) => {
+        logger.warn({ sourceId, provider: source.provider, error: (e as Error)?.name ?? 'reconcile_failed' }, 'Đối chiếu secret thất bại');
+        return null;
+      });
+      if (evidence === 'mismatch' && (!lastError || lastError === 'secret_mismatch')) {
+        lastError = 'secret_mismatch';
+        lastFix = SECRET_MISMATCH_FIX;
+      } else if (evidence === 'confirmed' && lastError === 'secret_mismatch') {
+        lastError = null;
+        lastFix = null;
       }
       next = (await this.tx(tenantId, (repo) => repo.updateSourceConnection(sourceId, { status, lastError, lastFix, lastCheckedAt: new Date() }))) ?? conn;
     }
@@ -412,6 +431,51 @@ export class SourceConnectionService {
     const connector = ProviderRegistry.has(source.provider) ? ProviderRegistry.get(source.provider).connector : undefined;
     if (!conn || !connector) throw hubError('not_found', {}, 'Source này chưa có kết nối provider');
     return { source, conn, connector };
+  }
+
+  /**
+   * H-R2-1 (ADR-152): secret do NGƯỜI DÙNG nhập (`spec.sourceSecretField`, vd checksumKey PayOS) chỉ thay bản cũ khi có
+   * BẰNG CHỨNG: webhook thật (raw_events ACCEPTED, từ lúc key đó được lưu) verify bằng chính key trong credentials.
+   * - có bằng chứng -> retire các version hiện hành KHÁC (+24h cho lượt gửi lại) -> 'confirmed';
+   * - webhook thật chỉ verify bằng version khác -> 'mismatch' (không retire gì; UI báo nhập sai);
+   * - chưa có webhook -> null (giữ cả hai — chiều an toàn).
+   * Chạy lười trong lúc kiểm tình trạng (console, ≤ 1 lần/phút/kết nối) — KHÔNG chạm đường ingest: 0 lệnh Redis, không
+   * thêm ghi vào TX raw_events (BB-3 giữ nguyên). Secret do provider sinh (Stripe) giữ luật +24h ở `callConnect`.
+   */
+  private async reconcileUserSecret(tenantId: string, source: any, conn: any, connector: ProviderConnector): Promise<'confirmed' | 'mismatch' | null> {
+    const field = connector.spec.sourceSecretField;
+    if (!field) return null;
+    const entered = this.decrypt(conn.credentialsEncrypted)?.[field];
+    if (!entered) return null;
+    const masterKey = getMasterKey();
+    const current = (source.secrets ?? [])
+      .filter((x: any) => !x.validUntil)
+      .map((x: any) => {
+        try {
+          return { version: x.version as number, validFrom: new Date(x.validFrom), value: aesGcmDecrypt(x.secretEncrypted, masterKey) };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as { version: number; validFrom: Date; value: string }[];
+    const mine = current.filter((x) => x.value === entered);
+    const others = current.filter((x) => x.value !== entered);
+    if (mine.length === 0 || others.length === 0) return null;
+    const since = new Date(Math.min(...mine.map((x) => x.validFrom.getTime())));
+    const events = (await this.prisma.forTenant(tenantId).findRecentRawEventsForSource(source.id, since, SECRET_EVIDENCE_SAMPLE)).filter((e: any) => e.signatureValid);
+    if (events.length === 0) return null;
+    const adapter = ProviderRegistry.get(source.provider);
+    const ctx = { verificationConfig: source.verificationConfig };
+    let otherOnly = false;
+    for (const e of events) {
+      const req = { provider: source.provider, sourceKey: source.sourceKey, headers: (e.headers ?? {}) as any, rawBody: Buffer.from(e.bodyRaw), body: e.body, contentType: e.contentType ?? undefined };
+      if (await adapter.verify(req, [entered], ctx)) {
+        await this.tx(tenantId, (repo) => repo.retireSourceSecretVersions(source.id, others.map((x) => x.version), new Date(Date.now() + SECRET_OVERLAP_MS)));
+        return 'confirmed';
+      }
+      if (await adapter.verify(req, others.map((x) => x.value), ctx)) otherOnly = true;
+    }
+    return otherOnly ? 'mismatch' : null;
   }
 
   /** Secret HIỆN HÀNH (không hạn). Bản đang được thay (có `validUntil`) không tính: trùng nó vẫn phải thêm version mới, không thì hết 24 giờ là verify hỏng. */

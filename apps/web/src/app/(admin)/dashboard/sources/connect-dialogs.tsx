@@ -76,6 +76,7 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [ack, setAck] = useState(false);
   const [result, setResult] = useState<ConnectionView | null>(null);
+  const [secretChanged, setSecretChanged] = useState(false);
   // H-1 (ADR-151): "nguồn có sẵn" (giữ sourceKey — service đang ghim nguồn đó vẫn nhận) hay "tạo nguồn mới".
   const [mode, setMode] = useState<"existing" | "new" | null>(null);
   const [existingId, setExistingId] = useState<string>("");
@@ -83,6 +84,8 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
   const sources = useSources();
   const spec = (connectors.data ?? []).find((c) => c.provider === provider) ?? connectors.data?.[0];
   const candidates = (sources.data ?? []).filter((s) => s.provider === spec?.provider && s.isActive);
+  // L-R2-2: danh sách nguồn chưa tải xong / lỗi -> KHÔNG ngầm chọn "tạo mới" (lặp lại H-1); khoá nút Kết nối.
+  const sourcesReady = sources.isSuccess;
   // Mặc định: provider đã có nguồn -> kết nối nguồn có sẵn (tạo nguồn mới sẽ làm service đang ghim nguồn cũ mất kênh).
   const effMode = mode ?? (candidates.length ? "existing" : "new");
   const target = candidates.find((s) => s.id === existingId) ?? candidates[0];
@@ -93,11 +96,11 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
         ...(spec?.overwriteWarning ? { acknowledgeOverwrite: ack } : {}),
       };
       return effMode === "existing" && target
-        ? hubFetch<{ connection: ConnectionView }>(`/api/v1/sources/${encodeURIComponent(target.id)}/connect`, {
+        ? hubFetch<{ connection: ConnectionView; secretChanged?: boolean }>(`/api/v1/sources/${encodeURIComponent(target.id)}/connect`, {
             method: "POST",
             body: JSON.stringify(common),
           })
-        : hubFetch<{ connection: ConnectionView }>("/api/v1/sources/connect", {
+        : hubFetch<{ connection: ConnectionView; secretChanged?: boolean }>("/api/v1/sources/connect", {
             method: "POST",
             body: JSON.stringify({
               provider: spec?.provider,
@@ -107,7 +110,7 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
             }),
           });
     },
-    onSuccess: (r) => setResult(r.connection),
+    onSuccess: (r) => (setResult(r.connection), setSecretChanged(!!r.secretChanged)),
     onError: (e) => toast.error(`Kết nối thất bại: ${e.message}`),
     onSettled: refresh,
   });
@@ -115,6 +118,7 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
     if (connect.isPending) return;
     if (!o) {
       setResult(null);
+      setSecretChanged(false);
       setCreds({});
       setAck(false);
       setName("");
@@ -126,6 +130,7 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
   };
   const ready =
     spec &&
+    sourcesReady &&
     (effMode === "existing" ? !!target : !!name.trim()) &&
     spec.fields.every((f) => creds[f.name]?.trim()) && (!spec.overwriteWarning || ack);
 
@@ -139,7 +144,16 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
           </DialogDescription>
         </DialogHeader>
         {result ? (
-          <StatusLine c={result} />
+          <div className="flex flex-col gap-2">
+            <StatusLine c={result} />
+            {secretChanged && (
+              <p className="rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
+                ⚠️ Secret ký (vd checksumKey) khác key hiện tại — hub sẽ giữ <b>cả hai</b> cho tới khi webhook thật xác minh
+                bằng key mới. Nếu webhook thật chỉ khớp key cũ, mục kết nối của nguồn sẽ báo <code>secret_mismatch</code>:
+                nhập lại đúng key rồi bấm &quot;Thử lại&quot;.
+              </p>
+            )}
+          </div>
         ) : !connectors.data?.length ? (
           <p className="text-muted-foreground text-sm">
             {connectors.isLoading
@@ -185,7 +199,13 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
                   Tạo nguồn mới
                 </Button>
               </div>
-              {effMode === "existing" && target ? (
+              {!sourcesReady ? (
+                <FieldDescription className="text-amber-600">
+                  {sources.isError
+                    ? "Không tải được danh sách nguồn — tải lại trang. Chưa thể kết nối (tránh tạo nhầm nguồn mới)."
+                    : "Đang tải danh sách nguồn…"}
+                </FieldDescription>
+              ) : effMode === "existing" && target ? (
                 <>
                   <select
                     aria-label="Nguồn có sẵn"
@@ -199,6 +219,10 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
                       </option>
                     ))}
                   </select>
+                  <FieldDescription>
+                    Secret ký nhập vào khác key nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh bằng
+                    key mới (không tự xoá key cũ).
+                  </FieldDescription>
                   <FieldDescription>
                     Hub đăng ký đúng URL của nguồn này (/hooks/{target.provider}/{target.sourceKey}) — service đang tin
                     nguồn này (vd Shop ghim SHOP_PAYMENT_SOURCE_KEYS) vẫn nhận sự kiện.

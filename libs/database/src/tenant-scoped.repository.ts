@@ -176,6 +176,18 @@ export class TenantScopedRepository {
     return this.prisma.sourceSecret.create({ data: { sourceId, secretEncrypted, version } });
   }
 
+  /**
+   * H-R2-1 (ADR-152): hẹn hết hạn ĐÚNG các version liệt kê (đang hiện hành) của source CỦA tenant này — dùng khi đã có
+   * bằng chứng (webhook thật verify bằng secret khác). Source khác tenant -> 0.
+   */
+  async retireSourceSecretVersions(sourceId: string, versions: number[], at: Date) {
+    if (versions.length === 0) return 0;
+    const source = await this.prisma.source.findFirst({ where: { id: sourceId, tenantId: this.tenantId }, select: { id: true } });
+    if (!source) return 0;
+    const r = await this.prisma.sourceSecret.updateMany({ where: { sourceId, version: { in: versions }, validUntil: null }, data: { validUntil: at } });
+    return r.count;
+  }
+
   // --- Source connections (KN2, ADR-138) — credentials_encrypted chỉ đọc ở service, không bao giờ ra API ---
   async findSourceConnection(sourceId: string) {
     return this.prisma.sourceConnection.findFirst({ where: { sourceId, tenantId: this.tenantId } });
