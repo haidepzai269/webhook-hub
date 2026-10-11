@@ -197,6 +197,39 @@ export const ERROR_CATALOG = {
     params: ['retryAfter'],
     fix: (p) => (Number.isFinite(p.retryAfter) ? `Wait ${p.retryAfter} seconds and retry.` : 'Slow down and retry later (see "detail" for the limit).'),
   },
+  // ---- kết nối hai đầu (SPEC-ket-noi, ADR-138) ----
+  use_endpoints_route: {
+    status: 422,
+    message: 'Webhook endpoints are created through the endpoints route (the hub generates the secret and runs the challenge).',
+    fix: () => 'POST /api/v1/endpoints with {name, url, eventTypes, sourceIds?} — the response shows the whsec_ secret once. /destinations is for telegram/discord.',
+  },
+  endpoint_owned_by_service: {
+    status: 409,
+    message: 'This endpoint is managed by a service API key.',
+    fix: () => 'Rotate the secret from the service itself (POST /v1/p/:project/endpoints/:id/verify with {signingSecret}) — the SDK ensure() does this.',
+  },
+  connector_unsupported: {
+    status: 422,
+    message: 'The hub cannot register its URL at this provider automatically.',
+    params: ['provider'],
+    fix: (p) => `Create the source with POST /api/v1/sources and paste its ingest URL into the ${s(p.provider, 'provider')} dashboard yourself.`,
+  },
+  public_url_required: {
+    status: 422,
+    message: 'HUB_PUBLIC_URL is not reachable from the internet, so the provider cannot call the hub.',
+    fix: () => 'Use a named cloudflared tunnel or the deployed hub, and set HUB_PUBLIC_URL to its public https URL.',
+  },
+  overwrite_not_acknowledged: {
+    status: 422,
+    message: 'Connecting replaces the webhook URL currently set at the provider.',
+    params: ['field'],
+    fix: () => 'Send "acknowledgeOverwrite": true after confirming no backend still needs the old URL (each PayOS channel has a single webhook URL).',
+  },
+  credentials_required: {
+    status: 422,
+    message: 'The stored provider credentials were deleted.',
+    fix: () => 'Reconnect with POST /api/v1/sources/:id/connection/retry and the credentials in the body.',
+  },
   // ---- máy chủ (KHÔNG lộ stack/message gốc) ----
   internal_error: {
     status: 500,
