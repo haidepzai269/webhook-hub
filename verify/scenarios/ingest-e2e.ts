@@ -8,7 +8,7 @@
  */
 import { listFixtures, loadFixture } from '../../tools/hub-sim/src/fixture';
 import { swVerify } from '../../tools/hub-sim/src/sign';
-import { API, closeWorld, createKey, createSource, Dev, psql, registerDev, RUN, sendFixture, SINK, SINK_INTERNAL, sleep, Source, svc, uniq } from '../lib/e2e-world';
+import { API, closeWorld, flushIdempotencyKeys, createKey, createSource, Dev, psql, registerDev, RUN, sendFixture, SINK, SINK_INTERNAL, sleep, Source, svc, uniq } from '../lib/e2e-world';
 import { composeOutput } from '../lib/compose';
 import { expect } from '../lib/http-session';
 import { ScenarioFile, waitFor } from '../lib/scenario';
@@ -101,7 +101,7 @@ const file: ScenarioFile = {
       },
     },
     {
-      name: '[BB:2] (phần l) gửi lại y hệt 3 lần (SePay, GitHub) → 200 cả 3, đúng MỘT event mỗi loại',
+      name: '[BB:2] (phần l) gửi lại y hệt 3 lần (SePay, GitHub), XOÁ khoá idem:* của Redis giữa các lần (chỉ Postgres phán) → 200 cả 3, đúng MỘT event mỗi loại',
       tags: ['smoke', 'VF4', 'demo-redeliver'],
       fn: async () => {
         // Nhận diện lần gửi: GitHub theo header delivery, SePay theo `id` trong body (cả hai chứa số unique `u`).
@@ -112,6 +112,7 @@ const file: ScenarioFile = {
         for (const c of cases) {
           const u = uniq();
           for (let i = 0; i < 3; i++) {
+            if (i > 0) await flushIdempotencyKeys(); // M-6: lần 2, 3 không được nhờ đường tắt Redis
             const r = await sendFixture(c.id, w.sources[c.provider].webhookUrl, u);
             expect(r.status === 200, `${c.id} lần ${i + 1} → ${r.status} ${r.text}`);
           }

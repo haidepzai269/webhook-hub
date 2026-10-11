@@ -3,6 +3,8 @@
 #
 # Mỗi bước: say (lời thoại) · do (thao tác) · expect (thấy gì là đúng) · env (local = hubv | deployed = Render/Vercel)
 # · timeoutS (ngân sách thời gian) · check (tuỳ chọn: `npm run demo:run -- --step N` TỰ KIỂM, in ✅/❌):
+# check KHÔNG đọc dữ liệu của thao tác tay vừa làm: nó chạy lại CÙNG tính chất bằng một kịch bản tự động độc lập
+# (in là "KIỂM ĐỘC LẬP") — nói đúng như vậy với hội đồng nếu được hỏi.
 #     check.kind = e2e   → chạy kịch bản L2 có tag `check.tag` vào hubv
 #     check.kind = chaos → chạy kịch bản L3 có tag `check.tag` vào hubv
 #     check.kind = jest  → chạy file test `check.file` (L1 dùng Postgres/Redis hubv)
@@ -101,7 +103,7 @@ steps:
     say: "Provider gửi lại là chuyện thường. Ba lần cùng một delivery id → đúng một sự kiện, kể cả khi Redis trống."
     do:
       - Bấm "Redeliver" 3 lần trên GitHub (hoặc `npm run hub-sim -- send github/push --to … --unique 1` ×3 — NÓI RÕ là phát lại).
-    expect: 3 lần 200, 1 raw_event, 1 event.
+    expect: 3 lần 200, 1 raw_event, 1 event. (Kiểm độc lập `demo-redeliver` XOÁ khoá `idem:*` của Redis giữa các lần gửi → chỉ Postgres phán.)
     check: { kind: e2e, tag: demo-redeliver }
     timeoutS: 40
 

@@ -75,10 +75,9 @@ async function redeliver(ids: Iterable<string>): Promise<void> {
 }
 
 /** Bắn liên tục id MỚI trong `ms` mili-giây (để chắc chắn có request đang bay lúc phá). */
-async function stream(ms: number, conc = 6): Promise<{ ids: string[]; acked: Set<string>; failed: Set<string> }> {
-  const ids: string[] = [];
-  const acked = new Set<string>();
-  const failed = new Set<string>();
+type StreamState = { ids: string[]; acked: Set<string>; failed: Set<string> };
+async function stream(ms: number, conc = 6, st: StreamState = { ids: [], acked: new Set(), failed: new Set() }): Promise<StreamState> {
+  const { ids, acked, failed } = st;
   const until = Date.now() + ms;
   await Promise.all(
     Array.from({ length: conc }, async () => {
@@ -115,6 +114,20 @@ function ledger(ids: string[]) {
   );
   const [raw, rawIds, ev, evIds, del, ok, dupDel] = row.split('|').map(Number);
   return { raw, rawIds, ev, evIds, del, ok, dupDel };
+}
+
+/**
+ * M-2 (review VF): tiền đề "phá GIỮA CHỪNG" — ngay lúc phá phải có id đã nhận 2xx (đã COMMIT) mà delivery CHƯA
+ * SUCCEEDED. Không có thì kịch bản không phá được gì (xanh suông) -> đỏ.
+ */
+function pendingAt(st: StreamState, label: string): number {
+  const acked = [...st.acked];
+  if (acked.length === 0) throw new Error(`${label}: chưa id nào được nhận lúc phá — kịch bản phá quá sớm`);
+  const l = ledger(acked);
+  const pending = acked.length - l.ok;
+  console.log(`  ${label}: lúc phá có ${acked.length} id đã 2xx, ${pending} chưa giao xong`);
+  expect(pending > 0, `${label}: lúc phá KHÔNG có việc dở (mọi id đã giao) — kịch bản không phá được gì`);
+  return pending;
 }
 
 /** 0 mất / 0 trùng / mọi delivery SUCCEEDED, chờ tối đa `timeoutMs` cho worker xử lý xong. */
@@ -166,7 +179,7 @@ const file: ScenarioFile = {
   teardown: closeWorld,
   scenarios: [
     {
-      name: '[BB:3] (phần l) kill -9 hub-api giữa loạt ingest → id đã nhận 2xx đều có raw_event; provider gửi lại phần lỗi → 0 mất, 0 trùng, delivery SUCCEEDED',
+      name: '[BB:3] (phần l) kill -9 hub-api giữa loạt ingest → 0 mất, 0 trùng, delivery SUCCEEDED; id đã nhận 2xx đều có raw_event (chỉ bắt được ACK sớm nếu SIGKILL rơi đúng khe ACK→COMMIT — bằng chứng CHÍNH của BB-3 là L0 + probe P-BB3-01/02)',
       tags: ['chaos', 'VF5', 'chaos-api'],
       fn: () =>
         guarded(async () => {
@@ -187,9 +200,11 @@ const file: ScenarioFile = {
       tags: ['chaos', 'VF5', 'chaos-worker'],
       fn: () =>
         guarded(async () => {
-          const run = stream(5000, 6);
+          const st: StreamState = { ids: [], acked: new Set(), failed: new Set() };
+          const run = stream(5000, 6, st);
           await sleep(1500); // worker đang normalize + giao những id đầu
           await dc(['kill', '-s', 'SIGKILL', 'hub-worker']);
+          pendingAt(st, 'kill hub-worker'); // worker đã chết: số chưa giao lúc này là việc dở bị cắt ngang
           const { ids, acked, failed } = await run;
           console.log(`  kill hub-worker giữa luồng: ${ids.length} id, 2xx ${acked.size}`);
           await redeliver(failed);
@@ -203,9 +218,13 @@ const file: ScenarioFile = {
       tags: ['chaos', 'VF5', 'chaos-rabbit'],
       fn: () =>
         guarded(async () => {
-          const run = stream(8000, 6);
+          const st: StreamState = { ids: [], acked: new Set(), failed: new Set() };
+          const run = stream(8000, 6, st);
           await sleep(1000);
-          await dc(['restart', 'rabbitmq'], 180_000);
+          const restarting = dc(['restart', 'rabbitmq'], 180_000);
+          await sleep(2500); // RabbitMQ đang xuống: outbox chưa đẩy được, delivery chưa giao
+          pendingAt(st, 'restart rabbitmq');
+          await restarting;
           const { ids, acked, failed } = await run;
           console.log(`  restart rabbitmq giữa luồng: ${ids.length} id, 2xx ${acked.size}, lỗi ${failed.size}`);
           await redeliver(failed);
@@ -242,7 +261,7 @@ const file: ScenarioFile = {
         }),
     },
     {
-      name: '[BB:3] (phần p) pause Postgres 5 s giữa loạt → không request nào nhận 2xx khi chưa COMMIT; gửi lại phần lỗi → 0 mất, 0 trùng',
+      name: 'VF5: pause Postgres 5 s giữa luồng → request treo/lỗi, gửi lại phần lỗi → 0 mất, 0 trùng, delivery SUCCEEDED (KHÔNG phải bằng chứng BB-3: pause không giết tiến trình nên ACK sớm vẫn COMMIT sau)',
       tags: ['chaos', 'VF5', 'chaos-pg'],
       fn: () =>
         guarded(async () => {

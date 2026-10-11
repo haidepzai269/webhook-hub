@@ -17,8 +17,8 @@
 | Bất biến | Nói gì | Test | Probe làm đỏ |
 |---|---|---|---|
 | BB-1 | Hub không biết "đơn hàng" | `[BB:1]` grep gác cổng | P-BB1-01 thêm `orderCode` vào worker |
-| BB-2 | Postgres là trọng tài chống trùng; Redis được phép sai | `[BB:2]` L0 + chaos (Redis tắt / FLUSHALL → vẫn 1 sự kiện) | P-BB2-01 nuốt lỗi trùng rồi ghi bản thứ hai |
-| BB-3 | Không trả 2xx trước COMMIT | `[BB:3]` L0 + chaos (kill -9 api/worker, pause Postgres → 0 mất, 0 trùng) | P-BB3-01 COMMIT lỗi vẫn ACK · P-BB3-02 ack trước khi ghi |
+| BB-2 | Postgres là trọng tài chống trùng; Redis được phép sai | `[BB:2]` L0 + L2 (gửi lại ×3, xoá khoá `idem:*` giữa các lần) + chaos (Redis tắt / FLUSHALL → vẫn 1 sự kiện) | P-BB2-01 nuốt lỗi trùng rồi ghi bản thứ hai |
+| BB-3 | Không trả 2xx trước COMMIT | `[BB:3]` **L0** (COMMIT lỗi → 5xx, thứ tự tx → SET NX → ACK; consumer ghi lỗi → nack) — đây là bằng chứng chính. Chaos (kill -9 api/worker, restart RabbitMQ, pause Postgres) chứng minh **0 mất, 0 trùng khi sập**, nhưng KHÔNG đủ để bắt một cài đặt ACK-sớm (pause không giết tiến trình; kill chỉ trúng khe ACK→COMMIT do may rủi) | P-BB3-01 COMMIT lỗi vẫn ACK · P-BB3-02 ack trước khi ghi (cả hai ở L0) |
 | BB-4 | api và worker là hai tiến trình | `[BB:4]` compose + không import chéo; chaos kill riêng từng bên | — (hình dạng hệ thống) |
 | BB-5 | Mọi truy vấn theo project | `[BB:5]` RLS bằng role `hub_app` | P-BB5-02 bỏ `set_config` → 0 dòng · P-BB5-01 repo quên lọc → RLS vẫn chặn |
 

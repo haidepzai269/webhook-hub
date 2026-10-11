@@ -9,12 +9,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Redis from 'ioredis';
 import { composeOutput, hostUrls, loadVerifyEnv, ROOT } from './compose';
+import { isLocalUrl } from './local-url';
+export { isLocalUrl };
 import { expect, HttpSession } from './http-session';
 import { waitFor } from './scenario';
 import { Fixture, loadFixture, prepare, Prepared } from '../../tools/hub-sim/src/fixture';
 import { SECRET_ENV } from '../../tools/hub-sim/cli';
 
 export const API = process.env.VERIFY_API_URL || hostUrls().HUB_API_URL;
+
+if (process.env.VERIFY_DEPLOYED !== '1' && !isLocalUrl(API)) {
+  throw new Error(`VERIFY_API_URL=${API} không phải hubv local — e2e/chaos/seed-demo chỉ chạy vào localhost. Muốn kiểm deployed: npm run verify:deployed.`);
+}
 export const SINK = process.env.VERIFY_SINK_URL || 'http://localhost:14100';
 /** Sink nhìn từ TRONG mạng compose (hub-api gọi ra). */
 export const SINK_INTERNAL = process.env.VERIFY_SINK_INTERNAL_URL || 'http://sink:4100';
@@ -32,6 +38,20 @@ export async function flushRateLimits(): Promise<void> {
   const keys = await redis.keys('rl:*');
   if (keys.length) await redis.del(...keys);
 }
+/**
+ * M-6: xoá khoá chống trùng `idem:*` trong Redis HUBV — để "gửi lại khi Redis trống" thật sự chỉ còn Postgres phán
+ * (BB-2). Chỉ chạy ở chế độ local (guard M-3 ở trên).
+ */
+export async function flushIdempotencyKeys(): Promise<number> {
+  if (!redis) {
+    redis = new Redis(process.env.VERIFY_REDIS_URL || hostUrls().REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    redis.on('error', () => undefined);
+  }
+  const keys = await redis.keys('idem:*');
+  if (keys.length) await redis.del(...keys);
+  return keys.length;
+}
+
 export async function closeWorld(): Promise<void> {
   await redis?.quit().catch(() => undefined);
   redis = null;
@@ -151,5 +171,6 @@ export async function sendFixture(id: string, webhookUrl: string, unique: string
 let seq = 0;
 export function uniq(): string {
   seq += 1;
-  return `${Date.now() % 1_000_000}${seq}`.slice(-9);
+  // L-4: đệm số 0 -> không còn (t=123456, seq=7) trùng (t=12345, seq=67).
+  return `${String(Date.now() % 1_000_000).padStart(6, '0')}${String(seq % 1000).padStart(3, '0')}`;
 }

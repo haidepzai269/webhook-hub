@@ -27,6 +27,7 @@ import { hostUrls, loadVerifyEnv, ROOT } from '../lib/compose';
 import { analyzeMap, declaredCodes, MapResult, scanTags, SourcesConfig } from '../lib/map';
 import { layerVerdict, ratchet, relFile, Summary, summarizeJest, unreachableSummary } from '../lib/results';
 import { CHAOS_MODULES, L2Options, runL2 } from '../lib/e2e-runner';
+import { isLocalUrl } from '../lib/local-url';
 import { applyProbe, BB_PROBES, judgeProbe, loadProbes, Probe } from '../lib/probe';
 
 const VERIFY_DIR = path.join(ROOT, 'verify');
@@ -133,7 +134,9 @@ function l0Env(): NodeJS.ProcessEnv {
   return env;
 }
 
-async function runLayer(layer: Layer, l2: L2Options = defaultL2()): Promise<{ summary: Summary; ms: number }> {
+async function runLayer(layer: Layer, l2opt?: L2Options): Promise<{ summary: Summary; ms: number }> {
+  // L2/L3 mới cần URL (và guard M-3); L0/L1 không bị chặn bởi VERIFY_API_URL lạ.
+  const l2 = layer === 'L2' || layer === 'L3' ? (l2opt ?? defaultL2()) : (l2opt as L2Options);
   if (layer === 'L3') {
     if (l2.deployed) throw new Error('L3 chaos không bao giờ chạy vào deployed');
     console.log(`
@@ -162,7 +165,14 @@ async function runLayer(layer: Layer, l2: L2Options = defaultL2()): Promise<{ su
 }
 
 function defaultL2(): L2Options {
-  return { tags: [], deployed: false, apiUrl: process.env.VERIFY_API_URL || hostUrls().HUB_API_URL };
+  const apiUrl = process.env.VERIFY_API_URL || hostUrls().HUB_API_URL;
+  // M-3: chỉ verify:deployed được trỏ ra ngoài. e2e/chaos/verify đăng ký user, bắn webhook, kill container — vào
+  // production là ghi rác + đốt quota. Biến VERIFY_API_URL còn sót từ lần chạy verify:deployed không được lọt vào đây.
+  if (!isLocalUrl(apiUrl)) {
+    console.error(`✗ VERIFY_API_URL=${apiUrl} không phải hubv local (localhost/127.0.0.1/::1/hub-api/hubv-*). Lệnh này chỉ chạy local — dùng npm run verify:deployed cho môi trường thật, hoặc unset VERIFY_API_URL.`);
+    process.exit(2);
+  }
+  return { tags: [], deployed: false, apiUrl };
 }
 
 function fmtRow(cols: (string | number)[]): string {
@@ -170,7 +180,7 @@ function fmtRow(cols: (string | number)[]): string {
   return cols.map((c, i) => String(c).padStart(w[i] ?? 6)).join(' |');
 }
 
-async function verify(layers: Layer[], l2: L2Options = defaultL2()): Promise<number> {
+async function verify(layers: Layer[], l2?: L2Options): Promise<number> {
   const results: Record<string, { summary: Summary; ms: number }> = {};
   const problems: string[] = [];
   for (const layer of layers) {
@@ -188,7 +198,7 @@ async function verify(layers: Layer[], l2: L2Options = defaultL2()): Promise<num
   for (const [layer, r] of Object.entries(results)) {
     if (r.summary.fail > 0 || r.summary.note) continue;
     // Tập con (lọc tag / deployed) không phải "số test của tầng" — không đụng bánh cóc.
-    if ((layer === 'L2' || layer === 'L3') && (l2.tags.length > 0 || l2.deployed)) continue;
+    if ((layer === 'L2' || layer === 'L3') && l2 && (l2.tags.length > 0 || l2.deployed)) continue;
     const rr = ratchet(baseline, layer, r.summary.pass, commitMsg);
     ratchetNotes.push(rr.message);
     if (!rr.ok) problems.push(rr.message);

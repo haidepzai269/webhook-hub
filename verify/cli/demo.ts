@@ -65,7 +65,8 @@ async function runStep(s: DemoStep, wait: boolean): Promise<{ s: DemoStep; ok: b
   if (wait) await ask('  [Enter khi xong thao tác] ');
   let ok: boolean | null = null;
   if (s.check) {
-    console.log(`  TỰ KIỂM: ${s.check.kind} ${s.check.tag ?? s.check.file}`);
+    // M-6: KHÔNG kiểm dữ liệu của thao tác vừa làm trên màn hình — chạy lại cùng tính chất bằng kịch bản tự động độc lập.
+    console.log(`  KIỂM ĐỘC LẬP bằng kịch bản tự động (không phải dữ liệu thao tác tay vừa rồi): ${s.check.kind} ${s.check.tag ?? s.check.file}`);
     ok = tsNode(checkArgs(s.check)).status === 0;
   }
   const ms = Date.now() - t0;
