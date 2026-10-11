@@ -26,3 +26,23 @@ polling `after=latest` trong service-resources.controller.ts, docs/ERRORS.md, do
 - `verify/baseline.json` không commit phần L0/L2 tăng (gồm test chưa commit của phiên khác); HEAD có L2=25, L3=6.
 - Luật commit (coordinator): CHỈ `git commit -m … -- <paths>`; file mới phải `git add` trước. Không amend/reset/rebase.
 - Câu hỏi Admin: `CAN-ADMIN-QUYET-VF.md` Q1–Q4.
+
+## Vòng sửa review REVIEW-VF-2026-10-11 (GO-with-fixes)
+
+| Mục | Commit | Ghi chú |
+|---|---|---|
+| H-1 + L-6 | `111e930` | Probe có lượt ĐỐI CHỨNG (code chưa phá phải xanh + test phụ kiểm mọi `@hub/*` phân giải vào worktree) và `expectFailure` (đỏ đúng lý do; không khai thì lỗi môi trường bị loại). Ctrl-C dọn worktree; đầu lượt dọn `probe-P-*` của pid chết. Mẫu: P-SIG-01/02, P-VT12-01, P-BB3-01, P-BB2-01 ✅; P-BB5-02 với mật khẩu DB sai → ⚠ INVALID |
+| M-1, M-2, M-3, M-6, L-4 | `c6fa735` | Sửa: dòng RED trong message commit này SAI — `local-url.spec` được viết SAU guard, không chạy đỏ trước. |
+| M-5 | `8d872ee` | CI: job `probe` riêng (240'), concurrency đêm riêng |
+| L-7, L-3 | `9d8ab7c` | RUNBOOK, PREFLIGHT |
+| M-4 | `113db81` | verify:bb cột L2/L3 từ `.last-run.json` |
+
+Phân giải `@hub/*` trong worktree probe: jest `moduleNameMapper` (`<rootDir>/libs/*/src`, rootDir = worktree) → vào worktree, KHÔNG về link workspace `node_modules/@hub` của cây chính. Đã kiểm bằng `require.resolve('@hub/database')` trong worktree và giờ là điều kiện của lượt đối chứng. Không dùng junction/symlink.
+
+Còn mở (Low, chưa làm):
+- L-1: probe đột biến HEAD còn `verify:bb` đo cây làm việc — chưa từ chối khi `p.file`/test đích bẩn so với HEAD.
+- L-2: đổi tên test "VF3 (§5.4, P-SIG-02)" trong hub-sim-adapters; thêm P-SIG-03/04 (Stripe, generic).
+- L-5: chaos đếm số lần sink nhận mỗi `webhook-id` (at-least-once phía nhận).
+- L-8: `seed-fresh-db` / `poll-seq-migration-db` chết lúc nạp khi không có env (không thuộc VF).
+- Probe AU/MS/KN chưa có `expectFailure` riêng — dựa vào bộ lọc lý do môi trường mặc định (`WRONG_REASON`, có `TypeError`): probe nào mà assert đúng tự nó là TypeError sẽ bị báo "đỏ sai lý do" → khai `expectFailure`. Chưa chạy `--all` sau H-1 (~3 giờ).
+- `verify/baseline.json` cây làm việc L0 = số của lượt review (gồm test chưa commit của phiên khác) — KHÔNG commit.
