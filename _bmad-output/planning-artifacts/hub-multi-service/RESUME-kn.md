@@ -67,3 +67,6 @@ ode_modules`. `git worktree remove --force` đi XUYÊN junction: xoá sạch `no
 | L-R2-2 UI | c18c349 | nguồn đang tải/lỗi -> khoá nút; cảnh báo "giữ cả hai key" khi `secretChanged` |
 | ADR-152 + SPEC + hướng dẫn test | 302cc1d | |
 - Còn mở từ R2: L-R2-1 (ghi we_ mồ côi vào last_fix), L-R2-3 (probe cho connectExisting/M-1/claim), L-R2-4 (hướng dẫn xoá we_ tay của Stripe), nút "gỡ secret cũ" thủ công.
+
+## Sửa sau REVIEW-KN-R3 (2026-10-11) — ADR-153
+- M-R3-1, L-R3-1, L-R3-2: code + `[KN:U27..U29]` (RED trước). L1 hub_app mỗi suite KN 3 lần đều xanh (payos 12/12, stripe 4/4, source-connections 7/7, console-endpoints 5/5); L0 820/0; gates 0; tsc xanh.
