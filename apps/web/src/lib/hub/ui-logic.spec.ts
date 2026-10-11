@@ -129,3 +129,12 @@ describe("describeVerification — cột Xác minh của trang Đích (P2, ADR-1
     expect(describeVerification(undefined, undefined)).toMatchObject({ tone: "ok" });
   });
 });
+
+describe("L-6: đổi project thì xoá trace cũ (TraceFeed không hiện trace của project trước)", () => {
+  it("socket.ts: unsubscribeProject đặt lại traces + toastCursor", () => {
+    const src = fs.readFileSync(path.join(__dirname, "socket.ts"), "utf8");
+    const block = src.slice(src.indexOf("useProjectStore.subscribe("), src.indexOf("const onConnect"));
+    expect(block).toMatch(/traces: \[\]/);
+    expect(block).toMatch(/toastCursor: emptyToastCursor\(\)/);
+  });
+});

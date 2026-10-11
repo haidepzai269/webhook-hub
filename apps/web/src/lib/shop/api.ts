@@ -87,13 +87,13 @@ export async function fetchProducts(): Promise<Product[]> {
   return res.json();
 }
 
-/** Chỉ gửi {id, qty}. Không bao giờ gửi amount/price — server tự tính (ADR-024). */
 export async function fetchPaymentOptions(): Promise<PaymentOptions> {
   const res = await fetch(`${SHOP_API}/payment-options`, { cache: "no-store" });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
+/** Chỉ gửi {id, qty}. Không bao giờ gửi amount/price — server tự tính (ADR-024). */
 export async function createOrder(
   items: { id: string; qty: number }[],
   customer: CustomerInput,

@@ -150,6 +150,8 @@ export function useHubRealtime() {
     // AU3: đổi project -> bỏ cache của project cũ (query key không mang projectId) + xin vé socket mới cho project mới.
     const unsubscribeProject = useProjectStore.subscribe((st, prev) => {
       if (st.projectId === prev.projectId) return;
+      // L-6: trace của project trước không được hiện trên dải "Vừa nhận" của project mới.
+      useRealtimeStore.setState({ traces: [], toastCursor: emptyToastCursor() });
       void qc.resetQueries();
       if (s.connected) s.disconnect().connect();
     });
