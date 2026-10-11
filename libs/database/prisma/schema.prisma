@@ -149,6 +149,7 @@ model User {
   passwordHash      String?   @map("password_hash") // null = chỉ đăng nhập GitHub
   emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamptz(6)
   githubId          String?   @unique @map("github_id") @db.VarChar(32) // id số của GitHub, không dùng login
+  googleSub         String?   @unique @map("google_sub") @db.VarChar(255) // AU5b: `sub` của ID token Google, không dùng email
   isOperator        Boolean   @default(false) @map("is_operator")
   passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

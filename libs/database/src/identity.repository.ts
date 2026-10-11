@@ -54,7 +54,7 @@ export class IdentityRepository {
     return this.db.user.findUnique({ where: { id } });
   }
 
-  createUser(data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt?: Date | null; isOperator?: boolean; githubId?: string | null }) {
+  createUser(data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt?: Date | null; isOperator?: boolean; githubId?: string | null; googleSub?: string | null }) {
     return this.db.user.create({ data });
   }
 
@@ -67,6 +67,22 @@ export class IdentityRepository {
   /** Chỉ liên kết khi user CHƯA có githubId (không đè liên kết cũ). 1 = đã liên kết. */
   async linkGithub(userId: string, githubId: string): Promise<number> {
     const r = await this.db.user.updateMany({ where: { id: userId, githubId: null }, data: { githubId } });
+    return r.count;
+  }
+
+  /** AU5b (ADR-127): định danh Google = `sub` (ổn định), không phải email. */
+  findUserByGoogleSub(googleSub: string) {
+    return this.db.user.findUnique({ where: { googleSub } });
+  }
+
+  /** Gắn `sub` CHỈ khi user chưa gắn Google nào (0 = đã gắn tài khoản Google khác -> google_account_mismatch). */
+  async linkGoogle(userId: string, googleSub: string): Promise<number> {
+    const r = await this.db.user.updateMany({ where: { id: userId, googleSub: null }, data: { googleSub } });
+    return r.count;
+  }
+
+  async unlinkGoogle(userId: string): Promise<number> {
+    const r = await this.db.user.updateMany({ where: { id: userId, googleSub: { not: null } }, data: { googleSub: null } });
     return r.count;
   }
 
@@ -302,7 +318,7 @@ export class IdentityRepository {
    * mà user là thành viên DUY NHẤT (người gọi thu hồi key của chúng — key do người nắm tài khoản trước đó tạo).
    */
   async resetClaimedAccount(userId: string, email: string, name: string, reason: string, at: Date): Promise<string[]> {
-    await this.db.user.update({ where: { id: userId }, data: { name, githubId: null } });
+    await this.db.user.update({ where: { id: userId }, data: { name, githubId: null, googleSub: null } });
     await this.db.emailToken.updateMany({ where: { invitedBy: userId, purpose: 'invite', usedAt: null }, data: { usedAt: at } });
     await this.db.emailToken.updateMany({ where: { email, purpose: { in: ['verify_email', 'reset_password'] }, usedAt: null }, data: { usedAt: at } });
     await this.revokeUserSessions(userId, reason, at);
@@ -316,7 +332,8 @@ export class IdentityRepository {
     return this.db.user.updateMany({ where: { id: userId, emailVerifiedAt: null }, data: { emailVerifiedAt: at } });
   }
 
-  updatePassword(userId: string, passwordHash: string, at: Date) {
+  /** `passwordHash = null`: bỏ mật khẩu đang chờ của người đăng ký trước (nhận tài khoản bằng Google, ADR-127). */
+  updatePassword(userId: string, passwordHash: string | null, at: Date) {
     return this.db.user.update({ where: { id: userId }, data: { passwordHash, passwordChangedAt: at } });
   }
 

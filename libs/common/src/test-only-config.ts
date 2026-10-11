@@ -23,5 +23,9 @@ export function testOnlyConfigProblems(env: Record<string, string | undefined>):
   if (gh && gh !== 'https://github.com') {
     problems.push('GITHUB_OAUTH_BASE_URL phải là https://github.com ở production (fake-github chỉ dành cho kiểm chứng)');
   }
+  // AU5b (ADR-127): fake-google chỉ ở stack kiểm chứng; production phải là Google thật (loadGoogleConfig cũng bỏ qua).
+  if ((env.GOOGLE_OAUTH_FAKE_BASE_URL ?? '').trim()) {
+    problems.push('GOOGLE_OAUTH_FAKE_BASE_URL chỉ dành cho kiểm chứng — production phải dùng Google thật');
+  }
   return problems;
 }

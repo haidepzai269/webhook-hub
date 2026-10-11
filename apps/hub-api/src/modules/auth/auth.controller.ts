@@ -23,6 +23,7 @@ import { SessionGuard } from './session.guard';
 import { SocketTicketService } from './socket-ticket.service';
 import { MembersService } from './members.service';
 import { GithubOAuthService, OAUTH_COOKIE } from './github-oauth.service';
+import { GoogleOAuthService } from './google-oauth.service';
 import { clearSessionCookies, CSRF_COOKIE, CSRF_HEADER, readCookie, readHeader, REFRESH_COOKIE, setSessionCookies } from './cookies';
 import { TooManyAttempts } from './auth-errors';
 import { clientIp } from './client-ip';
@@ -73,6 +74,7 @@ export class AuthController {
     private readonly tickets: SocketTicketService,
     private readonly members: MembersService,
     private readonly github: GithubOAuthService,
+    private readonly google: GoogleOAuthService,
   ) {}
 
   // ---------------------------------------------------------------- AU5: GitHub OAuth (SPEC-auth §5.10)
@@ -99,6 +101,32 @@ export class AuthController {
   @UseGuards(SessionGuard)
   async githubUnlink(@Req() req: RequestWithPrincipal) {
     await this.github.unlink(user(req), reqCtx(req));
+  }
+
+  // ---------------------------------------------------------------- AU5b: Google (OIDC, ADR-127)
+
+  @Get('google')
+  googleStart(@Res() res: Response, @Query('next') next?: string) {
+    const s = this.google.start(next);
+    res.cookie(s.cookie.name, s.cookie.value, s.cookie.options);
+    res.redirect(302, s.redirectUrl);
+  }
+
+  /** Cookie state/PKCE/nonce dùng MỘT lần: xoá ngay, kể cả khi lỗi. state sai -> 400 oauth_state_mismatch. */
+  @Get('google/callback')
+  async googleCallback(@Req() req: RequestWithPrincipal, @Res() res: Response, @Query() q: Record<string, unknown>) {
+    const sealed = readCookie(req, OAUTH_COOKIE);
+    res.clearCookie(OAUTH_COOKIE, { httpOnly: true, secure: true, sameSite: 'lax', path: '/' });
+    const r = await this.google.callback({ code: q?.code, state: q?.state }, sealed, reqCtx(req));
+    if (r.session) setSessionCookies(res, r.session);
+    res.redirect(302, r.redirect);
+  }
+
+  @Post('google/unlink')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(SessionGuard)
+  async googleUnlink(@Req() req: RequestWithPrincipal) {
+    await this.google.unlink(user(req), reqCtx(req));
   }
 
   /** AU4 (§5.11): nhận lời mời — email đăng nhập phải trùng email được mời (403 invite_email_mismatch). */

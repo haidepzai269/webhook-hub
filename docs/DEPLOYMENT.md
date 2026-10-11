@@ -365,6 +365,10 @@ GITHUB_OAUTH_CLIENT_ID=  # AU5: GitHub → Settings → Developer settings → O
 GITHUB_OAUTH_CLIENT_SECRET=
                          # Authorization callback URL = https://<web>.vercel.app/auth/github/callback (qua proxy web)
                          # KHÔNG đặt GITHUB_OAUTH_BASE_URL trên deployed (chỉ cho fake-github; khác github.com -> app thoát)
+GOOGLE_OAUTH_CLIENT_ID=  # AU5b (ADR-127): đăng nhập Google — client RIÊNG, KHÁC GOOGLE_CLIENT_ID/SECRET của driver mail gmail
+GOOGLE_OAUTH_CLIENT_SECRET=
+                         # Authorized redirect URI = https://<web>.vercel.app/auth/google/callback (qua proxy web). Cách tạo:
+                         # mục "Tạo client đăng nhập Google" dưới khối này. KHÔNG đặt GOOGLE_OAUTH_FAKE_BASE_URL trên deployed
 TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For (request gọi THẲNG API)
 WEB_PROXY_SECRET=        # R-2/ADR-110: ≥ 32 ký tự, GIỐNG HỆT biến cùng tên ở Vercel. Request console đi qua proxy của
                          # Vercel (rewrites) nên `req.ip` là IP egress của Vercel (chung cho mọi người). Web gửi IP thật
@@ -414,6 +418,19 @@ WEB_PROXY_SECRET=          # RUNTIME (không phải NEXT_PUBLIC_, không vào bu
 NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
 NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel
 ```
+
+### Tạo client đăng nhập Google (AU5b, ADR-127)
+
+1. Google Cloud project **`webhook-hub`** (dùng chung project với client gửi mail cũng được — nhưng là **client khác**).
+2. **Google Auth Platform → Branding / Audience**: User type **External**; **Publish app → In production**. Scope chỉ
+   `openid email profile` (không nhạy cảm) → **không cần Google thẩm định**, mọi tài khoản Google đăng nhập được.
+3. **Google Auth Platform → Clients → Create client** → loại **Web application**:
+   - *Authorized JavaScript origins*: **không cần** (luồng chạy ở server).
+   - *Authorized redirect URIs*: `http://localhost:3000/auth/google/callback` (stack dev, đi qua web :3000) và
+     `https://<web>.vercel.app/auth/google/callback`.
+4. Chép Client ID / Client secret → `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (Render; local: `.env`).
+   `WEB_PUBLIC_URL` phải khớp origin của redirect URI (local `http://localhost:3000`).
+5. Thử: `/login` → "Đăng nhập bằng Google". Lỗi `redirect_uri_mismatch` = URI ở bước 3 không khớp `<WEB_PUBLIC_URL>/auth/google/callback`.
 
 ### Lấy GOOGLE_REFRESH_TOKEN (MAIL_DRIVER=gmail, ADR-124)
 

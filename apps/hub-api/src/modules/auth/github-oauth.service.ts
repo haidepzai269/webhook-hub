@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '@hub/database';
 import { logger, MAIL_SENDER, MailSender, mailTemplates, maskEmail, normalizeEmail } from '@hub/common';
 import { AUTH_CONFIG, AuthConfig } from './auth-config';
@@ -7,6 +7,9 @@ import { AuthService, ReqCtx } from './auth.service';
 import { IssuedSession } from './cookies';
 import { authError } from './auth-errors';
 import { UserPrincipal } from '../service-api/principal';
+import { OAUTH_COOKIE, OAUTH_COOKIE_OPTIONS, OAUTH_TTL_MS, OAuthCookie, openOAuthCookie, safeEqual, sealOAuthCookie } from './oauth-cookie';
+
+export { OAUTH_COOKIE };
 
 /**
  * SPEC-auth §5.10 (AU5): đăng nhập GitHub — OAuth 2.0 authorization code + state + PKCE (RFC 6749, RFC 9700).
@@ -17,8 +20,6 @@ import { UserPrincipal } from '../service-api/principal';
  * - `GITHUB_OAUTH_BASE_URL` cho stack kiểm chứng (fake-github, VF4); production bắt buộc https://github.com
  *   (test-only-config.ts chặn lúc khởi động).
  */
-export const OAUTH_COOKIE = '__Host-hub_oauth';
-const OAUTH_TTL_MS = 10 * 60_000;
 export const GITHUB_OAUTH = Symbol('GITHUB_OAUTH');
 
 export interface GithubConfig {
@@ -42,18 +43,6 @@ export function loadGithubConfig(env: Record<string, string | undefined> = proce
 export interface CallbackResult {
   redirect: string;
   session?: IssuedSession;
-}
-
-interface OAuthCookie {
-  state: string;
-  verifier: string;
-  exp: number;
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
 @Injectable()
@@ -98,8 +87,8 @@ export class GithubOAuthService {
       redirectUrl: url.toString(),
       cookie: {
         name: OAUTH_COOKIE,
-        value: this.sealCookie({ state, verifier, exp: Date.now() + OAUTH_TTL_MS }),
-        options: { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: OAUTH_TTL_MS },
+        value: this.sealCookie({ p: 'github', state, verifier, exp: Date.now() + OAUTH_TTL_MS }),
+        options: { ...OAUTH_COOKIE_OPTIONS },
       },
     };
   }
@@ -170,8 +159,9 @@ export class GithubOAuthService {
     const idn = this.prisma.identity();
     const user = await idn.findUserById(p.id);
     if (!user) throw authError(HttpStatus.UNAUTHORIZED, 'session_expired');
-    if (!user.passwordHash) {
-      throw new HttpException({ error: 'last_login_method', message: 'Đặt mật khẩu (luồng quên mật khẩu) trước khi gỡ GitHub' }, HttpStatus.CONFLICT);
+    // AU5b (ADR-127): còn mật khẩu HOẶC Google thì gỡ được.
+    if (!user.passwordHash && !user.googleSub) {
+      throw new HttpException({ error: 'last_login_method', message: 'Đặt mật khẩu (luồng quên mật khẩu) hoặc liên kết Google trước khi gỡ GitHub' }, HttpStatus.CONFLICT);
     }
     if ((await idn.unlinkGithub(user.id)) === 1) await idn.recordAuthAudit({ userId: user.id, action: 'github.unlinked', ip: ctx.ip });
   }
@@ -202,19 +192,10 @@ export class GithubOAuthService {
   }
 
   private sealCookie(c: OAuthCookie): string {
-    const body = Buffer.from(JSON.stringify(c)).toString('base64url');
-    return `${body}.${createHmac('sha256', this.cfg.oauthCookieSecret).update(body).digest('base64url')}`;
+    return sealOAuthCookie(this.cfg.oauthCookieSecret, c);
   }
 
   private openCookie(v: string | undefined): OAuthCookie | null {
-    if (typeof v !== 'string' || !v.includes('.')) return null;
-    const [body, sig] = v.split('.', 2);
-    if (!safeEqual(sig, createHmac('sha256', this.cfg.oauthCookieSecret).update(body).digest('base64url'))) return null;
-    try {
-      const c = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as OAuthCookie;
-      return typeof c.state === 'string' && typeof c.verifier === 'string' && c.exp > Date.now() ? c : null;
-    } catch {
-      return null;
-    }
+    return openOAuthCookie(this.cfg.oauthCookieSecret, v, 'github');
   }
 }

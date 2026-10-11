@@ -123,6 +123,12 @@ export const mailTemplates = {
       }),
     };
   },
+  googleLinked(name: string) {
+    return {
+      subject: 'Google vừa được liên kết với tài khoản của bạn — Webhook Hub',
+      ...layout(`Chào ${name},`, ['Tài khoản Google vừa được liên kết; từ giờ bạn đăng nhập được bằng Google.', 'Nếu không phải bạn, hãy đổi mật khẩu và gỡ liên kết Google ngay.']),
+    };
+  },
   githubLinked(name: string) {
     return {
       subject: 'GitHub vừa được liên kết với tài khoản của bạn — Webhook Hub',

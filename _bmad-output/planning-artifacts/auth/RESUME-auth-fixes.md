@@ -46,3 +46,7 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 - xong (commit gmail). Code: libs/common/src/mail/gmail.ts; test L0 libs/common/test/mail-gmail.spec.ts [AU:GM1..GM6] (inline trong spec-sources).
 - Hướng dẫn lấy refresh token: DEPLOYMENT §9 "Lấy GOOGLE_REFRESH_TOKEN". Không có lệnh gọi Google thật nào trong test.
 - Review Gmail G-1..G-4: xong (commit G), ADR-126.
+
+## Story AU5b: đăng nhập Google (ADR-127)
+- Phần 1 backend: xong (commit AU5b-1). google-id-token.ts, google-oauth.service.ts, oauth-cookie.ts (dùng chung GitHub), migration users.google_sub, L0 google-oauth.spec (GO1-4, GO8a), L1 google-oauth-db.spec (GO5-7, GO8b).
+- Kế: phần 2 web (nút Google /login /register, lỗi ?error=), phần 3 fake-google trong sink + e2e GO9 + chạy thử dev stack :3000.

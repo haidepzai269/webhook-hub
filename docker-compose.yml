@@ -162,6 +162,11 @@ services:
       - GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID:-}
       - GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET:-}
       - GITHUB_OAUTH_BASE_URL=${GITHUB_OAUTH_BASE_URL:-}
+      # AU5b (ADR-127): đăng nhập Google — client OAuth RIÊNG (khác GOOGLE_CLIENT_ID/SECRET gửi mail). Trống -> /auth/google 503.
+      # Callback: ${WEB_PUBLIC_URL}/auth/google/callback. GOOGLE_OAUTH_FAKE_BASE_URL chỉ cho hubv (production -> app thoát).
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_FAKE_BASE_URL=${GOOGLE_OAUTH_FAKE_BASE_URL:-}
       - INTERNAL_TOKEN=${INTERNAL_TOKEN:-dev-internal-reconcile-token}
       - NODE_ENV=development
       # S2 (SPEC §4.3A): host trong connection string `hub://<key>@<host>/<project>` trả về khi tạo key

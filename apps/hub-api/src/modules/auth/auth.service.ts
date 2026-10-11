@@ -134,7 +134,7 @@ export class AuthService {
 
   /** User + project đầu tiên + membership owner + audit trong MỘT transaction; trùng slug -> thêm hậu tố, thử lại. Dùng chung với GitHub OAuth. */
   async createUserWithFirstProject(
-    data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt: Date | null; githubId?: string | null },
+    data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt: Date | null; githubId?: string | null; googleSub?: string | null },
     ctx: ReqCtx,
   ): Promise<{ userId: string; projectId: string }> {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -161,7 +161,7 @@ export class AuthService {
         if ((e as { code?: string })?.code !== 'P2002') throw e;
         // P2002 trên email = đăng ký đồng thời cùng email: trả hình dạng giống hệt nhánh "đã tồn tại".
         // R-12: trùng email HOẶC githubId (callback GitHub đồng thời) -> ném cho người gọi xử lý, không thử slug khác.
-        if (/email|github/i.test(String((e as { meta?: { target?: unknown } }).meta?.target ?? ''))) throw e;
+        if (/email|github|google/i.test(String((e as { meta?: { target?: unknown } }).meta?.target ?? ''))) throw e;
       }
     }
     throw new Error('Không tạo được slug project duy nhất sau 3 lần');
@@ -316,7 +316,7 @@ export class AuthService {
    * N-1 (ADR-121): người chứng minh hộp thư nhận tài khoản: mật khẩu MỚI + xác minh + xoá dấu vết của người nắm tài khoản
    * trước đó (tên, githubId, lời mời chờ, token email chờ, mọi phiên, key của project chỉ mình user là thành viên).
    */
-  private async claimAccount(userId: string, email: string, passwordHash: string, name: string, reason: string): Promise<void> {
+  async claimAccount(userId: string, email: string, passwordHash: string | null, name: string, reason: string): Promise<void> {
     const now = this.now();
     await this.store.$transaction(async (tx) => {
       const idn = this.store.identity(tx);

@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-11T03:50:37.614Z, commit 232ffe0).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-11T04:08:09.938Z, commit b754103).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 241 mã khai báo · 162 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 250 mã khai báo · 170 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -69,6 +69,14 @@ Tổng: 241 mã khai báo · 162 mã có test · 0 mồ côi · 12 mồ côi có
 | `AU:GM4` | spec-sources.json | L0 | libs/common/test/mail-gmail.spec.ts:74<br>libs/common/test/mail-gmail.spec.ts:127 | ✅ pass |
 | `AU:GM5` | spec-sources.json | L0 | libs/common/test/mail-gmail.spec.ts:103<br>libs/common/test/mail-gmail.spec.ts:141 | ✅ pass |
 | `AU:GM6` | spec-sources.json | L0 | libs/common/test/mail-gmail.spec.ts:156 | ✅ pass |
+| `AU:GO1` | spec-sources.json | L0 | apps/hub-api/test/google-oauth.spec.ts:51 | ✅ pass |
+| `AU:GO2` | spec-sources.json | L0 | apps/hub-api/test/google-oauth.spec.ts:69 | ✅ pass |
+| `AU:GO3` | spec-sources.json | L0 | apps/hub-api/test/google-oauth.spec.ts:110 | ✅ pass |
+| `AU:GO4` | spec-sources.json | L0 | apps/hub-api/test/google-oauth.spec.ts:134 | ✅ pass |
+| `AU:GO5` | spec-sources.json | L1 | apps/hub-api/test/google-oauth-db.spec.ts:79 | ✅ pass |
+| `AU:GO6` | spec-sources.json | L1 | apps/hub-api/test/google-oauth-db.spec.ts:106 | ✅ pass |
+| `AU:GO7` | spec-sources.json | L1 | apps/hub-api/test/google-oauth-db.spec.ts:126 | ✅ pass |
+| `AU:GO8` | spec-sources.json | L1,L0 | apps/hub-api/test/google-oauth-db.spec.ts:143<br>apps/hub-api/test/google-oauth.spec.ts:165 | ✅ pass |
 | `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:88 | chưa chạy |
 | `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:263 | chưa chạy |
 | `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:117 | chưa chạy |
@@ -183,6 +191,6 @@ Tổng: 241 mã khai báo · 162 mã có test · 0 mồ côi · 12 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (110 file, 641 khai báo it/test)
+## File test (112 file, 650 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

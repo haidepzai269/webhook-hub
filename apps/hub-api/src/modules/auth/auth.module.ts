@@ -6,6 +6,7 @@ import { SessionGuard } from './session.guard';
 import { SocketTicketService } from './socket-ticket.service';
 import { MembersService } from './members.service';
 import { GITHUB_OAUTH, GithubOAuthService, loadGithubConfig } from './github-oauth.service';
+import { GOOGLE_OAUTH, GoogleOAuthService, loadGoogleConfig } from './google-oauth.service';
 import { PrismaService } from '@hub/database';
 import { MAIL_SENDER as MAIL } from '@hub/common';
 import { AUTH_CONFIG, loadAuthConfig } from './auth-config';
@@ -35,6 +36,13 @@ import { createMailSender, MAIL_SENDER } from '@hub/common';
       provide: GithubOAuthService,
       inject: [AuthService, PrismaService, AUTH_CONFIG, GITHUB_OAUTH, MAIL],
       useFactory: (auth: AuthService, prisma: PrismaService, cfg: any, gh: any, mail: any) => new GithubOAuthService(auth, prisma, cfg, gh, mail),
+    },
+    // AU5b (ADR-127): Google OIDC — client KHÁC client gửi mail Gmail. Chưa đặt GOOGLE_OAUTH_CLIENT_ID/SECRET -> 503.
+    { provide: GOOGLE_OAUTH, useFactory: () => loadGoogleConfig() },
+    {
+      provide: GoogleOAuthService,
+      inject: [AuthService, PrismaService, AUTH_CONFIG, GOOGLE_OAUTH, MAIL],
+      useFactory: (auth: AuthService, prisma: PrismaService, cfg: any, g: any, mail: any) => new GoogleOAuthService(auth, prisma, cfg, g, mail),
     },
   ],
   exports: [JwtModule, AUTH_CONFIG, SessionGuard, AuthService, MembersService],
