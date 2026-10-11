@@ -291,11 +291,13 @@ Mỗi story theo vòng đời RED → GREEN → GATED → PROBED → REVIEWED (S
 | `[KN:U17]` | `xoá credentials` → cột null, `retry` trả 422 `credentials_required` |
 | `[KN:U18]` | Thành viên không có `manage:sources` → 403 `missing_scope` ở mọi route §4.4 |
 | `[KN:U19]` | (H-1) "Kết nối nguồn có sẵn": không tạo source mới, URL đăng ký = `/hooks/<provider>/<sourceKey cũ>`, checksumKey trùng bản hiện hành → không thêm version |
-| `[KN:U20]` | (H-1) nguồn có sẵn với checksumKey khác → SourceSecret version mới TRƯỚC khi gọi provider, bản cũ còn 24 giờ |
+| `[KN:U20]` | (H-1, H-R2-1) nguồn có sẵn với checksumKey khác → SourceSecret version mới TRƯỚC khi gọi provider, bản cũ KHÔNG bị hẹn hết hạn; webhook thật verify bằng key mới → lần kiểm tình trạng kế tiếp retire bản cũ (+24h) |
 | `[KN:U21]` | (H-1) nguồn có sẵn của project khác → 404 giống hệt id lạ; thiếu `acknowledgeOverwrite` / provider khác source → 422; không gọi provider |
 | `[KN:U22]` | (L-1) sourceKey trùng → 409 `conflict` GIỐNG HỆT dù key thuộc project nào; không tạo gì |
 | `[KN:U23]` | (L-3) kết nối đang PENDING → retry / gắn lại 409 `connection_in_progress`; PENDING kẹt (> 60 s) → cho chạy lại |
 | `[KN:U24]` | (M-1) TX lưu kết quả kết nối lại lỗi → `we_` cũ còn nguyên, DB trỏ `we_` cũ, `we_` mới mồ côi bị dọn; lần sau thành công mới gỡ `we_` cũ (sau COMMIT) |
+| `[KN:U25]` | (H-R2-1) key cũ ĐÚNG, dán key mới SAI → CONNECTED nhưng sau khi "tua" 25 giờ key đúng vẫn verify; webhook thật chỉ khớp key cũ → `secret_mismatch`, không retire gì |
+| `[KN:U26]` | (H-R2-1) FAILED với checksumKey khác → không retire version nào |
 
 ### 8.2 E2E trên hubv (`npm run verify`, L2)
 
@@ -375,6 +377,7 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
   - Secret do provider sinh (Stripe) luôn đặt các version đang hiệu lực hết hạn +24h (source có sẵn có thể đang giữ secret dán tay).
   - M-1: gỡ cấu hình cũ ở provider SAU COMMIT; TX lỗi → dọn cấu hình mới + FAILED `save_failed`; gỡ cũ lỗi → `last_error=previous_remote_not_removed`, vẫn CONNECTED.
   - L-1: P2002 → 409 `conflict` (`field:sourceKey`, `code:source_key_taken`); L-3: 409 `conflict` `code:connection_in_progress` (PENDING < 60 s).
+- **Sau REVIEW-KN-R2 (ADR-152):** secret do người dùng nhập không tự hết hạn bản cũ (thay luật "bản cũ còn 24 giờ" ở KN3 §11 cho checksumKey); retire khi webhook thật verify bằng key mới, phát hiện lúc `GET …/connection` (đối chiếu lười, không chạm ingest); `secret_mismatch` khi webhook thật chỉ khớp key cũ. Response `connect`/`retry` có `secretChanged`.
 
 ## 12. Checklist và kết quả
 
