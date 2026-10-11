@@ -17,12 +17,11 @@ import {
   simulateSepayTransfer,
 } from "@/lib/shop/api";
 import { cartSubtotal, useCart } from "@/lib/shop/cart";
+import { isFinalStatus, pollDeadline } from "@/lib/shop/order-status";
 import { useShopUi } from "@/lib/shop/ui";
 
 const POLL_MS = 2000;
 const POLL_TIMEOUT_MS = 30 * 60 * 1000; // dự phòng khi server không trả expiresAt
-const EXPIRY_GRACE_MS = 60 * 1000; // hỏi thêm 1 phút sau hạn: webhook có thể tới trễ vài giây
-const TERMINAL: OrderStatus[] = ["PAID", "EXPIRED", "CANCELLED"];
 const PHONE_RE = /^[0-9+\s.-]{8,20}$/; // khớp validate của apps/shop
 
 type Errors = Partial<Record<keyof CustomerInput, string>>;
@@ -59,7 +58,8 @@ export function CheckoutModal() {
   const submittingRef = useRef(false); // chặn double-submit trong cùng một frame
 
   const status: OrderStatus | null = state?.status ?? order?.status ?? null;
-  const finished = status !== null && TERMINAL.includes(status);
+  // R2-L1: EXPIRED chưa cuối trong cửa sổ grace — khoản trả đúng hạn có webhook tới muộn vẫn thành PAID (ADR-144).
+  const finished = status !== null && isFinalStatus(status, order?.expiresAt, Date.now());
   const orderCode = order?.orderCode;
 
   // Mở modal -> hỏi Shop có PayOS không; mặc định PayOS nếu Shop đã cấu hình, không thì chuyển khoản.
@@ -73,9 +73,9 @@ export function CheckoutModal() {
       .catch(() => setProvider("sepay"));
   }, [open, options]);
 
-  const deadline = order?.expiresAt ? Date.parse(order.expiresAt) + EXPIRY_GRACE_MS : pollStartedAt + POLL_TIMEOUT_MS;
+  const deadline = pollDeadline(order?.expiresAt, pollStartedAt + POLL_TIMEOUT_MS);
 
-  // Poll GET /orders/:code mỗi 2s. Dừng khi: trạng thái cuối, đóng modal, hoặc quá hạn đơn (+1 phút).
+  // Poll GET /orders/:code mỗi 2s. Dừng khi: trạng thái cuối, đóng modal, hoặc quá hạn đơn + grace.
   useEffect(() => {
     if (!open || !orderCode || finished || timedOut) return;
     let alive = true;
@@ -89,7 +89,7 @@ export function CheckoutModal() {
         const s = await fetchOrder(orderCode);
         if (!alive) return;
         setState(s);
-        if (TERMINAL.includes(s.status)) return;
+        if (isFinalStatus(s.status, order?.expiresAt, Date.now())) return;
       } catch {
         /* mạng chập chờn: thử lại ở nhịp sau */
       }
@@ -100,7 +100,7 @@ export function CheckoutModal() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [open, orderCode, finished, timedOut, deadline]);
+  }, [open, orderCode, finished, timedOut, deadline, order?.expiresAt]);
 
   // PAID → xoá giỏ (một lần)
   useEffect(() => {
@@ -347,7 +347,7 @@ export function CheckoutModal() {
               className={`ckstatus ck-${(timedOut ? "TIMEOUT" : (status ?? "PENDING")).toLowerCase()}`}
               aria-live="polite"
             >
-              {timedOut ? (
+              {timedOut && status !== "EXPIRED" ? (
                 <>
                   <i className="fas fa-hourglass-end" /> Đã hết thời gian chờ. Nếu bạn đã chuyển khoản, vui lòng liên hệ
                   hotline với mã {order.orderCode}.
@@ -363,6 +363,11 @@ export function CheckoutModal() {
                   <i className="fas fa-exclamation-triangle" /> Đơn đã hết hạn nhưng Shop đã nhận{" "}
                   <strong>{formatVnd(paid)}</strong>. Gọi hotline 1900 6868 kèm mã {order.orderCode} để được giao món
                   hoặc hoàn tiền.
+                </>
+              ) : status === "EXPIRED" && !finished && !timedOut ? (
+                <>
+                  <i className="fas fa-spinner fa-spin" /> Đơn đã quá hạn. Nếu bạn vừa chuyển khoản, Shop đang chờ xác nhận
+                  (tối đa vài phút)…
                 </>
               ) : status === "EXPIRED" || status === "CANCELLED" ? (
                 <>

@@ -242,6 +242,11 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(pickOrderCode(['DH9876543'], [])).toBeNull();
     });
 
+    it('R2-L4: khoá nhiều dòng theo thứ tự cố định (ORDER BY order_code) — hai webhook không deadlock', () => {
+      const src = require('fs').readFileSync(require('path').join(__dirname, '../src/main.ts'), 'utf8');
+      expect(src).toMatch(/order_code = ANY\(\$\{orderCodes\}\) ORDER BY order_code FOR UPDATE/);
+    });
+
     it('M-1/M-2: trả source và paidAt (thời điểm provider) để Shop xét kênh + hạn', () => {
       expect(readPayment({ type: 'payment.received', source: 'payos', data: core })).toEqual({ orderCodes: ['DH1234567'], amount: 50000, source: 'payos', paidAt: new Date('2026-10-10T07:00:00.000Z') });
       expect(readPayment({ type: 'payment.received', source: 'sepay', data: { ...core, paidAt: null } })).toMatchObject({ paidAt: undefined });

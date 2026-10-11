@@ -131,7 +131,7 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
   // Khoá hàng đơn (FOR UPDATE) trước: webhook/reconcile trên CÙNG đơn chạy tuần tự -> không 4xx (hub coi là DEAD).
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ order_code: string }[]>`SELECT order_code FROM shop.orders WHERE order_code = ANY(${orderCodes}) FOR UPDATE`;
+      const locked = await tx.$queryRaw<{ order_code: string }[]>`SELECT order_code FROM shop.orders WHERE order_code = ANY(${orderCodes}) ORDER BY order_code FOR UPDATE`;
       const code = pickOrderCode(orderCodes, locked.map((r) => r.order_code)); // M-3: mã có thật, không phải tiền tố lạ
       if (!code) return { status: 'ORDER_NOT_FOUND' };
       orderCode = code;

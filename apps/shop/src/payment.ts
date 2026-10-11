@@ -29,7 +29,7 @@ export function isExpired(order: { status: string; createdAt: Date }, now = new 
   return order.status === 'PENDING' && now.getTime() - order.createdAt.getTime() > EXPIRE_AFTER_MS;
 }
 
-/** MS-R2 (ADR-084): tiền THẬT chỉ đến từ cổng thanh toán (`source` do adapter của hub đặt, không giả được). */
+/** MS-R2 (ADR-084): tiền THẬT chỉ từ cổng thanh toán (`source` do adapter hub đặt). R2-L5: đơn chỉ có kênh payos/sepay nên source thêm ở đây = OTHER_CHANNEL (không cộng). */
 export const PAYMENT_SOURCES: readonly string[] = (process.env.SHOP_PAYMENT_SOURCES || 'payos,sepay').split(',').map((x) => x.trim()).filter(Boolean);
 
 /**
