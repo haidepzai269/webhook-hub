@@ -393,6 +393,8 @@ Dùng khi chỉ cần chứng minh luồng, không cần tiền thật.
 - **Host lạ bị chặn:** dán `hubs://hk_test_…@evil.example/x` → Kiểm tra → 422 "Host hub … không được phép" kèm cách sửa (`SHOP_ALLOWED_HUB_HOSTS`). Mã quản trị ngắn hơn 24 ký tự → trang báo "Shop chưa bật trang cài đặt".
 - **Chuyển project (runbook):** chỉ chuyển khi không còn đơn PENDING/UNDERPAID; sau khi Lưu thành công vào console project CŨ › Endpoints › `shop` → tắt/xoá subscription `payment.received`. Webhook còn tới từ nguồn cũ → log Shop `payment.received từ source KHÔNG tin cậy` kèm `sourceId` + `orderCodes` (đối soát tay).
 
+- **Lưu báo 500 (N-1, hiếm: hub đã nhận cấu hình mới, DB lỗi):** Lưu báo 500 → bấm **Lưu lại** hoặc restart Shop, rồi đối soát log `KHÔNG tin cậy` (UNTRUSTED) theo `orderCodes`. Log Shop có `ensure lại cấu hình cũ` kèm `restored`.
+- **Production:** dán `hub://…` (HTTP thường) → 422 kèm "dùng hubs://" (N-3).
 **Nếu không thấy:**
 - `/shop/settings` báo "Shop chưa bật trang cài đặt" → thiếu `SHOP_ADMIN_TOKEN` trên Render › shop.
 - Nút Lưu bị khoá, cảnh báo SHOP_SETTINGS_KEY → thiếu biến đó.

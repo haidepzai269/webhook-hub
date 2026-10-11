@@ -214,6 +214,12 @@ Nhắn: **"seed neon"**. Agent chạy seed từ máy local với khối `[hub-ap
 
    > **Chuyển Shop sang project khác (runbook, ADR-160 / REVIEW-SK M-1):** (1) chỉ chuyển khi **không còn đơn `PENDING`/`UNDERPAID`** (đơn đã tạo mang link PayOS/VietQR của kênh cũ; khách trả sau khi chuyển thì tiền vào project cũ, Shop bỏ qua); (2) sau khi Lưu thành công, vào console **project cũ** › Endpoints › `shop` → **tắt hoặc xoá subscription** `payment.received` của Shop (không thì hub cũ vẫn giao, Shop trả 200 và bỏ qua); (3) theo dõi log Shop: dòng `payment.received từ source KHÔNG tin cậy` kèm `orderCodes` = khoản cần đối soát tay.
 
+   > **Lưu báo 500 (REVIEW-SK R2 N-1):** hub đã nhận cấu hình mới nhưng Shop không ghi được DB. Shop giữ cấu hình cũ và tự đăng ký lại cấu hình cũ (best effort, log `ensure lại cấu hình cũ` kèm `restored`). → bấm **Lưu lại** tới khi OK, hoặc restart Shop; rồi đối soát log `KHÔNG tin cậy` (UNTRUSTED) theo `orderCodes`. Đổi project mà thấy 500: kiểm thêm console project mới › Endpoints › `shop`.
+
+   > **Đổi host `HUB_URL` env (N-4):** cài đặt đã lưu ở `/shop/settings` trỏ host cũ sẽ bị chặn (đóng an toàn, không gửi secret) → Shop không đăng ký được, **mọi webhook nhận 503** (hub retry/DLQ, replay được) cho tới khi **Lưu lại** cài đặt với host mới hoặc thêm host cũ vào `SHOP_ALLOWED_HUB_HOSTS`.
+
+   > **`hubs://` bắt buộc trên production (N-3):** `NODE_ENV=production` → `/shop/settings` từ chối connection string `hub://` (HTTP thường) với 422 "dùng hubs://". `HUB_URL` env là `hub://` thì Shop chỉ log cảnh báo.
+
    > Không đặt `PAYOS_BASE_URL` / `SHOP_PAYOS_API_BASE` trên Render (mặc định là API thật của PayOS). PayOS gửi webhook thanh toán về **hub** (URL đặt ở §9), không về Shop — Shop biết đơn đã trả qua `payment.received` hub giao tới.
 
 3. Create → sau khi lên, quay lại **Vercel** điền `NEXT_PUBLIC_SHOP_API_URL=https://shop-xxxx.onrender.com` → **Redeploy** (biến `NEXT_PUBLIC_` nhúng lúc build).
