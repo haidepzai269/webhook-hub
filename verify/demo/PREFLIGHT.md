@@ -31,5 +31,5 @@
 | Sự cố | Làm gì |
 |---|---|
 | Deployed chết | Chuyển hồi 1 và 3 sang `hubv` local, **nói rõ** là local |
-| PayOS chậm | `npm run hub-sim -- send payos/paid-69000 --to <url>` — **nói rõ** là phát lại (fixture `real` nếu có: "bytes này PayOS đã gửi hôm trước") |
+| PayOS chậm | `npm run hub-sim -- send payos/paid-69000 --to <url> --secret <checksum PayOS THẬT của source demo>` — **bắt buộc `--secret`** khi gửi vào deployed (mặc định hub-sim ký bằng secret GIẢ của `.env.verify` → hub deployed trả 401); lấy secret từ trình quản lý mật khẩu, KHÔNG gõ trên màn hình đang chiếu. Không có secret thì phát vào hubv local. **Nói rõ** là phát lại (fixture `real` nếu có: "bytes này PayOS đã gửi hôm trước") |
 | Mọi thứ chết | Chiếu video |

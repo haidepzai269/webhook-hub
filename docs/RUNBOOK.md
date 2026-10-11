@@ -9,7 +9,7 @@
 npm run verify:up && npm run verify   # hệ thống còn đúng không? L0 + L1 + L2 (~10 phút)
 npm run verify:chaos                  # L3: kill api/worker, restart rabbit, tắt/xả Redis, pause Postgres (~6 phút)
 npm run verify:bb                     # bảng 5 bất biến cho chương Kiểm thử (test xanh + probe đỏ)
-npm run verify:probe -- --all         # mọi probe §6.3 (~2–3 phút/probe; nightly trên CI)
+npm run verify:probe -- --all         # mọi probe §6.3: đối chứng + phá (~4–5 phút/probe, chạy đêm trên CI)
 npm run demo:rehearse                 # tập dượt 14 bước bấm giờ → verify/results/rehearsal-<ngày>.md
 ```
 
@@ -46,7 +46,7 @@ Muốn **dùng** hub như một dev bên ngoài: xem `docs/QUICKSTART.md` — đ
 ### Sáu lỗi hay gặp
 
 1. **Cổng 15433 (hoặc 14000, 16379…) bị chiếm** — một stack hubv cũ còn chạy: `npm run verify:down` rồi `verify:up`.
-2. **`no such file` khi container khởi động** — file `.sh` mang CRLF: `.gitattributes` đã ép LF; checkout lại (`git rm --cached -r . && git reset --hard` trên nhánh sạch) hoặc `dos2unix`.
+2. **`no such file` khi container khởi động** — file `.sh` mang CRLF: `.gitattributes` đã ép LF. Commit/stash việc đang dở trước, rồi `git add --renormalize .` và `git checkout -- '*.sh'` (chỉ ghi đè file `.sh`), hoặc `dos2unix <file>.sh`. Đừng dùng lệnh xoá index + `reset --hard`: mất mọi thay đổi chưa commit.
 3. **Docker thiếu RAM: RabbitMQ bị OOM kill** — Docker Desktop ≥ 6 GB, hoặc tắt stack dev khi chạy hubv.
 4. **`PRECONDITION_FAILED` do queue cũ** — đổi `x-message-ttl` của queue đã tồn tại: `npm run verify:reset` (xoá volume hubv, không đụng stack dev).
 5. **`verify:db` báo `skip > 0`** — chưa `verify:up` (hoặc Postgres hubv chưa healthy): `npm run verify:ps`.
