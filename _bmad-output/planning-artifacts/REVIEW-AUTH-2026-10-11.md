@@ -421,3 +421,72 @@ Hàm trả `pathname + search + hash` đã phân giải chứ không trả chu�
 | **AU6** RLS | **ĐẠT** | Runtime `hub_app`, FORCE RLS, gate migration dữ liệu (R-7). R-4: +16,8 % thời gian worker, +1,4 % đầu-cuối, nên chấp nhận A11. R-9 (`api_keys` chưa RLS) hoãn theo A7, ghi vào "giới hạn" của đồ án. **Deploy cần A1 + A8 trước** |
 
 **Chặng auth có thể đóng.** Việc còn lại thuộc Admin hoặc vận hành: A1 (role `hub_app` trên Neon), A2 (mail thật), A3 + TA11 (GitHub), A8 (`WEB_PROXY_SECRET`, `WEB_PUBLIC_URL`, kiểm IP trên Vercel), TA14 (trình duyệt thật). Không còn phát hiện mức Cao hay Trung bình nào đang mở.
+
+---
+
+# Gmail driver (`152e749`, ADR-124): `MAIL_DRIVER=gmail`
+
+> Review chỉ đọc. **Không gọi endpoint Google thật**: mọi phép thử dùng `fetch` giả. Không đọc `.env` hay `KEYS-CAN-LAY.md`. Script thử nằm trong scratchpad, gọi thẳng `libs/common/src/mail/gmail.ts`.
+
+## G.1 Bộ kiểm
+
+| Lệnh | Kết quả |
+|---|---|
+| `npm run verify` | L0 **634/0/0** · L1 **138/0/0** · map 237 mã · 0 mồ côi · 0 ma · 0 trùng |
+| `verify:gates` | 14 luật · 0 vi phạm |
+| `jest -w 2 libs/common/test/mail-gmail.spec.ts` | 6/6 (GM1..GM6) |
+
+## G.2 Token: làm mới, cache, gộp lượt gọi, lỗi
+
+| Thử (fetch giả) | Kết quả | Đánh giá |
+|---|---|---|
+| 3 thư gửi đồng thời khi token endpoint trả 500 | **1** lần gọi token, cả 3 bị reject, lỗi chỉ ghi `HTTP 500 (server_error)` (không lộ `error_description`) | ✓ gộp lượt gọi đúng |
+| Gửi lại sau khi token endpoint hồi phục | gọi token lần 2, cả 2 thư thành công | ✓ **lỗi không đầu độc cache**: `.finally()` xoá `refreshing`, không giữ promise bị reject |
+| `invalid_grant` | log `error` hướng dẫn lấy token lại (không in token), ném `Gmail OAuth: invalid_grant` | ✓ |
+| Gmail send luôn trả 401 | đúng **2** lần POST send (1 lần thử lại sau khi làm mới bắt buộc), rồi ném | ✓ có giới hạn |
+| Timeout | `AbortSignal.timeout(10 s)` cho cả hai fetch, phủ luôn lúc đọc body | ✓ |
+| Làm mới sớm | còn < 60 s thì làm mới. `expires_in` lạ → 3600 | ✓ |
+
+## G.3 MIME (RFC 5322/2045/2047)
+
+| Thử | Kết quả |
+|---|---|
+| Subject tiếng Việt dài | encoded-word `=?UTF-8?B?…?=` gập dòng bằng `CRLF + space`, dòng dài nhất 76. ✓ |
+| Tên hiển thị tiếng Việt trong From | encoded-word, gập dòng đúng. ✓ |
+| Thân thư | base64, dòng 76 ký tự, `CRLF`, không có LF trần. Boundary `hub_<24 hex>`: có `_` nên không thể trùng nội dung base64. ✓ |
+| `raw` | base64url, không padding, không còn `+ / =`. ✓ |
+| Header injection: CRLF, LF đơn, NUL trong Subject; CRLF trong To | **ném** trước khi gọi mạng. ✓ |
+| U+2028/U+2029/U+0085 trong Subject | thành encoded-word, không lọt ký tự xuống dòng thô. ✓ |
+| U+2028 trong To; nhiều người nhận bằng dấu phẩy; tên ASCII chứa `"` để chèn địa chỉ | **ném** (`địa chỉ email không hợp lệ`). ✓ |
+| **Thiếu `Date` và `Message-ID`** | không có header nào. RFC 5322 bắt buộc `Date`. Gmail API thường tự thêm nhưng không được ghi là bảo đảm. Xem G-2 |
+
+## G.4 Phát hiện (không có mức Cao hay Trung bình)
+
+- **G-1 · Thấp · U+0085 (NEL) trong local-part lọt vào header `To` dạng thô.**
+  - `ADDR_RE` dùng `\s` của JS, mà `\s` không gồm U+0085. Địa chỉ `a\u0085b@b.vn` (chính `isValidEmail` cũng cho qua lúc đăng ký) được ghi nguyên byte không-ASCII vào header.
+  - Không phải xuống dòng theo RFC 5322 nên **không** chèn được header. Gmail có thể từ chối thư đó.
+  - Sửa: `ADDR_RE` chỉ nhận ASCII in được (`[\x21-\x7e]`), hoặc `isValidEmail` từ chối ký tự điều khiển C1.
+- **G-2 · Thấp · thiếu `Date` / `Message-ID`; Subject ASCII không gập dòng.**
+  - Subject ASCII dài 1200 ký tự cho ra dòng 1209 > 998 (giới hạn RFC 5322). Mẫu thư hiện tại ngắn nên chưa gặp.
+  - Sửa: thêm `Date: <RFC 2822>` và `Message-ID: <uuid@domain-của-MAIL_FROM>`; với ASCII dài thì gập dòng hoặc luôn dùng encoded-word khi > 70 ký tự.
+- **G-3 · Thấp · lỗi send chép tối đa 200 ký tự body lỗi của Google vào `Error.message`** (rồi vào log qua `sendLater`).
+  - Body lỗi của Gmail không chứa token, nhưng có thể chứa trích đoạn header hay địa chỉ người nhận.
+  - Sửa: chỉ log `status` + `error.status/reason` (JSON). Lỗi token endpoint đã làm đúng: chỉ in `error`.
+- **G-4 · Thấp · `POST /auth/resend-verification` chờ gửi xong** (đường cũ, không phải R-6), nên khi Google treo có thể mất tới ~20 s (token 10 s + send 10 s).
+  - Đường đã đăng nhập nên không ảnh hưởng chống dò.
+  - **R-6 không đổi:** register (nền), forgot (`void`), invite (`void`) vẫn trả ngay.
+  - Nếu muốn có thể chuyển resend-verification sang `void` luôn.
+
+## G.5 Cấu hình, SSRF, tài liệu
+
+- **Boot:** `MAIL_DRIVER=gmail` thiếu biến → `authSecretProblems` liệt kê đủ 4 **tên** biến, hub-api thoát. `MAIL_FROM` sai cú pháp → báo lỗi. Driver được `trim().toLowerCase()` ở cả lúc kiểm và lúc tạo. ✓
+- **SSRF:** `GMAIL_TOKEN_URL` và `GMAIL_SEND_URL` là hằng số, không có biến môi trường nào đổi được host. ✓
+- **Bí mật:** không log token hay secret. `client_secret` chỉ nằm trong body POST tới Google. ✓
+- **Tài liệu DEPLOYMENT §9 "Lấy GOOGLE_REFRESH_TOKEN":** đúng về nội dung (External, In production để tránh hết hạn 7 ngày, chọn "Use your own OAuth credentials" trên Playground, scope `gmail.send`, cách thu hồi). Nên sửa ba chỗ cho khớp giao diện Google hiện tại:
+  1. Console mới gọi là **Google Auth Platform → Branding / Audience / Clients** chứ không còn "OAuth consent screen / Credentials". Mục **Test users nằm ở Audience và chỉ hiện SAU khi đã tạo consent screen (Branding)**. Bước 2 nên tách thành 2a "Get started / Branding" → 2b "Audience: External, thêm Test user".
+  2. Ghi rõ **tài khoản @gmail cá nhân không chọn được "Internal"** (chỉ Workspace mới có), nên bắt buộc External.
+  3. Khi đã **Publish → In production** thì danh sách Test users không còn tác dụng. Nên ghi rằng có thể bỏ qua bước thêm Test user nếu publish ngay, hoặc cần nó nếu ở lại Testing (khi đó token chết sau 7 ngày).
+
+## G.6 Kết luận
+
+**ĐẠT.** Logic token đúng: gộp lượt gọi, không đầu độc cache, thử lại 401 có giới hạn, `invalid_grant` rõ ràng, có timeout. MIME đúng cho các mẫu thư hiện có. Chống header injection ổn (kể cả Unicode line separator). Host cố định, không log token. R-6 không đổi. Bốn điểm Thấp (G-1..G-4) và ba chỗ sửa tài liệu không chặn deploy. Trước demo nên thêm `Date`/`Message-ID` (G-2) để giảm khả năng thư vào spam.
