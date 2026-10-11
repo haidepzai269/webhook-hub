@@ -28,6 +28,11 @@ const GITHUB_ERRORS: Record<string, string> = {
   email_exists_unverified: "Email này đã đăng ký nhưng chưa xác minh. Đăng nhập bằng mật khẩu hoặc dùng Quên mật khẩu.",
   github_account_mismatch: "Tài khoản này đã liên kết với một tài khoản GitHub khác.",
   operator_github_forbidden: "Operator không đăng nhập bằng GitHub.",
+  google_denied: "Bạn đã huỷ đăng nhập Google.",
+  google_failed: "Google không phản hồi hoặc phản hồi không hợp lệ. Thử lại sau.",
+  google_email_unverified: "Email của tài khoản Google chưa được Google xác minh.",
+  google_account_mismatch: "Tài khoản này đã liên kết với một tài khoản Google khác.",
+  operator_google_forbidden: "Operator không đăng nhập bằng Google.",
 };
 
 export function LoginForm() {
