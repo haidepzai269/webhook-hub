@@ -22,6 +22,8 @@ export interface ProjectSummary {
   environment: string;
   /** AU3: role của mình trong project (operator không là thành viên = owner). */
   role?: string;
+  /** false = operator đang thấy project mình KHÔNG là thành viên (quyền operator). */
+  member?: boolean;
 }
 
 /** `GET /api/v1/projects` (console đa service) — trả MẢNG. */

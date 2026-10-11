@@ -55,7 +55,8 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
     expect(await raw.auditLog.count({ where: { tenantId: p.id, action: 'project.created' } })).toBe(1);
     expect((await ctrl.list(req(alice))).map((x: any) => x.id)).toContain(p.id);
     expect((await ctrl.list(req(bob))).map((x: any) => x.id)).not.toContain(p.id); // IDOR: bob không thấy
-    expect((await ctrl.list(req(op))).some((x: any) => x.id === p.id && x.role === 'owner')).toBe(true); // operator thấy hết
+    expect((await ctrl.list(req(op))).some((x: any) => x.id === p.id && x.role === 'owner' && x.member === false)).toBe(true); // operator thấy hết, nhưng member=false (stale project)
+    expect((await ctrl.list(req(alice))).find((x: any) => x.id === p.id)).toMatchObject({ member: true });
   });
 
   it('tạo key: key hk_<env>_ chỉ trả MỘT lần, DB chỉ có sha256; danh sách không có key/keyHash; audit api_key.created', async () => {

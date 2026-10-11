@@ -109,9 +109,10 @@ export class ProjectsController {
   async list(@Req() req: RequestWithPrincipal) {
     const p = me(req);
     const mine = await this.prisma.identity().listMemberships(p.id);
-    if (!p.isOperator) return mine.map((m) => ({ id: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role }));
+    if (!p.isOperator) return mine.map((m) => ({ id: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role, member: true }));
+    // `member` thật (sửa lỗi "stale project"): web mặc định project mình là thành viên, không tự rơi vào project người khác.
     const roles = new Map(mine.map((m) => [m.projectId, m.role]));
-    return (await this.prisma.listProjects()).map((x) => ({ ...x, role: roles.get(x.id) ?? 'owner' }));
+    return (await this.prisma.listProjects()).map((x) => ({ ...x, role: roles.get(x.id) ?? 'owner', member: roles.has(x.id) }));
   }
 
   /** Người tạo thành owner (membership) trong CÙNG transaction. `live` cần email đã xác minh (§5.6). */

@@ -27,9 +27,10 @@ export function AuthGuard({ children }: { children: ReactNode }) {
     // AU3: có phiên -> chọn project hợp lệ (đã nhớ nếu còn quyền, không thì cái đầu) TRƯỚC khi mount trang:
     // mọi query /api/v1/* cần ?projectId=.
     hubFetch<AuthMe>("/auth/me")
-      .then(() => hubFetch<ProjectSummary[]>("/api/v1/projects"))
-      .then((projects) => {
-        ensureProject(projects.map((p) => p.id));
+      .then(async (me) => ({ me, projects: await hubFetch<ProjectSummary[]>("/api/v1/projects") }))
+      .then(({ me, projects }) => {
+        // Lựa chọn nhớ theo user; mặc định project mình là thành viên (sửa lỗi "stale project").
+        ensureProject(projects, me.user.id);
         if (alive) setAuthed(true);
       })
       .catch(() => {

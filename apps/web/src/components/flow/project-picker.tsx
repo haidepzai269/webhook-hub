@@ -35,19 +35,25 @@ export function ProjectPicker({ className }: { className?: string }) {
         <Button variant="outline" size="sm" className={className} aria-label="Project">
           <FolderKanban {...ICON} />
           {current?.name ?? "Chọn project"}
+          {current?.member === false && (
+            <span className="rounded bg-amber-500/15 px-1.5 text-amber-700 text-xs dark:text-amber-400">
+              đang xem với quyền operator
+            </span>
+          )}
           <ChevronDown {...ICON} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Project</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={current?.id ?? ""}
-          onValueChange={(v) => setProjectId(v)}
-        >
+        <DropdownMenuRadioGroup value={current?.id ?? ""} onValueChange={(v) => setProjectId(v)}>
           {data.map((p) => (
             <DropdownMenuRadioItem key={p.id} value={p.id}>
               {p.name}
-              {p.role && <span className="pl-2 text-muted-foreground text-xs">{p.role}</span>}
+              {p.member === false ? (
+                <span className="pl-2 text-amber-600 text-xs">operator</span>
+              ) : (
+                p.role && <span className="pl-2 text-muted-foreground text-xs">{p.role}</span>
+              )}
               <span className="ml-auto pl-3 font-mono text-muted-foreground text-xs">{p.slug}</span>
             </DropdownMenuRadioItem>
           ))}

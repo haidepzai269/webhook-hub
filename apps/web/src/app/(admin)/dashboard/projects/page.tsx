@@ -104,7 +104,7 @@ export default function ProjectsPage() {
               </TableCell>
               <TableCell className="font-mono text-xs">{p.slug}</TableCell>
               <TableCell>{p.environment}</TableCell>
-              <TableCell>{p.role ?? "—"}</TableCell>
+              <TableCell>{p.member === false ? "operator (không là thành viên)" : (p.role ?? "—")}</TableCell>
               <TableCell className="text-right">
                 {p.id !== projectId ? (
                   <Button size="sm" variant="outline" onClick={() => setProjectId(p.id)}>

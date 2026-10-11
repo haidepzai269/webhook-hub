@@ -1,4 +1,4 @@
-import { currentProjectId } from "./project-store";
+import { clearProjectSelection, currentProjectId } from "./project-store";
 import { errorMessageOf } from "./ui-logic";
 
 export class HubApiError extends Error {
@@ -20,7 +20,10 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 /** Cookie `hub_csrf` (không HttpOnly — cố ý, SPEC-auth §5.4). Token phiên thì HttpOnly: JS không bao giờ thấy. */
 export function readCsrfCookie(): string | null {
   if (typeof document === "undefined") return null;
-  const m = document.cookie.split(";").map((c) => c.trim()).find((c) => c.startsWith("hub_csrf="));
+  const m = document.cookie
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith("hub_csrf="));
   return m ? decodeURIComponent(m.slice("hub_csrf=".length)) : null;
 }
 
@@ -62,7 +65,8 @@ export function refreshSession(): Promise<boolean> {
  * chưa có — trừ `/api/v1/projects` (liệt kê/tạo của chính mình; route con mang id trên path).
  */
 export function scopeToProject(path: string, projectId: string | null = currentProjectId()): string {
-  if (!projectId || !path.startsWith("/api/v1/") || path.startsWith("/api/v1/projects") || /[?&]projectId=/.test(path)) return path;
+  if (!projectId || !path.startsWith("/api/v1/") || path.startsWith("/api/v1/projects") || /[?&]projectId=/.test(path))
+    return path;
   return `${path}${path.includes("?") ? "&" : "?"}projectId=${encodeURIComponent(projectId)}`;
 }
 
@@ -106,8 +110,12 @@ export interface AuthMe {
   memberships: { projectId: string; slug: string; name: string; environment: string; role: string }[];
 }
 
-/** Đăng xuất: thu hồi phiên ở server (cookie bị xoá trong response). Lỗi mạng vẫn về /login. */
+/**
+ * Đăng xuất: thu hồi phiên ở server (cookie bị xoá trong response). Lỗi mạng vẫn về /login. Quên project đang chọn
+ * (lỗi "stale project": user sau — vd operator — không được thừa hưởng project của user trước).
+ */
 export async function logout(): Promise<void> {
+  clearProjectSelection();
   try {
     await hubFetch("/auth/logout", { method: "POST" }, true);
   } catch {

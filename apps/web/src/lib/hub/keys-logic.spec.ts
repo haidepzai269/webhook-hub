@@ -44,8 +44,8 @@ describe("console Project + API key (SK1)", () => {
   });
 
   it("người mới: project tự tạo lúc đăng ký được chọn sẵn -> trang API key dùng ngay, không cần bước tạo project", () => {
-    expect(ensureProject(["auto-project-id"])).toBe("auto-project-id");
+    expect(ensureProject([{ id: "auto-project-id", member: true }], "u1")).toBe("auto-project-id");
     expect(currentProjectId()).toBe("auto-project-id");
-    expect(ensureProject(["other", "auto-project-id"])).toBe("auto-project-id"); // giữ lựa chọn còn hợp lệ
+    expect(ensureProject([{ id: "other" }, { id: "auto-project-id" }], "u1")).toBe("auto-project-id"); // giữ lựa chọn còn hợp lệ
   });
 });
