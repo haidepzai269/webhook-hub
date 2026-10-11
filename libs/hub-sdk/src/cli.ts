@@ -63,6 +63,9 @@ function fixOf(e: unknown): string | null {
 
 /** Trần chờ theo Retry-After (L-5): hub/proxy xin chờ lâu hơn thì vẫn thử lại sau 30s. */
 export const MAX_RETRY_AFTER_MS = 30_000;
+const MIN_RETRY_MS = 1000;
+/** R2-L2: số lần thử `after=latest` trước khi bỏ cuộc (≈ 40 s với backoff 1/2/5 s). */
+export const LATEST_MAX_ATTEMPTS = 10;
 
 const describe = (he: HubError) => (he?.status ? `HTTP ${he.status}` : he?.code ?? 'error');
 
@@ -73,7 +76,10 @@ const describe = (he: HubError) => (he?.status ? `HTTP ${he.status}` : he?.code 
 function retryDelayMs(he: HubError, attempt: number): number | null {
   const transient = he?.status === 0 || he?.status === 429 || he?.status >= 500;
   if (!transient) return null;
-  if ((he.status === 429 || he.status === 503) && typeof he.retryAfter === 'number') return Math.min(he.retryAfter * 1000, MAX_RETRY_AFTER_MS);
+  // R2-L1: kẹp [1 s, 30 s] — `Retry-After: 0` của proxy không được biến thành vòng poll không nghỉ.
+  if ((he.status === 429 || he.status === 503) && typeof he.retryAfter === 'number') {
+    return Math.max(MIN_RETRY_MS, Math.min(he.retryAfter * 1000, MAX_RETRY_AFTER_MS));
+  }
   return BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
 }
 
@@ -235,6 +241,12 @@ async function listen(args: string[], io: CliIO): Promise<number> {
           return 1;
         }
         attempt++;
+        if (attempt >= LATEST_MAX_ATTEMPTS) {
+          // R2-L2: không treo mãi — báo rõ và đưa fix (của hub nếu có).
+          io.err(`Reading latest cursor gave up after ${attempt} attempts (${describe(e as HubError)}).`);
+          io.err(`  fix: ${fixOf(e) ?? 'Check that the hub is up (GET /health) and retry later'}; or start from a known position with --from <cursor> (e.g. the "Last cursor" of a previous run).`);
+          return 1;
+        }
         io.err(`${hhmmss()}  hub busy (${describe(e as HubError)}) — retrying in ${ms / 1000}s`);
         await sleep(ms, signal);
         if (signal?.aborted) return 0;

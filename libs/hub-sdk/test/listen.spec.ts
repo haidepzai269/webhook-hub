@@ -243,4 +243,31 @@ describe('[DX] hub listen', () => {
     expect(sleeps).toEqual([3000, 7000, 30000, 5000]); // không có Retry-After -> backoff thường (đã ở bậc 5s)
     expect(t.lines.join(' ')).toMatch(/rate limited/);
   });
+
+  it('R2-L1: Retry-After kẹp tối thiểu 1s; dạng HTTP-date hiểu được; header hỏng -> dùng retryAfter của body', async () => {
+    const date = new Date(Date.now() + 5000).toUTCString();
+    const hub = fakeHub([], { limited: [{ header: '0' }, { header: date }, { header: 'abc', retryAfter: 4 }, { header: '' }] });
+    const sleeps: number[] = [];
+    const t = io(hub, { HUB_LISTEN_SECRET: SECRET });
+    t.io.sleep = async (ms: number) => void sleeps.push(ms);
+    expect(await runCli(['listen', '--forward', 'http://localhost:3000/w', '--from', '0'], t.io)).toBe(0);
+    expect(sleeps[0]).toBe(1000);
+    expect(sleeps[1]).toBeGreaterThanOrEqual(3000);
+    expect(sleeps[1]).toBeLessThanOrEqual(5000);
+    expect(sleeps[2]).toBe(4000);
+    expect(sleeps[3]).toBeGreaterThanOrEqual(1000); // header rỗng không thành sleep(0)
+  });
+
+  it('R2-L2: --from latest thất bại mãi -> sau 10 lần thoát mã 1, có hướng dẫn (--from <cursor>) + fix của hub', async () => {
+    const hub = fakeHub([], { latestFails: 1000 });
+    const sleeps: number[] = [];
+    const t = io(hub, { HUB_LISTEN_SECRET: SECRET });
+    t.io.sleep = async (ms: number) => void sleeps.push(ms);
+    expect(await runCli(['listen', '--forward', 'http://localhost:3000/w'], t.io)).toBe(1);
+    expect(sleeps).toHaveLength(9); // 10 lần gọi, 9 lần chờ
+    const text = t.lines.join(' ');
+    expect(text).toMatch(/gave up after 10 attempts/);
+    expect(text).toMatch(/--from <cursor>/);
+    expect(text).toMatch(/fix:/);
+  });
 });

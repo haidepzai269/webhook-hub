@@ -242,11 +242,26 @@ export class HubClient {
       // DX1: kèm `fix` + `requestId` của hub (không chứa key/secret — luật catalog) để log của service tự giải thích.
       const fix = typeof parsed?.fix === 'string' ? ` — fix: ${parsed.fix}` : '';
       const rid = typeof parsed?.requestId === 'string' ? ` [requestId ${parsed.requestId}]` : '';
-      const ra = Number(res.headers?.get?.('retry-after') ?? parsed?.retryAfter);
-      throw new HubError(res.status, code, `Hub trả HTTP ${res.status} (${code}) cho ${method} ${path.split('?')[0]}${fix}${rid}`, parsed, Number.isFinite(ra) && ra >= 0 ? ra : undefined);
+      const ra = parseRetryAfter(res.headers?.get?.('retry-after'), parsed?.retryAfter);
+      throw new HubError(res.status, code, `Hub trả HTTP ${res.status} (${code}) cho ${method} ${path.split('?')[0]}${fix}${rid}`, parsed, ra);
     }
     return parsed as T;
   }
+}
+
+/**
+ * R2-L1: Retry-After = số giây (`120`) hoặc HTTP-date (RFC 9110). Header không đọc được (rỗng, rác) -> thử `retryAfter`
+ * của body. Kết quả là giây ≥ 0 hoặc undefined; người dùng tự kẹp tối thiểu (CLI: ≥ 1 s).
+ */
+export function parseRetryAfter(header: string | null | undefined, bodyValue: unknown, nowMs = Date.now()): number | undefined {
+  const h = typeof header === 'string' ? header.trim() : '';
+  if (/^\d+$/.test(h)) return Number(h);
+  if (h) {
+    const at = Date.parse(h);
+    if (Number.isFinite(at)) return Math.max(0, Math.ceil((at - nowMs) / 1000));
+  }
+  const b = typeof bodyValue === 'number' ? bodyValue : typeof bodyValue === 'string' && /^\d+$/.test(bodyValue.trim()) ? Number(bodyValue) : NaN;
+  return Number.isFinite(b) && b >= 0 ? b : undefined;
 }
 
 export function createHubClient(connectionString: string, opts?: { fetch?: FetchLike }): HubClient {
