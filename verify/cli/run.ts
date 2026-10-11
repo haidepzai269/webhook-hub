@@ -4,7 +4,10 @@
  *   npm run verify:unit            L0 — mọi *.spec.ts KHÔNG dùng describeDb. Không cần docker.
  *   npm run verify:db              L1 — mọi *.spec.ts dùng describeDb, RUN_DB_TESTS=1, Postgres/Redis của hubv.
  *                                  skip > 0 → ĐỎ (H1). hubv chưa lên → ĐỎ "skip > 0 ở L1".
- *   npm run verify                 L0 + L1 (+ L2 khi VF4 có runner).
+ *   npm run verify:e2e [-- --tag smoke]   L2 — kịch bản HTTP vào hubv (VF4, verify/lib/e2e-runner.ts). Lọc tag thì
+ *                                  KHÔNG cập nhật bánh cóc (tập con).
+ *   npm run verify:deployed        L2 chỉ kịch bản `@deployed-safe`, vào VERIFY_API_URL (bắt buộc). Không bánh cóc.
+ *   npm run verify                 L0 + L1 + L2.
  *   npm run verify:map [-- --story VF2]   sinh docs/TEST-MAP.md; mồ côi / ma / trùng → ĐỎ.
  *   npm run verify -- --evidence   in khối "Verify:" cho commit từ lần chạy cuối (không chạy lại).
  *
@@ -19,6 +22,7 @@ import * as path from 'path';
 import { hostUrls, loadVerifyEnv, ROOT } from '../lib/compose';
 import { analyzeMap, declaredCodes, MapResult, scanTags, SourcesConfig } from '../lib/map';
 import { layerVerdict, ratchet, relFile, Summary, summarizeJest, unreachableSummary } from '../lib/results';
+import { L2Options, runL2 } from '../lib/e2e-runner';
 
 const VERIFY_DIR = path.join(ROOT, 'verify');
 const RESULTS_DIR = path.join(VERIFY_DIR, '.results');
@@ -30,7 +34,7 @@ const TEST_MAP = path.join(ROOT, 'docs', 'TEST-MAP.md');
 const SCAN_DIRS = ['apps', 'libs', 'verify', 'tools'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', '.results', '.git']);
 
-type Layer = 'L0' | 'L1';
+type Layer = 'L0' | 'L1' | 'L2';
 
 function walk(dir: string, match: (f: string) => boolean, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;
@@ -98,7 +102,14 @@ function runJest(layer: Layer, files: string[], env: NodeJS.ProcessEnv): { summa
   return { summary: summarizeJest(JSON.parse(fs.readFileSync(out, 'utf8')), ROOT), ms };
 }
 
-async function runLayer(layer: Layer): Promise<{ summary: Summary; ms: number }> {
+async function runLayer(layer: Layer, l2: L2Options = defaultL2()): Promise<{ summary: Summary; ms: number }> {
+  if (layer === 'L2') {
+    console.log(`
+▶ L2: kịch bản e2e → ${l2.apiUrl}${l2.tags.length ? ` (tag ${l2.tags.join(', ')})` : ''}${l2.deployed ? ' [deployed: chỉ @deployed-safe]' : ''}`);
+    const t0 = Date.now();
+    const summary = await runL2(l2);
+    return { summary, ms: Date.now() - t0 };
+  }
   const files = specFiles().filter((f) => layerOfFile(f) === layer);
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (layer === 'L0') {
@@ -128,16 +139,20 @@ async function runLayer(layer: Layer): Promise<{ summary: Summary; ms: number }>
   return runJest('L1', files, env);
 }
 
+function defaultL2(): L2Options {
+  return { tags: [], deployed: false, apiUrl: process.env.VERIFY_API_URL || hostUrls().HUB_API_URL };
+}
+
 function fmtRow(cols: (string | number)[]): string {
   const w = [6, 6, 6, 6, 8];
   return cols.map((c, i) => String(c).padStart(w[i] ?? 6)).join(' |');
 }
 
-async function verify(layers: Layer[]): Promise<number> {
+async function verify(layers: Layer[], l2: L2Options = defaultL2()): Promise<number> {
   const results: Record<string, { summary: Summary; ms: number }> = {};
   const problems: string[] = [];
   for (const layer of layers) {
-    const r = await runLayer(layer);
+    const r = await runLayer(layer, l2);
     results[layer] = r;
     problems.push(...layerVerdict(layer, r.summary));
     // Tầng thấp đỏ thì không chạy tầng cao hơn (§2)
@@ -150,6 +165,8 @@ async function verify(layers: Layer[]): Promise<number> {
   const ratchetNotes: string[] = [];
   for (const [layer, r] of Object.entries(results)) {
     if (r.summary.fail > 0 || r.summary.note) continue;
+    // Tập con (lọc tag / deployed) không phải "số test của tầng" — không đụng bánh cóc.
+    if (layer === 'L2' && (l2.tags.length > 0 || l2.deployed)) continue;
     const rr = ratchet(baseline, layer, r.summary.pass, commitMsg);
     ratchetNotes.push(rr.message);
     if (!rr.ok) problems.push(rr.message);
@@ -191,7 +208,6 @@ async function verify(layers: Layer[]): Promise<number> {
   for (const layer of ['L0', 'L1', 'L2']) {
     const r = results[layer];
     if (r) console.log(fmtRow([layer, r.summary.pass, r.summary.fail, r.summary.skip, `${Math.round(r.ms / 1000)}s`]) + (r.summary.note ? `   ${r.summary.note}` : ''));
-    else if (layer === 'L2' && layers.length > 1) console.log(fmtRow(['L2', '—', '—', '—', '—']) + '   chưa có runner L2 (VF4) — không tính');
   }
   for (const n of ratchetNotes) console.log(`  bánh cóc: ${n}`);
   if (problems.length > 0) {
@@ -222,7 +238,7 @@ function loadMap(): { config: SourcesConfig; result: MapResult; declared: Return
 }
 
 function layerLabel(file: string): string {
-  if (file.startsWith('verify/scenarios/')) return 'L2*';
+  if (file.startsWith('verify/scenarios/')) return /stack-isolation/.test(file) ? 'L2*' : 'L2';
   return file.endsWith('.spec.ts') ? layerOfFile(file) : '?';
 }
 
@@ -257,7 +273,7 @@ function writeTestMap(m: ReturnType<typeof loadMap>): void {
     '',
     `> Sinh bởi \`npm run verify:map\` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần \`verify\` cuối (${last.at ?? 'chưa chạy'}, commit ${last.commit ?? '—'}).`,
     '> Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.',
-    '> `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.',
+    '> `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.',
     '',
     `Tổng: ${m.declared.size} mã khai báo · ${m.result.covered.size} mã có test · ${m.result.orphans.length} mồ côi · ${m.result.acceptedOrphans.length} mồ côi có lý do · ${m.result.ghosts.length} ma · ${m.result.dups.length} trùng.`,
     '',
@@ -326,15 +342,27 @@ async function main() {
       process.exit(await verify(['L0']));
     case 'db':
       process.exit(await verify(['L1']));
+    case 'e2e': {
+      const tags = rest.flatMap((x, i) => (rest[i - 1] === '--tag' ? x.split(',') : []));
+      process.exit(await verify(['L2'], { ...defaultL2(), tags }));
+    }
+    case 'deployed': {
+      const apiUrl = process.env.VERIFY_API_URL;
+      if (!apiUrl) {
+        console.error('verify:deployed cần VERIFY_API_URL (+ VERIFY_API_KEY, VERIFY_PROJECT_SLUG=demo). Không có mặc định — không bao giờ tự trỏ vào hạ tầng thật.');
+        process.exit(2);
+      }
+      process.exit(await verify(['L2'], { tags: [], deployed: true, apiUrl }));
+    }
     case 'all': {
-      const code = await verify(['L0', 'L1']);
+      const code = await verify(['L0', 'L1', 'L2']);
       const mapCode = mapCmd();
       process.exit(code || mapCode);
     }
     case 'map':
       process.exit(mapCmd(opt('--story')));
     default:
-      console.error('Dùng: run.ts unit|db|all|map [--story X] [--evidence]');
+      console.error('Dùng: run.ts unit|db|e2e [--tag x]|deployed|all|map [--story X] [--evidence]');
       process.exit(2);
   }
 }

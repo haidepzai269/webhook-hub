@@ -79,7 +79,7 @@ async function main(argv: string[]): Promise<number> {
       const to = arg(args, '--to');
       if (!to) throw new Error('send cần --to <url>, vd http://localhost:14000/hooks/github/src_github_main');
       const p = prepare(f, arg(args, '--secret') ?? defaultSecret(f.provider), { unique: arg(args, '--unique') });
-      const res = await fetch(to, { method: p.method, headers: p.headers, body: p.body });
+      const res = await fetch(to, { method: p.method, headers: p.headers, body: new Uint8Array(p.body) });
       const text = await res.text();
       const ok = res.status === f.expect.status;
       console.log(`${ok ? '✓' : '✗'} ${args[0]} -> ${res.status} (mong đợi ${f.expect.status}) ${text.slice(0, 300)}`);

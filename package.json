@@ -28,6 +28,8 @@
     "verify:unit": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts unit",
     "verify:db": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts db",
     "verify:map": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts map",
+    "verify:e2e": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts e2e",
+    "verify:deployed": "ts-node --transpile-only -P tsconfig.json verify/cli/run.ts deployed",
     "verify:selftest": "ts-node --transpile-only -P tsconfig.json verify/scenarios/stack-isolation.ts",
     "verify:gates": "ts-node --transpile-only -P tsconfig.json verify/cli/gates.ts",
     "verify:e2e:auth": "ts-node --transpile-only -P tsconfig.json verify/scenarios/auth-e2e.ts",
