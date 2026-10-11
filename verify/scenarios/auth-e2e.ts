@@ -17,8 +17,11 @@ import Redis from 'ioredis';
 import { io as ioClient } from 'socket.io-client';
 import { composeOutput, hostUrls, ROOT } from '../lib/compose';
 import { createRunner, expect, HttpSession } from '../lib/http-session';
+import { assertLocalOrExit } from '../lib/local-url';
 
 const API = process.env.VERIFY_API_URL || hostUrls().HUB_API_URL;
+// M-R2-2: `npm run verify:e2e:auth` chạy thẳng file này (không qua guard của run.ts/e2e-world) — chặn TRƯỚC Redis/request.
+assertLocalOrExit(API, 'verify:e2e:auth');
 const redis = new Redis(process.env.VERIFY_REDIS_URL || hostUrls().REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
 const run = createRunner();
 const RUN = randomUUID().slice(0, 8);

@@ -11,6 +11,24 @@ describe('VERIFY_API_URL chỉ local (M-3)', () => {
     for (const u of ['https://hub-api.onrender.com', 'https://webhook-hub.vercel.app', 'http://203.0.113.5:14000', 'http://localhost.evil.com', 'khong-phai-url']) expect([u, isLocalUrl(u)]).toEqual([u, false]);
   });
 
+  it('VF4 (M-R2-2): hubv chỉ là MỘT nhãn DNS không dấu chấm (tên container compose) — hubv.evil.com, hubv-x.onrender.com bị chặn', () => {
+    for (const u of ['http://hubv-hub-api-1:4000', 'http://hubv-sink-1:4100']) expect([u, isLocalUrl(u)]).toEqual([u, true]);
+    for (const u of ['http://hubv.evil.com', 'https://hubv-x.onrender.com', 'https://hubv-api.vercel.app', 'http://hubv.', 'http://hubv-:4000', 'http://hubv']) expect([u, isLocalUrl(u)]).toEqual([u, false]);
+  });
+
+  it('VF4 (M-R2-2): `verify:e2e:auth` (auth-e2e.ts chạy thẳng) với VERIFY_API_URL trỏ ra ngoài -> thoát 2, không gửi request nào', () => {
+    const ts = path.join(ROOT, 'node_modules', 'ts-node', 'dist', 'bin.js');
+    const r = spawnSync(process.execPath, [ts, '--transpile-only', '-P', 'tsconfig.json', 'verify/scenarios/auth-e2e.ts'], {
+      cwd: ROOT,
+      env: { ...process.env, VERIFY_API_URL: 'https://hubv-x.onrender.com', VERIFY_REDIS_URL: 'redis://127.0.0.1:1' },
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/không phải hubv local/);
+    expect(r.stdout).not.toMatch(/^[✓✗] /m);
+  }, 90_000);
+
   it('VF4 (M-3): `run.ts e2e` với VERIFY_API_URL trỏ ra ngoài -> thoát 2, không chạy kịch bản nào', () => {
     const ts = path.join(ROOT, 'node_modules', 'ts-node', 'dist', 'bin.js');
     const r = spawnSync(process.execPath, [ts, '--transpile-only', '-P', 'tsconfig.json', 'verify/cli/run.ts', 'e2e', '--tag', 'smoke'], {
