@@ -28,18 +28,56 @@ function withConnectionLimit(url, n) {
   }
 }
 
+/**
+ * Chép từng DÒNG log của con ra `out`. D-1: `proc` đặt SAU spread — con không giả được nhãn. D-4: `out.write` trả false
+ * (stdout chậm, vd log Render) -> tạm dừng đọc của con tới khi `drain` (log không dồn vô hạn trong RAM supervisor).
+ */
 function pipeLines(stream, out, tag) {
-  readline.createInterface({ input: stream }).on('line', (line) => {
+  const rl = readline.createInterface({ input: stream });
+  let paused = false;
+  const write = (text) => {
+    if (!out.write(text) && !paused) {
+      paused = true;
+      rl.pause();
+      out.once('drain', () => {
+        paused = false;
+        rl.resume();
+      });
+    }
+  };
+  rl.on('line', (line) => {
     if (line.startsWith('{') && line.endsWith('}')) {
       try {
-        out.write(`${JSON.stringify({ proc: tag, ...JSON.parse(line) })}\n`);
+        write(`${JSON.stringify({ ...JSON.parse(line), proc: tag })}\n`);
         return;
       } catch {
         /* không phải JSON hợp lệ -> tiền tố */
       }
     }
-    out.write(`[${tag}] ${line}\n`);
+    write(`[${tag}] ${line}\n`);
   });
+}
+
+/**
+ * Env của hai con (ADR-129 + review D-5/D-6):
+ * - D-5: `DIRECT_URL` (owner, vượt RLS) chỉ cần cho migrate đã chạy XONG ở hub_prestart -> con nhận `DIRECT_URL = DATABASE_URL`
+ *   (hub_app; Prisma vẫn thấy biến của `directUrl` nhưng không còn quyền owner), bỏ `HUB_APP_DB_PASSWORD`.
+ * - D-6: con drain trong `SHUTDOWN_TIMEOUT_MS - 3000` (22 s) — supervisor SIGKILL ở mốc 25 s, không cắt ngang lúc con đang kết thúc.
+ */
+function buildChildEnvs(env) {
+  const supervisorTimeout = parseInt(env.SHUTDOWN_TIMEOUT_MS || '25000', 10);
+  const childTimeout = String(Math.max(1000, supervisorTimeout - 3000));
+  const base = { ...env, SHUTDOWN_TIMEOUT_MS: childTimeout };
+  delete base.HUB_APP_DB_PASSWORD;
+  const forChild = (conns) => {
+    const url = withConnectionLimit(env.DATABASE_URL, conns);
+    return { ...base, DATABASE_URL: url, DIRECT_URL: url };
+  };
+  return {
+    supervisorTimeout,
+    api: forChild(env.HUB_ALL_API_DB_CONNECTIONS || '5'),
+    worker: { ...forChild(env.HUB_ALL_WORKER_DB_CONNECTIONS || '5'), WORKER_METRICS_PORT: env.WORKER_METRICS_PORT ?? '0' },
+  };
 }
 
 /**
@@ -117,14 +155,8 @@ function supervise(specs, opts = {}) {
 
 function main() {
   const env = process.env;
-  const timeoutMs = parseInt(env.SHUTDOWN_TIMEOUT_MS || '25000', 10);
   const heap = (mb, def) => `--max-old-space-size=${parseInt(mb || def, 10)}`;
-  const apiEnv = { ...env, DATABASE_URL: withConnectionLimit(env.DATABASE_URL, env.HUB_ALL_API_DB_CONNECTIONS || '5') };
-  const workerEnv = {
-    ...env,
-    DATABASE_URL: withConnectionLimit(env.DATABASE_URL, env.HUB_ALL_WORKER_DB_CONNECTIONS || '5'),
-    WORKER_METRICS_PORT: env.WORKER_METRICS_PORT ?? '0',
-  };
+  const { supervisorTimeout: timeoutMs, api: apiEnv, worker: workerEnv } = buildChildEnvs(env);
   const sup = supervise(
     [
       { name: 'api', cmd: process.execPath, args: [heap(env.HUB_ALL_API_HEAP_MB, '200'), 'dist/apps/hub-api/src/main.js'], cwd: 'apps/hub-api', env: apiEnv },
@@ -138,4 +170,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { supervise, withConnectionLimit };
+module.exports = { supervise, withConnectionLimit, buildChildEnvs };

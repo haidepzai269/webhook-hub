@@ -138,6 +138,16 @@
       "note": "Phát hiện của review driver Gmail (G-1..G-4); test gắn [AR:G-n] hoặc mã GM tương ứng."
     },
     {
+      "ns": "AR",
+      "file": "_bmad-output/planning-artifacts/REVIEW-DEPLOY-2026-10-11.md",
+      "pattern": "^- \\*\\*(D-\\d+) ·",
+      "requireTest": false,
+      "done": {
+        "all": true
+      },
+      "note": "Review chế độ hub-all (D-1..D-6); D-2/D-3 sửa bằng tài liệu/số đo nên không bắt buộc test."
+    },
+    {
       "ns": "VF",
       "file": "_bmad-output/planning-artifacts/verification/SPEC-verification.md",
       "pattern": "^\\|\\s*(VT\\d+)\\s*\\|",
