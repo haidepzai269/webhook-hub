@@ -170,3 +170,23 @@ describe('G-4 — resend-verification không chờ gửi mail', () => {
     expect(sent).toBe(1);
   });
 });
+
+describe('GO-4 — rate limit callback OAuth', () => {
+  it('[AR:GO-4] cùng IP gọi callback quá 20 lần/phút -> 429 (một INCR mỗi lần); IP khác không bị ảnh hưởng', async () => {
+    const { AuthService } = require('../src/modules/auth/auth.service');
+    const { AuthRateLimiter } = require('../src/modules/auth/rate-limit');
+    const { JwtService } = require('@nestjs/jwt');
+    const { loadAuthConfig } = require('../src/modules/auth/auth-config');
+    const cfg = loadAuthConfig({ JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40) });
+    let evals = 0;
+    const counts = new Map<string, number>();
+    const redis = { eval: async (_s: string, _n: number, key: string) => (evals++, counts.set(key, (counts.get(key) ?? 0) + 1), [counts.get(key), 60]) };
+    const svc = new AuthService({ identity: () => ({ recordAuthAudit: async () => undefined }) } as any, new JwtService({}), cfg, new AuthRateLimiter(redis));
+    const st = (ip: string) => svc.limitOAuthCallback({ ip, userAgent: null }).then(() => 200, (e: any) => e.getStatus());
+    const a: number[] = [];
+    for (let i = 0; i < 21; i++) a.push(await st('203.0.113.9'));
+    expect(a.slice(0, 20).every((x) => x === 200) && a[20] === 429).toBe(true);
+    expect(await st('198.51.100.1')).toBe(200);
+    expect(evals).toBe(22);
+  });
+});

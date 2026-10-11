@@ -82,6 +82,16 @@ describe('ID token Google (ADR-127)', () => {
   });
 });
 
+describe('Review AU5b GO-3', () => {
+  it('[AR:GO-3] azp có mặt thì PHẢI bằng client id, kể cả khi aud là chuỗi đúng; claim hd được trả ra', async () => {
+    const jwks = new GoogleJwks('https://jwks', jwksServer([[{ kid: 'k1', jwk: K1.jwk }]]).fetchImpl, () => NOW);
+    const v = (claims: Record<string, unknown>) =>
+      verifyGoogleIdToken(idToken(claims), { jwks, clientId: CLIENT, nonce: 'n-1', now: () => NOW }).then((c) => c, (e: any) => `ERR:${e.reason}`);
+    expect(await v(good({ azp: 'client-khac' }))).toBe('ERR:aud');
+    expect(await v(good({ azp: CLIENT, hd: 'cong-ty.vn' }))).toMatchObject({ sub: '1098765', hd: 'cong-ty.vn' });
+  });
+});
+
 describe('Luồng OAuth Google (ADR-127)', () => {
   const cfg = loadAuthConfig({ JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40), WEB_PUBLIC_URL: 'http://web.test' });
   const gcfg = loadGoogleConfig({ GOOGLE_OAUTH_CLIENT_ID: CLIENT, GOOGLE_OAUTH_CLIENT_SECRET: 'sec' });

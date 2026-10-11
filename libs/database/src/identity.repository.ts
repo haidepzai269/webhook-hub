@@ -81,13 +81,24 @@ export class IdentityRepository {
     return r.count;
   }
 
+  /**
+   * GO-1 (ADR-128): gỡ Google bằng MỘT câu UPDATE có điều kiện "còn cách đăng nhập khác SAU khi gỡ" (mật khẩu hoặc
+   * GitHub). Hai lệnh gỡ song song: lệnh sau chờ khoá dòng rồi tính lại WHERE trên bản mới (READ COMMITTED) -> 0 dòng.
+   */
   async unlinkGoogle(userId: string): Promise<number> {
-    const r = await this.db.user.updateMany({ where: { id: userId, googleSub: { not: null } }, data: { googleSub: null } });
+    const r = await this.db.user.updateMany({
+      where: { id: userId, googleSub: { not: null }, OR: [{ passwordHash: { not: null } }, { githubId: { not: null } }] },
+      data: { googleSub: null },
+    });
     return r.count;
   }
 
+  /** GO-1 (ADR-128): như `unlinkGoogle` — chỉ gỡ khi còn mật khẩu hoặc Google, trong CÙNG câu UPDATE. */
   async unlinkGithub(userId: string): Promise<number> {
-    const r = await this.db.user.updateMany({ where: { id: userId, githubId: { not: null } }, data: { githubId: null } });
+    const r = await this.db.user.updateMany({
+      where: { id: userId, githubId: { not: null }, OR: [{ passwordHash: { not: null } }, { googleSub: { not: null } }] },
+      data: { githubId: null },
+    });
     return r.count;
   }
 

@@ -89,6 +89,7 @@ export class AuthController {
   /** Cookie state/PKCE dùng MỘT lần: xoá ngay, kể cả khi lỗi. state sai -> 400 oauth_state_mismatch. */
   @Get('github/callback')
   async githubCallback(@Req() req: RequestWithPrincipal, @Res() res: Response, @Query() q: Record<string, unknown>) {
+    await this.auth.limitOAuthCallback(reqCtx(req)); // GO-4
     const sealed = readCookie(req, OAUTH_COOKIE);
     res.clearCookie(OAUTH_COOKIE, { httpOnly: true, secure: true, sameSite: 'lax', path: '/' });
     const r = await this.github.callback({ code: q?.code, state: q?.state }, sealed, reqCtx(req));
@@ -115,6 +116,7 @@ export class AuthController {
   /** Cookie state/PKCE/nonce dùng MỘT lần: xoá ngay, kể cả khi lỗi. state sai -> 400 oauth_state_mismatch. */
   @Get('google/callback')
   async googleCallback(@Req() req: RequestWithPrincipal, @Res() res: Response, @Query() q: Record<string, unknown>) {
+    await this.auth.limitOAuthCallback(reqCtx(req)); // GO-4
     const sealed = readCookie(req, OAUTH_COOKIE);
     res.clearCookie(OAUTH_COOKIE, { httpOnly: true, secure: true, sameSite: 'lax', path: '/' });
     const r = await this.google.callback({ code: q?.code, state: q?.state }, sealed, reqCtx(req));

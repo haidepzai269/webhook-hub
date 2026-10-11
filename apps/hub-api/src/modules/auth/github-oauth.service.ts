@@ -160,10 +160,12 @@ export class GithubOAuthService {
     const user = await idn.findUserById(p.id);
     if (!user) throw authError(HttpStatus.UNAUTHORIZED, 'session_expired');
     // AU5b (ADR-127): còn mật khẩu HOẶC Google thì gỡ được.
-    if (!user.passwordHash && !user.googleSub) {
+    if (!user.githubId) return;
+    // GO-1 (ADR-128): điều kiện "còn mật khẩu hoặc Google" nằm TRONG câu UPDATE (không đua được với gỡ Google).
+    if ((await idn.unlinkGithub(user.id)) !== 1) {
       throw new HttpException({ error: 'last_login_method', message: 'Đặt mật khẩu (luồng quên mật khẩu) hoặc liên kết Google trước khi gỡ GitHub' }, HttpStatus.CONFLICT);
     }
-    if ((await idn.unlinkGithub(user.id)) === 1) await idn.recordAuthAudit({ userId: user.id, action: 'github.unlinked', ip: ctx.ip });
+    await idn.recordAuthAudit({ userId: user.id, action: 'github.unlinked', ip: ctx.ip });
   }
 
   private async login(userId: string, ctx: ReqCtx): Promise<IssuedSession> {

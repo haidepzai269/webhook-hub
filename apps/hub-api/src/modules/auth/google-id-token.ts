@@ -15,6 +15,8 @@ export interface GoogleIdClaims {
   email: string;
   emailVerified: boolean;
   name: string;
+  /** Workspace: domain của tổ chức (GO-2). */
+  hd?: string;
 }
 
 export class IdTokenError extends Error {
@@ -102,7 +104,10 @@ export async function verifyGoogleIdToken(
   const nowS = Math.floor((opts.now ?? Date.now)() / 1000);
   if (!GOOGLE_ISSUERS.includes(c.iss as (typeof GOOGLE_ISSUERS)[number])) throw new IdTokenError('iss');
   const aud = Array.isArray(c.aud) ? c.aud : [c.aud];
-  if (!aud.includes(opts.clientId) || (Array.isArray(c.aud) && c.azp !== opts.clientId)) throw new IdTokenError('aud');
+  // GO-3: có `azp` thì phải bằng client id (kể cả khi aud là chuỗi); aud là mảng thì azp bắt buộc.
+  if (!aud.includes(opts.clientId) || (c.azp !== undefined && c.azp !== opts.clientId) || (Array.isArray(c.aud) && c.azp === undefined)) {
+    throw new IdTokenError('aud');
+  }
   if (typeof c.exp !== 'number' || c.exp + SKEW_S < nowS) throw new IdTokenError('expired');
   if (typeof c.iat === 'number' && c.iat - SKEW_S > nowS) throw new IdTokenError('iat_future');
   if (!opts.nonce || typeof c.nonce !== 'string' || c.nonce !== opts.nonce) throw new IdTokenError('nonce');
@@ -113,5 +118,6 @@ export async function verifyGoogleIdToken(
     email: c.email,
     emailVerified: c.email_verified === true || c.email_verified === 'true',
     name: (typeof c.name === 'string' && c.name.trim() ? c.name.trim() : c.email.split('@')[0]).slice(0, 100),
+    ...(typeof c.hd === 'string' && c.hd ? { hd: c.hd } : {}),
   };
 }

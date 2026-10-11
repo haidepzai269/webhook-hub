@@ -44,6 +44,14 @@ interface GoogleProfile {
   email: string;
   emailVerified: boolean;
   name: string;
+  hd?: string;
+}
+
+/** GO-2: Google là nơi CẤP email này — gmail.com/googlemail.com, hoặc Workspace có `hd` trùng domain của email. */
+export function googleAuthoritative(email: string, hd: string | undefined): boolean {
+  const domain = email.split('@')[1]?.toLowerCase() ?? '';
+  if (domain === 'gmail.com' || domain === 'googlemail.com') return true;
+  return !!hd && hd.toLowerCase() === domain;
 }
 
 @Injectable()
@@ -144,6 +152,12 @@ export class GoogleOAuthService {
         await idn.recordAuthAudit({ userId: byEmail.id, action: 'google.link_mismatch', ip: ctx.ip, meta: { googleSub: p.sub } });
         return { redirect: this.web('/login?error=google_account_mismatch') };
       }
+      // GO-2 (ADR-128): tự ghép vào tài khoản ĐÃ xác minh chỉ khi Google có thẩm quyền với email (gmail.com /
+      // googlemail.com, hoặc Workspace với hd = domain email). Domain riêng có thể đổi chủ mà email_verified vẫn true.
+      if (byEmail.emailVerifiedAt && !googleAuthoritative(email, p.hd)) {
+        await idn.recordAuthAudit({ userId: byEmail.id, action: 'google.link_requires_password', ip: ctx.ip, meta: { googleSub: p.sub } });
+        return { redirect: this.web('/login?error=google_link_requires_password') };
+      }
       if (!byEmail.emailVerifiedAt) {
         // N-1 (ADR-121/127): mật khẩu/tên hiện có là của "ai đó đã đăng ký" — Google chứng minh hộp thư -> nhận tài khoản.
         await this.auth.claimAccount(byEmail.id, email, null, p.name, 'google_claimed');
@@ -174,10 +188,12 @@ export class GoogleOAuthService {
     const idn = this.prisma.identity();
     const user = await idn.findUserById(principal.id);
     if (!user) throw authError(HttpStatus.UNAUTHORIZED, 'session_expired');
-    if (!user.passwordHash && !user.githubId) {
+    if (!user.googleSub) return; // chưa gắn: không có gì để gỡ
+    // GO-1 (ADR-128): điều kiện "còn cách khác" nằm TRONG câu UPDATE — 0 dòng = không còn cách khác (kể cả do đua).
+    if ((await idn.unlinkGoogle(user.id)) !== 1) {
       throw new HttpException({ error: 'last_login_method', message: 'Đặt mật khẩu hoặc liên kết GitHub trước khi gỡ Google' }, HttpStatus.CONFLICT);
     }
-    if ((await idn.unlinkGoogle(user.id)) === 1) await idn.recordAuthAudit({ userId: user.id, action: 'google.unlinked', ip: ctx.ip });
+    await idn.recordAuthAudit({ userId: user.id, action: 'google.unlinked', ip: ctx.ip });
   }
 
   private async login(userId: string, ctx: ReqCtx) {

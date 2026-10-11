@@ -55,8 +55,8 @@ describeDb('Đăng nhập Google (Postgres + fetch giả, AU5b)', () => {
       throw e;
     }
   };
-  async function signIn(sub: string, email: string, name = 'Google User') {
-    claims = { sub, email, name };
+  async function signIn(sub: string, email: string, name = 'Google User', extra: Record<string, unknown> = {}) {
+    claims = { sub, email, name, ...extra };
     const s = google.start();
     const c = openOAuthCookie(cfg.oauthCookieSecret, s.cookie.value, 'google')!;
     currentNonce = c.nonce!;
@@ -89,7 +89,7 @@ describeDb('Đăng nhập Google (Postgres + fetch giả, AU5b)', () => {
     expect((await signIn(`sub-a-${run}`, `doi-email-${run}@gmail.test`)).redirect).toBe('http://web.test/dashboard');
     expect(await raw.user.count({ where: { email: `doi-email-${run}@gmail.test` } })).toBe(0); // KHÔNG khoá theo email
 
-    const v = `gg-lienket-${run}@gmail.test`;
+    const v = `gg-lienket-${run}@gmail.com`; // GO-2: chỉ tự ghép khi Google có thẩm quyền với email (gmail.com / hd)
     emails.push(v);
     const vu = await raw.user.create({ data: { email: v, name: 'Bình', passwordHash: 'x', emailVerifiedAt: new Date() } });
     expect((await signIn(`sub-b-${run}`, v)).redirect).toBe('http://web.test/dashboard');
@@ -148,9 +148,36 @@ describeDb('Đăng nhập Google (Postgres + fetch giả, AU5b)', () => {
     const github = new GithubOAuthService(auth, svc, cfg, loadGithubConfig({}), mail);
     await github.unlink(p(both), ctx); // còn Google -> gỡ GitHub được
     expect((await raw.user.findUniqueOrThrow({ where: { id: both.id } })).githubId).toBeNull();
-    const withPw = await raw.user.findUniqueOrThrow({ where: { email: `gg-lienket-${run}@gmail.test` } });
+    const withPw = await raw.user.findUniqueOrThrow({ where: { email: `gg-lienket-${run}@gmail.com` } });
     await google.unlink(p(withPw), ctx);
     expect((await raw.user.findUniqueOrThrow({ where: { id: withPw.id } })).googleSub).toBeNull();
     expect(await raw.authAudit.count({ where: { userId: withPw.id, action: 'google.unlinked' } })).toBe(1);
+  });
+
+  it('[AR:GO-2] email trùng user ĐÃ xác minh nhưng domain KHÔNG do Google quản (không gmail.com, không hd khớp) -> KHÔNG tự ghép (google_link_requires_password); hd khớp domain -> ghép', async () => {
+    const e1 = `gg-domain-${run}@cong-ty.test`;
+    emails.push(e1);
+    const u1 = await raw.user.create({ data: { email: e1, name: 'D', passwordHash: 'x', emailVerifiedAt: new Date() } });
+    expect(await signIn(`sub-d-${run}`, e1)).toEqual({ redirect: 'http://web.test/login?error=google_link_requires_password' });
+    expect(await signIn(`sub-d2-${run}`, e1, 'D', { hd: 'khac.test' })).toEqual({ redirect: 'http://web.test/login?error=google_link_requires_password' });
+    expect((await raw.user.findUniqueOrThrow({ where: { id: u1.id } })).googleSub).toBeNull();
+    expect((await signIn(`sub-d3-${run}`, e1, 'D', { hd: 'cong-ty.test' })).redirect).toBe('http://web.test/dashboard');
+    expect((await raw.user.findUniqueOrThrow({ where: { id: u1.id } })).googleSub).toBe(`sub-d3-${run}`);
+  });
+
+  it('[AR:GO-1] gỡ Google và gỡ GitHub SONG SONG khi user chỉ còn hai cách đó -> đúng MỘT 204 và MỘT 409 last_login_method, user luôn còn một cách đăng nhập (5 vòng)', async () => {
+    const email = `gg-unlink-${run}@gmail.com`;
+    emails.push(email);
+    const u = await raw.user.create({ data: { email, name: 'U', passwordHash: null, emailVerifiedAt: new Date() } });
+    const github = new GithubOAuthService(auth, svc, cfg, loadGithubConfig({}), mail);
+    const p = { kind: 'user', id: u.id, sessionId: randomUUID(), email } as any;
+    for (let i = 0; i < 5; i++) {
+      await raw.user.update({ where: { id: u.id }, data: { googleSub: `sub-u-${run}-${i}`, githubId: `9${i}${run.replace(/\D/g, '').slice(0, 5) || '0'}` } });
+      const rs = await Promise.all([status(google.unlink(p, ctx)), status(github.unlink(p, ctx))]);
+      expect(rs.filter((r) => r === undefined)).toHaveLength(1);
+      expect(rs.filter((r) => r === '409 last_login_method')).toHaveLength(1);
+      const after = await raw.user.findUniqueOrThrow({ where: { id: u.id } });
+      expect(!!after.googleSub || !!after.githubId).toBe(true);
+    }
   });
 });

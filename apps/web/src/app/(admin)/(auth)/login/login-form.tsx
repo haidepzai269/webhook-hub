@@ -33,6 +33,8 @@ const GITHUB_ERRORS: Record<string, string> = {
   google_email_unverified: "Email của tài khoản Google chưa được Google xác minh.",
   google_account_mismatch: "Tài khoản này đã liên kết với một tài khoản Google khác.",
   operator_google_forbidden: "Operator không đăng nhập bằng Google.",
+  google_link_requires_password:
+    "Email này đã có tài khoản và Google không phải nơi cấp email đó — đăng nhập bằng mật khẩu (hoặc Quên mật khẩu) trước; liên kết Google từ trang tài khoản khi có.",
 };
 
 export function LoginForm() {

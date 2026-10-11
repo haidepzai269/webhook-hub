@@ -40,6 +40,8 @@ const LIMITS = {
   loginEmailFailures: { limit: 5, windowS: 15 * 60 },
   registerIp: { limit: 5, windowS: 60 * 60 },
   refreshIp: { limit: 60, windowS: 60 },
+  // GO-4 (ADR-128): mỗi callback OAuth hợp lệ làm hub-api POST tới token endpoint của nhà cung cấp -> chặn khuếch đại.
+  oauthCallbackIp: { limit: 20, windowS: 60 },
 };
 
 /** Bỏ dấu tiếng Việt, kebab — slug project đầu tiên (SPEC-auth §5.8). */
@@ -495,6 +497,11 @@ export class AuthService {
       user: { id: user.id, email: user.email, name: user.name, emailVerified: !!user.emailVerifiedAt },
       memberships: memberships.map((m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role })),
     };
+  }
+
+  /** GO-4: một INCR theo IP (đi qua đường IP R-2) cho `/auth/{google,github}/callback`; vượt -> 429. */
+  async limitOAuthCallback(ctx: ReqCtx): Promise<void> {
+    await this.limit('oauthCallbackIp', `rl:oauthcb:ip:${ctx.ip ?? 'unknown'}`, '');
   }
 
   private async limit(kind: keyof typeof LIMITS, key: string, email: string): Promise<void> {

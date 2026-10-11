@@ -421,7 +421,10 @@ NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DE
 
 ### Tạo client đăng nhập Google (AU5b, ADR-127)
 
-1. Google Cloud project **`webhook-hub`** (dùng chung project với client gửi mail cũng được — nhưng là **client khác**).
+1. Google Cloud project **`webhook-hub`** — dùng chung project với client gửi mail được (Admin đang làm vậy), nhưng là **client khác**.
+   GO-5: chung project = chung **một consent screen và một trạng thái publish** (Branding/Audience): tên app/logo trên màn
+   hình đăng nhập là của project đó, và scope nhạy cảm `gmail.send` chưa thẩm định nằm cùng app. Tách **hai project**
+   (login / mail) là gia cố tuỳ chọn cho sạch, không bắt buộc.
 2. **Google Auth Platform → Branding / Audience**: User type **External**; **Publish app → In production**. Scope chỉ
    `openid email profile` (không nhạy cảm) → **không cần Google thẩm định**, mọi tài khoản Google đăng nhập được.
 3. **Google Auth Platform → Clients → Create client** → loại **Web application**:
@@ -430,7 +433,10 @@ NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DE
      `https://<web>.vercel.app/auth/google/callback`.
 4. Chép Client ID / Client secret → `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (Render; local: `.env`).
    `WEB_PUBLIC_URL` phải khớp origin của redirect URI (local `http://localhost:3000`).
-5. Thử: `/login` → "Đăng nhập bằng Google". Lỗi `redirect_uri_mismatch` = URI ở bước 3 không khớp `<WEB_PUBLIC_URL>/auth/google/callback`.
+5. GO-2 (ADR-128): email Google trùng tài khoản ĐÃ xác minh chỉ tự liên kết khi Google là nơi cấp email (`@gmail.com`,
+   `@googlemail.com`, hoặc Workspace có claim `hd` = domain email). Domain riêng khác → `/login?error=google_link_requires_password`:
+   đăng nhập bằng mật khẩu. Hiện CHƯA có trang/endpoint "liên kết Google khi đang đăng nhập" — thêm khi có trang tài khoản.
+6. Thử: `/login` → "Đăng nhập bằng Google". Lỗi `redirect_uri_mismatch` = URI ở bước 3 không khớp `<WEB_PUBLIC_URL>/auth/google/callback`.
 
 ### Lấy GOOGLE_REFRESH_TOKEN (MAIL_DRIVER=gmail, ADR-124)
 
