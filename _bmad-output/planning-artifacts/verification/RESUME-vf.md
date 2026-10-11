@@ -46,3 +46,16 @@ Còn mở (Low, chưa làm):
 - L-8: `seed-fresh-db` / `poll-seq-migration-db` chết lúc nạp khi không có env (không thuộc VF).
 - Probe AU/MS/KN chưa có `expectFailure` riêng — dựa vào bộ lọc lý do môi trường mặc định (`WRONG_REASON`, có `TypeError`): probe nào mà assert đúng tự nó là TypeError sẽ bị báo "đỏ sai lý do" → khai `expectFailure`. Chưa chạy `--all` sau H-1 (~3 giờ).
 - `verify/baseline.json` cây làm việc L0 = số của lượt review (gồm test chưa commit của phiên khác) — KHÔNG commit.
+
+## Vòng sửa REVIEW-VF-R2-2026-10-11 (GO-with-fixes)
+
+| Mục | Commit | Ghi chú |
+|---|---|---|
+| M-R2-1, L-R2-3, L-R2-1 | `acf6c44` | `verify/lib/last-run.ts`: at+commit TRONG từng tầng; `verify:bb` đọc commit của tầng, cảnh báo KHÁC HEAD; bản ghi cũ không có commit tầng -> "commit không rõ". VT11 chỉ đếm worktree `probe-P-*-<pid>` của chính lượt hoặc pid chết. judgeProbe: khớp `expectFailure` **VÀ** không khớp `WRONG_REASON` (miễn bằng `allowEnvReason`, chưa probe nào khai) — chọn hướng chặt; FOR-EXAMINERS khớp |
+| M-R2-2 | `f92173d` | `auth-e2e.ts` gọi `assertLocalOrExit` (thoát 2, không ngoại lệ VERIFY_DEPLOYED); `isLocalUrl` chỉ nhận `hubv-…` một nhãn DNS (`/^hubv-[a-z0-9]+(-[a-z0-9]+)*$/`) |
+| L-R2-2, L-R2-4, L-R2-6 | `4c05481` | Lý do VT11 trong `verify/spec-sources.json` (bỏ "35/35", nêu job `probe`); `docs/TEST-MAP.md` đã sinh lại bằng `verify:map` nhưng KHÔNG commit (diff gồm trạng thái phiên khác). demo-redeliver assert xoá ≥ 1 khoá `idem:*` trước lần 2 (lần 3 có thể 0: bản trùng do PG phán không ghi lại khoá). `workflow_dispatch` nhóm concurrency `manual`, không cancel |
+
+RED trước: `last-run.spec` (module chưa có), `probe.spec` (export chưa có, ECONNREFUSED + expectFailure còn được nhận), `local-url.spec` (hubv.evil.com nhận; auth-e2e thoát 1).
+Đã chạy: `npx jest verify/test -w 2` 69/69 · `verify:gates` 0 vi phạm · `verify:e2e --tag demo-redeliver` 1/1 · `verify:probe P-SIG-02 P-BB2-01` 2/2 ✅, VT11 sạch.
+
+Còn mở: L-R2-5 (chấp nhận), L-R2-7 (guard host DB/Redis L1), guard host `VERIFY_REDIS_URL` (phần 2 của L-R2-4), `--all` theo luật phán mới chưa chạy, L-1/L-2/L-5/L-8 vòng 1. `.last-run.json` cũ: L0/L1/L3 chưa có commit tầng tới khi chạy lại.
