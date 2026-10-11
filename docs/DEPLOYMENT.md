@@ -6,6 +6,9 @@
 
 ---
 
+> **Runbook từng bước cho operator:** [`HUONG-DAN-DEPLOY.md`](../HUONG-DAN-DEPLOY.md) (Render + Vercel + Neon, 11/10).
+> File này là thiết kế + kiểm kê biến; hai file phải khớp nhau — lệch thì runbook theo code thật, sửa file này.
+
 ## 1. Hai môi trường, hai nhiệm vụ (ADR-019)
 
 Đây là **quyết định kiến trúc**, không phải cách chữa cháy. Viết đúng như vậy vào báo cáo.
@@ -34,7 +37,7 @@
 | `hub-api` | **Render** (Docker) | Web Service · `/health` · Socket.IO server |
 | `hub-worker` | **Render** (Docker) | Consumer + outbox relay + cleanup (ADR-020) |
 | `web` (dashboard + storefront UI) | **Vercel** | Next.js |
-| `shop` (3 endpoint + reconcile) | **Vercel** route handlers | ADR-022 |
+| `shop` (backend) | **Render** Web Service (Docker, free) | Server Express chạy LIÊN TỤC (vòng tự đăng ký endpoint với hub, nhận push ký Standard Webhooks) — KHÔNG chạy kiểu serverless/route handler trên Vercel (thay ADR-022). Giao diện cửa hàng nằm trong `web` (Vercel) |
 | PostgreSQL | **Neon** | schema `hub` + `shop` |
 | Redis | **Upstash** | `rediss://`, giao thức Redis (không dùng REST) |
 | RabbitMQ | **CloudAMQP** — Little Lemur (free) | ⚠️ món dễ bị quên nhất |
@@ -81,7 +84,7 @@ services:
     runtime: docker
     region: singapore
     dockerfilePath: ./Dockerfile
-    dockerCommand: node dist/apps/hub-api/main.js
+    dockerCommand: docker-entrypoint.sh hub-api     # entrypoint nhận: hub-api | hub-worker | shop | web | seed
     healthCheckPath: /health
     plan: free
     envVars: [...]
@@ -91,12 +94,22 @@ services:
     runtime: docker
     region: singapore
     dockerfilePath: ./Dockerfile
-    dockerCommand: node dist/apps/hub-worker/main.js
+    dockerCommand: docker-entrypoint.sh hub-worker
     plan: starter
     envVars: [...]
+
+  - type: web
+    name: shop
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerCommand: docker-entrypoint.sh shop
+    healthCheckPath: /products   # shop KHÔNG có route /health
+    plan: free
+    envVars: [...]               # SHOP_PORT = PORT (shop đọc SHOP_PORT, Render cấp PORT) — xem HUONG-DAN-DEPLOY §8
 ```
 
-**Một Dockerfile multi-stage, một image, hai `dockerCommand` khác nhau.** Không build hai image.
+**Một Dockerfile multi-stage, một image, ba `dockerCommand` khác nhau** (`docker-entrypoint.sh hub-api|hub-worker|shop`). Không build nhiều image.
 
 ### 3.4. ⚠️ Graceful shutdown: **25 giây**, không phải 30
 
@@ -108,7 +121,7 @@ Render gửi `SIGTERM` rồi `SIGKILL` sau ~30s. Timeout drain trong `ARCHITECTU
 
 - Phải nghe biến môi trường **`PORT`** của Render, không hardcode 4000.
 - `RENDER_EXTERNAL_URL` dùng để tự cấu hình CORS/callback.
-- Deploy từ GitHub, auto-deploy nhánh `main`.
+- Deploy từ GitHub, auto-deploy nhánh **`master`** (repo không có `main`).
 
 ---
 
@@ -262,14 +275,14 @@ Hoặc dùng UI CloudAMQP → *RabbitMQ Manager* → Admin → Policies với c�
 
 ## 7. Vercel
 
-### 7.1. Hai thứ trên Vercel
+### 7.1. Một thứ trên Vercel: `web` — Shop backend ở Render
 
-| Project | Nội dung |
+| Ở đâu | Nội dung |
 |---|---|
-| `web` | Next.js — dashboard (client của `hub-api`) + storefront UI (client của `shop`) |
-| `shop` | Route handlers: `GET /api/products` · `POST /api/orders` · `POST /api/hub-webhook` · `POST /api/internal/reconcile` |
+| Vercel `web` | Next.js — dashboard (client của `hub-api`) + giao diện cửa hàng (client của `shop`, `NEXT_PUBLIC_SHOP_API_URL`) |
+| Render `shop` | Server Express (`apps/shop`): `GET /products` · `POST /orders` · `GET /orders/:code` · `POST /hub-webhook` · `POST /api/internal/reconcile`. Chạy liên tục: vòng tự đăng ký endpoint với hub + nhận push đã ký. `docker-entrypoint.sh shop`, cổng `SHOP_PORT` (= `PORT` Render cấp), health check `/products` |
 
-`shop` kết nối Neon bằng **pooled connection string** (serverless → nhiều kết nối ngắn).
+`shop` kết nối Neon bằng role `shop_user` (pooled, `?sslmode=require&schema=shop`, §4). Chi tiết biến: HUONG-DAN-DEPLOY §8.
 
 ### 7.2. Cron đối soát — GitHub Actions, không phải Vercel Cron
 
@@ -284,7 +297,7 @@ jobs:
   reconcile:
     runs-on: ubuntu-latest
     steps:
-      - run: curl -fsS -X POST "$SHOP_URL/api/internal/reconcile" -H "X-Internal-Token: $TOKEN"
+      - run: curl -fsS -X POST "$SHOP_URL/api/internal/reconcile" -H "X-Internal-Token: $TOKEN"   # SHOP_URL = https://shop-xxxx.onrender.com
 ```
 
 Endpoint đó **phải có token nội bộ** — nếu không thì ai cũng gọi được.
@@ -308,7 +321,7 @@ Vercel **không chạy được WebSocket server** — nhưng không cần: serv
 | Ping | Mỗi | Mục đích |
 |---|---|---|
 | `https://hub-api.onrender.com/health` | 5 phút | ☠️ **Chống Render ngủ** + giám sát |
-| `https://<shop>.vercel.app/api/products` | 5 phút | Giám sát |
+| `https://shop-xxxx.onrender.com/products` | 5 phút | Giám sát + giữ shop (Render free) không ngủ |
 
 Bật **public status page** → chụp vào báo cáo. Mười phút cấu hình, và nó trả lời câu *"làm sao biết hệ thống đang sống?"*.
 
@@ -341,10 +354,10 @@ DIRECT_URL=              # Neon direct, role OWNER — chỉ cho prisma migrate 
                          # (local: `hub`). REVOKE trong migration RLS chỉ nhắm `hub._prisma_migrations` → trên Neon không
                          # trúng gì; hub_app vẫn bị permission denied ở `public._prisma_migrations` (không được cấp quyền).
 REDIS_URL=               # Upstash rediss://
-AMQP_URL=                # CloudAMQP amqps://
+RABBITMQ_URL=            # CloudAMQP amqps:// (tên biến code đọc; trước đây file này ghi nhầm AMQP_URL)
 
 # --- Bảo mật ---
-ENCRYPTION_MASTER_KEY=   # AES-256-GCM, 32 byte base64 — KHÔNG commit
+MASTER_KEY=              # AES-256-GCM, ≥ 32 ký tự — KHÔNG commit (tên code đọc; trước đây ghi nhầm ENCRYPTION_MASTER_KEY)
 # Đăng nhập console (SPEC-auth §7, ADR-103) — bốn secret, mỗi cái ≥ 32 ký tự và KHÁC nhau; hub-api thoát nếu sai
 JWT_SECRET=              # access token 15 phút (cookie __Host-hub_at)
 CSRF_SECRET=             # ký token CSRF gắn với session
