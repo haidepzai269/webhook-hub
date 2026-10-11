@@ -122,6 +122,7 @@ Phần này vượt trần 450 dòng (ADR-141/144). **Nới trần lên ~600 dò
 - **SK4 — thêm theo coordinator (lỗi production):** (a) QR PayOS của đơn CŨ hiện lại khi mở modal → khung "Đơn DH… + Tạo đơn mới", giỏ đổi thì tự tạo đơn mới (ADR-158); (b) "stale project" sau đăng xuất → lựa chọn project theo user, xoá khi logout, mặc định project là thành viên, badge operator; (c) nút 🔗 trên nguồn chưa kết nối mở hộp Kết nối điền sẵn; (d) chặn trình duyệt tự điền đăng nhập vào ô credential, giá trị có "@" bị từ chối; 422 `public_url_required` nói rõ đặt `HUB_PUBLIC_URL` ở Render › hub-api.
 - **SK4 — M-2:** hỏi trạng thái MỘT lần mỗi lần mở modal có đơn cũ (thay `resetOrder()`); `?order=` mở modal với đơn tối thiểu (chỉ trạng thái, không món/QR).
 - **[SK:T1]** chưa chạy L2 trên hubv: phải rebuild image hub-api/shop/web của hubv (phiên dev không được rebuild/restart container). Phủ ở L0/L1: `settings.spec` (U1–U5), `settings-db.spec` (U4 + GRANT trên Postgres hubv), `console-projects-db.spec` (U6). Ghi `acceptedOrphans`.
+- **REVIEW-SK fix (ADR-160):** H-1 `PUT /settings` kiểm trước, lưu sau — FAILED trả **422** (không phải 200) `{saved: [], registration, fix}`, không ghi DB, link cũ giữ nguyên; PUT tuần tự (L-6). M-1 `skip: 'UNTRUSTED'` + log warn. M-2 token ≥ 24 ký tự, allowlist host hub (`SHOP_ALLOWED_HUB_HOSTS`). M-3 một bản chụp + `reload()` mỗi 60s khi DB lỗi. Trần giữ 600/600.
 
 ## 9. Checklist
 

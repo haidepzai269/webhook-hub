@@ -389,6 +389,9 @@ Dùng khi chỉ cần chứng minh luồng, không cần tiền thật.
 - Mã quản trị sai → "Sai mã quản trị"; sai 5 lần trong 1 phút → bị khoá 1 phút.
 - Console › API key › **Thu hồi** key `shop` → `/shop/settings` › Kiểm tra lại → "Hub từ chối key (401)" kèm cách sửa.
 - Mở lại giỏ sau khi trả: modal hiện form đơn mới (không còn QR cũ). Đổi món khi đơn đang chờ → tự tạo đơn mới. Khung đầu bước thanh toán luôn ghi "Đơn DHxxxxxxx" + nút **Tạo đơn mới**.
+- **Lưu thất bại không làm hỏng Shop (ADR-160):** dán HUB_URL của một key đã thu hồi (hoặc tắt `SHOP_PUBLIC_URL` đúng) → **Lưu và kết nối** → thấy "Chưa lưu gì — Shop vẫn chạy bằng cấu hình cũ" + cách sửa. Mua món 5.000đ ngay sau đó → vẫn **Đã thanh toán!** (cấu hình cũ còn chạy).
+- **Host lạ bị chặn:** dán `hubs://hk_test_…@evil.example/x` → Kiểm tra → 422 "Host hub … không được phép" kèm cách sửa (`SHOP_ALLOWED_HUB_HOSTS`). Mã quản trị ngắn hơn 24 ký tự → trang báo "Shop chưa bật trang cài đặt".
+- **Chuyển project (runbook):** chỉ chuyển khi không còn đơn PENDING/UNDERPAID; sau khi Lưu thành công vào console project CŨ › Endpoints › `shop` → tắt/xoá subscription `payment.received`. Webhook còn tới từ nguồn cũ → log Shop `payment.received từ source KHÔNG tin cậy` kèm `sourceId` + `orderCodes` (đối soát tay).
 
 **Nếu không thấy:**
 - `/shop/settings` báo "Shop chưa bật trang cài đặt" → thiếu `SHOP_ADMIN_TOKEN` trên Render › shop.
