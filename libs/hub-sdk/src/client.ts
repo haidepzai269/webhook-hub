@@ -84,6 +84,15 @@ export interface Subscription {
   sourceKeys?: string[];
   isActive: boolean;
 }
+/** Source công khai của project (không bao giờ có secret). Cần scope `manage:sources`. */
+export interface SourceSummary {
+  id: string;
+  name: string;
+  provider: string;
+  sourceKey: string;
+  webhookUrl: string;
+  isActive: boolean;
+}
 export interface EnsureEndpointInput {
   name: string;
   url: string;
@@ -207,6 +216,11 @@ export class HubClient {
     create: (input: { endpointId: string; name: string; eventTypes: string[]; sourceIds?: string[]; sourceKeys?: string[] }): Promise<Subscription> =>
       this.request('POST', '/subscriptions', input),
     update: (id: string, patch: { isActive: boolean }): Promise<Subscription> => this.request('PATCH', `/subscriptions/${encodeURIComponent(id)}`, patch),
+  };
+
+  /** SK2: liệt kê source của project (để service chọn nguồn tin cậy). Thiếu `manage:sources` -> HubError 403. */
+  readonly sources = {
+    list: (): Promise<SourceSummary[]> => this.request('GET', '/sources'),
   };
 
   /** Phía nhận: verify Standard Webhooks trên BYTES gốc. */

@@ -535,3 +535,22 @@ model ProcessedHubEvent {
   @@map("processed_hub_events")
   @@schema("shop")
 }
+
+// SK2 (SPEC-shop-ket-noi-project §4.1, ADR-155): cài đặt kết nối của Shop — MỘT dòng (id = 1). Giá trị ở đây thắng env.
+// Bốn trường bí mật là ciphertext AES-256-GCM (`iv:tag:data`, khoá SHOP_SETTINGS_KEY) — tên cột có hậu tố `_encrypted`.
+// NULL / mảng rỗng = chưa lưu -> Shop dùng env cũ (HUB_URL, SHOP_PAYMENT_SOURCE_KEYS, PAYOS_*, SHOP_BANK_*).
+model ShopSetting {
+  id                Int      @id @default(1) @db.SmallInt
+  hubConnectionUrl  String?  @map("hub_connection_url_encrypted")
+  paymentSourceKeys String[] @default([]) @map("payment_source_keys")
+  payosClientId     String?  @map("payos_client_id_encrypted")
+  payosApiKey       String?  @map("payos_api_key_encrypted")
+  payosChecksumKey  String?  @map("payos_checksum_key_encrypted")
+  bankCode          String?  @map("bank_code") @db.VarChar(512)
+  bankAccount       String?  @map("bank_account") @db.VarChar(512)
+  bankAccountName   String?  @map("bank_account_name") @db.VarChar(512)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("settings")
+  @@schema("shop")
+}

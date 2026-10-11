@@ -26,7 +26,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 
 - **Thứ tự ingest là cố định** — xem `docs/ARCHITECTURE.md` §3.1. Redis `SET NX` phải nằm **SAU `COMMIT`**. Đừng "tối ưu" lại.
 - **Topology RabbitMQ khai báo ở MỘT chỗ duy nhất:** `libs/messaging/topology.ts`. Rải rác → `PRECONDITION_FAILED`, app không lên.
-- **`apps/shop/src` trần cứng ~450 dòng** (ADR-141 — cần tạo link PayOS thật). Vượt = đang lạc đề, dừng lại. Giỏ hàng chỉ ở client, server tự tính tổng (ADR-024). Không đăng nhập, không kho.
+- **`apps/shop/src` trần cứng ~600 dòng** (ADR-141 link PayOS thật; ADR-156 trang Cài đặt kết nối — cách B). Vượt = đang lạc đề, dừng lại. Giỏ hàng chỉ ở client, server tự tính tổng (ADR-024). Không đăng nhập, không kho.
 - **Thêm provider = viết một class `ProviderAdapter` + đăng ký registry.** Không sửa ingest/worker/DB. Đây là luận điểm chính của đề tài — đừng phá nó bằng một cái `if (provider === 'x')` trong lõi.
 - **Mọi so sánh chữ ký dùng `crypto.timingSafeEqual`.** Luôn luôn — kể cả khi SDK provider có hàm verify riêng (PayOS SDK so bằng `!==`, ADR-058).
 - **Khoá chống trùng không bao giờ ngẫu nhiên** — thiếu id của provider thì `bodyHashKey(rawBody)`.

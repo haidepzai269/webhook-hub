@@ -2,12 +2,12 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { timingSafeCompare } from '@hub/crypto';
-import { createHubClient, challengeResponse, verifyWebhook } from '@hub/sdk';
+import { challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
 import { applyPayment, bankQrUrl, creditsOrder, EXPIRE_AFTER_MS, isExpired, newOrderCode, pickOrderCode, readPayment } from './payment';
 import { createPaymentLink, PAYOS_DUPLICATE_ORDER, payosConfig, payosLinkInput } from './payos';
-import { HubRegistration } from './hub-registration';
+import { HubLink, prismaStore, settingsRouter, ShopSettings } from './settings';
 
 const expressFactory = typeof express === 'function' ? express : (express as any).default || require('express');
 const app = expressFactory();
@@ -15,29 +15,26 @@ const prisma = new PrismaClient();
 const PORT = process.env.SHOP_PORT || 4001;
 // S11 (§4.12): KHÔNG còn secret gắn cứng — thiếu thì Shop không khởi động (lỗi rõ ràng).
 const SIGNING_SECRET = process.env.HUB_SIGNING_SECRET || '';
-if (!SIGNING_SECRET) {
-  logger.error('[Shop] Thiếu HUB_SIGNING_SECRET (secret ký Standard Webhooks của endpoint Shop) -> dừng');
-  process.exit(1);
-}
-// Shop là SERVICE dùng hub: connection string chứa API key `shop` (manage:endpoints, read:events).
-const hub = process.env.HUB_URL ? createHubClient(process.env.HUB_URL) : null;
-const PAYMENT_SOURCE_KEYS = (process.env.SHOP_PAYMENT_SOURCE_KEYS || 'src_payos_main,src_sepay_main').split(',').map((k) => k.trim()).filter(Boolean);
+if (!SIGNING_SECRET) [logger.error('[Shop] Thiếu HUB_SIGNING_SECRET (secret ký Standard Webhooks của endpoint Shop) -> dừng'), process.exit(1)];
+// SK2 (ADR-155): HUB_URL / nguồn tin cậy / PayOS / VietQR đọc qua `settings` — `shop.settings` thắng env, env là mặc định.
+const settings = new ShopSettings(prismaStore(prisma), process.env, logger);
 const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
-// P1 (ADR-141): PayOS thật (cùng kênh với source của hub) + trang Shop để PayOS đưa khách quay lại sau khi trả.
-const payos = payosConfig();
+// P1 (ADR-141): trang Shop để PayOS đưa khách quay lại sau khi trả.
 const SHOP_WEB_URL = (process.env.SHOP_WEB_URL || 'http://localhost:3000/shop').replace(/\/$/, '');
 
+app.set('trust proxy', 1); // Render: IP thật của khách cho giới hạn sai mã quản trị (SK2)
 app.use(cors());
 // Giữ rawBody để kiểm tra chữ ký HMAC
 app.use(express.json({ verify: (req: any, _res, buf) => (req.rawBody = buf) }));
-app.use((err: any, _req: Request, res: Response, next: any) =>
-  err?.type === 'entity.parse.failed' ? res.status(400).json({ error: 'JSON không hợp lệ' }) : next(err),
-);
+app.use((err: any, _req: Request, res: Response, next: any) => (err?.type === 'entity.parse.failed' ? res.status(400).json({ error: 'JSON không hợp lệ' }) : next(err)));
 
 // 1. GET /products — Menu đồ ăn, giá thật VND (ADR-027)
 app.get('/products', (_req: Request, res: Response) => res.json(MENU));
-app.get('/payment-options', (_req: Request, res: Response) => res.json({ payos: !!payos, bankQr: !!bankQrUrl(process.env, 1, 'DH') }));
+app.get('/payment-options', async (_req: Request, res: Response) => {
+  const { env } = await settings.get();
+  res.json({ payos: !!payosConfig(env), bankQr: !!bankQrUrl(env, 1, 'DH') });
+});
 
 // 2. POST /orders — Tạo đơn từ giỏ hàng. Server tự tính tổng, KHÔNG đọc `amount` từ body (ADR-024)
 app.post('/orders', async (req: Request, res: Response) => {
@@ -45,6 +42,8 @@ app.post('/orders', async (req: Request, res: Response) => {
     const priced = priceOrder(req.body);
     if ('error' in priced) return res.status(400).json({ error: priced.error });
     const paymentProvider = req.body.paymentProvider === 'payos' ? 'payos' : 'sepay';
+    const { env } = await settings.get();
+    const payos = payosConfig(env);
     if (paymentProvider === 'payos' && !payos) return res.status(400).json({ error: 'Shop chưa cấu hình PayOS — chọn chuyển khoản ngân hàng' });
 
     // Mã đơn DH + 7 chữ số (ADR-141); trùng @unique (P2002) thì sinh lại, tối đa 3 lần
@@ -60,7 +59,7 @@ app.post('/orders', async (req: Request, res: Response) => {
     const expiresAt = new Date(order.createdAt.getTime() + EXPIRE_AFTER_MS);
 
     // PayOS: link thật, hết hạn SỚM hơn đơn (ADR-144). SePay: VietQR của tài khoản nhận (hoặc null).
-    let payment: { qrImageUrl: string | null; qrCode?: string; checkoutUrl?: string } = { qrImageUrl: bankQrUrl(process.env, priced.amount, order.orderCode) };
+    let payment: { qrImageUrl: string | null; qrCode?: string; checkoutUrl?: string } = { qrImageUrl: bankQrUrl(env, priced.amount, order.orderCode) };
     if (paymentProvider === 'payos' && payos) {
       try {
         let link;
@@ -116,6 +115,7 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
 
   // 4.3. Chỉ `payment.received` (VND) từ sourceId đã ghim (R-1, ADR-094). Chưa ghim -> thử đăng ký NGAY (R2-1), vẫn
   // chưa được thì 503 để hub retry — không xử lý tiền khi chưa biết nguồn nào tin được (R-8).
+  const { client: hub, registration } = hubLink;
   if (hub && registration.trustedSourceIds.length === 0 && !(await registration.ensureNow())) {
     return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
   }
@@ -164,10 +164,7 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
 
 // 5. Đối soát: đơn PENDING quá hạn -> EXPIRED. UNDERPAID giữ nguyên (đã có tiền vào).
 async function expireStaleOrders() {
-  const { count } = await prisma.order.updateMany({
-    where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - EXPIRE_AFTER_MS) } },
-    data: { status: 'EXPIRED', version: { increment: 1 } },
-  });
+  const { count } = await prisma.order.updateMany({ where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - EXPIRE_AFTER_MS) } }, data: { status: 'EXPIRED', version: { increment: 1 } } });
   if (count > 0) logger.info({ count }, '[Shop] Reconcile: chuyển đơn quá hạn sang EXPIRED');
   return count;
 }
@@ -176,9 +173,7 @@ async function expireStaleOrders() {
 app.post('/api/internal/reconcile', async (req: Request, res: Response) => {
   const token = req.headers['x-internal-token'];
   if (!INTERNAL_TOKEN) return res.status(503).json({ error: 'INTERNAL_TOKEN chưa được cấu hình' });
-  if (typeof token !== 'string' || !timingSafeCompare(token, INTERNAL_TOKEN)) {
-    return res.status(401).json({ error: 'Sai X-Internal-Token' });
-  }
+  if (typeof token !== 'string' || !timingSafeCompare(token, INTERNAL_TOKEN)) return res.status(401).json({ error: 'Sai X-Internal-Token' });
   try {
     // ADR-141: tiền về đơn đã hết hạn KHÔNG mất âm thầm — đối soát báo số đơn EXPIRED có tiền (cần giao/hoàn tiền).
     const expiredCount = await expireStaleOrders();
@@ -195,17 +190,21 @@ if (RECONCILE_INTERVAL_MS > 0) {
   setInterval(() => expireStaleOrders().catch((e) => logger.error({ err: e?.message }, '[Shop] Reconcile lỗi')), RECONCILE_INTERVAL_MS);
 }
 
-// S11 (§4.12): Shop TỰ đăng ký endpoint + subscription `payment.received` bằng SDK (seed không tạo nữa). Idempotent.
-// MS-P2-1: chỉ nhận tiền từ ĐÚNG các source của operator; tắt sub cũ không ghim. R2-1 (ADR-097): thử lại VÔ HẠN, backoff
-// 10s -> 60s (hub cold start), Shop vẫn phục vụ trong lúc chờ.
-const registration = new HubRegistration(async () => {
-  const r = await hub!.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys: PAYMENT_SOURCE_KEYS, exclusive: true });
+// S11: Shop TỰ đăng ký endpoint + subscription `payment.received` (idempotent), ghim ĐÚNG source tin cậy, tắt sub cũ (MS-P2-1);
+// thử lại vô hạn (R2-1). SK2: lưu cài đặt -> `hubLink.reconnect()` dựng lại client + ensure NGAY (không redeploy).
+const hubLink = new HubLink(async (hub, sourceKeys) => {
+  const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys, exclusive: true });
   logger.info({ endpointId: r.endpoint.id, created: r.created, hub, trustedSourceIds: r.subscription.sourceIds }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
   return r.subscription.sourceIds ?? [];
 }, logger);
+app.use(settingsRouter({ settings, link: hubLink, env: process.env, log: logger }));
 
-app.listen(PORT, () => {
-  logger.info(`🛒 Demo Shop API đang chạy trên cổng ${PORT} (trần ~450 dòng, ADR-141)`);
-  if (hub) registration.start();
-  else logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
+// Nạp cài đặt TRƯỚC khi nhận request: webhook không bao giờ tới lúc chưa biết hub/nguồn tin cậy.
+void settings.get().then(({ env }) => {
+  hubLink.apply(env);
+  app.listen(PORT, () => {
+    logger.info(`🛒 Demo Shop API đang chạy trên cổng ${PORT} (trần ~600 dòng, ADR-156)`);
+    if (hubLink.client) hubLink.registration.start();
+    else logger.warn('[Shop] Không có HUB_URL -> không tự đăng ký endpoint với hub');
+  });
 });

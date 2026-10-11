@@ -228,13 +228,13 @@ export const GATES: Gate[] = [
   },
   {
     id: 'shop-size',
-    rule: 'Tổng apps/shop/src/**/*.ts ≤ 450 dòng',
-    source: 'CLAUDE.md, ADR-141',
+    rule: 'Tổng apps/shop/src/**/*.ts ≤ 600 dòng',
+    source: 'CLAUDE.md, ADR-141, ADR-156',
     include: (f) => /^apps\/shop\/src\/.*\.ts$/.test(f),
     check: () => [],
     checkAll: (files) => {
       const n = files.reduce((sum, f) => sum + f.text.replace(/\r?\n$/, '').split(/\r?\n/).length, 0);
-      return n > 450 ? [{ file: 'apps/shop/src', line: n, text: `${n} dòng > 450` }] : [];
+      return n > 600 ? [{ file: 'apps/shop/src', line: n, text: `${n} dòng > 600` }] : [];
     },
   },
 ];

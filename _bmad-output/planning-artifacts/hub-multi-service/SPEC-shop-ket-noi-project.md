@@ -111,8 +111,15 @@ Phần này vượt trần 450 dòng (ADR-141/144). **Nới trần lên ~600 dò
 
 ## 8. Lệch so với spec (phiên DEV ghi)
 
-- …
+- **SK1 — không có bước tạo project trong demo (Admin làm rõ 2026-10-12).** Mỗi user đã có project tự tạo lúc đăng ký (`auth.service.ts`, "<tên>'s project"); `AuthGuard` → `ensureProject()` chọn sẵn project đó. Trang Project chủ yếu để xem/chuyển; "Tạo project" là nút phụ (outline). Trang API key làm việc trên project đang chọn. Kịch bản §1 thành: đăng ký → API key → tạo key → Nguồn › Kết nối PayOS → Shop › Cài đặt → Lưu → trả tiền. Nhiều project để tách môi trường, sản phẩm, thành viên (ADR-038).
+- **SK1 — không thêm route hub.** Bộ chọn project đã có ở sidebar (AU3); chỉ thêm 2 trang + nhóm sidebar "Project".
+- **SK2 — danh sách source khi `test-hub`:** `GET /v1/p/:project/sources` đòi `manage:sources`; key mặc định của Shop (manage:endpoints + read:events) nhận 403. KHÔNG nới scope của hub. Shop trả 200 với `sources: null` + `sourcesFix`; UI cho gõ sourceKey (phần cuối Webhook URL ở console › Nguồn). Key có thêm `manage:sources` thì được danh sách để tick. SDK thêm `client.sources.list()`.
+- **SK2 — `test-hub` chỉ bắt buộc `manage:endpoints`** (Shop runtime chỉ dùng `ensure`); thiếu → 422 + `fix`. Key thu hồi → 401 + `fix`.
+- **SK2 — tên cột:** bí mật ở `hub_connection_url_encrypted`, `payos_*_encrypted` (spec liệt kê `hub_connection_url` ở cả hai nhóm — coi là bí mật, không có bản plaintext). `payment_source_keys` là `text[]` thường. Một dòng (`CHECK id = 1`).
+- **SK2 — `PUT` thêm `clear: [field]`** để xoá giá trị DB, quay về env.
+- **SK2 — rate-limit:** sai 5 lần trong cửa sổ 1 phút/IP → 429 cho tới hết cửa sổ (kể cả token đúng). Trong bộ nhớ, mất khi restart.
+- **SK2 — trần Shop:** đúng 600/600 dòng sau SK2 (ADR-156).
 
 ## 9. Checklist
 
-- [x] SK1 · [ ] SK2 · [ ] SK3 · [ ] SK4
+- [x] SK1 · [x] SK2 · [ ] SK3 · [ ] SK4
