@@ -114,7 +114,13 @@ describeDb('[KN2] khung connector (Postgres)', () => {
     const st: any = await conn.status(tenant, sourceId);
     expect(st.hasCredentials).toBe(true);
     expect(st.credentialHints).toEqual({ token: `****${SECRET.token.slice(-4)}`, signingSecret: `****${SECRET.signingSecret.slice(-4)}` });
-    // Lưới thứ hai: interceptor đổi cột mã hoá thành cờ.
+    // Lưới thứ hai (L-6): bản ghi THẬT mà hub_app đọc (đúng hình dạng một route lỡ trả thẳng row Prisma) qua interceptor
+    // -> ciphertext thành cờ, không còn khoá/giá trị mã hoá.
+    const row: any = await svc.forTenant(tenant).findSourceConnection(sourceId);
+    expect(row.credentialsEncrypted).toBeTruthy();
+    const netted = redactSecrets(row) as any;
+    expect(netted).toMatchObject({ hasCredentials: true });
+    expect(JSON.stringify(netted)).not.toContain(row.credentialsEncrypted);
     expect(redactSecrets({ credentialsEncrypted: 'v1:abc' })).toEqual({ hasCredentials: true });
   });
 

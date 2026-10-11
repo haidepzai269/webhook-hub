@@ -10,5 +10,6 @@
   "layer": "L1",
   "testFile": [
     "apps/hub-api/test/stripe-connect-db.spec.ts"
-  ]
+  ],
+  "expectFailure": "webhook_endpoints/we_"
 }

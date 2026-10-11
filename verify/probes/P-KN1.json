@@ -10,5 +10,6 @@
   "layer": "L0",
   "testFile": [
     "apps/hub-api/test/source-connections.spec.ts"
-  ]
+  ],
+  "expectFailure": "provider === 'payos'"
 }

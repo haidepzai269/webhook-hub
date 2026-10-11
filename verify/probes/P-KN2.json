@@ -2,13 +2,14 @@
   "id": "P-KN2",
   "claim": "Gọi provider TRƯỚC khi commit source + secret → provider gọi ingest vào source chưa tồn tại (cạm bẫy 4)",
   "file": "apps/hub-api/src/modules/console/source-connection.service.ts",
-  "find": "    // (3) TX: Source",
-  "replace": "    await connector.connect({ ingestUrl, credentials, secretForSource, baseUrl: connectorBaseUrl(connector.spec, this.env) }).catch(() => undefined);\n    // (3) TX: Source",
+  "find": "    // (3) TX: Source (+",
+  "replace": "    await connector.connect({ ingestUrl, credentials, secretForSource, baseUrl: connectorBaseUrl(connector.spec, this.env) }).catch(() => undefined);\n    // (3) TX: Source (+",
   "expectRed": [
     "[KN:U8]"
   ],
   "layer": "L1",
   "testFile": [
     "apps/hub-api/test/source-connections-db.spec.ts"
-  ]
+  ],
+  "expectFailure": "\"found\""
 }

@@ -10,5 +10,6 @@
   "layer": "L1",
   "testFile": [
     "apps/hub-api/test/source-connections-db.spec.ts"
-  ]
+  ],
+  "expectFailure": "hasCredentials"
 }
