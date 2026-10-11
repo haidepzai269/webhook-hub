@@ -530,6 +530,62 @@ Mở dashboard `http://localhost:13000/login` (cần `VERIFY_WITH_WEB=1 npm run 
 
 ---
 
+## 4b. Chặng C — Kết nối hai đầu (SPEC-ket-noi KN1–KN4, ADR-142/146/149/150)
+
+> **Điều kiện:** image `hubv` build lại SAU commit KN4, và `.env.verify` có `PAYOS_FAKE_BASE_URL=http://sink:4100/_fake/payos`, `STRIPE_FAKE_BASE_URL=http://sink:4100/_fake/stripe`, `CONNECTOR_INGEST_BASE_URL=http://hub-api:4000` (CHỈ ngoài production — production có các biến này thì hub-api không khởi động). Fake PayOS của sink nhận `clientId=fake-payos-client-id`, `apiKey=fake-payos-api-key`, `checksumKey=fake-payos-checksum-key` (đổi bằng env `FAKE_PAYOS_*` của sink). Không gọi PayOS/Stripe thật.
+> Cần `PA`, `PB`, `H` (A1), `SINK_IN`, `verify_sig` (§1).
+
+### C1. Console tạo endpoint — hub sinh `whsec_` (T1)
+
+```bash
+R=$(curl -s -X POST "$API/api/v1/endpoints?projectId=$PA" "${H[@]}" -H "$CT" \
+  -d "{\"name\":\"c1-$RUN\",\"url\":\"$SINK_IN/c1-$RUN\",\"eventTypes\":[\"payment.*\"]}"); echo "$R"
+EC=$(echo "$R" | jget .endpoint.id); SECC=$(echo "$R" | jget .signingSecret)
+call "$API/api/v1/endpoints/$EC?projectId=$PA" "${H[@]}"                                   # chi tiết: KHÔNG có secret
+call -X POST "$API/api/v1/destinations?projectId=$PA" "${H[@]}" -H "$CT" -d '{"name":"x","type":"webhook","config":{"url":"https://a.example"}}'
+call -X POST "$API/api/v1/endpoints?projectId=$PA" "${H[@]}" -H "$CT" \
+  -d "{\"name\":\"x\",\"url\":\"$SINK_IN/x\",\"eventTypes\":[\"payment.*\"],\"sourceIds\":[\"00000000-0000-4000-8000-000000000000\"]}"
+```
+
+✅ Phải thấy: 201 `{endpoint:{verification:"VERIFIED"}, subscription:{eventTypes:["payment.*"]}, verification:"VERIFIED", signingSecret:"whsec_…"}`; chi tiết 200 không có `signingSecret`; `/destinations` webhook → **422 `use_endpoints_route`** có `fix`; sourceId lạ → **404** và không có endpoint `x` mới (GET `/api/v1/destinations`). Publish `payment.received` (A6) rồi `verify_sig "$SECC" /c1-$RUN` → ✅ chữ ký ĐÚNG.
+
+### C2. "Kết nối PayOS" với fake (T2)
+
+```bash
+call -X POST "$API/api/v1/sources/connect?projectId=$PA" "${H[@]}" -H "$CT" \
+  -d '{"provider":"payos","name":"thieu-ack","credentials":{"clientId":"fake-payos-client-id","apiKey":"fake-payos-api-key","checksumKey":"fake-payos-checksum-key"}}'
+R=$(curl -s -X POST "$API/api/v1/sources/connect?projectId=$PA" "${H[@]}" -H "$CT" \
+  -d '{"provider":"payos","name":"c2","acknowledgeOverwrite":true,"credentials":{"clientId":"fake-payos-client-id","apiKey":"fake-payos-api-key","checksumKey":"fake-payos-checksum-key"}}'); echo "$R"
+SP=$(echo "$R" | jget .source.id)
+curl -s -X POST $SINK/_fake/payos/send-payment -H "$CT" -d '{"amount":2000,"description":"C2 test"}'
+call "$API/api/v1/sources/$SP/connection?projectId=$PA" "${H[@]}"
+```
+
+✅ Thiếu ack → **422 `overwrite_not_acknowledged`**; có ack → 201 `connection.status:"CONNECTED"`, `display:"CAFE TEST · ****1234"`; sink ghi `POST /_fake/payos/confirm-webhook` có `x-client-id`; giao dịch giả tới ingest 200 và (subscription `payment.*` của C1) sink nhận `payment.received` amount 2000. GET connection: `hasCredentials:true`, `credentialHints` chỉ `****` + 4 ký tự, **không** có `apiKey`/`checksumKey`, `manualDisconnect` nói đổi URL ở dashboard PayOS.
+⚠ KQ1 chưa xử lý: request KIỂM TRA (orderCode 123, `VQRIO123`) cũng đi như giao dịch 3.000đ — đúng hiện trạng, xem CAN-ADMIN-QUYET-KN.md.
+
+### C3. "Kết nối Stripe" với fake (T3)
+
+```bash
+R=$(curl -s -X POST "$API/api/v1/sources/connect?projectId=$PA" "${H[@]}" -H "$CT" \
+  -d '{"provider":"stripe","name":"c3","credentials":{"secretKey":"rk_test_c3"}}'); echo "$R"; SS=$(echo "$R" | jget .source.id)
+call -X POST "$API/api/v1/sources/$SS/connection/retry?projectId=$PA" "${H[@]}" -H "$CT" -d '{}'
+call -X DELETE "$API/api/v1/sources/$SS/connection?projectId=$PA" "${H[@]}"
+curl -s "$SINK/_requests" | jget '.filter(r=>r.path.startsWith("/_fake/stripe")).map(r=>r.method+" "+r.path)'
+```
+
+✅ 201 CONNECTED `display:"Stripe (test) · we_test…"`; retry 200 CONNECTED với `we_` MỚI; sink thấy `POST`, `POST`, `DELETE <we cũ>`, `DELETE <we mới>`; ngắt → `{remoteDeleted:true, connection:{status:"DISCONNECTED"}}`.
+
+### C4. Cô lập + quyền (T4)
+
+```bash
+call "$API/api/v1/sources/$SP/connection?projectId=$PB" "${H[@]}"                                   # nguồn của A, hỏi bằng project B
+call "$API/api/v1/sources/00000000-0000-4000-8000-000000000000/connection?projectId=$PB" "${H[@]}"  # id lạ
+call -X POST "$API/api/v1/sources/connect?projectId=$PA" "${H[@]}" -H "$CT" -d '{"provider":"sepay","name":"x","credentials":{}}'
+```
+
+✅ Hai lệnh đầu **404 giống hệt** (trừ `requestId`); sepay → **422 `connector_unsupported`**. Viewer (A3) gọi bất kỳ route `/sources/*/connection*` hay `/sources/connect` → **403 `missing_scope` `required:"manage:sources"`**.
+
 ## 5. Khi một bước đỏ
 
 1. Chép **nguyên văn** lệnh + output vào cột "Ghi chú" ở §6.
