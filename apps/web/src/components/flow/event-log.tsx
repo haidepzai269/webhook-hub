@@ -1,6 +1,6 @@
 "use client";
 
-import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronDown, ChevronUp, Pause, Play, Search, Terminal } from "lucide-react";
 import Link from "next/link";
@@ -10,7 +10,15 @@ import { Input } from "@/components/ui/input";
 import { useExecutions } from "@/lib/hub/queries";
 
 import { EXECUTION_LABEL, EXECUTION_TONE, FailedAt, failedAtText, MiniPipeline } from "./execution-bits";
-import { clampLogHeight, LOG_COLUMNS, logGridTemplate, readLogHeight, writeLogHeight } from "./log-layout";
+import {
+  clampLogHeight,
+  LOG_COLUMNS,
+  logGridTemplate,
+  logHeightAria,
+  readLogHeight,
+  stepLogHeight,
+  writeLogHeight,
+} from "./log-layout";
 import { ProviderIcon } from "./provider-icon";
 import { ICON, TONE_VAR } from "./tokens";
 
@@ -45,11 +53,16 @@ export function EventLog() {
   const heightRef = useRef<number | null>(null);
   heightRef.current = height;
   const drag = useRef<{ startY: number; startH: number } | null>(null);
+  const [viewportH, setViewportH] = useState<number | null>(null);
 
   // Đọc chiều cao đã nhớ sau khi mount (tránh lệch hydrate); viewport đổi → kẹp lại trong 25–85%.
   useEffect(() => {
     setHeight(readLogHeight(viewerStorage(), window.innerHeight));
-    const onResize = () => setHeight((h) => (h === null ? h : clampLogHeight(h, window.innerHeight)));
+    setViewportH(window.innerHeight);
+    const onResize = () => {
+      setViewportH(window.innerHeight);
+      setHeight((h) => (h === null ? h : clampLogHeight(h, window.innerHeight)));
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -70,6 +83,17 @@ export function EventLog() {
     drag.current = null;
     if (heightRef.current !== null) writeLogHeight(viewerStorage(), heightRef.current);
   }, []);
+  /** Bàn phím (L-B3): ↑/↓ 5% viewport, Home/End = min/max; nhớ ngay như khi thả chuột. */
+  const onResizeKey = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const vh = window.innerHeight;
+    const next = stepLogHeight(heightRef.current ?? vh * 0.25, e.key, vh);
+    if (next === null) return;
+    e.preventDefault();
+    setOpen(true);
+    setHeight(next);
+    writeLogHeight(viewerStorage(), next);
+  }, []);
+  const aria = height !== null && viewportH ? logHeightAria(height, viewportH) : null;
   const items = useMemo(() => {
     const all = data?.pages.flatMap((p) => p.items) ?? [];
     const needle = q.trim().toLowerCase();
@@ -90,12 +114,18 @@ export function EventLog() {
         role="separator"
         aria-orientation="horizontal"
         aria-label="Kéo để đổi chiều cao nhật ký"
-        title="Kéo để đổi chiều cao"
+        aria-valuenow={aria?.now}
+        aria-valuemin={aria?.min}
+        aria-valuemax={aria?.max}
+        aria-valuetext={aria ? `${aria.now}% chiều cao màn hình` : undefined}
+        tabIndex={0}
+        title="Kéo (hoặc ↑/↓) để đổi chiều cao"
         className="flow-log-resizer absolute inset-x-0 top-0 z-10 h-2 cursor-row-resize touch-none"
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
         onPointerUp={onDragEnd}
         onPointerCancel={onDragEnd}
+        onKeyDown={onResizeKey}
       />
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5" style={{ borderColor: "var(--flow-card-border)" }}>
         <Terminal {...ICON} className="text-muted-foreground" aria-hidden />

@@ -5,7 +5,9 @@ import {
   LOG_HEIGHT_MAX_FRAC,
   LOG_HEIGHT_MIN_FRAC,
   logGridTemplate,
+  logHeightAria,
   readLogHeight,
+  stepLogHeight,
   writeLogHeight,
 } from "./log-layout";
 
@@ -60,5 +62,23 @@ describe("log-layout — lưới cột cố định của Nhật ký sự kiện
         300,
       ),
     ).not.toThrow();
+  });
+});
+
+describe("log-layout — tay kéo bằng bàn phím (L-B3)", () => {
+  const vh = 1000;
+  it("ArrowUp cao thêm 5% viewport, ArrowDown thấp đi 5%, kẹp trong 25–85%", () => {
+    expect(stepLogHeight(400, "ArrowUp", vh)).toBe(450);
+    expect(stepLogHeight(400, "ArrowDown", vh)).toBe(350);
+    expect(stepLogHeight(840, "ArrowUp", vh)).toBe(850);
+    expect(stepLogHeight(260, "ArrowDown", vh)).toBe(250);
+  });
+  it("Home/End nhảy về min/max; phím khác -> null (không xử lý)", () => {
+    expect(stepLogHeight(400, "Home", vh)).toBe(250);
+    expect(stepLogHeight(400, "End", vh)).toBe(850);
+    expect(stepLogHeight(400, "Enter", vh)).toBeNull();
+  });
+  it("aria-valuenow/min/max theo % viewport (số nguyên)", () => {
+    expect(logHeightAria(333, vh)).toEqual({ now: 33, min: 25, max: 85 });
   });
 });

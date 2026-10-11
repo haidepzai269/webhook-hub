@@ -73,6 +73,7 @@ export default function FlowMapPage() {
                 <button
                   type="button"
                   onClick={() => setShowUnused((v) => !v)}
+                  aria-pressed={!showUnused}
                   title={showUnused ? "Đích không còn subscription đang bật — bấm để ẩn khỏi bản đồ" : "Đang ẩn — bấm để hiện trên bản đồ"}
                 >
                   <TonePill tone="idle" icon={<PowerOff {...ICON_SM} aria-hidden />}>

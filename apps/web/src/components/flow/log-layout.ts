@@ -48,3 +48,35 @@ export function writeLogHeight(store: Store | null | undefined, px: number): voi
     /* storage bị chặn → chỉ không nhớ */
   }
 }
+
+/** Bước bàn phím của tay kéo: 5% viewport mỗi lần ↑/↓. */
+export const LOG_HEIGHT_KEY_STEP_FRAC = 0.05;
+
+/**
+ * Tay kéo bằng bàn phím (L-B3): ↑ cao thêm, ↓ thấp đi, Home/End = min/max; luôn kẹp 25–85%.
+ * Phím khác → null (để trình duyệt xử lý như thường).
+ */
+export function stepLogHeight(currentPx: number, key: string, viewportH: number): number | null {
+  const step = viewportH * LOG_HEIGHT_KEY_STEP_FRAC;
+  switch (key) {
+    case "ArrowUp":
+      return clampLogHeight(currentPx + step, viewportH);
+    case "ArrowDown":
+      return clampLogHeight(currentPx - step, viewportH);
+    case "Home":
+      return viewportH * LOG_HEIGHT_MIN_FRAC;
+    case "End":
+      return viewportH * LOG_HEIGHT_MAX_FRAC;
+    default:
+      return null;
+  }
+}
+
+/** aria-valuenow/min/max của separator: phần trăm viewport (số nguyên). */
+export function logHeightAria(px: number, viewportH: number): { now: number; min: number; max: number } {
+  return {
+    now: Math.round((px / viewportH) * 100),
+    min: Math.round(LOG_HEIGHT_MIN_FRAC * 100),
+    max: Math.round(LOG_HEIGHT_MAX_FRAC * 100),
+  };
+}
