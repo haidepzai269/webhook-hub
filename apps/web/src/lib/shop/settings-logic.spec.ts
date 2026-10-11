@@ -1,4 +1,11 @@
-import { buildSettingsBody, currentHint, emptyForm, parseKeyList, suggestSourceKeys } from "./settings-logic";
+import {
+  buildSettingsBody,
+  currentHint,
+  emptyForm,
+  parseKeyList,
+  saveHeadline,
+  suggestSourceKeys,
+} from "./settings-logic";
 
 /** SK3 (SPEC-shop-ket-noi-project §4.4): trang Cài đặt kết nối của Shop. */
 describe("Shop › Cài đặt kết nối (SK3)", () => {
@@ -29,5 +36,12 @@ describe("Shop › Cài đặt kết nối (SK3)", () => {
       "Đang dùng …ab12 (đã lưu ở trang này). Để trống = giữ nguyên.",
     );
     expect(currentHint({ source: "none", configured: false })).toBe("Chưa có");
+  });
+
+  it("H-1: đăng ký FAILED -> server KHÔNG lưu gì; trang nói rõ Shop vẫn chạy cấu hình cũ", () => {
+    expect(saveHeadline({ saved: [], registration: { status: "FAILED" } })).toContain("Chưa lưu gì");
+    expect(saveHeadline({ saved: [], registration: { status: "FAILED" } })).toContain("cấu hình cũ");
+    expect(saveHeadline({ saved: ["bankCode"], registration: { status: "VERIFIED" } })).toBe("Đã lưu: bankCode.");
+    expect(saveHeadline({ saved: [], registration: { status: "SKIPPED" } })).toBe("Đã lưu: (không đổi gì).");
   });
 });

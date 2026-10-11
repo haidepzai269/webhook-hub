@@ -59,3 +59,10 @@ export function currentHint(v: { source: string; configured?: boolean; last4?: s
   const where = v.source === "db" ? "đã lưu ở trang này" : "từ env của server";
   return `Đang dùng …${v.last4 ?? "****"} (${where}). Để trống = giữ nguyên.`;
 }
+
+/** H-1 (ADR-160): Lưu = kiểm trước, lưu sau. Đăng ký FAILED -> server KHÔNG lưu gì, Shop vẫn chạy cấu hình cũ. */
+export function saveHeadline(r: { saved: string[]; registration: { status: string } }): string {
+  return r.registration.status === "FAILED"
+    ? "Chưa lưu gì — Shop vẫn chạy bằng cấu hình cũ (vẫn nhận tiền như trước). Sửa theo dòng dưới rồi bấm Lưu lại."
+    : `Đã lưu: ${r.saved.join(", ") || "(không đổi gì)"}.`;
+}

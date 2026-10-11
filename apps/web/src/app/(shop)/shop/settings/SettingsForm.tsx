@@ -10,6 +10,7 @@ import {
   type SaveResult,
   type SettingsView,
   saveSettings,
+  ShopAdminError,
   testHub,
 } from "@/lib/shop/settings";
 import {
@@ -17,6 +18,7 @@ import {
   emptyForm,
   type SettingsForm as Form,
   parseKeyList,
+  saveHeadline,
   suggestSourceKeys,
 } from "@/lib/shop/settings-logic";
 
@@ -116,7 +118,9 @@ export function SettingsForm() {
       setView(r.settings);
       setForm((f) => ({ ...emptyForm(), paymentSourceKeys: f.paymentSourceKeys })); // bí mật không ở lại trong ô
     } catch (e) {
-      fail(e);
+      // H-1: 422 kèm `registration` = đăng ký FAILED, server không lưu gì — giữ nguyên ô để sửa rồi Lưu lại.
+      if (e instanceof ShopAdminError && e.body?.registration) setResult(e.body as unknown as SaveResult);
+      else fail(e);
     } finally {
       setBusy("");
     }
@@ -336,7 +340,7 @@ export function SettingsForm() {
                 className={`alert mt-3 ${result.registration.status === "VERIFIED" ? "alert-success" : "alert-warning"}`}
                 role="status"
               >
-                Đã lưu: {result.saved.join(", ") || "(không đổi gì)"}.
+                {saveHeadline(result)}
                 <br />
                 {result.registration.status === "VERIFIED" ? (
                   <>
