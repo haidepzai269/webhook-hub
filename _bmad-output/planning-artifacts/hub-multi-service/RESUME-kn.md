@@ -58,3 +58,12 @@ ode_modules`. `git worktree remove --force` đi XUYÊN junction: xoá sạch `no
 | expectFailure P-KN* + U10 row thật (L-6) | a780a7c | 5/5 probe ✅ qua `npm run verify:probe` (worktree của runner, không junction) |
 - Kiểm: L0 `npx jest -w 2` 812/0 (2 suite không nạp = L-5 có từ trước); L1 hub_app: payos-connect-db 7/7, stripe-connect-db 4/4, source-connections-db 7/7; `verify:gates` 0 vi phạm; tsc hub-api + web xanh.
 - Còn mở: KQ1/M-2 (chờ production), M-3 L2 T1–T4 (chờ rebuild hubv), L-2, L-4, L-5, L-7, sửa P2002 ở `POST /api/v1/sources`.
+
+## Sửa sau REVIEW-KN-R2 (2026-10-11) — ADR-152
+| Mục | Commit | Ghi chú |
+|---|---|---|
+| H-R2-1 checksumKey người dùng nhập không tự hết hạn bản cũ | c18c349 | retire lười trong `status()` khi raw_events thật verify bằng key mới; `secret_mismatch` khi chỉ khớp key cũ; `[KN:U20]` sửa, `[KN:U25]`, `[KN:U26]` mới |
+| M-R2-1 U23 chập chờn | c18c349 | promise lười; payos-connect-db 9/9 × 5 lần |
+| L-R2-2 UI | c18c349 | nguồn đang tải/lỗi -> khoá nút; cảnh báo "giữ cả hai key" khi `secretChanged` |
+| ADR-152 + SPEC + hướng dẫn test | 302cc1d | |
+- Còn mở từ R2: L-R2-1 (ghi we_ mồ côi vào last_fix), L-R2-3 (probe cho connectExisting/M-1/claim), L-R2-4 (hướng dẫn xoá we_ tay của Stripe), nút "gỡ secret cũ" thủ công.
