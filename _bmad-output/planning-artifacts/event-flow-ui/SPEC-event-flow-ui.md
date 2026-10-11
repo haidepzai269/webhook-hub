@@ -193,6 +193,22 @@ Bắn PayOS từ playground → V3 thấy chấm chạy từ PayOS tới Shop v�
 | **Đa service** (agent khác, đang chạy trên `master`) | Thêm project, `endpoint.verification` (PENDING/FAILED), `subscriptions.sourceIds`, `events.normalized`/`seq`, header Standard Webhooks; S7 đổi nghĩa `after` của `GET /api/v1/events` | `FlowNode`/`StageView` có sẵn trường **tuỳ chọn** `projectId`, `verification`, `sourceIds`. Lý do `endpoint_unverified`, `source_filtered` khai báo sẵn. V2 dùng `/flow/executions` của module mới, **không** dùng `/api/v1/events`, để khỏi vướng S7 |
 | **Auth AU1–AU6** (sau đa service) | Cookie, `?projectId=` bắt buộc, scope theo role, RLS | Mọi gọi API qua `client.ts`. Route `flow` được gắn guard giống các route `/api/v1/*` khác, để AU3 thêm `@RequireScope('read:project')` một lần cho cả module. Nút hành động (Replay…) để AU3 ẩn theo scope `replay:deliveries` |
 
+## 6A. Hợp đồng khớp với đợt đa service (10/10, bắt buộc)
+
+Hai agent chạy song song. Chỗ nối là **module `flow` đọc DB ở server**: UI không đọc API đa service trực tiếp, nên khi schema đổi thì chỉ phải sửa `buildEventFlow`/repo của `flow`, không phải sửa từng màn.
+
+| Điểm nối | Agent đa service cam kết | Agent UI cam kết |
+|---|---|---|
+| Project | Đọc `projectId` của console gom vào **một** helper/guard (X2), ghi tên thật vào DINH-CHINH §7 | Route `flow` dùng **đúng** helper đó sau khi rebase. Trước khi rebase dùng `@CurrentTenant()` |
+| Endpoint chưa VERIFIED | Không tạo delivery (§4.6). Cột `destinations.verification` + `verification_error` | Chặng `routed` tự tính lúc đọc: subscription khớp type mà không có delivery → `skipped` + lý do `endpoint_unverified` / `source_filtered` / `subscription_inactive`, nhãn "trạng thái hiện tại". Badge trên node Destination ở V3 |
+| `sourceIds` | `subscriptions.source_ids` | Nhãn trên cạnh Subscription ở V3 |
+| `normalized`, `seq`, `sourceId` của event | Cột mới trên `events` | Hiển thị `normalized` (pill "chuẩn" / "thô") ở V1. Không dùng `seq` |
+| Nguồn `api` (service tự publish qua `POST /events`) | `ProviderEnum` thêm `api`, `generic` | Node Source có icon riêng cho `api` (Lucide `PlugZap`) và `generic` (Lucide `Puzzle`). Chặng `verified` của `api` ghi "API key", không ghi "chữ ký" |
+| Header gửi đi Standard Webhooks | `webhook-id/timestamp/signature` | Tab "Payload/Response" của attempt hiển thị header đã gửi, che chữ ký |
+| Tên hàm repo bị đổi (vd `findActiveSubscriptionsForEventType` → `findActiveSubscriptionsForEvent`) | Ghi vào §7 | Sửa lúc rebase |
+
+**F7 (sau merge, agent UI làm):** rebase lên `master` sau đợt đa service, sửa theo bảng trên, chạy lại test + build + **chụp lại ảnh**. Có thêm bộ lọc project ở V3/V2 nếu console đã có `GET /api/v1/projects`.
+
 ## 7. Stories (làm theo thứ tự)
 
 | ID | Nội dung | Ước lượng |
@@ -246,12 +262,13 @@ Tổng khoảng 20 giờ (cộng 1,5 giờ nếu làm F6).
 
 | Story | Commit | Bằng chứng | Ảnh | Lệch |
 |---|---|---|---|---|
-| F1 | | | — | |
-| F2 | | | — | |
-| F3 | | | | |
-| F4 | | | | |
-| F5 | | | | |
-| F6 | | | | |
+| F1 | `58bb232` (+ sửa ở `22f8d25`, `383df2e`) | 26 unit `[UI:F1-01..26]` (stages, buildEventFlow, healthOf, §6A classifySkippedSubscriptions) | — | `health.ts` thêm theo §0A.E; mốc normalize = delivery đầu (EF-5) |
+| F2 | `80a8bba` | 6 DB `[UI:F2-01..06]` gồm tenant khác → 404, không lộ secret; events/:id p95 31ms | — | repo ở module flow (EF-2); FlowScope một chỗ (§6A) |
+| F3 | `383df2e` | tsc + next build sạch; ảnh V1 ok/hỏng sáng+tối | screens/v1-journey-{ok,fail}-{light,dark}.png | attempt là chip trong node Delivery (EF-7); không có IP (hub không lưu) |
+| F4 | `22f8d25` (API) · `beaef11` (UI) | 4 DB `[UI:F4-01..04]` (lọc SQL khớp buildEventFlow, cursor, tenant); executions p95 ≤ 154ms / 10k | screens/v2-executions-{light,dark}.png | ảo hoá bằng `content-visibility` thay thư viện; "trùng" không có trong DB (EF-8) |
+| F5 | `22f8d25` (API) · `beaef11` (UI) | 2 DB `[UI:F5-01..02]`; topology 15m p95 33ms, 24h p95 122ms / 10k | screens/v3-flow-map-{light,dark}.png | mặc định ẩn subscription đang tắt (Tuỳ chọn bật lại); throttle "đang chặn" không đo được từ DB |
+| F6 | — | chưa làm | — | — |
+| F7 | `1a43972` + sửa review `2d9d627` (R-9) `414e208` (R-6) `ffd25f4` (R-4) `d622299`/`dea7f62` (R-5) `4186715` (§6A) | L0 553 · L1 92 · E2E socket theo project trên hubv | screens/*-cafe-* | §6A "header gửi đi": KHÔNG làm — delivery_attempts không lưu header; UI ghi rõ giới hạn (cần đổi worker/schema, ngoài phạm vi) |
 
 ## 11. Kết quả review (phiên review điền)
 
