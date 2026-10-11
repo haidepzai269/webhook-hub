@@ -1,16 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { TOPOLOGY_WINDOWS, type TopologyWindow } from "@hub/flow";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, PowerOff, SlidersHorizontal } from "lucide-react";
 
 import { EventLog } from "@/components/flow/event-log";
 import { ProjectPicker } from "@/components/flow/project-picker";
-import { HealthPill } from "@/components/flow/pills";
+import { HealthPill, TonePill } from "@/components/flow/pills";
 import { ProviderIcon } from "@/components/flow/provider-icon";
-import { ICON } from "@/components/flow/tokens";
+import { ICON, ICON_SM } from "@/components/flow/tokens";
 import { TopologyCanvas } from "@/components/flow/topology-canvas";
+import { unusedDestinationIds } from "@/components/flow/unused-destinations";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -43,13 +44,16 @@ export default function FlowMapPage() {
   const [collapseSubs, setCollapseSubs] = useState(false);
   const [hideInactive, setHideInactive] = useState(true);
   const [showSubscriptions, setShowSubscriptions] = useState(false);
+  const [showUnused, setShowUnused] = useState(true);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const { data, error, isLoading } = useTopology(window);
   useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
 
   const sources = data?.nodes.filter((n) => n.kind === "source") ?? [];
+  // Đích "không dùng" (không còn subscription bật) không tính vào crashed/warning — đếm riêng, luôn hiện ở header.
+  const unused = useMemo(() => (data ? unusedDestinationIds(data) : new Set<string>()), [data]);
   const counts = { crashed: 0, warning: 0, healthy: 0, idle: 0 };
-  for (const n of data?.nodes ?? []) counts[n.health]++;
+  for (const n of data?.nodes ?? []) if (!unused.has(n.id)) counts[n.health]++;
   const sourceName = sourceFilter ? sources.find((s) => s.id === `src:${sourceFilter}`)?.label : null;
 
   return (
@@ -65,6 +69,17 @@ export default function FlowMapPage() {
               {counts.warning > 0 && <HealthPill health="warning" label={`${counts.warning} warning`} />}
               <HealthPill health="healthy" label={`${counts.healthy} healthy`} />
               <HealthPill health="idle" label={`${counts.idle} idle`} />
+              {unused.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowUnused((v) => !v)}
+                  title={showUnused ? "Đích không còn subscription đang bật — bấm để ẩn khỏi bản đồ" : "Đang ẩn — bấm để hiện trên bản đồ"}
+                >
+                  <TonePill tone="idle" icon={<PowerOff {...ICON_SM} aria-hidden />}>
+                    {unused.size} đích không dùng{showUnused ? "" : " (đang ẩn)"}
+                  </TonePill>
+                </button>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -123,6 +138,9 @@ export default function FlowMapPage() {
                 <DropdownMenuCheckboxItem checked={!hideInactive} onCheckedChange={(v) => setHideInactive(!v)}>
                   Hiện subscription đang tắt
                 </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem checked={showUnused} onCheckedChange={(v) => setShowUnused(Boolean(v))}>
+                  Hiện đích không dùng (không còn subscription)
+                </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={collapseSubs} onCheckedChange={(v) => setCollapseSubs(Boolean(v))}>
                   Gộp subscription cùng đích
                 </DropdownMenuCheckboxItem>
@@ -157,6 +175,7 @@ export default function FlowMapPage() {
             layoutVersion={layoutVersion}
             hideInactive={hideInactive}
             showSubscriptions={showSubscriptions}
+            showUnused={showUnused}
           />
         ) : null}
         </div>
