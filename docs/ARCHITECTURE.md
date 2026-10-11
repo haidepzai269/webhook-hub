@@ -855,7 +855,9 @@ laptop dev:  hub listen ──GET /v1/p/cafe/events?after=<cursor>&wait=20──
   (M-2 review DX-A): `listen` không biết subscription → forward mọi event key đọc được (không áp `eventTypes`/`sourceIds`
   đã ghim) và không có `renderedContent`. Lọc local bằng `--types`; handler vẫn phải tự kiểm `source`/`sourceId`.
 - **`after=latest` có trần:** tối đa 10 lô × 1000 event chưa cấp cursor mỗi request; còn tồn → 503 `service_unavailable` +
-  `Retry-After` (CLI tự thử lại) — không giữ advisory lock/transaction vô hạn trong một request (M-1).
+  `Retry-After` (CLI tự thử lại, bỏ cuộc sau 10 lần kèm `fix`) (M-1). **Mỗi lô là một transaction riêng** (R2-M1, ADR-145):
+  advisory lock theo tenant chỉ giữ trong một lô và commit ngay — không có tx dài chạm timeout 5 s của Prisma, poller cùng
+  project chỉ chờ một lô.
 - **Chỉ đọc:** `listen` không tạo delivery, không chạm endpoint/circuit breaker; không retry (cursor tiến kể cả khi app local
   lỗi); hub 5xx/mất mạng → backoff 1/2/5 s. Hub không gọi được `localhost` của dev (SSRF guard + NAT) — `listen` đi chiều ngược lại.
 - **`hub trigger <type>`**: mẫu kiểu chuẩn (`canonicalSample`, cạnh validator catalog) → `POST /events` → `validateCanonical` + đường ingest bình thường.

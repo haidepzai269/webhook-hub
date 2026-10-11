@@ -38,3 +38,9 @@
   chứa luôn thay đổi M-1/L-5 + ADR-143 của mình, và các file controller/catalog/ADR trong `c888ef6` là bản HEAD+mình (THIẾU hunk
   KN1: mã `use_endpoints_route`/`endpoint_owned_by_service`… trong catalog, refactor controller, ADR-142 — vẫn nằm ở working tree
   của họ). Commit `80a98bd` của mình vì thế RỖNG (cùng tree). Từ đây mình chỉ commit qua GIT_INDEX_FILE riêng + commit-tree.
+- Review vòng 2 (GO-with-fixes): R2-M1 (lô poll_seq commit riêng — `ORCHESTRATED_METHODS`, test DB hub_app RED [5,5,5] → xanh [5,3,1]),
+  R2-L1 (parseRetryAfter: số giây / HTTP-date / body; kẹp 1–30 s), R2-L2 (`--from latest` bỏ cuộc sau 10 lần + fix). ADR-145.
+  R2-L3 KHÔNG làm: 413 xảy ra trước khi nạp adapter (`ingest.service.ts` ~dòng 244), đưa qua `rejectAck` = đổi thứ tự đường
+  nóng; nhánh 413/404/429 của `genericAckFix` để dành nếu sau này làm. R2-L4: không viết lại lịch sử.
+  Commit theo luật mới: `git commit -m … -- <paths>`. File lẫn hunk của agent khác (tenant-scoped.repository.ts, ARCHITECTURE.md):
+  tạm ghi bản HEAD+mình vào working tree, commit theo path, rồi trả lại bản đầy đủ (kiểm mtime trước khi trả).
