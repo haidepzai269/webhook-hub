@@ -38,6 +38,24 @@ describeDb('shop.settings (Postgres, SK2)', () => {
     await expect(db.$executeRaw`INSERT INTO shop.settings (id, updated_at) VALUES (2, now())`).rejects.toThrow(); // CHECK id = 1
   });
 
+  it('[SK:U3] H-1: prepare() chưa commit KHÔNG ghi DB; commit() mới ghi; dòng giải mã lỗi (khoá khác) -> ghi đè cả dòng, không lai (M-3)', async () => {
+    const s = new ShopSettings(prismaStore(db), env, log);
+    await s.save(parseInput({ hubConnectionUrl: conn, paymentSourceKeys: ['src_payos_q'] }) as any);
+    const before1 = await db.shopSetting.findUniqueOrThrow({ where: { id: 1 } });
+    const other = `hubs://hk_test_${'R'.repeat(39)}yyyy@hub.example/proj-r`;
+    const p = await s.prepare(parseInput({ hubConnectionUrl: other, paymentSourceKeys: ['src_r'] }) as any);
+    expect(p.resolved.env.HUB_URL).toBe(other); // ứng viên trong bộ nhớ
+    const still = await db.shopSetting.findUniqueOrThrow({ where: { id: 1 } });
+    expect([still.hubConnectionUrl, still.paymentSourceKeys]).toEqual([before1.hubConnectionUrl, ['src_payos_q']]); // FAILED = không commit
+    await p.commit();
+    expect((await new ShopSettings(prismaStore(db), env, log).get()).env).toMatchObject({ HUB_URL: other, SHOP_PAYMENT_SOURCE_KEYS: 'src_r' });
+    // Khoá đổi: dòng cũ không giải được -> lưu mới ghi đè cả dòng (payment_source_keys cũ không sót lại)
+    const env2 = { SHOP_SETTINGS_KEY: randomBytes(32).toString('base64') } as unknown as NodeJS.ProcessEnv;
+    await new ShopSettings(prismaStore(db), env2, log).save(parseInput({ bankCode: 'VCB' }) as any);
+    const row = await db.shopSetting.findUniqueOrThrow({ where: { id: 1 } });
+    expect([row.hubConnectionUrl, row.paymentSourceKeys, row.bankCode]).toEqual([null, [], 'VCB']);
+  });
+
   it('migration cấp quyền cho shop_user (role runtime của Shop) nếu role tồn tại', async () => {
     const [{ exists }] = await db.$queryRaw<{ exists: boolean }[]>`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'shop_user') AS exists`;
     if (!exists) return; // máy không có shop_user: migration bỏ qua GRANT (đúng thiết kế)

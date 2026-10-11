@@ -5,7 +5,7 @@ import { timingSafeCompare } from '@hub/crypto';
 import { challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
-import { applyPayment, bankQrUrl, creditsOrder, EXPIRE_AFTER_MS, isExpired, newOrderCode, pickOrderCode, readPayment } from './payment';
+import { applyPayment, bankQrUrl, creditsOrder, EXPIRE_AFTER_MS, isExpired, newOrderCode, orderCodesIn, pickOrderCode, readPayment } from './payment';
 import { createPaymentLink, PAYOS_DUPLICATE_ORDER, payosConfig, payosLinkInput } from './payos';
 import { HubLink, prismaStore, settingsRouter, ShopSettings } from './settings';
 
@@ -20,13 +20,11 @@ if (!SIGNING_SECRET) [logger.error('[Shop] Thiếu HUB_SIGNING_SECRET (secret k�
 const settings = new ShopSettings(prismaStore(prisma), process.env, logger);
 const SHOP_PUBLIC_URL = (process.env.SHOP_PUBLIC_URL || `http://localhost:${process.env.SHOP_PORT || 4001}`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
-// P1 (ADR-141): trang Shop để PayOS đưa khách quay lại sau khi trả.
-const SHOP_WEB_URL = (process.env.SHOP_WEB_URL || 'http://localhost:3000/shop').replace(/\/$/, '');
+const SHOP_WEB_URL = (process.env.SHOP_WEB_URL || 'http://localhost:3000/shop').replace(/\/$/, ''); // P1 (ADR-141): PayOS đưa khách quay lại
 
 app.set('trust proxy', 1); // Render: IP thật của khách cho giới hạn sai mã quản trị (SK2)
 app.use(cors());
-// Giữ rawBody để kiểm tra chữ ký HMAC
-app.use(express.json({ verify: (req: any, _res, buf) => (req.rawBody = buf) }));
+app.use(express.json({ verify: (req: any, _res, buf) => (req.rawBody = buf) })); // giữ rawBody để kiểm chữ ký HMAC
 app.use((err: any, _req: Request, res: Response, next: any) => (err?.type === 'entity.parse.failed' ? res.status(400).json({ error: 'JSON không hợp lệ' }) : next(err)));
 
 // 1. GET /products — Menu đồ ăn, giá thật VND (ADR-027)
@@ -45,7 +43,6 @@ app.post('/orders', async (req: Request, res: Response) => {
     const { env } = await settings.get();
     const payos = payosConfig(env);
     if (paymentProvider === 'payos' && !payos) return res.status(400).json({ error: 'Shop chưa cấu hình PayOS — chọn chuyển khoản ngân hàng' });
-
     // Mã đơn DH + 7 chữ số (ADR-141); trùng @unique (P2002) thì sinh lại, tối đa 3 lần
     let order;
     for (let attempt = 0; !order; attempt++) {
@@ -57,7 +54,6 @@ app.post('/orders', async (req: Request, res: Response) => {
       }
     }
     const expiresAt = new Date(order.createdAt.getTime() + EXPIRE_AFTER_MS);
-
     // PayOS: link thật, hết hạn SỚM hơn đơn (ADR-144). SePay: VietQR của tài khoản nhận (hoặc null).
     let payment: { qrImageUrl: string | null; qrCode?: string; checkoutUrl?: string } = { qrImageUrl: bankQrUrl(env, priced.amount, order.orderCode) };
     if (paymentProvider === 'payos' && payos) {
@@ -79,7 +75,6 @@ app.post('/orders', async (req: Request, res: Response) => {
         return res.status(502).json({ error: 'Không tạo được link thanh toán PayOS — thử lại hoặc chọn chuyển khoản ngân hàng' });
       }
     }
-
     const { id, orderCode, status } = order;
     res.json({ success: true, order: { id, orderCode, amount: priced.amount, status, items: priced.items, paymentProvider, expiresAt, payment } });
   } catch (err: any) {
@@ -107,26 +102,21 @@ app.get('/orders/:code', async (req: Request, res: Response) => {
 app.post('/hub-webhook', async (req: any, res: Response) => {
   // 4.1. Standard Webhooks (ADR-040): chữ ký trên bytes gốc + timestamp ≤ 300s, kể cả challenge. `webhook-id` = khoá chống trùng.
   const eventId = req.headers['webhook-id'] as string;
-  if (!verifyWebhook(req.rawBody ?? Buffer.alloc(0), req.headers, SIGNING_SECRET)) {
-    return res.status(401).json({ error: 'Chữ ký Standard Webhooks không hợp lệ hoặc quá hạn' });
-  }
+  if (!verifyWebhook(req.rawBody ?? Buffer.alloc(0), req.headers, SIGNING_SECRET)) return res.status(401).json({ error: 'Chữ ký Standard Webhooks không hợp lệ hoặc quá hạn' });
   const challenge = challengeResponse(req.body);
   if (challenge) return res.status(200).json(challenge);
-
   // 4.3. Chỉ `payment.received` (VND) từ sourceId đã ghim (R-1, ADR-094). Chưa ghim -> thử đăng ký NGAY (R2-1), vẫn
   // chưa được thì 503 để hub retry — không xử lý tiền khi chưa biết nguồn nào tin được (R-8).
   const { client: hub, registration } = hubLink;
-  if (hub && registration.trustedSourceIds.length === 0 && !(await registration.ensureNow())) {
-    return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
-  }
+  if (hub && registration.trustedSourceIds.length === 0 && !(await registration.ensureNow())) return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
   const p = readPayment(req.body, undefined, hub ? registration.trustedSourceIds : undefined);
   if ('skip' in p || !eventId) {
-    if ('skip' in p && p.skip === 'UNMATCHED') logger.warn({ eventId }, '[Shop] Không tìm thấy mã đơn DH trong memo/reference');
+    // M-1: source không tin cậy (vd project cũ sau khi chuyển) — 200 nhưng để lại dấu vết đối soát (không có bí mật).
+    if ('skip' in p && p.skip !== 'IGNORED') logger.warn({ eventId, sourceId: req.body?.sourceId, orderCodes: orderCodesIn(req.body?.data) }, p.skip === 'UNMATCHED' ? '[Shop] Không tìm thấy mã đơn DH trong memo/reference' : '[Shop] payment.received từ source KHÔNG tin cậy -> bỏ qua; có mã đơn thì cần đối soát');
     return res.status(200).json({ success: true, status: 'skip' in p ? p.skip : 'IGNORED' });
   }
   const { orderCodes, amount, source, paidAt } = p;
   let orderCode = orderCodes[0];
-
   // 4.4. Chống trùng BỀN VỮNG + cộng dồn trong CÙNG transaction (ADR-034): event-id và paidAmount cùng commit/rollback.
   // Khoá hàng đơn (FOR UPDATE) trước: webhook/reconcile trên CÙNG đơn chạy tuần tự -> không 4xx (hub coi là DEAD).
   try {
@@ -171,8 +161,8 @@ async function expireStaleOrders() {
 
 // POST /api/internal/reconcile — gọi bởi GitHub Actions (deployed, ADR-022), bắt buộc X-Internal-Token
 app.post('/api/internal/reconcile', async (req: Request, res: Response) => {
-  const token = req.headers['x-internal-token'];
   if (!INTERNAL_TOKEN) return res.status(503).json({ error: 'INTERNAL_TOKEN chưa được cấu hình' });
+  const token = req.headers['x-internal-token'];
   if (typeof token !== 'string' || !timingSafeCompare(token, INTERNAL_TOKEN)) return res.status(401).json({ error: 'Sai X-Internal-Token' });
   try {
     // ADR-141: tiền về đơn đã hết hạn KHÔNG mất âm thầm — đối soát báo số đơn EXPIRED có tiền (cần giao/hoàn tiền).
@@ -186,9 +176,7 @@ app.post('/api/internal/reconcile', async (req: Request, res: Response) => {
 
 // Local: tự reconcile định kỳ (docker-compose đặt RECONCILE_INTERVAL_MS)
 const RECONCILE_INTERVAL_MS = Number(process.env.RECONCILE_INTERVAL_MS || 0);
-if (RECONCILE_INTERVAL_MS > 0) {
-  setInterval(() => expireStaleOrders().catch((e) => logger.error({ err: e?.message }, '[Shop] Reconcile lỗi')), RECONCILE_INTERVAL_MS);
-}
+if (RECONCILE_INTERVAL_MS > 0) setInterval(() => expireStaleOrders().catch((e) => logger.error({ err: e?.message }, '[Shop] Reconcile lỗi')), RECONCILE_INTERVAL_MS);
 
 // S11: Shop TỰ đăng ký endpoint + subscription `payment.received` (idempotent), ghim ĐÚNG source tin cậy, tắt sub cũ (MS-P2-1);
 // thử lại vô hạn (R2-1). SK2: lưu cài đặt -> `hubLink.reconnect()` dựng lại client + ensure NGAY (không redeploy).
@@ -196,10 +184,11 @@ const hubLink = new HubLink(async (hub, sourceKeys) => {
   const r = await hub.endpoints.ensure({ name: 'shop', url: `${SHOP_PUBLIC_URL}/hub-webhook`, eventTypes: ['payment.received'], signingSecret: SIGNING_SECRET, sourceKeys, exclusive: true });
   logger.info({ endpointId: r.endpoint.id, created: r.created, hub, trustedSourceIds: r.subscription.sourceIds }, `[Shop] endpoint VERIFIED (${r.endpoint.url}), subscription payment.received`);
   return r.subscription.sourceIds ?? [];
-}, logger);
+}, logger, process.env);
 app.use(settingsRouter({ settings, link: hubLink, env: process.env, log: logger }));
 
-// Nạp cài đặt TRƯỚC khi nhận request: webhook không bao giờ tới lúc chưa biết hub/nguồn tin cậy.
+// Nạp cài đặt TRƯỚC khi nhận request: webhook không bao giờ tới lúc chưa biết hub/nguồn tin cậy. M-3: boot lúc DB lỗi -> env, 60s thử lại tới khi đọc được.
+setInterval(() => settings.degraded && void hubLink.lock(async () => { const r = await settings.reload(); if (r) hubLink.sync(r.env); }), 60_000).unref();
 void settings.get().then(({ env }) => {
   hubLink.apply(env);
   app.listen(PORT, () => {

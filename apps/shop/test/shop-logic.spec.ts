@@ -293,11 +293,11 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(readPayment({ type: 'payment.received', source: 'generic', data: core }, ['generic'])).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
     });
 
-    it('R-1: có danh sách sourceId tin cậy (từ ensure) -> event từ source khác (dù tên sepay) IGNORED', () => {
+    it('R-1: có danh sách sourceId tin cậy (từ ensure) -> event từ source khác (dù tên sepay) UNTRUSTED (bỏ qua, main log warn — M-1)', () => {
       const ok = { type: 'payment.received', source: 'sepay', sourceId: 'S-OP', data: core };
       expect(readPayment(ok, undefined, ['S-OP'])).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
-      expect(readPayment({ ...ok, sourceId: 'S-ATTACKER' }, undefined, ['S-OP'])).toEqual({ skip: 'IGNORED' });
-      expect(readPayment({ ...ok, sourceId: undefined }, undefined, ['S-OP'])).toEqual({ skip: 'IGNORED' });
+      expect(readPayment({ ...ok, sourceId: 'S-ATTACKER' }, undefined, ['S-OP'])).toEqual({ skip: 'UNTRUSTED' });
+      expect(readPayment({ ...ok, sourceId: undefined }, undefined, ['S-OP'])).toEqual({ skip: 'UNTRUSTED' });
     });
 
     it('payload cũ (payment.succeeded + transferAmount/orderCode) không còn được đọc', () => {

@@ -34,12 +34,13 @@ export const PAYMENT_SOURCES: readonly string[] = (process.env.SHOP_PAYMENT_SOUR
  * Đọc khoản tiền từ kiểu chuẩn `payment.received` (S3-2, ADR-053) — không `if` theo provider. M-3 (ADR-144): lấy MỌI mã
  * `DH`+7 số (hoặc +10 số, mã cũ) trong `memo` rồi `reference`; Shop chọn mã có thật trong DB (`pickOrderCode`).
  */
-export function readPayment(body: any, allowed: readonly string[] = PAYMENT_SOURCES, trustedSourceIds?: readonly string[]): { orderCodes: string[]; amount: number; source: string; paidAt?: Date } | { skip: 'IGNORED' | 'UNMATCHED' } {
+export const orderCodesIn = (d: any) => [...new Set([...`${d?.memo ?? ''} ${d?.reference ?? ''}`.matchAll(/DH(?:\d{10}|\d{7})(?!\d)/g)].map((m) => m[0]))];
+export function readPayment(body: any, allowed: readonly string[] = PAYMENT_SOURCES, trustedSourceIds?: readonly string[]): { orderCodes: string[]; amount: number; source: string; paidAt?: Date } | { skip: 'IGNORED' | 'UNMATCHED' | 'UNTRUSTED' } {
   const d = body?.data || {};
   if (body?.type !== 'payment.received' || d.currency !== 'VND' || !allowed.includes(body?.source)) return { skip: 'IGNORED' };
-  // R-1 (ADR-094): có danh sách source tin cậy (sourceIds của subscription đã ghim lúc ensure) -> phải khớp ĐÚNG id.
-  if (trustedSourceIds && !trustedSourceIds.includes(body?.sourceId)) return { skip: 'IGNORED' };
-  const orderCodes = [...new Set([...`${d.memo ?? ''} ${d.reference ?? ''}`.matchAll(/DH(?:\d{10}|\d{7})(?!\d)/g)].map((m) => m[0]))];
+  // R-1 (ADR-094): có danh sách source tin cậy (sourceIds đã ghim lúc ensure) -> phải khớp ĐÚNG id. M-1: UNTRUSTED để main log warn.
+  if (trustedSourceIds && !trustedSourceIds.includes(body?.sourceId)) return { skip: 'UNTRUSTED' };
+  const orderCodes = orderCodesIn(d);
   if (orderCodes.length === 0) return { skip: 'UNMATCHED' };
   const amount = Number(d.amount);
   if (!Number.isSafeInteger(amount) || amount <= 0) return { skip: 'IGNORED' };

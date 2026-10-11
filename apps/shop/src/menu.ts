@@ -26,7 +26,6 @@ export function priceOrder(body: any): PricedOrder {
   const rawItems = body?.items;
   if (!Array.isArray(rawItems) || rawItems.length === 0) return { ok: false, error: 'Giỏ hàng rỗng' };
   if (rawItems.length > 50) return { ok: false, error: 'Quá nhiều dòng trong giỏ' };
-
   const merged = new Map<string, number>();
   for (const it of rawItems) {
     const menuItem = MENU.find((m) => m.id === it?.id);
@@ -36,7 +35,6 @@ export function priceOrder(body: any): PricedOrder {
     if (qty > 20) return { ok: false, error: 'Số lượng phải là số nguyên 1–20' };
     merged.set(menuItem.id, qty);
   }
-
   const name = str(body?.customer?.name, 100);
   const phone = str(body?.customer?.phone, 20);
   if (!name || !phone) return { ok: false, error: 'Thiếu tên hoặc số điện thoại' };
