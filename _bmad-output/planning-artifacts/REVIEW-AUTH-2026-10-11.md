@@ -490,3 +490,116 @@ Hàm trả `pathname + search + hash` đã phân giải chứ không trả chu�
 ## G.6 Kết luận
 
 **ĐẠT.** Logic token đúng: gộp lượt gọi, không đầu độc cache, thử lại 401 có giới hạn, `invalid_grant` rõ ràng, có timeout. MIME đúng cho các mẫu thư hiện có. Chống header injection ổn (kể cả Unicode line separator). Host cố định, không log token. R-6 không đổi. Bốn điểm Thấp (G-1..G-4) và ba chỗ sửa tài liệu không chặn deploy. Trước demo nên thêm `Date`/`Message-ID` (G-2) để giảm khả năng thư vào spam.
+
+### G.7 Kiểm lại bản sửa `e328ab5` (ADR-126)
+
+- **G-1:** đã đóng. `CTRL_RE` chặn C0, DEL, C1 (gồm NEL U+0085) và U+2028/2029. Địa chỉ email phải là ASCII in được.
+- **G-2:** đã đóng. Có `Date` (`toUTCString`, dạng `GMT` là obs-zone, RFC 5322 vẫn chấp nhận) và `Message-ID: <uuid@domain-của-MAIL_FROM>`. Subject ASCII dài hơn 70 ký tự chuyển sang encoded-word và được gập dòng.
+- **G-3:** đã đóng. Lỗi send chỉ còn `HTTP <status> (<error.status>/<reason>)`, và chỉ nhận chuỗi khớp `[A-Za-z_]`.
+- **G-4:** đã đóng. `resend-verification` chạy nền (`void … .catch`).
+
+Bộ kiểm L0 643 (trong lần chạy ở mục AU5b) xanh.
+
+---
+
+# AU5b Google login (`8afb866`, `3111edb`, `cfe11dd`, `bba23a6`; ADR-127)
+
+> hubv dựng lại từ HEAD `bba23a6` kèm web. Đã prune build cache; đĩa còn 29 GB.
+> **Không gọi Google thật:** dùng fake-google trong sink của hubv, cộng script chạy thẳng `google-id-token.ts` / `oauth-cookie.ts` với cặp khoá RSA tự sinh.
+> Không đọc `.env` hay `KEYS-CAN-LAY.md`. Source không sửa gì. Có dùng psql bằng owner trên **hubv** để dựng thế user "có cả GitHub lẫn Google" cho phép thử đua.
+
+## GO.1 Bộ kiểm
+
+| Lệnh | Kết quả |
+|---|---|
+| `npm run verify` | L0 **643/0/0** · L1 **142/0/0** · map 250 mã · 0 mồ côi · 0 ma · 0 trùng |
+| `verify:gates` | 14 luật · 0 vi phạm |
+| `verify:e2e:auth` | **18/18** (thêm `[AU:GO9]` chạy trọn luồng qua web :13000) |
+| Log hub-api sau toàn bộ phép thử | 0 dòng chứa `id_token`, `client_secret`, `code_verifier`, `eyJhbGci` hay access token |
+
+## GO.2 Kiểm ID token (offline, `verifyGoogleIdToken` thật, JWKS giả)
+
+| Thử | Kết quả |
+|---|---|
+| Token hợp lệ | chấp nhận |
+| `alg: none` | reject `alg` |
+| `alg: HS256`, ký HMAC bằng PEM khoá công khai (alg confusion) | reject `alg` |
+| `alg: RS256` nhưng chữ ký là HMAC bằng PEM | reject `signature` |
+| Ký bằng khoá RSA khác; sửa payload sau khi ký | reject `signature` / `signature` |
+| `kid` = `../../etc/passwd`, `__proto__`; thiếu `kid` | reject `kid_unknown` / `kid_unknown` / `kid_missing` (tra bằng `Map`, không có đường dẫn) |
+| Header có `jku` trỏ ra ngoài | bị bỏ qua (khoá chỉ lấy từ JWKS cố định), token vẫn hợp lệ ✓ |
+| `iss` = `http://accounts.google.com`, `https://accounts.google.com.evil` | reject. `accounts.google.com` (không scheme) chấp nhận, đúng tài liệu Google |
+| `aud` khác; `aud` mảng có client nhưng `azp` khác | reject `aud`. `aud` là chuỗi đúng client nhưng `azp` khác thì chấp nhận (Thấp, xem GO-3) |
+| `exp` quá 30 s (trong ±60 s); quá 120 s; `exp` là chuỗi | chấp nhận / reject / reject |
+| `iat` ở tương lai 300 s | reject `iat_future` |
+| `nonce` sai; thiếu `nonce` | reject / reject |
+| `email_verified: "false"` | trả `emailVerified=false`, callback chuyển về `google_email_unverified` (thử live bên dưới) |
+| **JWKS refetch dùng làm DoS:** 50 `kid` lạ trong 30 s | **0** lần tải thêm. Sau 31 s, 5 `kid` lạ chỉ thêm **1** lần tải ✓. Ngoài ra ID token chỉ tới từ token endpoint của Google sau khi đổi code thành công, nên kẻ tấn công không chèn được `kid` rác |
+| Cookie OAuth của GitHub mở ở callback Google; cookie kiểu cũ (không có trường `p`) | `null` / `null` ✓ (không replay chéo provider được) |
+
+## GO.3 Luồng thật qua fake-google (hubv)
+
+| Thử | Kết quả |
+|---|---|
+| Google trả `email_verified=false` | `/login?error=google_email_unverified` ✓ |
+| Email của **operator** qua Google | `/login?error=operator_google_forbidden` ✓ (kiểm cả theo `sub` lẫn theo email) |
+| Email chữ hoa `Case.User@Gmail.Test` | lưu `case.user@gmail.test`. `sub` khác cùng email (chữ thường) → `google_account_mismatch` kèm audit `google.link_mismatch` ✓ |
+| Chiếm trước: đăng ký bằng mật khẩu A rồi nạn nhân vào bằng Google (GO9) | Google chứng minh hộp thư → `claimAccount(passwordHash=null)`: **A → 401** ✓ |
+| Dùng lại URL callback với cookie mới (state khác) | 400 ✓ |
+| Dùng lại URL callback với **đúng cookie gốc** (code đã dùng) | 302 `google_failed` (token endpoint từ chối code đã dùng; fake mô phỏng đúng Google) ✓ |
+| `state` sai; không có cookie | 400 / 400 ✓ |
+| PKCE downgrade | không có đường nào: server luôn gửi `S256` và luôn gửi `code_verifier` từ cookie ký HMAC ✓ |
+| `next`: `/invite` | `/invite` ✓ |
+| `next`: `//evil.com`, `/\t/evil.com`, `https://evil.com` | đều về `/dashboard` ✓ |
+| `next`: `/%2F%2Fevil.com` | Location `http://localhost:13000/%2F%2Fevil.com`, vẫn cùng origin ✓ |
+| `safeNextPath` (offline): `/ /`, `/\u0085/`, `/　/`, `/@evil.com` | hoặc bị từ chối, hoặc ra path cùng origin ✓ |
+| `GOOGLE_OAUTH_FAKE_BASE_URL` ở production | `loadGoogleConfig` bỏ qua khi `NODE_ENV=production`, **và** `test-only-config` làm app thoát ✓ |
+| Tách env | Client đăng nhập dùng `GOOGLE_OAUTH_CLIENT_ID/SECRET`, client mail dùng `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN`: không dùng chung biến ✓ |
+
+## GO.4 Phát hiện
+
+### GO-1 · Thấp/Trung bình · Đua giữa `unlink-google` và `unlink-github` để user không còn cách đăng nhập nào
+- **Chỗ:** `google-oauth.service.ts` hàm `unlink` (dòng 173–181) và `github-oauth.service.ts` hàm `unlink`. Cả hai **đọc** user, kiểm "còn cách khác", rồi mới `updateMany` gỡ. Không khoá, và điều kiện không nằm trong câu UPDATE.
+- **Tái hiện (hubv):**
+  - user Google không có mật khẩu; dùng psql gán thêm `github_id`;
+  - bắn song song `POST /auth/google/unlink` và `POST /auth/github/unlink`.
+  - 5 vòng → **4/5 vòng cả hai trả 204**, user còn `password_hash=∅ | github_id=∅ | google_sub=∅`, tức không còn cách đăng nhập nào (ADR-127 hứa 409 `last_login_method`).
+- **Mức độ:** vẫn cứu được qua quên mật khẩu (email đã xác minh → đặt mật khẩu), nhưng chỉ khi mail chạy. Nếu deployed lỗi mail thì user bị khoá ngoài hẳn. Chỉ chính user tự gây ra.
+- **Sửa:** gộp kiểm và gỡ vào **một** UPDATE có điều kiện, rồi `count = 0` → 409:
+  - `UPDATE users SET google_sub = NULL WHERE id = $1 AND google_sub IS NOT NULL AND (password_hash IS NOT NULL OR github_id IS NOT NULL)`;
+  - câu đối xứng cho GitHub.
+
+  Hoặc `SELECT … FOR UPDATE` trong transaction. Thêm test L1 đua song song.
+
+### GO-2 · Thấp (đánh đổi thiết kế, giống GitHub §5.10) · Tự ghép theo email vào tài khoản ĐÃ xác minh, không cần mật khẩu
+- Email Google trùng user đã xác minh thì gắn `sub` và đăng nhập luôn (có mail báo "Google vừa được liên kết").
+- Rủi ro đã biết với email **không thuộc Google** (domain riêng): `email_verified` phản ánh thời điểm tạo tài khoản Google. Nếu domain hết hạn và đổi chủ, tài khoản Google cũ vẫn có `email_verified=true` và chiếm được tài khoản hub.
+- Gợi ý (không chặn):
+  - chỉ tự ghép khi email là `@gmail.com` hoặc token có claim `hd` (Workspace);
+  - các trường hợp khác thì bắt đăng nhập bằng mật khẩu một lần trước khi liên kết.
+
+  Ghi vào ADR-127 phần đánh đổi.
+
+### GO-3 · Thấp · `aud` là chuỗi đúng client nhưng `azp` khác vẫn được chấp nhận
+- OIDC Core §3.1.3.7: nếu có `azp` thì *nên* kiểm `azp == client_id`. Token vốn chỉ đến qua token endpoint của chính client này (TLS, đổi code bằng `client_secret`) nên không khai thác được. Sửa một dòng: `if (c.azp !== undefined && c.azp !== clientId) reject`.
+
+### GO-4 · Thấp · Callback không có rate limit
+- Mỗi request `GET /auth/google/callback` (và `/auth/github/callback`) có cookie hợp lệ, mà cookie lấy miễn phí qua `/auth/google`, sẽ làm hub-api gửi 1 POST tới token endpoint của Google. Kẻ tấn công có thể dùng hub-api bắn Google liên tục (khuếch đại 1:1, có thể khiến client bị Google throttle).
+- Sửa: rate limit theo IP cho `/auth/*/callback` (vd 20 lần/phút) bằng `AuthRateLimiter` sẵn có (đường console, không tính R1).
+
+### GO-5 · Ghi chú tài liệu
+- DEPLOYMENT "Tạo client đăng nhập Google" đúng (External, In production, `openid email profile` không cần thẩm định, redirect URI qua web).
+- Nếu dùng **chung project** với client gửi mail thì cả hai **dùng chung một consent screen và trạng thái publish**. Project có scope nhạy cảm `gmail.send` chưa thẩm định có thể khiến màn hình đăng nhập hiện tên app hay logo khác mong muốn. Khuyên tách **hai project** (login / mail) cho sạch.
+
+## GO.5 Kết luận AU5b
+
+**ĐẠT.**
+- Kiểm ID token chặt: chỉ RS256, khoá theo JWKS cố định, `kid` không chèn được, refetch có giãn cách, đủ `iss`/`aud`/`exp`/`iat`/`nonce`.
+- state + PKCE S256 + nonce gắn với cookie HMAC có trường provider, không replay chéo provider được.
+- Định danh theo `sub`. Ma trận ghép đúng: operator bị từ chối, `email_verified=false` bị từ chối, `sub` khác → mismatch có audit.
+- Chiếm trước qua tài khoản mật khẩu chưa xác minh bị vô hiệu bằng `claimAccount`.
+- `next` an toàn ở cả server và web. Fake-google không thể bật ở production. Env login và env mail tách riêng. Không lộ bí mật trong log.
+
+**Nên sửa trước demo:** GO-1 (đua gỡ liên kết làm mất mọi cách đăng nhập; sửa bằng UPDATE có điều kiện, khoảng 10 dòng). GO-2..GO-4 là Thấp hoặc đánh đổi, ghi ADR là đủ.
+
+**Kết luận AU5 (GitHub + Google):** ĐẠT có điều kiện, vẫn cần chạy tay TA11 (GitHub) và một lượt Google thật trên deployed (Admin, A3).
