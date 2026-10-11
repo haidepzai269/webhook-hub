@@ -17,6 +17,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
+import { useSources } from "@/lib/hub/queries";
 
 /** KN2 (SPEC-ket-noi §4, ADR-138): form dựng từ `spec.fields` của connector — UI không biết provider nào có ô gì. */
 interface ConnectorInfo {
@@ -75,18 +76,37 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [ack, setAck] = useState(false);
   const [result, setResult] = useState<ConnectionView | null>(null);
+  // H-1 (ADR-151): "nguồn có sẵn" (giữ sourceKey — service đang ghim nguồn đó vẫn nhận) hay "tạo nguồn mới".
+  const [mode, setMode] = useState<"existing" | "new" | null>(null);
+  const [existingId, setExistingId] = useState<string>("");
+  const [sourceKey, setSourceKey] = useState("");
+  const sources = useSources();
   const spec = (connectors.data ?? []).find((c) => c.provider === provider) ?? connectors.data?.[0];
+  const candidates = (sources.data ?? []).filter((s) => s.provider === spec?.provider && s.isActive);
+  // Mặc định: provider đã có nguồn -> kết nối nguồn có sẵn (tạo nguồn mới sẽ làm service đang ghim nguồn cũ mất kênh).
+  const effMode = mode ?? (candidates.length ? "existing" : "new");
+  const target = candidates.find((s) => s.id === existingId) ?? candidates[0];
   const connect = useMutation({
-    mutationFn: () =>
-      hubFetch<{ connection: ConnectionView }>("/api/v1/sources/connect", {
-        method: "POST",
-        body: JSON.stringify({
-          provider: spec?.provider,
-          name: name.trim(),
-          credentials: creds,
-          ...(spec?.overwriteWarning ? { acknowledgeOverwrite: ack } : {}),
-        }),
-      }),
+    mutationFn: () => {
+      const common = {
+        credentials: creds,
+        ...(spec?.overwriteWarning ? { acknowledgeOverwrite: ack } : {}),
+      };
+      return effMode === "existing" && target
+        ? hubFetch<{ connection: ConnectionView }>(`/api/v1/sources/${encodeURIComponent(target.id)}/connect`, {
+            method: "POST",
+            body: JSON.stringify(common),
+          })
+        : hubFetch<{ connection: ConnectionView }>("/api/v1/sources/connect", {
+            method: "POST",
+            body: JSON.stringify({
+              provider: spec?.provider,
+              name: name.trim(),
+              ...(sourceKey.trim() ? { sourceKey: sourceKey.trim() } : {}),
+              ...common,
+            }),
+          });
+    },
     onSuccess: (r) => setResult(r.connection),
     onError: (e) => toast.error(`Kết nối thất bại: ${e.message}`),
     onSettled: refresh,
@@ -98,11 +118,16 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
       setCreds({});
       setAck(false);
       setName("");
+      setMode(null);
+      setExistingId("");
+      setSourceKey("");
     }
     onOpenChange(o);
   };
   const ready =
-    spec && name.trim() && spec.fields.every((f) => creds[f.name]?.trim()) && (!spec.overwriteWarning || ack);
+    spec &&
+    (effMode === "existing" ? !!target : !!name.trim()) &&
+    spec.fields.every((f) => creds[f.name]?.trim()) && (!spec.overwriteWarning || ack);
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -132,7 +157,7 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
                     type="button"
                     size="sm"
                     variant={spec?.provider === c.provider ? "default" : "outline"}
-                    onClick={() => (setProvider(c.provider), setCreds({}), setAck(false))}
+                    onClick={() => (setProvider(c.provider), setCreds({}), setAck(false), setMode(null), setExistingId(""))}
                   >
                     {c.provider}
                   </Button>
@@ -140,13 +165,68 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
               </div>
             </Field>
             <Field className="gap-1.5">
-              <FieldLabel htmlFor="cn-name">Tên nguồn</FieldLabel>
-              <Input
-                id="cn-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="VD: PayOS kênh cafe"
-              />
+              <FieldLabel>Nguồn</FieldLabel>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={effMode === "existing" ? "default" : "outline"}
+                  disabled={!candidates.length}
+                  onClick={() => setMode("existing")}
+                >
+                  Kết nối nguồn có sẵn
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={effMode === "new" ? "default" : "outline"}
+                  onClick={() => setMode("new")}
+                >
+                  Tạo nguồn mới
+                </Button>
+              </div>
+              {effMode === "existing" && target ? (
+                <>
+                  <select
+                    aria-label="Nguồn có sẵn"
+                    className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                    value={target.id}
+                    onChange={(e) => setExistingId(e.target.value)}
+                  >
+                    {candidates.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} · {s.sourceKey}
+                      </option>
+                    ))}
+                  </select>
+                  <FieldDescription>
+                    Hub đăng ký đúng URL của nguồn này (/hooks/{target.provider}/{target.sourceKey}) — service đang tin
+                    nguồn này (vd Shop ghim SHOP_PAYMENT_SOURCE_KEYS) vẫn nhận sự kiện.
+                  </FieldDescription>
+                </>
+              ) : (
+                <>
+                  <Input
+                    id="cn-name"
+                    aria-label="Tên nguồn"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Tên nguồn, VD: PayOS kênh cafe"
+                  />
+                  <Input
+                    id="cn-key"
+                    aria-label="sourceKey (tuỳ chọn)"
+                    value={sourceKey}
+                    onChange={(e) => setSourceKey(e.target.value)}
+                    placeholder="sourceKey (tuỳ chọn, a-z 0-9 _) — bỏ trống để hub tự sinh"
+                  />
+                  {candidates.length > 0 && (
+                    <FieldDescription className="text-amber-600">
+                      Nguồn mới có URL mới: provider sẽ gửi vào nguồn mới, service đang ghim nguồn cũ sẽ KHÔNG nhận nữa.
+                    </FieldDescription>
+                  )}
+                </>
+              )}
             </Field>
             {spec?.fields.map((f) => (
               <Field key={f.name} className="gap-1.5">

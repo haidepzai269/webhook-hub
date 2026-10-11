@@ -2,7 +2,8 @@ import * as http from 'http';
 import { randomUUID } from 'crypto';
 import { AddressInfo } from 'net';
 import { PrismaService, getMasterKey } from '@hub/database';
-import { aesGcmDecrypt } from '@hub/crypto';
+import { aesGcmDecrypt, aesGcmEncrypt } from '@hub/crypto';
+import { HttpException } from '@nestjs/common';
 import { ProviderRegistry } from '@hub/providers';
 import { SourceConnectionService } from '../src/modules/console/source-connection.service';
 import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
@@ -19,6 +20,7 @@ describeDb('[KN3] Kết nối PayOS với fake PayOS (Postgres)', () => {
   const raw = newTestPrisma('owner');
   const svc = new PrismaService();
   const tenant = randomUUID();
+  const other = randomUUID();
   const FAKE = { clientId: 'fake-cid', apiKey: 'fake-api-key-VALUE', checksumKey: 'fake-checksum-VALUE' };
   const ingestHits: { key: string; status: number }[] = [];
   let sink: http.Server;
@@ -48,8 +50,8 @@ describeDb('[KN3] Kết nối PayOS với fake PayOS (Postgres)', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await raw.auditLog.deleteMany({ where: { tenantId: tenant } });
-    await raw.source.deleteMany({ where: { tenantId: tenant } });
+    await raw.auditLog.deleteMany({ where: { tenantId: { in: [tenant, other] } } });
+    await raw.source.deleteMany({ where: { tenantId: { in: [tenant, other] } } });
     await raw.$disconnect();
     await svc.$disconnect();
     await new Promise((r) => sink.close(r));
@@ -79,5 +81,89 @@ describeDb('[KN3] Kết nối PayOS với fake PayOS (Postgres)', () => {
     expect(aesGcmDecrypt(versions[1].secretEncrypted, getMasterKey())).toBe(FAKE.checksumKey);
     // Không có disconnect -> GET trả hướng dẫn ngắt tay.
     expect((await conn.status(tenant, wrongCk.source.id)).manualDisconnect).toMatch(/dashboard PayOS/);
+  });
+
+  // ---- H-1 (REVIEW-KN): gắn connector vào source CÓ SẴN (Shop ghim src_payos_main) ----
+  const errOf = async (p: Promise<unknown>) => {
+    const e = await p.then(() => null, (x) => x);
+    expect(e).toBeInstanceOf(HttpException);
+    return { status: (e as HttpException).getStatus(), body: (e as HttpException).getResponse() as any };
+  };
+  /** Như `POST /api/v1/sources` (dán tay): source + SourceSecret v1 = checksumKey. */
+  const manualSource = (tenantId: string, checksum: string) =>
+    raw.source.create({
+      data: { tenantId, provider: 'payos', name: 'PayOS main', sourceKey: `src_payos_main_${randomUUID().slice(0, 8)}`, isActive: true, secrets: { create: { secretEncrypted: aesGcmEncrypt(checksum, getMasterKey()), version: 1 } } },
+    });
+  const sourceCount = () => raw.source.count({ where: { tenantId: tenant } });
+
+  it('[KN:U19] "Kết nối nguồn có sẵn": KHÔNG tạo source mới, URL đăng ký = /hooks/payos/<sourceKey cũ> (Shop vẫn nhận), checksumKey trùng -> không thêm version', async () => {
+    const s = await manualSource(tenant, FAKE.checksumKey);
+    const before = await sourceCount();
+    const r: any = await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE });
+    expect(r.connection).toMatchObject({ status: 'CONNECTED', display: 'CAFE TEST · ****1234', ingestUrl: expect.stringMatching(new RegExp(`/hooks/payos/${s.sourceKey}$`)) });
+    expect(r.source).toMatchObject({ id: s.id, sourceKey: s.sourceKey });
+    expect(r.source.secrets).toBeUndefined();
+    expect(await sourceCount()).toBe(before);
+    expect(ingestHits.at(-1)).toEqual({ key: s.sourceKey, status: 200 });
+    const versions = await raw.sourceSecret.findMany({ where: { sourceId: s.id } });
+    expect(versions.map((v) => [v.version, v.validUntil])).toEqual([[1, null]]);
+    const audits = await raw.auditLog.findMany({ where: { tenantId: tenant, entityId: s.id }, orderBy: { createdAt: 'asc' } });
+    expect(audits.map((a) => a.action)).toEqual(['source.connect']);
+    expect(JSON.stringify(audits.map((x) => x.metadata))).not.toContain(FAKE.apiKey);
+    // Bấm lại (đã có kết nối) = kết nối lại trên CÙNG source, vẫn không tạo source.
+    const again: any = await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE });
+    expect(again.connection.status).toBe('CONNECTED');
+    expect(await sourceCount()).toBe(before);
+  });
+
+  it('[KN:U20] nguồn có sẵn với checksumKey KHÁC -> SourceSecret version mới TRƯỚC khi gọi PayOS (request kiểm tra verify được), version cũ còn 24 giờ', async () => {
+    const s = await manualSource(tenant, 'checksum-cu-cua-kenh-khac');
+    const r: any = await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE });
+    expect(r.connection.status).toBe('CONNECTED');
+    expect(ingestHits.at(-1)).toEqual({ key: s.sourceKey, status: 200 });
+    const versions = await raw.sourceSecret.findMany({ where: { sourceId: s.id }, orderBy: { version: 'asc' } });
+    expect(versions.map((v) => v.version)).toEqual([1, 2]);
+    expect(versions[0].validUntil!.getTime()).toBeGreaterThan(Date.now() + 23 * 3600_000);
+    expect(versions[1].validUntil).toBeNull();
+    expect(aesGcmDecrypt(versions[1].secretEncrypted, getMasterKey())).toBe(FAKE.checksumKey);
+  });
+
+  it('[KN:U21] nguồn có sẵn: project khác -> 404 giống hệt id lạ; thiếu acknowledgeOverwrite -> 422; provider khác source -> 422; không gọi PayOS', async () => {
+    const foreign = await manualSource(other, FAKE.checksumKey);
+    const mine = await manualSource(tenant, FAKE.checksumKey);
+    const hits = ingestHits.length;
+    const a = await errOf((conn as any).connectExisting(tenant, 'user:u1', foreign.id, { acknowledgeOverwrite: true, credentials: FAKE }));
+    const b = await errOf((conn as any).connectExisting(tenant, 'user:u1', randomUUID(), { acknowledgeOverwrite: true, credentials: FAKE }));
+    expect(a).toEqual(b);
+    expect(a.status).toBe(404);
+    expect((await errOf((conn as any).connectExisting(tenant, 'user:u1', mine.id, { credentials: FAKE }))).body).toMatchObject({ error: 'overwrite_not_acknowledged' });
+    expect((await errOf((conn as any).connectExisting(tenant, 'user:u1', mine.id, { provider: 'stripe', acknowledgeOverwrite: true, credentials: FAKE })))).toMatchObject({ status: 422, body: { error: 'validation_failed', field: 'provider' } });
+    expect(ingestHits.length).toBe(hits);
+    expect(await raw.sourceConnection.count({ where: { sourceId: { in: [foreign.id, mine.id] } } })).toBe(0);
+  });
+
+  it('[KN:U22] sourceKey trùng (UNIQUE toàn cục) -> 409 conflict GIỐNG HỆT dù key thuộc project mình hay project khác; không tạo gì', async () => {
+    const foreign = await manualSource(other, FAKE.checksumKey);
+    const mine = await manualSource(tenant, FAKE.checksumKey);
+    const before = await sourceCount();
+    const body = (sourceKey: string) => ({ provider: 'payos', name: 'trùng', sourceKey, acknowledgeOverwrite: true, credentials: FAKE });
+    const x = await errOf(conn.connect(tenant, 'user:u1', body(foreign.sourceKey)));
+    const y = await errOf(conn.connect(tenant, 'user:u1', body(mine.sourceKey)));
+    expect(x).toEqual(y);
+    expect(x).toMatchObject({ status: 409, body: { error: 'conflict', field: 'sourceKey' } });
+    expect(await sourceCount()).toBe(before);
+  });
+
+  it('[KN:U23] kết nối đang PENDING (lượt khác đang gọi provider) -> retry / connectExisting 409 connection_in_progress; PENDING cũ (kẹt) -> cho chạy lại', async () => {
+    const s = await manualSource(tenant, FAKE.checksumKey);
+    await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE });
+    await raw.sourceConnection.update({ where: { sourceId: s.id }, data: { status: 'PENDING', updatedAt: new Date() } });
+    const hits = ingestHits.length;
+    for (const p of [conn.retry(tenant, 'user:u1', s.id, {}), (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE })]) {
+      expect(await errOf(p)).toMatchObject({ status: 409, body: { error: 'conflict', code: 'connection_in_progress' } });
+    }
+    expect(ingestHits.length).toBe(hits);
+    await raw.$executeRawUnsafe(`UPDATE hub.source_connections SET updated_at = now() - interval '10 minutes' WHERE source_id = $1::uuid`, s.id);
+    expect((await conn.retry(tenant, 'user:u1', s.id, {})).connection.status).toBe('CONNECTED');
   });
 });

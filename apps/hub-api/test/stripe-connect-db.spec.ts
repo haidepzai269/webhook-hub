@@ -94,6 +94,44 @@ describeDb('[KN4] Kết nối Stripe với fake Stripe (Postgres)', () => {
     expect((await raw.sourceConnection.findUniqueOrThrow({ where: { sourceId } })).remoteRef).not.toBe(firstWe);
   });
 
+  it('[KN:U24] (M-1) kết nối lại mà TX lưu we_ mới + secret mới LỖI -> we_ CŨ còn nguyên ở Stripe (không DELETE), DB vẫn trỏ we_ cũ, secret cũ vẫn verify; we_ mới mồ côi bị dọn; lần sau thành công mới gỡ we_ cũ (SAU commit)', async () => {
+    const oldWe = (await raw.sourceConnection.findUniqueOrThrow({ where: { sourceId } })).remoteRef!;
+    const oldSecrets = await raw.sourceSecret.findMany({ where: { sourceId }, orderBy: { version: 'asc' } });
+    const liveSecret = aesGcmDecrypt(oldSecrets.at(-1)!.secretEncrypted, getMasterKey());
+    const deletesBefore = (await requests('DELETE')).length;
+    const postsBefore = (await requests('POST')).length;
+    // TX thứ 2 của retry (= TX3, lưu kết quả của provider) lỗi như Neon pooler rớt; các TX khác chạy thật.
+    let calls = 0;
+    const flaky: any = new Proxy(svc, {
+      get(t: any, p) {
+        if (p === 'tenantTx') {
+          return (tid: string, fn: any, o?: any) => (++calls === 2 ? Promise.reject(Object.assign(new Error('Can\'t reach database server (giả)'), { code: 'P1001' })) : t.tenantTx(tid, fn, o));
+        }
+        const v = t[p];
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
+    });
+    const flakyConn = new SourceConnectionService(flaky, { STRIPE_FAKE_BASE_URL: `${sinkBase}/_fake/stripe`, HUB_PUBLIC_URL: 'https://hub.example.com' });
+    await expect(flakyConn.retry(tenant, 'user:u1', sourceId, {})).rejects.toBeDefined();
+    expect((await requests('POST')).length).toBe(postsBefore + 1);
+    const deletes = (await requests('DELETE')).slice(deletesBefore).map((d) => d.path);
+    expect(deletes).not.toContain(`/_fake/stripe/v1/webhook_endpoints/${oldWe}`);
+    // we_ mới (secret của nó đã mất cùng TX) bị dọn để không bắn event ký bằng secret không ai giữ.
+    expect(deletes).toHaveLength(1);
+    const after = await raw.sourceConnection.findUniqueOrThrow({ where: { sourceId } });
+    expect(after.remoteRef).toBe(oldWe);
+    expect(after.status).toBe('FAILED');
+    expect((await raw.sourceSecret.findMany({ where: { sourceId } })).length).toBe(oldSecrets.length);
+    expect(await verifies(sourceKey, liveSecret)).toBe(true);
+    // we_ cũ vẫn sống ở fake Stripe.
+    const got = await fetch(`${sinkBase}/_fake/stripe/v1/webhook_endpoints/${oldWe}`, { headers: { authorization: `Bearer ${KEY.secretKey}` } });
+    expect(got.status).toBe(200);
+    // Lần sau thành công: COMMIT trước, rồi mới gỡ we_ cũ.
+    const ok: any = await conn.retry(tenant, 'user:u1', sourceId, {});
+    expect(ok.connection.status).toBe('CONNECTED');
+    expect((await requests('DELETE')).at(-1).path).toBe(`/_fake/stripe/v1/webhook_endpoints/${oldWe}`);
+  });
+
   it('[KN4] status: URL ở Stripe khớp -> CONNECTED; we_ bị xoá ở Stripe -> FAILED remote_gone; ngắt -> DELETE we_ hiện tại, DISCONNECTED', async () => {
     await raw.sourceConnection.update({ where: { sourceId }, data: { lastCheckedAt: null } });
     expect((await conn.status(tenant, sourceId)).status).toBe('CONNECTED');

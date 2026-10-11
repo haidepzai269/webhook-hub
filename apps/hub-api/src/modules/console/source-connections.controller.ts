@@ -38,6 +38,16 @@ export class SourceConnectionsController {
     return this.svc.connect(tenantId, `user:${userId}`, body);
   }
 
+  /**
+   * H-1 (ADR-151): gắn connector vào source CÓ SẴN (giữ sourceKey -> service đang ghim source đó vẫn nhận). Không tạo source.
+   * Luôn 201 kể cả FAILED, như `sources/connect`.
+   */
+  @Post('sources/:id/connect')
+  @RequireScope('manage:sources')
+  connectExisting(@CurrentTenant() tenantId: string, @CurrentUser() userId: string, @Param('id') id: string, @Body() body: any) {
+    return this.svc.connectExisting(tenantId, `user:${userId}`, id, body ?? {});
+  }
+
   @Post('sources/:id/connection/retry')
   @HttpCode(200)
   @RequireScope('manage:sources')

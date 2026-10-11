@@ -191,6 +191,20 @@ export class TenantScopedRepository {
     return this.findSourceConnection(sourceId);
   }
 
+  /**
+   * L-3 (REVIEW-KN): "giành" kết nối để gọi provider — chỉ cập nhật khi KHÔNG có lượt khác đang PENDING (PENDING cập nhật
+   * trước `staleBefore` coi là kẹt, cho chạy lại). Một câu UPDATE có điều kiện = nguyên tử, hai lượt bấm cùng lúc chỉ một
+   * lượt thắng. Không giành được (đang PENDING, hoặc source không thuộc tenant) -> null.
+   */
+  async claimSourceConnection(sourceId: string, staleBefore: Date, data: Prisma.SourceConnectionUncheckedUpdateInput) {
+    const r = await this.prisma.sourceConnection.updateMany({
+      where: { sourceId, tenantId: this.tenantId, OR: [{ status: { not: 'PENDING' } }, { updatedAt: { lt: staleBefore } }] },
+      data: { ...data, status: 'PENDING' },
+    });
+    if (r.count !== 1) return null;
+    return this.findSourceConnection(sourceId);
+  }
+
   // --- Destinations ---
   async findDestinations(where: Prisma.DestinationWhereInput = {}) {
     return this.prisma.destination.findMany({

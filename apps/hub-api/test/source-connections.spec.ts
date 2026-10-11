@@ -54,7 +54,7 @@ describe('[KN2] kết nối provider — L0', () => {
     const routes = Object.getOwnPropertyNames(SourceConnectionsController.prototype).filter(
       (n) => n !== 'constructor' && Reflect.getMetadata(METHOD_METADATA, (SourceConnectionsController.prototype as any)[n]) !== undefined,
     );
-    expect(routes.sort()).toEqual(['connect', 'connectors', 'deleteCredentials', 'disconnect', 'retry', 'status']);
+    expect(routes.sort()).toEqual(['connect', 'connectExisting', 'connectors', 'deleteCredentials', 'disconnect', 'retry', 'status']);
     for (const r of routes) expect([r, Reflect.getMetadata(REQUIRE_SCOPE_KEY, (SourceConnectionsController.prototype as any)[r])]).toEqual([r, 'manage:sources']);
     const P = '391110c1-3a81-480a-93ab-e11de0be107a';
     const prisma: any = {

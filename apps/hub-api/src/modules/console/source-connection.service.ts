@@ -14,8 +14,22 @@ const SOURCE_KEY_RE = /^[a-z0-9_]{3,64}$/;
 export const STATUS_CHECK_INTERVAL_MS = 60_000;
 /** Provider sinh secret mới khi kết nối lại (Stripe) -> secret cũ còn verify thêm 24 giờ (thời gian chồng). */
 export const SECRET_OVERLAP_MS = 24 * 60 * 60_000;
+/**
+ * L-3: kết nối PENDING cập nhật trong khoảng này = một lượt khác đang gọi provider -> 409 `connection_in_progress`.
+ * PENDING cũ hơn = kẹt (tiến trình chết giữa chừng / TX ghi kết quả lỗi) -> cho bấm lại. Lớn hơn timeout `connectorFetch` (20s).
+ */
+export const PENDING_STALE_MS = 60_000;
 
 const notFound = () => hubError('not_found', {}, 'Source không tồn tại');
+const inProgress = () => hubError('conflict', { code: 'connection_in_progress' }, 'Đang kết nối với provider (một lượt khác vừa bấm) — đợi kết quả rồi tải lại');
+/** L-1: `source_key` UNIQUE toàn cục -> body GIỐNG HỆT dù key thuộc project mình hay project khác (không dò được key của người khác). */
+const sourceKeyTaken = () => hubError('conflict', { field: 'sourceKey', code: 'source_key_taken' }, 'sourceKey đã được dùng — chọn key khác hoặc bỏ trống để hub tự sinh');
+const isUniqueViolation = (e: unknown) => (e as { code?: unknown })?.code === 'P2002';
+
+function publicSource(source: any) {
+  const { secrets, ...rest } = source;
+  return { ...rest, secretVersions: Array.isArray(secrets) ? secrets.length : 0, webhookUrl: `/hooks/${source.provider}/${source.sourceKey}` };
+}
 
 /**
  * KN2 (SPEC-ket-noi §4.4): URL công khai mà provider gọi vào. `HUB_PUBLIC_URL` là localhost / IP nội bộ / tên một nhãn
@@ -101,6 +115,8 @@ export class SourceConnectionService {
   }
 
   async connect(tenantId: string, actor: string, body: any) {
+    // H-1: `sourceId` trong body = gắn vào source CÓ SẴN (giống `POST /sources/:id/connect`).
+    if (body?.sourceId !== undefined && body?.sourceId !== null && body?.sourceId !== '') return this.connectExisting(tenantId, actor, body.sourceId, body);
     const provider = body?.provider;
     if (!ProviderRegistry.has(provider)) unprocessable({ error: 'validation_failed', field: 'provider', message: 'provider không hợp lệ' });
     const connector = ProviderRegistry.get(provider).connector;
@@ -137,11 +153,64 @@ export class SourceConnectionService {
       });
       await repo.createAuditLog({ action: 'source.create', entityType: 'source', entityId: s.id, actor, metadata: { provider, name, sourceKey, via: 'connect' } });
       return s;
+    }).catch((e) => {
+      if (isUniqueViolation(e)) throw sourceKeyTaken();
+      throw e;
     });
     // (4)+(5) NGOÀI tx: gọi provider, rồi ghi kết quả (FAILED vẫn giữ source — "Thử lại" không phải nhập lại).
-    const view = await this.callConnect(tenantId, actor, source.id, provider, connector, credentials, ingestUrl, secretForSource, 'source.connect', null);
-    const { secrets: _omit, ...publicSource } = source as any;
-    return { source: { ...publicSource, webhookUrl: `/hooks/${provider}/${sourceKey}` }, connection: view };
+    const view = await this.callConnect(tenantId, actor, source.id, provider, connector, credentials, ingestUrl, 'source.connect', null);
+    const { secretVersions: _v, ...src } = publicSource(source);
+    return { source: src, connection: view };
+  }
+
+  /**
+   * H-1 (REVIEW-KN, ADR-151): gắn connector vào source CÓ SẴN của project (vd `src_payos_main` mà Shop ghim trong
+   * `SHOP_PAYMENT_SOURCE_KEYS`) — URL đăng ký tại provider là `/hooks/<provider>/<sourceKey cũ>`, nên service đang tin
+   * source đó vẫn nhận. Cùng luật với `connect`: secret ký (checksumKey) thành SourceSecret version mới nếu khác bản hiện
+   * hành (bản cũ còn 24 giờ), COMMIT trước rồi mới gọi provider; source project khác -> 404 giống hệt id lạ.
+   * Source đã có kết nối -> kết nối lại trên chính nó (như "Thử lại" với credentials mới).
+   */
+  async connectExisting(tenantId: string, actor: string, sourceId: unknown, body: any) {
+    if (typeof sourceId !== 'string' || !UUID_RE.test(sourceId)) throw notFound();
+    const source: any = await this.prisma.forTenant(tenantId).findSourceById(sourceId);
+    if (!source) throw notFound();
+    if (body?.provider !== undefined && body?.provider !== source.provider) {
+      unprocessable({ error: 'validation_failed', field: 'provider', message: 'provider phải trùng provider của source có sẵn' });
+    }
+    const connector = ProviderRegistry.has(source.provider) ? ProviderRegistry.get(source.provider).connector : undefined;
+    if (!connector) throw hubError('connector_unsupported', { provider: source.provider }, 'Provider này chưa tự kết nối được — dán URL ở dashboard provider');
+    if (!source.isActive) unprocessable({ error: 'validation_failed', field: 'sourceId', message: 'Source đang tắt — bật lại trước khi kết nối' });
+    const credentials = parseCredentials(connector, body?.credentials);
+    this.requireAck(connector, body);
+    const existing = await this.prisma.forTenant(tenantId).findSourceConnection(source.id);
+    if (existing) {
+      const r = await this.retry(tenantId, actor, source.id, { credentials });
+      return { source: publicSource(source), connection: r.connection };
+    }
+    const base = publicIngestBase(this.env);
+    if (!base) throw hubError('public_url_required', {}, 'HUB_PUBLIC_URL là localhost/IP nội bộ — provider không gọi vào được');
+    const ingestUrl = `${base}/hooks/${source.provider}/${source.sourceKey}`;
+    const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
+    const masterKey = getMasterKey();
+    // (3) TX: SourceSecret version mới (nếu cần) + kết nối PENDING -> COMMIT TRƯỚC khi gọi provider.
+    await this.tx(tenantId, async (repo) => {
+      if (secretForSource && !this.currentSecrets(source).includes(secretForSource)) {
+        await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource, masterKey), new Date(Date.now() + SECRET_OVERLAP_MS));
+      }
+      await repo.createSourceConnection({
+        sourceId: source.id,
+        provider: source.provider,
+        credentialsEncrypted: aesGcmEncrypt(JSON.stringify(credentials), masterKey),
+        status: 'PENDING',
+        ingestUrl,
+      });
+    }).catch((e) => {
+      // Hai lượt bấm cùng lúc: `source_id` UNIQUE -> lượt thua.
+      if (isUniqueViolation(e)) throw inProgress();
+      throw e;
+    });
+    const view = await this.callConnect(tenantId, actor, source.id, source.provider, connector, credentials, ingestUrl, 'source.connect', null);
+    return { source: publicSource(source), connection: view };
   }
 
   /** "Thử lại" / kết nối lại: credentials trong body (đổi) hoặc bản đã lưu. Đã xoá credentials mà không gửi -> 422 `credentials_required`. */
@@ -160,14 +229,19 @@ export class SourceConnectionService {
     const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
     const masterKey = getMasterKey();
     await this.tx(tenantId, async (repo) => {
+      // L-3: giành kết nối TRƯỚC (UPDATE có điều kiện) — lượt khác đang PENDING -> 409, không đụng secret.
+      const claimed = await repo.claimSourceConnection(source.id, new Date(Date.now() - PENDING_STALE_MS), {
+        credentialsEncrypted: aesGcmEncrypt(JSON.stringify(credentials), masterKey),
+        ingestUrl,
+      });
+      if (!claimed) throw inProgress();
       // Secret ký do dev nhập đổi (vd checksumKey mới) -> version mới TRƯỚC khi gọi provider (request kiểm tra phải verify được).
-      if (secretForSource && !this.activeSecrets(source).includes(secretForSource)) {
+      if (secretForSource && !this.currentSecrets(source).includes(secretForSource)) {
         await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource, masterKey), new Date(Date.now() + SECRET_OVERLAP_MS));
       }
-      await repo.updateSourceConnection(source.id, { credentialsEncrypted: aesGcmEncrypt(JSON.stringify(credentials), masterKey), status: 'PENDING', ingestUrl });
     });
     const action = conn.status === 'CONNECTED' || conn.status === 'DRIFTED' ? 'source.reconnect' : 'source.connect';
-    const view = await this.callConnect(tenantId, actor, source.id, source.provider, connector, credentials, ingestUrl, secretForSource, action, conn.remoteRef);
+    const view = await this.callConnect(tenantId, actor, source.id, source.provider, connector, credentials, ingestUrl, action, conn.remoteRef);
     return { connection: view };
   }
 
@@ -259,11 +333,11 @@ export class SourceConnectionService {
     connector: ProviderConnector,
     credentials: Record<string, string>,
     ingestUrl: string,
-    secretForSource: string | undefined,
     action: 'source.connect' | 'source.reconnect',
     previousRemoteRef: string | null,
   ): Promise<ConnectionView> {
     const baseUrl = connectorBaseUrl(connector.spec, this.env);
+    const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
     let result: { remoteRef: string; display: string; sourceSecret?: string } | null = null;
     let failure: { code: string; fix: string } | null = null;
     try {
@@ -275,35 +349,58 @@ export class SourceConnectionService {
           : { code: 'provider_unreachable', fix: 'Không gọi được API của provider (mạng/DNS/timeout). Bấm "Thử lại" sau ít phút.' };
       logger.warn({ sourceId, provider, error: failure.code }, 'Kết nối provider thất bại');
     }
-    // Kết nối lại thành công mà provider cấp id mới -> gỡ cấu hình cũ ở provider (Stripe: xoá we_ cũ). Lỗi ở đây không làm hỏng kết nối mới.
-    if (result && previousRemoteRef && previousRemoteRef !== result.remoteRef && connector.disconnect) {
-      await connector.disconnect({ credentials, remoteRef: previousRemoteRef, baseUrl }).catch((e) => {
-        logger.warn({ sourceId, provider, error: e instanceof ConnectorError ? e.code : 'disconnect_failed' }, 'Không gỡ được cấu hình cũ ở provider');
-      });
-    }
     const masterKey = getMasterKey();
-    const conn = await this.tx(tenantId, async (repo) => {
-      if (result?.sourceSecret) {
-        // Provider SINH secret ký (Stripe): version mới; version cũ verify thêm 24 giờ (event của endpoint cũ còn đang gửi lại).
-        await repo.addSourceSecret(sourceId, aesGcmEncrypt(result.sourceSecret, masterKey), previousRemoteRef ? new Date(Date.now() + SECRET_OVERLAP_MS) : undefined);
-      }
-      const u = await repo.updateSourceConnection(
-        sourceId,
-        result
-          ? { status: 'CONNECTED', remoteRef: result.remoteRef, display: result.display, lastError: null, lastFix: null, connectedAt: new Date(), lastCheckedAt: new Date() }
-          : { status: 'FAILED', lastError: failure!.code, lastFix: failure!.fix },
-      );
-      await repo.createAuditLog({
-        action,
-        entityType: 'source',
-        entityId: sourceId,
-        actor,
-        // §4.3 điều 3: CHỈ tên trường — không giá trị credentials, không secret.
-        metadata: { provider, status: result ? 'CONNECTED' : 'FAILED', error: failure?.code ?? null, fields: Object.keys(credentials), secretRotated: !!result?.sourceSecret },
+    let conn: any;
+    try {
+      conn = await this.tx(tenantId, async (repo) => {
+        if (result?.sourceSecret) {
+          // Provider SINH secret ký (Stripe): version mới; các version đang hiệu lực verify thêm 24 giờ (event của cấu hình cũ
+          // còn đang gửi lại / secret dán tay trước đây của source có sẵn). Source mới chưa có version nào -> không đổi gì.
+          await repo.addSourceSecret(sourceId, aesGcmEncrypt(result.sourceSecret, masterKey), new Date(Date.now() + SECRET_OVERLAP_MS));
+        }
+        const u = await repo.updateSourceConnection(
+          sourceId,
+          result
+            ? { status: 'CONNECTED', remoteRef: result.remoteRef, display: result.display, lastError: null, lastFix: null, connectedAt: new Date(), lastCheckedAt: new Date() }
+            : { status: 'FAILED', lastError: failure!.code, lastFix: failure!.fix },
+        );
+        await repo.createAuditLog({
+          action,
+          entityType: 'source',
+          entityId: sourceId,
+          actor,
+          // §4.3 điều 3: CHỈ tên trường — không giá trị credentials, không secret.
+          metadata: { provider, status: result ? 'CONNECTED' : 'FAILED', error: failure?.code ?? null, fields: Object.keys(credentials), secretRotated: !!result?.sourceSecret },
+        });
+        return u;
       });
-      return u;
-    });
-    return this.view(conn!, connector);
+    } catch (e) {
+      // M-1: TX ghi kết quả lỗi (vd pooler rớt). DB vẫn trỏ cấu hình CŨ + secret cũ -> KHÔNG gỡ cấu hình cũ ở provider.
+      // Cấu hình MỚI ở provider có secret vừa mất cùng TX (Stripe chỉ trả một lần) -> dọn để nó không bắn event không verify được.
+      if (result && result.remoteRef !== previousRemoteRef && connector.disconnect) {
+        await connector.disconnect({ credentials, remoteRef: result.remoteRef, baseUrl }).catch((x) => {
+          logger.warn({ sourceId, provider, error: x instanceof ConnectorError ? x.code : 'disconnect_failed' }, 'Không dọn được cấu hình mới ở provider sau khi lưu kết quả lỗi');
+        });
+      }
+      await this.tx(tenantId, (repo) =>
+        repo.updateSourceConnection(sourceId, { status: 'FAILED', lastError: 'save_failed', lastFix: 'Hub không lưu được kết quả kết nối (DB tạm lỗi) — bấm "Thử lại".' }),
+      ).catch(() => undefined);
+      throw e;
+    }
+    // M-1: kết nối lại mà provider cấp id mới -> gỡ cấu hình cũ ở provider (Stripe: xoá we_ cũ) SAU khi COMMIT.
+    // Best-effort: lỗi chỉ ghi `last_error` để người dùng gỡ tay; kết nối mới vẫn CONNECTED.
+    if (result && previousRemoteRef && previousRemoteRef !== result.remoteRef && connector.disconnect) {
+      try {
+        await connector.disconnect({ credentials, remoteRef: previousRemoteRef, baseUrl });
+      } catch (e) {
+        logger.warn({ sourceId, provider, error: e instanceof ConnectorError ? e.code : 'disconnect_failed' }, 'Không gỡ được cấu hình cũ ở provider');
+        conn =
+          (await this.tx(tenantId, (repo) =>
+            repo.updateSourceConnection(sourceId, { lastError: 'previous_remote_not_removed', lastFix: `Không gỡ được cấu hình cũ (${previousRemoteRef}) ở provider — xoá tay ở dashboard provider.` }),
+          ).catch(() => null)) ?? conn;
+      }
+    }
+    return this.view(conn, connector);
   }
 
   private async load(tenantId: string, sourceId: string) {
@@ -317,10 +414,10 @@ export class SourceConnectionService {
     return { source, conn, connector };
   }
 
-  private activeSecrets(source: any): string[] {
-    const now = Date.now();
+  /** Secret HIỆN HÀNH (không hạn). Bản đang được thay (có `validUntil`) không tính: trùng nó vẫn phải thêm version mới, không thì hết 24 giờ là verify hỏng. */
+  private currentSecrets(source: any): string[] {
     return (source.secrets ?? [])
-      .filter((x: any) => !x.validUntil || new Date(x.validUntil).getTime() > now)
+      .filter((x: any) => !x.validUntil)
       .map((x: any) => {
         try {
           return aesGcmDecrypt(x.secretEncrypted, getMasterKey());
