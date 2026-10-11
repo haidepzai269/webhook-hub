@@ -164,3 +164,11 @@ describe("connectionDialogMode — nút Kết nối trên dòng Nguồn", () => 
     expect(connectionDialogMode(null, "payos", undefined)).toBe("loading");
   });
 });
+
+describe("errorMessageOf — 422 public_url_required", () => {
+  it("nói đúng biến HUB_PUBLIC_URL, đặt ở service hub-api trên Render (thắng detail tiếng Anh của hub)", () => {
+    const m = errorMessageOf({ error: "public_url_required", detail: "HUB_PUBLIC_URL là localhost/IP nội bộ" });
+    expect(m).toContain("HUB_PUBLIC_URL=");
+    expect(m).toContain("hub-api trên Render");
+  });
+});

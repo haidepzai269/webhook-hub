@@ -118,6 +118,9 @@ const VI_BY_CODE: Record<string, string> = {
   not_found: "Không tìm thấy (hoặc không thuộc project này).",
   internal_error: "Lỗi máy chủ hub — thử lại sau.",
   service_unavailable: "Hub tạm thời không phục vụ được — thử lại sau.",
+  // Admin gặp 422 vì HUB_PUBLIC_URL chưa đặt trên Render: nói ĐÚNG biến nào, đặt ở đâu.
+  public_url_required:
+    "Hub chưa có địa chỉ công khai nên provider không gọi vào được. Đặt biến HUB_PUBLIC_URL=https://<hub-api>.onrender.com cho service hub-api trên Render (Environment → Add Environment Variable) rồi deploy lại. Local: dùng named cloudflared tunnel và đặt HUB_PUBLIC_URL là URL https của tunnel.",
   invalid_api_key: "API key không hợp lệ hoặc đã bị thu hồi.",
   unauthenticated: "Chưa đăng nhập.",
   session_expired: "Phiên đăng nhập đã hết hạn.",
@@ -132,7 +135,8 @@ export function errorMessageOf(body: unknown): string {
   if (body === null || typeof body !== "object") return typeof body === "string" ? body.slice(0, 300) : "";
   const b = body as { detail?: unknown; message?: unknown; error?: unknown; requestId?: unknown };
   let text = "";
-  if (typeof b.detail === "string" && b.detail) text = b.detail;
+  if (b.error === "public_url_required") text = VI_BY_CODE.public_url_required;
+  else if (typeof b.detail === "string" && b.detail) text = b.detail;
   else if (typeof b.error === "string" && VI_BY_CODE[b.error]) text = VI_BY_CODE[b.error];
   else if (Array.isArray(b.message)) text = b.message.join(", ");
   else if (typeof b.message === "string") text = b.message;

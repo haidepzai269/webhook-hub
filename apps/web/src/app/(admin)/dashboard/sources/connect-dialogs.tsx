@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
 import { connectionDialogMode } from "@/lib/hub/ui-logic";
@@ -145,7 +146,7 @@ export function ConnectSourceDialog({
     spec &&
     sourcesReady &&
     (effMode === "existing" ? !!target : !!name.trim()) &&
-    spec.fields.every((f) => creds[f.name]?.trim()) &&
+    spec.fields.every((f) => creds[f.name]?.trim() && !credentialError(f.label, creds[f.name])) &&
     (!spec.overwriteWarning || ack);
 
   return (
@@ -175,122 +176,128 @@ export function ConnectSourceDialog({
               : 'Chưa provider nào hỗ trợ tự kết nối — dùng "Thêm nguồn" rồi dán URL.'}
           </p>
         ) : (
-          <FieldGroup className="gap-4">
-            <Field className="gap-1.5">
-              <FieldLabel>Provider</FieldLabel>
-              <div className="flex gap-2">
-                {connectors.data.map((c) => (
+          // autoComplete off + tên ô riêng: trình duyệt không tự điền đăng nhập operator vào ô credential (lỗi production).
+          <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
+            <FieldGroup className="gap-4">
+              <Field className="gap-1.5">
+                <FieldLabel>Provider</FieldLabel>
+                <div className="flex gap-2">
+                  {connectors.data.map((c) => (
+                    <Button
+                      key={c.provider}
+                      type="button"
+                      size="sm"
+                      variant={spec?.provider === c.provider ? "default" : "outline"}
+                      onClick={() => (
+                        setProvider(c.provider), setCreds({}), setAck(false), setMode(null), setExistingId("")
+                      )}
+                    >
+                      {c.provider}
+                    </Button>
+                  ))}
+                </div>
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel>Nguồn</FieldLabel>
+                <div className="flex gap-2">
                   <Button
-                    key={c.provider}
                     type="button"
                     size="sm"
-                    variant={spec?.provider === c.provider ? "default" : "outline"}
-                    onClick={() => (
-                      setProvider(c.provider), setCreds({}), setAck(false), setMode(null), setExistingId("")
-                    )}
+                    variant={effMode === "existing" ? "default" : "outline"}
+                    disabled={!candidates.length}
+                    onClick={() => setMode("existing")}
                   >
-                    {c.provider}
+                    Kết nối nguồn có sẵn
                   </Button>
-                ))}
-              </div>
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel>Nguồn</FieldLabel>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={effMode === "existing" ? "default" : "outline"}
-                  disabled={!candidates.length}
-                  onClick={() => setMode("existing")}
-                >
-                  Kết nối nguồn có sẵn
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={effMode === "new" ? "default" : "outline"}
-                  onClick={() => setMode("new")}
-                >
-                  Tạo nguồn mới
-                </Button>
-              </div>
-              {!sourcesReady ? (
-                <FieldDescription className="text-amber-600">
-                  {sources.isError
-                    ? "Không tải được danh sách nguồn — tải lại trang. Chưa thể kết nối (tránh tạo nhầm nguồn mới)."
-                    : "Đang tải danh sách nguồn…"}
-                </FieldDescription>
-              ) : effMode === "existing" && target ? (
-                <>
-                  <select
-                    aria-label="Nguồn có sẵn"
-                    className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                    value={target.id}
-                    onChange={(e) => setExistingId(e.target.value)}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={effMode === "new" ? "default" : "outline"}
+                    onClick={() => setMode("new")}
                   >
-                    {candidates.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} · {s.sourceKey}
-                      </option>
-                    ))}
-                  </select>
-                  <FieldDescription>
-                    Secret ký nhập vào khác key nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh
-                    bằng key mới (không tự xoá key cũ).
+                    Tạo nguồn mới
+                  </Button>
+                </div>
+                {!sourcesReady ? (
+                  <FieldDescription className="text-amber-600">
+                    {sources.isError
+                      ? "Không tải được danh sách nguồn — tải lại trang. Chưa thể kết nối (tránh tạo nhầm nguồn mới)."
+                      : "Đang tải danh sách nguồn…"}
                   </FieldDescription>
-                  <FieldDescription>
-                    Hub đăng ký đúng URL của nguồn này (/hooks/{target.provider}/{target.sourceKey}) — service đang tin
-                    nguồn này (vd Shop ghim SHOP_PAYMENT_SOURCE_KEYS) vẫn nhận sự kiện.
-                  </FieldDescription>
-                </>
-              ) : (
-                <>
-                  <Input
-                    id="cn-name"
-                    aria-label="Tên nguồn"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Tên nguồn, VD: PayOS kênh cafe"
-                  />
-                  <Input
-                    id="cn-key"
-                    aria-label="sourceKey (tuỳ chọn)"
-                    value={sourceKey}
-                    onChange={(e) => setSourceKey(e.target.value)}
-                    placeholder="sourceKey (tuỳ chọn, a-z 0-9 _) — bỏ trống để hub tự sinh"
-                  />
-                  {candidates.length > 0 && (
-                    <FieldDescription className="text-amber-600">
-                      Nguồn mới có URL mới: provider sẽ gửi vào nguồn mới, service đang ghim nguồn cũ sẽ KHÔNG nhận nữa.
+                ) : effMode === "existing" && target ? (
+                  <>
+                    <select
+                      aria-label="Nguồn có sẵn"
+                      className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                      value={target.id}
+                      onChange={(e) => setExistingId(e.target.value)}
+                    >
+                      {candidates.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} · {s.sourceKey}
+                        </option>
+                      ))}
+                    </select>
+                    <FieldDescription>
+                      Secret ký nhập vào khác key nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh
+                      bằng key mới (không tự xoá key cũ).
                     </FieldDescription>
-                  )}
-                </>
-              )}
-            </Field>
-            {spec?.fields.map((f) => (
-              <Field key={f.name} className="gap-1.5">
-                <FieldLabel htmlFor={`cn-${f.name}`}>{f.label}</FieldLabel>
-                <Input
-                  id={`cn-${f.name}`}
-                  type={f.secret ? "password" : "text"}
-                  autoComplete="off"
-                  value={creds[f.name] ?? ""}
-                  onChange={(e) => setCreds({ ...creds, [f.name]: e.target.value })}
-                />
-                {f.help && <FieldDescription>{f.help}</FieldDescription>}
+                    <FieldDescription>
+                      Hub đăng ký đúng URL của nguồn này (/hooks/{target.provider}/{target.sourceKey}) — service đang
+                      tin nguồn này (vd Shop ghim SHOP_PAYMENT_SOURCE_KEYS) vẫn nhận sự kiện.
+                    </FieldDescription>
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      id="cn-name"
+                      aria-label="Tên nguồn"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Tên nguồn, VD: PayOS kênh cafe"
+                    />
+                    <Input
+                      id="cn-key"
+                      aria-label="sourceKey (tuỳ chọn)"
+                      value={sourceKey}
+                      onChange={(e) => setSourceKey(e.target.value)}
+                      placeholder="sourceKey (tuỳ chọn, a-z 0-9 _) — bỏ trống để hub tự sinh"
+                    />
+                    {candidates.length > 0 && (
+                      <FieldDescription className="text-amber-600">
+                        Nguồn mới có URL mới: provider sẽ gửi vào nguồn mới, service đang ghim nguồn cũ sẽ KHÔNG nhận
+                        nữa.
+                      </FieldDescription>
+                    )}
+                  </>
+                )}
               </Field>
-            ))}
-            {spec && <p className="text-muted-foreground text-xs">{spec.keyHint}</p>}
-            {spec?.overwriteWarning && (
-              <label className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-                <span>
-                  <b>Tôi hiểu URL cũ sẽ bị thay.</b> {spec.overwriteWarning}
-                </span>
-              </label>
-            )}
-          </FieldGroup>
+              {spec?.fields.map((f) => (
+                <Field key={f.name} className="gap-1.5">
+                  <FieldLabel htmlFor={credentialInputAttrs(spec.provider, f.name, f.secret).id}>{f.label}</FieldLabel>
+                  <Input
+                    {...credentialInputAttrs(spec.provider, f.name, f.secret)}
+                    value={creds[f.name] ?? ""}
+                    aria-invalid={!!credentialError(f.label, creds[f.name] ?? "")}
+                    onChange={(e) => setCreds({ ...creds, [f.name]: e.target.value })}
+                  />
+                  {credentialError(f.label, creds[f.name] ?? "") && (
+                    <p className="text-destructive text-xs">{credentialError(f.label, creds[f.name] ?? "")}</p>
+                  )}
+                  {f.help && <FieldDescription>{f.help}</FieldDescription>}
+                </Field>
+              ))}
+              {spec && <p className="text-muted-foreground text-xs">{spec.keyHint}</p>}
+              {spec?.overwriteWarning && (
+                <label className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
+                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                  <span>
+                    <b>Tôi hiểu URL cũ sẽ bị thay.</b> {spec.overwriteWarning}
+                  </span>
+                </label>
+              )}
+            </FieldGroup>
+          </form>
         )}
         <DialogFooter>
           {result ? (

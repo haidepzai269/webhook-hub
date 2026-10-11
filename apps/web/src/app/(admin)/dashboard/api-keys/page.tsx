@@ -178,11 +178,17 @@ export default function ApiKeysPage() {
           {connectionString ? (
             <ConnectionStringOnce connectionString={connectionString} />
           ) : (
-            <form id="key-form" noValidate onSubmit={submit}>
+            <form id="key-form" noValidate autoComplete="off" onSubmit={submit}>
               <FieldGroup className="gap-4">
                 <Field className="gap-1.5">
                   <FieldLabel htmlFor="key-service">Tên service</FieldLabel>
-                  <Input id="key-service" value={serviceName} onChange={(e) => setServiceName(e.target.value)} />
+                  <Input
+                    id="key-service"
+                    name="hub-key-service-name"
+                    autoComplete="off"
+                    value={serviceName}
+                    onChange={(e) => setServiceName(e.target.value)}
+                  />
                 </Field>
                 <Field className="gap-1.5">
                   <FieldLabel>Scope</FieldLabel>

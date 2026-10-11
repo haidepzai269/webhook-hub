@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
@@ -186,7 +187,7 @@ export default function SourcesPage() {
         formId="source-form"
         submitting={create.isPending}
       >
-        <form id="source-form" noValidate onSubmit={form.handleSubmit(onSubmit)}>
+        <form id="source-form" noValidate autoComplete="off" onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup className="gap-4">
             <Controller
               control={form.control}
@@ -233,9 +234,8 @@ export default function SourcesPage() {
                   <FieldLabel htmlFor="src-secret">Secret</FieldLabel>
                   <Input
                     {...field}
+                    {...credentialInputAttrs("source", "secret", true)}
                     id="src-secret"
-                    type="password"
-                    autoComplete="off"
                     aria-invalid={fieldState.invalid}
                   />
                   <FieldDescription>{SECRET_HINT[provider]}</FieldDescription>

@@ -264,6 +264,8 @@ Render free ngủ sau ~15 phút → webhook đầu tiên timeout (GitHub chỉ c
 | Delivery tới shop RETRYING 503                         | Shop chưa đăng ký xong / đang ngủ                                                        | Chờ — tự lành                                                      |
 | `PRECONDITION_FAILED` RabbitMQ                         | Queue cũ khác arguments                                                                  | Xoá queue trên CloudAMQP rồi restart worker (cạm bẫy 3)            |
 | Mail không tới                                         | Refresh token Gmail chết (app còn Testing)                                               | Google Auth Platform → Audience → **In production**, lấy token mới |
+| Bấm **Kết nối provider** → 422 `public_url_required`  | `HUB_PUBLIC_URL` chưa đặt (hoặc là localhost) trên **Render › hub-api** — **BẮT BUỘC** cho nút Kết nối | Render › hub-api › Environment: `HUB_PUBLIC_URL=https://hub-api-xxxx.onrender.com` (không `/` cuối) → deploy lại |
+| Ô Client ID/Api Key tự hiện email/mật khẩu đăng nhập   | Trình duyệt tự điền (đã chặn bằng `autocomplete`, tên ô riêng)                            | Xoá ô rồi dán khoá thật; ô có `@` bị từ chối                        |
 
 ---
 
