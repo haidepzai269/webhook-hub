@@ -1,0 +1,43 @@
+{
+  "provider": "generic",
+  "case": "x-sig-wrong-header",
+  "origin": "synthetic",
+  "description": "AB Bank gửi chữ ký ở header x-sig thay vì x-signature -> 401, chế độ lắng nghe báo missing_header",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJzb1RpZW4iOiA2OTAwMC4wLCAibWFHRCI6ICJBQl9fVV9fIiwgIm5vaUR1bmciOiAiREg2OTAwX19VX18gdGhhbmggdG9cdTAwZTFuIiwgInRob2lHaWFuIjogIjIwMjYtMTAtMTAgMTQ6MDI6MzcifQ==",
+  "signature": {
+    "scheme": "generic-hmac",
+    "timestamped": false,
+    "headerOverride": "x-sig"
+  },
+  "oddBytes": true,
+  "sourceConfig": {
+    "scheme": "hmac-sha256",
+    "header": "x-signature",
+    "encoding": "hex",
+    "idempotency": {
+      "field": "maGD"
+    },
+    "eventType": "payment.received",
+    "mapping": {
+      "amount": "soTien",
+      "currency": {
+        "const": "VND"
+      },
+      "method": {
+        "const": "bank_transfer"
+      },
+      "reference": "maGD",
+      "memo": "noiDung",
+      "providerTxnId": "maGD",
+      "paidAt": "thoiGian"
+    },
+    "timezone": "+07:00"
+  },
+  "expect": {
+    "status": 401
+  }
+}

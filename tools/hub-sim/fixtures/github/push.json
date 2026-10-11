@@ -1,0 +1,23 @@
+{
+  "provider": "github",
+  "case": "push",
+  "origin": "synthetic",
+  "description": "GitHub push 2 commit — bytes lạ (khoảng trắng, \\u1eed, thứ tự khoá)",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "x-github-event": "push",
+    "x-github-delivery": "sim-push-__U__"
+  },
+  "bodyBase64": "eyJyZWYiOiAicmVmcy9oZWFkcy9tYWluIiwgImFmdGVyIjogImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCAiYmVmb3JlIjogIjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCAicmVwb3NpdG9yeSI6IHsibmFtZSI6ICJ3ZWJob29rLWh1YiIsICJpZCI6IDEsICJmdWxsX25hbWUiOiAic2ltL3dlYmhvb2staHViIiwgImh0bWxfdXJsIjogImh0dHBzOi8vZ2l0aHViLmNvbS9zaW0vd2ViaG9vay1odWIifSwgInNlbmRlciI6IHsibG9naW4iOiAic2ltIiwgImlkIjogOX0sICJwdXNoZXIiOiB7Im5hbWUiOiAic2ltIiwgImVtYWlsIjogInNpbUBleGFtcGxlLnRlc3QifSwgImNyZWF0ZWQiOiBmYWxzZSwgImRlbGV0ZWQiOiBmYWxzZSwgImZvcmNlZCI6IGZhbHNlLCAiY29tcGFyZSI6ICJodHRwczovL2dpdGh1Yi5jb20vc2ltL3dlYmhvb2staHViL2NvbXBhcmUvMDAwLi4uYWFhIiwgImNvbW1pdHMiOiBbeyJtZXNzYWdlIjogImNvbW1pdCAwIHNcdTFlZWRhIGxcdTFlZDdpIiwgImlkIjogImMwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCAidGltZXN0YW1wIjogIjIwMjYtMTAtMTBUMTQ6MDI6MzcrMDc6MDAiLCAidXJsIjogImh0dHBzOi8vZ2l0aHViLmNvbS9zaW0vd2ViaG9vay1odWIvY29tbWl0L2MwIiwgImF1dGhvciI6IHsibmFtZSI6ICJTaW0iLCAiZW1haWwiOiAic2ltQGV4YW1wbGUudGVzdCIsICJ1c2VybmFtZSI6ICJzaW0ifSwgImNvbW1pdHRlciI6IHsibmFtZSI6ICJTaW0iLCAiZW1haWwiOiAic2ltQGV4YW1wbGUudGVzdCIsICJ1c2VybmFtZSI6ICJzaW0ifX0sIHsibWVzc2FnZSI6ICJjb21taXQgMSBzXHUxZWVkYSBsXHUxZWQ3aSIsICJpZCI6ICJjMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxIiwgInRpbWVzdGFtcCI6ICIyMDI2LTEwLTEwVDE0OjAyOjM3KzA3OjAwIiwgInVybCI6ICJodHRwczovL2dpdGh1Yi5jb20vc2ltL3dlYmhvb2staHViL2NvbW1pdC9jMSIsICJhdXRob3IiOiB7Im5hbWUiOiAiU2ltIiwgImVtYWlsIjogInNpbUBleGFtcGxlLnRlc3QiLCAidXNlcm5hbWUiOiAic2ltIn0sICJjb21taXR0ZXIiOiB7Im5hbWUiOiAiU2ltIiwgImVtYWlsIjogInNpbUBleGFtcGxlLnRlc3QiLCAidXNlcm5hbWUiOiAic2ltIn19XSwgImhlYWRfY29tbWl0IjogeyJtZXNzYWdlIjogImNvbW1pdCAxIHNcdTFlZWRhIGxcdTFlZDdpIiwgImlkIjogImMwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDEiLCAidGltZXN0YW1wIjogIjIwMjYtMTAtMTBUMTQ6MDI6MzcrMDc6MDAiLCAidXJsIjogImh0dHBzOi8vZ2l0aHViLmNvbS9zaW0vd2ViaG9vay1odWIvY29tbWl0L2MxIiwgImF1dGhvciI6IHsibmFtZSI6ICJTaW0iLCAiZW1haWwiOiAic2ltQGV4YW1wbGUudGVzdCIsICJ1c2VybmFtZSI6ICJzaW0ifSwgImNvbW1pdHRlciI6IHsibmFtZSI6ICJTaW0iLCAiZW1haWwiOiAic2ltQGV4YW1wbGUudGVzdCIsICJ1c2VybmFtZSI6ICJzaW0ifX19",
+  "signature": {
+    "scheme": "github",
+    "timestamped": false
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 200,
+    "type": "repo.push",
+    "normalized": true
+  }
+}

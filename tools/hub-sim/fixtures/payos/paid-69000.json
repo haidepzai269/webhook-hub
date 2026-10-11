@@ -1,0 +1,21 @@
+{
+  "provider": "payos",
+  "case": "paid-69000",
+  "origin": "synthetic",
+  "description": "PayOS trả đủ 69.000đ — bytes lạ (khoảng trắng sau dấu :, \\u00e1 thay á, 69000.0)",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJjb2RlIjogIjAwIiwgImRlc2MiOiAic3VjY2VzcyIsICJzdWNjZXNzIjogdHJ1ZSwgImRhdGEiOiB7Im9yZGVyQ29kZSI6IDY5MDBfX1VfXywgImFtb3VudCI6IDY5MDAwLjAsICJkZXNjcmlwdGlvbiI6ICJESDY5MDBfX1VfXyB0aGFuaCB0b1x1MDBlMW4gY1x1MDBlMCBwaFx1MDBlYSIsICJhY2NvdW50TnVtYmVyIjogIjAwMDBYWFhYIiwgInJlZmVyZW5jZSI6ICJTSU1QQVlPU19fVV9fIiwgInRyYW5zYWN0aW9uRGF0ZVRpbWUiOiAiMjAyNi0xMC0xMCAxNDowMjozNyIsICJjdXJyZW5jeSI6ICJWTkQiLCAicGF5bWVudExpbmtJZCI6ICJzaW1saW5rX19VX18iLCAiY29kZSI6ICIwMCIsICJkZXNjIjogInN1Y2Nlc3MiLCAiY291bnRlckFjY291bnRCYW5rSWQiOiAiIiwgImNvdW50ZXJBY2NvdW50QmFua05hbWUiOiAiIiwgImNvdW50ZXJBY2NvdW50TmFtZSI6ICIiLCAiY291bnRlckFjY291bnROdW1iZXIiOiAiIiwgInZpcnR1YWxBY2NvdW50TmFtZSI6ICIiLCAidmlydHVhbEFjY291bnROdW1iZXIiOiAiIn0sICJzaWduYXR1cmUiOiAiX19TSUdfXyJ9",
+  "signature": {
+    "scheme": "payos-body-field",
+    "timestamped": false
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 200,
+    "type": "payment.received",
+    "normalized": true
+  }
+}

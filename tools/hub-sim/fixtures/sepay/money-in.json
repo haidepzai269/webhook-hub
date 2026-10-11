@@ -1,0 +1,21 @@
+{
+  "provider": "sepay",
+  "case": "money-in",
+  "origin": "synthetic",
+  "description": "SePay tiền vào 69.000đ — bytes lạ",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJnYXRld2F5IjogIlZpZXRjb21iYW5rIiwgImlkIjogOTI3MF9fVV9fLCAidHJhbnNhY3Rpb25EYXRlIjogIjIwMjYtMTAtMTAgMTQ6MDI6MzciLCAiYWNjb3VudE51bWJlciI6ICIwMDAwWFhYWCIsICJjb2RlIjogbnVsbCwgImNvbnRlbnQiOiAiREg2OTAwX19VX18gdGhhbmggdG9cdTAwZTFuIiwgInRyYW5zZmVyVHlwZSI6ICJpbiIsICJ0cmFuc2ZlckFtb3VudCI6IDY5MDAwLjAsICJhY2N1bXVsYXRlZCI6IDEwMDAwMDAsICJzdWJBY2NvdW50IjogbnVsbCwgInJlZmVyZW5jZUNvZGUiOiAiTUJWQ0IuU0lNX19VX18iLCAiZGVzY3JpcHRpb24iOiAiQmFua0FQSU5vdGlmeSBESDY5MDBfX1VfXyJ9",
+  "signature": {
+    "scheme": "sepay-apikey",
+    "timestamped": false
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 200,
+    "type": "payment.received",
+    "normalized": true
+  }
+}

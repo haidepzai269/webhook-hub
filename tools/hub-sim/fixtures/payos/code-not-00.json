@@ -1,0 +1,21 @@
+{
+  "provider": "payos",
+  "case": "code-not-00",
+  "origin": "synthetic",
+  "description": "PayOS code≠00, amount=0 -> payment.failed",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJjb2RlIjogIjAxIiwgImRlc2MiOiAiR2lhbyBkaWNoIHRoYXQgYmFpIiwgInN1Y2Nlc3MiOiBmYWxzZSwgImRhdGEiOiB7Im9yZGVyQ29kZSI6IDY5MDBfX1VfXywgImFtb3VudCI6IDAsICJkZXNjcmlwdGlvbiI6ICJESDY5MDBfX1VfXyB0aGFuaCB0b1x1MDBlMW4gY1x1MDBlMCBwaFx1MDBlYSIsICJhY2NvdW50TnVtYmVyIjogIjAwMDBYWFhYIiwgInJlZmVyZW5jZSI6ICJTSU1QQVlPU19fVV9fIiwgInRyYW5zYWN0aW9uRGF0ZVRpbWUiOiAiMjAyNi0xMC0xMCAxNDowMjozNyIsICJjdXJyZW5jeSI6ICJWTkQiLCAicGF5bWVudExpbmtJZCI6ICJzaW1saW5rX19VX18iLCAiY29kZSI6ICIwMSIsICJkZXNjIjogIkdpYW8gZGljaCB0aGF0IGJhaSIsICJjb3VudGVyQWNjb3VudEJhbmtJZCI6ICIiLCAiY291bnRlckFjY291bnRCYW5rTmFtZSI6ICIiLCAiY291bnRlckFjY291bnROYW1lIjogIiIsICJjb3VudGVyQWNjb3VudE51bWJlciI6ICIiLCAidmlydHVhbEFjY291bnROYW1lIjogIiIsICJ2aXJ0dWFsQWNjb3VudE51bWJlciI6ICIifSwgInNpZ25hdHVyZSI6ICJfX1NJR19fIn0=",
+  "signature": {
+    "scheme": "payos-body-field",
+    "timestamped": false
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 200,
+    "type": "payment.failed",
+    "normalized": true
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provider": "stripe",
+  "case": "stale-timestamp",
+  "origin": "synthetic",
+  "description": "Stripe t cố định (cũ) — KHÔNG ký lại thời gian -> 401 chống phát lại (VT6)",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJ0eXBlIjogInBheW1lbnRfaW50ZW50LnN1Y2NlZWRlZCIsICJpZCI6ICJldnRfc2ltX19VX18iLCAib2JqZWN0IjogImV2ZW50IiwgImFwaV92ZXJzaW9uIjogIjIwMjQtMDYtMjAiLCAiY3JlYXRlZCI6IDE3NjAxMDQ5NTcsICJsaXZlbW9kZSI6IGZhbHNlLCAicGVuZGluZ193ZWJob29rcyI6IDEsICJkYXRhIjogeyJvYmplY3QiOiB7Im9iamVjdCI6ICJwYXltZW50X2ludGVudCIsICJpZCI6ICJwaV9zaW1fX1VfXyIsICJhbW91bnQiOiAxOTk5LCAiYW1vdW50X3JlY2VpdmVkIjogMTk5OS4wLCAiY3VycmVuY3kiOiAidXNkIiwgImRlc2NyaXB0aW9uIjogIlx1MDExMFx1MDFhMW4gREgxIiwgInBheW1lbnRfbWV0aG9kX3R5cGVzIjogWyJjYXJkIl0sICJzdGF0dXMiOiAic3VjY2VlZGVkIiwgImxhc3RfcGF5bWVudF9lcnJvciI6IG51bGwsICJjcmVhdGVkIjogMTc2MDEwNDk1MH19fQ==",
+  "signature": {
+    "scheme": "stripe",
+    "timestamped": true,
+    "fixedAt": "2025-10-09T08:53:20Z"
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 401
+  }
+}

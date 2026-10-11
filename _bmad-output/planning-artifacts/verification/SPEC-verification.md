@@ -562,7 +562,7 @@ Lý do làm VF1, VF2, VF7 sớm: từ AU1 trở đi mọi story đi theo §6. N�
 
 ## 15. Checklist (phiên DEV đánh dấu)
 
-- [x] VF1 · [x] VF2 · [x] VF7 · [ ] VF3 · [ ] VF4 · [ ] VF5 · [ ] VF6 · [ ] VF8
+- [x] VF1 · [x] VF2 · [x] VF7 · [x] VF3 · [ ] VF4 · [ ] VF5 · [ ] VF6 · [ ] VF8
 - ADR mới: ADR-068 (VF1 hubv), ADR-069 (VF2 runner/map), ADR-070 (VF7 CI/gates). Commit: VF1 `3ea2cb5`, VF2 `fabb67e`, VF7 `c96bf6b`.
 - Bằng chứng (lệnh đã chạy, output rút gọn): `npm run verify:unit` → `L0 379 | 0 | 0`; `verify:db` (Postgres/Redis thật) → `L1 55 | 0 | 0`; `verify:db` khi hubv tắt → exit 1 "skip > 0 ở L1 (55)" (VT1); `it.skip` một test có mã → exit 1 "GIẢM 373 → 372" (VT2); `verify:map` → 198 mã · 53 có test · 0 mồ côi · 10 mồ côi có lý do · 0 ma · 0 trùng; `verify:gates` → 12 luật · 0 vi phạm · 7 ngoại lệ có lý do; `verify:selftest` → VT8, VT9 ✓.
 - Lệch so với spec (kèm lý do):
@@ -574,6 +574,7 @@ Lý do làm VF1, VF2, VF7 sớm: từ AU1 trở đi mọi story đi theo §6. N�
   6. §7.1 job `e2e` (mọi push) và `chaos` chưa có: theo §11 thuộc VF8 (cần runner L2/L3). Bước tạo role `hub_app` của job `db` để AU6.
   7. §7.3 có 7 ngoại lệ có lý do (PayOS `orderCode`, lối thoát `rawEvent`/`processedMessage`); luật chữ ký bỏ qua `typeof … === '<kiểu>'`/`=== null`.
 - Spec cần phiên viết spec sửa: §7.1 dòng "Fixture 'ký gốc' bị skip có lý do (§4.2)" và §11.1 "trừ skip có lý do ở §4.2" mâu thuẫn §4.2 bản mới ("L2 cũng không được có skip"). §4.1 cổng rabbit 15672 trùng UI dev. Bảng test của SPEC-auth / SPEC đa service không ghi mã → story (map cần `done.groups`).
+- **VF3** (ADR-132): `tools/hub-sim` (`npm run hub-sim -- list|show|sign|send|capture|scrub`), 14 fixture synthetic §5.4, [VF:VT5] a–d (PayOS/Stripe/GitHub SDK + vector Standard Webhooks), [VF:VT6] phần a ở L0 (phần b HTTP 401 thuộc runner L2 VF4). Lệch: lệnh `npm run hub-sim --` thay `npx hub-sim`; route thật `/hooks/<provider>/<sourceKey>` (spec §5.2 ghi `/hooks/<sourceId>`); `fixedAt` ISO thay epoch (gate fixture-account). Bằng chứng: `verify:unit` L0 696/0/0; gửi thật vào hubv 7 fixture GitHub/PayOS/SePay đúng 200/401; probe tay (ký GitHub trên JSON đã parse) → 3 test đỏ.
 - Chặn trước khi push: commit `auth/SPEC-auth.md` + `verification/SPEC-verification.md` (không thì `verify:map` đỏ trên CI); Admin quyết 3 phát hiện gitleaks (commit `0b2cef42`, giá trị ví dụ trong spec).
 
 ## 16. Kết quả (phiên TEST điền)

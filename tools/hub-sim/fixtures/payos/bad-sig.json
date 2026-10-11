@@ -1,0 +1,20 @@
+{
+  "provider": "payos",
+  "case": "bad-sig",
+  "origin": "synthetic",
+  "description": "PayOS chữ ký sai 1 ký tự -> 401",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJjb2RlIjogIjAwIiwgImRlc2MiOiAic3VjY2VzcyIsICJzdWNjZXNzIjogdHJ1ZSwgImRhdGEiOiB7Im9yZGVyQ29kZSI6IDY5MDBfX1VfXywgImFtb3VudCI6IDY5MDAwLCAiZGVzY3JpcHRpb24iOiAiREg2OTAwX19VX18gdGhhbmggdG9cdTAwZTFuIGNcdTAwZTAgcGhcdTAwZWEiLCAiYWNjb3VudE51bWJlciI6ICIwMDAwWFhYWCIsICJyZWZlcmVuY2UiOiAiU0lNUEFZT1NfX1VfXyIsICJ0cmFuc2FjdGlvbkRhdGVUaW1lIjogIjIwMjYtMTAtMTAgMTQ6MDI6MzciLCAiY3VycmVuY3kiOiAiVk5EIiwgInBheW1lbnRMaW5rSWQiOiAic2ltbGlua19fVV9fIiwgImNvZGUiOiAiMDAiLCAiZGVzYyI6ICJzdWNjZXNzIiwgImNvdW50ZXJBY2NvdW50QmFua0lkIjogIiIsICJjb3VudGVyQWNjb3VudEJhbmtOYW1lIjogIiIsICJjb3VudGVyQWNjb3VudE5hbWUiOiAiIiwgImNvdW50ZXJBY2NvdW50TnVtYmVyIjogIiIsICJ2aXJ0dWFsQWNjb3VudE5hbWUiOiAiIiwgInZpcnR1YWxBY2NvdW50TnVtYmVyIjogIiJ9LCAic2lnbmF0dXJlIjogIl9fU0lHX18ifQ==",
+  "signature": {
+    "scheme": "payos-body-field",
+    "timestamped": false,
+    "tamper": true
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 401
+  }
+}

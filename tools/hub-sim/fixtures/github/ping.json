@@ -1,0 +1,22 @@
+{
+  "provider": "github",
+  "case": "ping",
+  "origin": "synthetic",
+  "description": "GitHub ping -> normalized:false (github.ping)",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "x-github-event": "ping",
+    "x-github-delivery": "sim-ping-__U__"
+  },
+  "bodyBase64": "eyJ6ZW4iOiJLZWVwIGl0IGxvZ2ljYWxseSBhd2Vzb21lLiIsImhvb2tfaWQiOjEsImhvb2siOnsidHlwZSI6IlJlcG9zaXRvcnkifSwicmVwb3NpdG9yeSI6eyJpZCI6MSwibmFtZSI6IndlYmhvb2staHViIiwiZnVsbF9uYW1lIjoic2ltL3dlYmhvb2staHViIn0sInNlbmRlciI6eyJsb2dpbiI6InNpbSIsImlkIjo5fX0=",
+  "signature": {
+    "scheme": "github",
+    "timestamped": false
+  },
+  "expect": {
+    "status": 200,
+    "type": "github.ping",
+    "normalized": false
+  }
+}

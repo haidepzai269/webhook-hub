@@ -1,0 +1,22 @@
+{
+  "provider": "github",
+  "case": "pr-opened",
+  "origin": "synthetic",
+  "description": "GitHub pull_request.opened",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "x-github-event": "pull_request",
+    "x-github-delivery": "sim-pr-__U__"
+  },
+  "bodyBase64": "eyJhY3Rpb24iOiJvcGVuZWQiLCJudW1iZXIiOjcsInB1bGxfcmVxdWVzdCI6eyJudW1iZXIiOjcsInRpdGxlIjoiQWRkIGNhdGFsb2ciLCJzdGF0ZSI6Im9wZW4iLCJtZXJnZWQiOmZhbHNlLCJodG1sX3VybCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9zaW0vd2ViaG9vay1odWIvcHVsbC83IiwidXNlciI6eyJsb2dpbiI6ImFtZWxpYSJ9LCJiYXNlIjp7InJlZiI6Im1haW4ifSwiaGVhZCI6eyJyZWYiOiJmZWF0L3MxNCJ9fSwicmVwb3NpdG9yeSI6eyJpZCI6MSwibmFtZSI6IndlYmhvb2staHViIiwiZnVsbF9uYW1lIjoic2ltL3dlYmhvb2staHViIiwiaHRtbF91cmwiOiJodHRwczovL2dpdGh1Yi5jb20vc2ltL3dlYmhvb2staHViIn0sInNlbmRlciI6eyJsb2dpbiI6InNpbSIsImlkIjo5fX0=",
+  "signature": {
+    "scheme": "github",
+    "timestamped": false
+  },
+  "expect": {
+    "status": 200,
+    "type": "repo.pull_request.opened",
+    "normalized": true
+  }
+}

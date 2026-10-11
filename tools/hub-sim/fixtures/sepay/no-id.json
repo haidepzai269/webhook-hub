@@ -1,0 +1,21 @@
+{
+  "provider": "sepay",
+  "case": "no-id",
+  "origin": "synthetic",
+  "description": "SePay thiếu id + referenceCode -> khoá chống trùng = hash body (không ngẫu nhiên)",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "bodyBase64": "eyJnYXRld2F5IjogIlZpZXRjb21iYW5rIiwgInRyYW5zYWN0aW9uRGF0ZSI6ICIyMDI2LTEwLTEwIDE0OjAyOjM3IiwgImFjY291bnROdW1iZXIiOiAiMDAwMFhYWFgiLCAiY29kZSI6IG51bGwsICJjb250ZW50IjogIkRINjkwMF9fVV9fIHRoYW5oIHRvXHUwMGUxbiIsICJ0cmFuc2ZlclR5cGUiOiAiaW4iLCAidHJhbnNmZXJBbW91bnQiOiA2OTAwMC4wLCAiYWNjdW11bGF0ZWQiOiAxMDAwMDAwLCAic3ViQWNjb3VudCI6IG51bGwsICJkZXNjcmlwdGlvbiI6ICJCYW5rQVBJTm90aWZ5IERINjkwMF9fVV9fIn0=",
+  "signature": {
+    "scheme": "sepay-apikey",
+    "timestamped": false
+  },
+  "oddBytes": true,
+  "expect": {
+    "status": 200,
+    "type": "payment.received",
+    "normalized": true
+  }
+}
