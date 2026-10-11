@@ -102,3 +102,43 @@ export function livePrune(s: LiveState, now: number): { state: LiveState; nextWa
   }
   return { state: { hops }, nextWakeAt: next };
 }
+
+/** Một mốc socket chờ áp — gom theo khung hình rồi áp một lần (L-B2: burst không thành bão render). */
+export type LiveOp =
+  | { op: "start"; keys: string[]; token: string; at: number }
+  | { op: "end"; keys: string[]; token: string; kind: LiveResult; at: number };
+
+/** Áp tuần tự các mốc đã gom (giống gọi từng reducer, giữ đúng thứ tự và thời điểm). */
+export function liveApplyBatch(s: LiveState, ops: readonly LiveOp[]): LiveState {
+  let out = s;
+  for (const o of ops)
+    out = o.op === "start" ? liveStart(out, o.keys, o.token, o.at) : liveEnd(out, o.keys, o.token, o.kind, o.at);
+  return out;
+}
+
+/** So nông: cùng tập khoá và từng giá trị `===`. */
+export function sameShallow(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  for (const k of ka) if (!Object.hasOwn(b, k) || a[k] !== b[k]) return false;
+  return true;
+}
+
+/**
+ * Giữ object cũ (theo `id`) khi `same(old, next)` — node/cạnh memo không render lại; không phần tử nào đổi
+ * (cùng độ dài, cùng thứ tự) → trả nguyên mảng cũ.
+ */
+export function reuseStable<T extends { id: string }>(prev: readonly T[], next: readonly T[], same: (old: T, n: T) => boolean): T[] {
+  const byId = new Map(prev.map((p) => [p.id, p]));
+  let allSame = prev.length === next.length;
+  const out = next.map((n, i) => {
+    const old = byId.get(n.id);
+    if (old && same(old, n)) {
+      if (prev[i] !== old) allSame = false;
+      return old;
+    }
+    allSame = false;
+    return n;
+  });
+  return allSame ? (prev as T[]) : out;
+}

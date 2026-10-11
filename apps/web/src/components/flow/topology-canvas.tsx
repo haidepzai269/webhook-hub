@@ -28,7 +28,18 @@ import { useRouter } from "next/navigation";
 import { subscribeHubSocket } from "@/lib/hub/socket";
 
 import { layoutLR } from "./layout";
-import { emptyLive, type LiveResult, type LiveState, type LiveView, liveEnd, livePrune, liveStart, liveView } from "./live-activity";
+import {
+  emptyLive,
+  liveApplyBatch,
+  type LiveOp,
+  type LiveResult,
+  type LiveState,
+  type LiveView,
+  livePrune,
+  liveView,
+  reuseStable,
+  sameShallow,
+} from "./live-activity";
 import { ProviderIcon } from "./provider-icon";
 import { destinationIcon, HEALTH_TONE, HealthGlyph, ICON, ICON_SM, KIND_ICON, type Tone, TONE_VAR, toneStyle } from "./tokens";
 import { unusedDestinationIds } from "./unused-destinations";
@@ -37,6 +48,8 @@ const NODE_W = 236;
 const NODE_H = 108;
 const POS_KEY = "flow:v3:positions";
 const MAX_PULSES_PER_SEC = 30;
+/** Mảng rỗng dùng chung — `[]` mới mỗi lần sẽ phá giữ-nguyên-tham-chiếu của data cạnh (L-B2). */
+const NO_PULSES: { id: number; tone: string }[] = [];
 const PULSE_MS = 1400;
 
 const WINDOW_SHORT: Record<TopologyWindow, string> = { "15m": "15m", "1h": "1h", "24h": "24h" };
@@ -473,23 +486,32 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
 
   useEffect(() => {
     const now = Date.now();
-    setNodes((prev) =>
-      topo.nodes.map((n) => {
-        const old = prev.find((p) => p.id === n.id);
-        return {
-          id: n.id,
-          type: "card",
-          position: old?.position ?? positions[n.id] ?? { x: 0, y: 0 },
-          data: { node: n, window: topo.window, onBadge, live: liveView(live, n.id, now), unused: unused.has(n.id) },
-        };
-      }),
-    );
+    // L-B2: node không đổi gì giữ nguyên object (TopologyCard memo không render lại).
+    setNodes((prev) => {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      return reuseStable(
+        prev,
+        topo.nodes.map((n) => {
+          const old = byId.get(n.id);
+          return {
+            id: n.id,
+            type: "card",
+            position: old?.position ?? positions[n.id] ?? { x: 0, y: 0 },
+            data: { node: n, window: topo.window, onBadge, live: liveView(live, n.id, now), unused: unused.has(n.id) },
+          };
+        }),
+        (o, n) => o.position === n.position && sameShallow(o.data, n.data),
+      );
+    });
   }, [topo, positions, setNodes, onBadge, live, unused]);
 
   useEffect(() => {
     const now = Date.now();
-    setEdges(
-      topo.edges.map((e) => {
+    // L-B2: cạnh không đổi gì giữ nguyên object (TopologyEdge memo không render lại).
+    setEdges((prev) =>
+      reuseStable(
+        prev,
+        topo.edges.map((e) => {
         const view = liveView(live, e.id, now);
         const markerColor = view === "idle" ? TONE_VAR[HEALTH_TONE[e.health]] : TONE_VAR[LIVE_TONE[view]];
         return {
@@ -498,9 +520,17 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
           target: e.target,
           type: "flow",
           markerEnd: { type: MarkerType.ArrowClosed, color: markerColor, width: 16, height: 16 },
-          data: { edge: e, window: topo.window, pulses: pulses[e.id] ?? [], caption: topo.captions[e.id], live: view },
+          data: { edge: e, window: topo.window, pulses: pulses[e.id] ?? NO_PULSES, caption: topo.captions[e.id], live: view },
         };
       }),
+        (o, n) =>
+          o.source === n.source &&
+          o.target === n.target &&
+          (o.markerEnd as { color?: string } | undefined)?.color === (n.markerEnd as { color?: string } | undefined)?.color &&
+          !!o.data &&
+          !!n.data &&
+          sameShallow(o.data, n.data),
+      ),
     );
   }, [topo, pulses, setEdges, live]);
 
@@ -552,8 +582,21 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
     const t = () => topoRef.current;
     const subsOfDest = (destinationId: string) =>
       fullRef.current.nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription" && n.destinationId === destinationId && n.active);
-    const start = (keys: string[], token: string) => setLive((s) => liveStart(s, keys, token, Date.now()));
-    const end = (keys: string[], token: string, kind: LiveResult) => setLive((s) => liveEnd(s, keys, token, kind, Date.now()));
+    // L-B2: gom mốc socket theo khung hình → một setLive / frame dù burst vài trăm ev/s.
+    let queue: LiveOp[] = [];
+    let frame: number | null = null;
+    const flush = () => {
+      frame = null;
+      const ops = queue;
+      queue = [];
+      if (ops.length) setLive((s) => liveApplyBatch(s, ops));
+    };
+    const enqueue = (o: LiveOp) => {
+      queue.push(o);
+      if (frame === null) frame = requestAnimationFrame(flush);
+    };
+    const start = (keys: string[], token: string) => enqueue({ op: "start", keys, token, at: Date.now() });
+    const end = (keys: string[], token: string, kind: LiveResult) => enqueue({ op: "end", keys, token, kind, at: Date.now() });
     // Chặng "giao" của một đích: mọi biến thể id cạnh (gộp nhãn / cột subscription / gộp nhóm) + node đích.
     const deliverKeys = (d: string) =>
       subsOfDest(d)
@@ -601,6 +644,7 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
       pulse(subsOfDest(n.destinationId).map((s) => `e:sub:${s.id.slice(4)}`).concat(`e:sub:subgroup:${n.destinationId}`, `e:fold:${n.destinationId}`), tone);
     });
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
       offTrace();
       offEvent();
       offAttempt();

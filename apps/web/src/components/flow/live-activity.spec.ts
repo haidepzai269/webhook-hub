@@ -2,12 +2,16 @@ import {
   emptyLive,
   FAIL_HOLD_MS,
   IN_FLIGHT_TTL_MS,
+  liveApplyBatch,
   liveEnd,
+  type LiveOp,
   livePrune,
   liveStart,
   liveView,
   MAX_TOKENS_PER_HOP,
+  reuseStable,
   SUCCESS_SETTLE_MS,
+  sameShallow,
 } from "./live-activity";
 
 /** Trạng thái sống của cạnh/node kiểu n8n: chỉ chạy khi CÓ sự kiện đang bay, TTL để burst không quay mãi. */
@@ -82,5 +86,43 @@ describe("live-activity — reducer trạng thái chặng theo sự kiện realt
     expect(s0.hops).toEqual({});
     liveEnd(s1, ["e:gate"], "a", "ok", 1);
     expect(liveView(s1, "e:gate", 1)).toBe("running");
+  });
+});
+
+describe("live-activity — gom cập nhật theo khung hình (L-B2)", () => {
+  it("liveApplyBatch áp tuần tự = gọi từng reducer một; batch rỗng trả nguyên state", () => {
+    const s0 = emptyLive();
+    expect(liveApplyBatch(s0, [])).toBe(s0);
+    const ops: LiveOp[] = [
+      { op: "start", keys: ["e:gate", "normalize"], token: "r1", at: 100 },
+      { op: "start", keys: ["e:gate"], token: "r2", at: 110 },
+      { op: "end", keys: ["e:gate", "normalize"], token: "r1", kind: "ok", at: 200 },
+    ];
+    const seq = liveEnd(liveStart(liveStart(s0, ["e:gate", "normalize"], "r1", 100), ["e:gate"], "r2", 110), ["e:gate", "normalize"], "r1", "ok", 200);
+    expect(liveApplyBatch(s0, ops)).toEqual(seq);
+    expect(liveView(liveApplyBatch(s0, ops), "e:gate", 200)).toBe("running");
+    expect(liveView(liveApplyBatch(s0, ops), "normalize", 200)).toBe("ok");
+  });
+});
+
+describe("live-activity — giữ nguyên tham chiếu khi không đổi (L-B2)", () => {
+  it("sameShallow: cùng khoá + cùng giá trị (===) -> true; khác một trường -> false", () => {
+    const node = { id: "n" };
+    expect(sameShallow({ node, live: "idle", unused: false }, { node, live: "idle", unused: false })).toBe(true);
+    expect(sameShallow({ node, live: "idle" }, { node, live: "running" })).toBe(false);
+    expect(sameShallow({ node }, { node: { id: "n" } })).toBe(false);
+    expect(sameShallow({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+  });
+  it("reuseStable: phần tử không đổi giữ object cũ; mọi phần tử giữ nguyên -> trả mảng cũ", () => {
+    const prev = [{ id: "a", v: 1 }, { id: "b", v: 2 }];
+    const same = reuseStable(prev, [{ id: "a", v: 1 }, { id: "b", v: 2 }], (o, n) => o.v === n.v);
+    expect(same).toBe(prev);
+    const changed = reuseStable(prev, [{ id: "a", v: 1 }, { id: "b", v: 3 }], (o, n) => o.v === n.v);
+    expect(changed).not.toBe(prev);
+    expect(changed[0]).toBe(prev[0]);
+    expect(changed[1]).toEqual({ id: "b", v: 3 });
+    const shrunk = reuseStable(prev, [{ id: "a", v: 1 }], (o, n) => o.v === n.v);
+    expect(shrunk).toEqual([prev[0]]);
+    expect(shrunk).not.toBe(prev);
   });
 });
