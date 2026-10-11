@@ -603,3 +603,30 @@ Bộ kiểm L0 643 (trong lần chạy ở mục AU5b) xanh.
 **Nên sửa trước demo:** GO-1 (đua gỡ liên kết làm mất mọi cách đăng nhập; sửa bằng UPDATE có điều kiện, khoảng 10 dòng). GO-2..GO-4 là Thấp hoặc đánh đổi, ghi ADR là đủ.
 
 **Kết luận AU5 (GitHub + Google):** ĐẠT có điều kiện, vẫn cần chạy tay TA11 (GitHub) và một lượt Google thật trên deployed (Admin, A3).
+
+## AU5b vòng 2 (`93f669b`, ADR-128): kiểm lại GO-1..GO-5
+
+> hubv dựng lại từ HEAD `80bfb69` kèm web. Source không sửa gì.
+> Bộ kiểm: verify L0 **645/0/0** · L1 **144/0/0** · map 0 mồ côi · gates 14/0 · e2e auth **18/18**.
+
+| Mục | Thử | Kết quả |
+|---|---|---|
+| GO-1 | 12 vòng, mỗi vòng bắn song song `POST /auth/google/unlink` và `/auth/github/unlink` (user không mật khẩu, có cả GitHub lẫn Google) | mỗi vòng **đúng một bên 204, bên kia 409**. **0/12** vòng làm mất hết cách đăng nhập (trước: 4/5). UPDATE có điều kiện an toàn khi đua vì Postgres kiểm lại WHERE trên dòng mới sau khi chờ khoá. ✓ đóng |
+| GO-2 | user mật khẩu ĐÃ xác minh @`company.test` rồi vào bằng Google | `/login?error=google_link_requires_password` ✓ |
+| GO-2 | user đã xác minh @`gmail.com` / @`googlemail.com` rồi vào bằng Google | tự liên kết → `/dashboard` ✓ |
+| GO-2 | hàm `googleAuthoritative` (bảng): `hd` khớp, kể cả khác hoa thường | true |
+| GO-2 | `hd` khác domain; subdomain `sub.corp.com` với `hd=corp.com`; `gmail.com.evil` | false / false / false ✓ |
+| GO-3 | `aud` chuỗi + `azp` khác | reject ✓ |
+| GO-3 | `aud` mảng không có `azp` | reject ✓ |
+| GO-3 | `aud` chuỗi không có `azp`; `aud` mảng + `azp` đúng client | chấp nhận (đúng OIDC) |
+| GO-4 | 22 callback gửi thẳng API | 20×400 rồi 429, 429. Khoá `rl:oauthcb:ip:<IP socket>` ✓ |
+| GO-4 | qua web: IP A 21 lần, rồi IP B (callback GitHub) | A: lần 21 → 429. B: 400, 400. Khoá là `rl:oauthcb:ip:7.7.7.7` và `:8.8.8.8`, tức theo **IP client do proxy R-2 chuyển**, không phải IP web/egress ✓. GitHub và Google dùng chung bộ đếm theo IP |
+| GO-5 | tài liệu | ADR-128 + DEPLOYMENT đã cập nhật |
+
+**Còn lại (Thấp, không chặn):**
+- Tài khoản **chưa xác minh** trên domain riêng vẫn được Google nhận (`claimAccount`) mà không cần `hd`. Đã thử: `ud@company.test` → `/dashboard`.
+  - Rủi ro chỉ là trường hợp domain hết hạn đổi chủ chiếm một tài khoản *chưa kích hoạt*, nên mất mát gần như không có.
+  - Nếu muốn chặt: cùng luật `googleAuthoritative`, không thì bắt bấm link mail.
+- Callback bị 429 trả JSON ngay trên trang trình duyệt. Có thể chuyển hướng về `/login?error=too_many_attempts` cho đẹp.
+
+**Kết luận: AU5b ĐẠT. Push được.** Vẫn còn A3 (OAuth client thật + một lượt Google thật trên deployed) và TA11 (GitHub).
