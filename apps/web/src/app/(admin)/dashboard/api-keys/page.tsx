@@ -104,7 +104,7 @@ export default function ApiKeysPage() {
               key, scope tối thiểu.
             </>
           ) : (
-            "Chọn project ở thanh bên trước."
+            "Đang tải project của bạn… (tài khoản mới có sẵn một project từ lúc đăng ký)."
           )
         }
         actions={

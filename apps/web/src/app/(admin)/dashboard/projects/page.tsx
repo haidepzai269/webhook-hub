@@ -72,9 +72,9 @@ export default function ProjectsPage() {
     <>
       <PageHeader
         title="Project"
-        description="Mỗi project là một vùng cô lập: source, endpoint, sự kiện và API key riêng."
+        description="Tài khoản mới đã có sẵn một project (tạo lúc đăng ký) và console đang chọn nó — vào thẳng API key là dùng được. Tạo thêm project khi cần tách môi trường, sản phẩm hoặc thành viên (ADR-038)."
         actions={
-          <Button onClick={() => setOpen(true)}>
+          <Button variant="outline" onClick={() => setOpen(true)}>
             <Plus />
             Tạo project
           </Button>

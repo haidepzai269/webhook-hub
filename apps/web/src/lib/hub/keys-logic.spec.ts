@@ -7,6 +7,7 @@ import {
   slugFromName,
   toSummary,
 } from "./keys-logic";
+import { currentProjectId, ensureProject } from "./project-store";
 
 /** SK1 (SPEC-shop-ket-noi-project §3): trang Project + API key của console. */
 describe("console Project + API key (SK1)", () => {
@@ -40,5 +41,11 @@ describe("console Project + API key (SK1)", () => {
     expect(slugFromName("Cửa hàng Đồ ăn của tôi!")).toBe("cua-hang-do-an-cua-toi");
     expect(projectCreateError(409, { error: "slug_taken" }, "x")).toMatch(/đã có project/);
     expect(projectCreateError(422, {}, "x")).toMatch(/Slug chỉ gồm/);
+  });
+
+  it("người mới: project tự tạo lúc đăng ký được chọn sẵn -> trang API key dùng ngay, không cần bước tạo project", () => {
+    expect(ensureProject(["auto-project-id"])).toBe("auto-project-id");
+    expect(currentProjectId()).toBe("auto-project-id");
+    expect(ensureProject(["other", "auto-project-id"])).toBe("auto-project-id"); // giữ lựa chọn còn hợp lệ
   });
 });
