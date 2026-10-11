@@ -3,8 +3,11 @@ import { DEFAULT_TENANT_ID, PrismaService } from '@hub/database';
 import { hashApiKey } from '@hub/common';
 import { ProjectsController, parseCreateKey } from '../src/modules/console/projects.controller';
 import { ProjectScopeGuard } from '../src/modules/console/project-scope.guard';
+import { Reflector } from '@nestjs/core';
+import { parseConnectionString } from '@hub/sdk';
+import { ApiKeyGuard } from '../src/modules/service-api/api-key.guard';
 import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
-import { REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
+import { NO_PROJECT_SCOPE_KEY, REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
 /** R-8: guard đóng mặc định — handler giả phải khai scope như route thật. */
 const readProjectHandler = () => undefined;
 Reflect.defineMetadata(REQUIRE_SCOPE_KEY, 'read:project', readProjectHandler);
@@ -121,6 +124,23 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
     expect((await raw.apiKey.findUniqueOrThrow({ where: { id: k.id } })).revokedAt).not.toBeNull();
     expect(await raw.auditLog.count({ where: { tenantId: p.id, action: 'api_key.revoked' } })).toBe(1);
     await expect(ctrl.revokeKey(op.id, DEFAULT_TENANT_ID, k.id)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('[SK:U6] connection string tạo ở console dùng được ngay (ApiKeyGuard nhận đúng project); thu hồi -> service nhận 401', async () => {
+    const p = await ctrl.create(req(alice), alice.id, { slug: `sk-${run}`, name: 'SK' });
+    created.push(p.id);
+    const k = await ctrl.createKey(req(alice), alice.id, p.id, { serviceName: 'shop', scopes: ['manage:endpoints', 'read:events'] });
+    const conn = parseConnectionString(k.connectionString);
+    expect(conn).toMatchObject({ project: `sk-${run}`, apiKey: k.key });
+    expect(JSON.stringify(await ctrl.listKeys(p.id))).not.toContain(k.key); // không hiện lại ở đâu
+    const guard = new ApiKeyGuard(svc, new Reflector());
+    const meHandler = () => undefined;
+    Reflect.defineMetadata(NO_PROJECT_SCOPE_KEY, 'GET /me', meHandler);
+    const call = (auth: string) =>
+      guard.canActivate({ switchToHttp: () => ({ getRequest: () => ({ headers: { authorization: auth }, params: { project: conn.project } }) }), getHandler: () => meHandler, getClass: () => class {} } as any);
+    await expect(call(`Bearer ${conn.apiKey}`)).resolves.toBe(true);
+    await ctrl.revokeKey(alice.id, p.id, k.id);
+    await expect(call(`Bearer ${conn.apiKey}`)).rejects.toMatchObject({ status: 401 });
   });
 
   it('ProjectScopeGuard: không ?projectId -> 400 project_required (AU3); thành viên -> vào; không là thành viên / lạ / sai định dạng -> CÙNG 404; operator vào mọi project', async () => {

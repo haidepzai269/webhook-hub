@@ -2,10 +2,12 @@ import {
   Activity,
   Cable,
   FlaskConical,
+  FolderKanban,
   Inbox,
+  KeyRound,
   LayoutDashboard,
-  Network,
   type LucideIcon,
+  Network,
   ScrollText,
   Send,
   Skull,
@@ -41,6 +43,15 @@ export const sidebarItems: NavGroup[] = [
     id: "overview",
     label: "Tổng quan",
     items: [{ id: "dashboard", title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
+  },
+  {
+    id: "project",
+    label: "Project",
+    items: [
+      // SK1 (SPEC-shop-ket-noi-project §3): tạo project + API key (copy connection string một lần).
+      { id: "projects", title: "Project", url: "/dashboard/projects", icon: FolderKanban },
+      { id: "api-keys", title: "API key", url: "/dashboard/api-keys", icon: KeyRound },
+    ],
   },
   {
     id: "config",

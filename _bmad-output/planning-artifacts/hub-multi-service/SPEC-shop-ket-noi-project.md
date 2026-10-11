@@ -115,4 +115,4 @@ Phần này vượt trần 450 dòng (ADR-141/144). **Nới trần lên ~600 dò
 
 ## 9. Checklist
 
-- [ ] SK1 · [ ] SK2 · [ ] SK3 · [ ] SK4
+- [x] SK1 · [ ] SK2 · [ ] SK3 · [ ] SK4
