@@ -134,8 +134,8 @@ export const GATES: Gate[] = [
     id: 'data-migration-rls',
     rule:
       "Migration DỮ LIỆU (UPDATE/INSERT/DELETE trên bảng có RLS) tạo sau 20261011110000_rls_hub_app phải tự `SET LOCAL app.rls" +
-      "_system = 'on';` ở đầu file — Neon: owner không phải superuser, FORCE RLS làm câu lệnh ảnh hưởng 0 dòng mà KHÔNG báo lỗi",
-    source: 'REVIEW-AUTH R-7, ADR-111, DEPLOYMENT §9',
+      "_system = 'on';` ở đầu file — phòng thủ: nơi owner không có BYPASSRLS, FORCE RLS làm câu lệnh ảnh hưởng 0 dòng mà KHÔNG báo lỗi (Neon của đồ án: owner có BYPASSRLS, ADR-125)",
+    source: 'REVIEW-AUTH R-7, ADR-111, ADR-125, DEPLOYMENT §9',
     include: (f) => {
       const m = /^libs\/database\/prisma\/migrations\/(\d{14})_[^/]+\/migration\.sql$/.exec(f);
       return !!m && m[1] > RLS_MIGRATION_TS;
