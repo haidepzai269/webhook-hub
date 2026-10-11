@@ -95,8 +95,10 @@ const r = new Base(p, t);`,
     ]);
   });
 
-  it('Shop ≤ 300 dòng', () => {
-    const f = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(301) });
-    expect(runGates([byId('shop-size')], f.list, f.read)[0].violations).toHaveLength(1);
+  it('Shop: TỔNG apps/shop/src ≤ 450 dòng (ADR-141), không chỉ main.ts', () => {
+    const big = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(300), 'apps/shop/src/payos.ts': 'x\n'.repeat(151), 'apps/shop/test/a.spec.ts': 'x\n'.repeat(999) });
+    expect(runGates([byId('shop-size')], big.list, big.read)[0].violations).toHaveLength(1);
+    const ok = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(300), 'apps/shop/src/payos.ts': 'x\n'.repeat(150) });
+    expect(runGates([byId('shop-size')], ok.list, ok.read)[0].violations).toHaveLength(0);
   });
 });

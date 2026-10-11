@@ -1,6 +1,8 @@
 import { hmacSha256, timingSafeCompare } from '@hub/crypto';
 import { MENU, priceOrder, maskCustomer } from '../src/menu';
-import { applyPayment, EXPIRE_AFTER_MS, readPayment } from '../src/payment';
+import { applyPayment, creditsOrder, EXPIRE_AFTER_MS, isExpired, orderTtlMs, pickOrderCode, readPayment } from '../src/payment';
+
+const TTL_MIN = EXPIRE_AFTER_MS / 60_000; // L-4: test không phụ thuộc SHOP_ORDER_TTL_MIN của máy chạy
 
 describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
   const SIGNING_SECRET = 'hub_outbound_signing_secret_999';
@@ -105,8 +107,8 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(run([58000n, 50000n, 30000n])).toMatchObject({ status: 'PAID', paidAmount: 138000n });
     });
 
-    it('tiền về đơn EXPIRED: ghi nhận nhưng KHÔNG hồi sinh', () => {
-      expect(applyPayment(order('EXPIRED'), 138000n)).toEqual({
+    it('tiền về đơn EXPIRED (trả SAU hạn): ghi nhận nhưng KHÔNG hồi sinh', () => {
+      expect(applyPayment(order('EXPIRED', 0, TTL_MIN + 10), 138000n)).toEqual({
         status: 'EXPIRED',
         paidAmount: 138000n,
         outcome: 'LATE_PAYMENT',
@@ -121,18 +123,46 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       });
     });
 
-    it('UNDERPAID không tự hết hạn (đã có tiền vào), dù đã quá hạn (mặc định 30 phút, SHOP_ORDER_TTL_MIN)', () => {
-      expect(EXPIRE_AFTER_MS).toBe(30 * 60 * 1000);
-      expect(applyPayment(order('UNDERPAID', 100000, 60), 38000n).status).toBe('PAID');
+    it('UNDERPAID không tự hết hạn (đã có tiền vào), dù đã quá hạn', () => {
+      expect(applyPayment(order('UNDERPAID', 100000, TTL_MIN * 2), 38000n).status).toBe('PAID');
+    });
+
+    it('L-4: hạn đơn mặc định 30 phút, đổi bằng SHOP_ORDER_TTL_MIN (hàm thuần, không đọc env của máy chạy)', () => {
+      expect(orderTtlMs({} as any)).toBe(30 * 60_000);
+      expect(orderTtlMs({ SHOP_ORDER_TTL_MIN: '45' } as any)).toBe(45 * 60_000);
+      expect(orderTtlMs({ SHOP_ORDER_TTL_MIN: 'x' } as any)).toBe(30 * 60_000);
     });
 
     it('PENDING quá hạn mà cron reconcile CHƯA chạy: vẫn coi là EXPIRED (hết hạn lười)', () => {
-      expect(applyPayment(order('PENDING', 0, 40), 138000n)).toEqual({
+      expect(applyPayment(order('PENDING', 0, TTL_MIN + 10), 138000n)).toEqual({
         status: 'EXPIRED',
         paidAmount: 138000n,
         outcome: 'LATE_PAYMENT',
       });
-      expect(applyPayment(order('PENDING', 0, 29), 138000n).status).toBe('PAID');
+      expect(applyPayment(order('PENDING', 0, TTL_MIN - 1), 138000n).status).toBe('PAID');
+    });
+
+    it('M-1: trả ĐÚNG hạn (paidAt của provider) nhưng webhook tới SAU hạn (cold start) -> vẫn PAID', () => {
+      const o = order('PENDING', 0, TTL_MIN + 3);
+      const paidAt = new Date(o.createdAt.getTime() + EXPIRE_AFTER_MS - 60_000);
+      expect(applyPayment(o, 138000n, paidAt)).toMatchObject({ status: 'PAID', outcome: 'PAID' });
+      // cron đã kịp EXPIRE trước khi webhook tới: khoản trả đúng hạn vẫn được tính
+      expect(applyPayment({ ...o, status: 'EXPIRED' }, 138000n, paidAt)).toMatchObject({ status: 'PAID', outcome: 'PAID' });
+      expect(applyPayment({ ...o, status: 'EXPIRED' }, 100000n, paidAt)).toMatchObject({ status: 'UNDERPAID' });
+    });
+
+    it('M-1: paidAt sau hạn -> LATE_PAYMENT; paidAt ở tương lai (lệch đồng hồ) bị chặn bởi now', () => {
+      const o = order('PENDING', 0, TTL_MIN + 10);
+      expect(applyPayment(o, 138000n, new Date(o.createdAt.getTime() + EXPIRE_AFTER_MS + 60_000)).outcome).toBe('LATE_PAYMENT');
+      expect(applyPayment(o, 138000n, new Date(Date.now() + 3_600_000)).outcome).toBe('LATE_PAYMENT');
+    });
+
+    it('L-2: GET /orders hiển thị hết hạn lười (PENDING quá hạn = EXPIRED, UNDERPAID không)', () => {
+      expect(isExpired(order('PENDING', 0, TTL_MIN + 1))).toBe(true);
+      expect(isExpired(order('PENDING', 0, TTL_MIN - 1))).toBe(false);
+      expect(isExpired(order('UNDERPAID', 1, TTL_MIN + 1))).toBe(false);
+      const src = require('fs').readFileSync(require('path').join(__dirname, '../src/main.ts'), 'utf8');
+      expect(src).toMatch(/isExpired\(order\) \? 'EXPIRED'/);
     });
   });
 
@@ -190,16 +220,38 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
   });
 
   describe('S3-2: đọc khoản tiền từ kiểu chuẩn payment.received (một đầu ra duy nhất)', () => {
-    const core = { amount: 50000, currency: 'VND', method: 'bank_transfer', reference: 'FT1', memo: 'DH123456 thanh toan', counterparty: null, account: null, providerTxnId: '1', paidAt: '2026-10-10T07:00:00.000Z', raw: {} };
+    const core = { amount: 50000, currency: 'VND', method: 'bank_transfer', reference: 'FT1', memo: 'DH1234567 thanh toan', counterparty: null, account: null, providerTxnId: '1', paidAt: '2026-10-10T07:00:00.000Z', raw: {} };
 
     it('cùng một hình dạng cho mọi provider: mã đơn trong memo, tiền ở data.amount', () => {
-      expect(readPayment({ type: 'payment.received', source: 'sepay', data: core })).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      expect(readPayment({ type: 'payment.received', source: 'sepay', data: core })).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
       // PayOS (method payment_link) và SePay (bank_transfer) đọc y hệt — không có nhánh theo provider
-      expect(readPayment({ type: 'payment.received', source: 'sepay', data: { ...core, method: 'payment_link' } })).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      expect(readPayment({ type: 'payment.received', source: 'sepay', data: { ...core, method: 'payment_link' } })).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
     });
 
     it('memo không có mã -> tìm trong reference', () => {
-      expect(readPayment({ type: 'payment.received', source: 'sepay', data: { ...core, memo: 'chuyen tien', reference: 'DH777' } })).toEqual({ orderCode: 'DH777', amount: 50000 });
+      expect(readPayment({ type: 'payment.received', source: 'sepay', data: { ...core, memo: 'chuyen tien', reference: 'DH7777777' } })).toMatchObject({ orderCodes: ['DH7777777'], amount: 50000 });
+    });
+
+    it('M-3: lấy MỌI mã DH+7 số / DH+10 số (cũ), không lấy lần khớp đầu không neo; mã có độ dài khác bị bỏ', () => {
+      const r = (memo: string) => readPayment({ type: 'payment.received', source: 'payos', data: { ...core, memo } });
+      expect(r('CSDH9876543DH1234567')).toMatchObject({ orderCodes: ['DH9876543', 'DH1234567'] });
+      expect(r('CSDH12 DH1234567')).toMatchObject({ orderCodes: ['DH1234567'] });
+      expect(r('DH1234567890 cu')).toMatchObject({ orderCodes: ['DH1234567890'] });
+      expect(r('DH12345678 sai do dai')).toEqual({ skip: 'UNMATCHED' });
+      expect(pickOrderCode(['DH9876543', 'DH1234567'], ['DH1234567'])).toBe('DH1234567');
+      expect(pickOrderCode(['DH9876543'], [])).toBeNull();
+    });
+
+    it('M-1/M-2: trả source và paidAt (thời điểm provider) để Shop xét kênh + hạn', () => {
+      expect(readPayment({ type: 'payment.received', source: 'payos', data: core })).toEqual({ orderCodes: ['DH1234567'], amount: 50000, source: 'payos', paidAt: new Date('2026-10-10T07:00:00.000Z') });
+      expect(readPayment({ type: 'payment.received', source: 'sepay', data: { ...core, paidAt: null } })).toMatchObject({ paidAt: undefined });
+    });
+
+    it('M-2: chỉ cộng tiền từ ĐÚNG kênh khách đã chọn (một tài khoản sau cả PayOS lẫn SePay không bị cộng đôi)', () => {
+      expect(creditsOrder('payos', 'payos')).toBe(true);
+      expect(creditsOrder('payos', 'sepay')).toBe(false);
+      expect(creditsOrder('sepay', 'payos')).toBe(false);
+      expect(creditsOrder(null, 'sepay')).toBe(true); // đơn cũ không ghi kênh
     });
 
     it('không có mã -> UNMATCHED; kiểu khác / tiền tệ khác / số tiền sai -> IGNORED', () => {
@@ -210,16 +262,16 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
     });
 
     it('MS-R2: chỉ tin source thanh toán THẬT (payos, sepay) — sự kiện service tự phát (api) hay nguồn tuỳ chỉnh (generic) cùng khuôn vẫn IGNORED', () => {
-      expect(readPayment({ type: 'payment.received', source: 'payos', data: core })).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      expect(readPayment({ type: 'payment.received', source: 'payos', data: core })).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
       expect(readPayment({ type: 'payment.received', source: 'api', data: core })).toEqual({ skip: 'IGNORED' });
       expect(readPayment({ type: 'payment.received', source: 'generic', data: core })).toEqual({ skip: 'IGNORED' });
       expect(readPayment({ type: 'payment.received', data: core })).toEqual({ skip: 'IGNORED' });
-      expect(readPayment({ type: 'payment.received', source: 'generic', data: core }, ['generic'])).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      expect(readPayment({ type: 'payment.received', source: 'generic', data: core }, ['generic'])).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
     });
 
     it('R-1: có danh sách sourceId tin cậy (từ ensure) -> event từ source khác (dù tên sepay) IGNORED', () => {
       const ok = { type: 'payment.received', source: 'sepay', sourceId: 'S-OP', data: core };
-      expect(readPayment(ok, undefined, ['S-OP'])).toEqual({ orderCode: 'DH123456', amount: 50000 });
+      expect(readPayment(ok, undefined, ['S-OP'])).toMatchObject({ orderCodes: ['DH1234567'], amount: 50000 });
       expect(readPayment({ ...ok, sourceId: 'S-ATTACKER' }, undefined, ['S-OP'])).toEqual({ skip: 'IGNORED' });
       expect(readPayment({ ...ok, sourceId: undefined }, undefined, ['S-OP'])).toEqual({ skip: 'IGNORED' });
     });

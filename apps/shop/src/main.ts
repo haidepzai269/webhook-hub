@@ -5,8 +5,8 @@ import { timingSafeCompare } from '@hub/crypto';
 import { createHubClient, challengeResponse, verifyWebhook } from '@hub/sdk';
 import { logger } from '@hub/common';
 import { MENU, priceOrder, maskCustomer, type Customer } from './menu';
-import { applyPayment, bankQrUrl, EXPIRE_AFTER_MS, newOrderCode, payosOrderNumber, qrImage, readPayment } from './payment';
-import { createPaymentLink, payosConfig } from './payos';
+import { applyPayment, bankQrUrl, creditsOrder, EXPIRE_AFTER_MS, isExpired, newOrderCode, pickOrderCode, qrImage, readPayment } from './payment';
+import { createPaymentLink, PAYOS_DUPLICATE_ORDER, payosConfig, payosLinkInput } from './payos';
 import { HubRegistration } from './hub-registration';
 
 const expressFactory = typeof express === 'function' ? express : (express as any).default || require('express');
@@ -59,12 +59,20 @@ app.post('/orders', async (req: Request, res: Response) => {
     }
     const expiresAt = new Date(order.createdAt.getTime() + EXPIRE_AFTER_MS);
 
-    // PayOS: link thật, hết hạn CÙNG lúc đơn (PayOS từ chối trả muộn). SePay: VietQR của tài khoản nhận (hoặc null).
+    // PayOS: link thật, hết hạn SỚM hơn đơn (ADR-144). SePay: VietQR của tài khoản nhận (hoặc null).
     let payment: { qrImageUrl: string | null; qrCode?: string; checkoutUrl?: string } = { qrImageUrl: bankQrUrl(process.env, priced.amount, order.orderCode) };
     if (paymentProvider === 'payos' && payos) {
-      const back = `${SHOP_WEB_URL}?order=${order.orderCode}`;
       try {
-        const link = await createPaymentLink(payos, { orderCode: payosOrderNumber(order.orderCode), amount: priced.amount, description: order.orderCode, returnUrl: back, cancelUrl: `${back}&cancel=1`, expiredAt: Math.floor(expiresAt.getTime() / 1000) });
+        let link;
+        for (let attempt = 0; !link; attempt++) {
+          try {
+            link = await createPaymentLink(payos, payosLinkInput({ orderCode: order.orderCode, amount: priced.amount, createdAt: order.createdAt, expiresAt }, SHOP_WEB_URL));
+          } catch (e: any) {
+            // L-3: PayOS đã có orderCode này (vd DB Shop dựng lại) -> đổi mã đơn, thử lại MỘT lần
+            if (e?.code !== PAYOS_DUPLICATE_ORDER || attempt >= 1) throw e;
+            order = await prisma.order.update({ where: { id: order.id }, data: { orderCode: newOrderCode() } });
+          }
+        }
         await prisma.order.update({ where: { id: order.id }, data: { payosPaymentLinkId: link.paymentLinkId } });
         payment = { qrImageUrl: qrImage(link.qrCode), qrCode: link.qrCode, checkoutUrl: link.checkoutUrl };
       } catch (e: any) {
@@ -86,7 +94,8 @@ app.get('/orders/:code', async (req: Request, res: Response) => {
   try {
     const order = await prisma.order.findUnique({ where: { orderCode: String(req.params.code) } });
     if (!order) return res.status(404).json({ error: 'Không tìm thấy đơn hàng' });
-    const { orderCode, status, items, createdAt } = order;
+    const { orderCode, items, createdAt } = order;
+    const status = isExpired(order) ? 'EXPIRED' : order.status; // L-2: hết hạn lười, chỉ hiển thị (cron ghi sau)
     const customer = maskCustomer(order.customer as unknown as Customer | null);
     res.json({ orderCode, status, amount: Number(order.amount), paidAmount: Number(order.paidAmount), expiresAt: new Date(createdAt.getTime() + EXPIRE_AFTER_MS), items, customer, createdAt });
   } catch (err: any) {
@@ -97,8 +106,7 @@ app.get('/orders/:code', async (req: Request, res: Response) => {
 
 // 4. POST /hub-webhook — Nhận outbound webhook từ Webhook Hub
 app.post('/hub-webhook', async (req: any, res: Response) => {
-  // 4.1. Standard Webhooks (ADR-040) qua SDK: chữ ký trên bytes gốc + timestamp lệch ≤ 300s (chống replay).
-  // Request challenge CŨNG phải qua bước này. `webhook-id` = event id, giữ nguyên qua retry -> khoá chống trùng.
+  // 4.1. Standard Webhooks (ADR-040): chữ ký trên bytes gốc + timestamp ≤ 300s, kể cả challenge. `webhook-id` = khoá chống trùng.
   const eventId = req.headers['webhook-id'] as string;
   if (!verifyWebhook(req.rawBody ?? Buffer.alloc(0), req.headers, SIGNING_SECRET)) {
     return res.status(401).json({ error: 'Chữ ký Standard Webhooks không hợp lệ hoặc quá hạn' });
@@ -106,42 +114,39 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
   const challenge = challengeResponse(req.body);
   if (challenge) return res.status(200).json(challenge);
 
-  // 4.3. Chỉ nhận kiểu chuẩn `payment.received` (VND); mã đơn DH\d+ trong data.memo rồi data.reference
-  // R-1 (ADR-094): chỉ tin sourceId của subscription đã ghim. Chưa ghim xong (ensure chưa thành công) -> 503 để hub
-  // retry sau, không xử lý tiền khi chưa biết nguồn nào tin được (R-8).
-  // R2-1: chưa ghim -> thử đăng ký NGAY (hub đang gửi webhook tức là hub đã sống), vẫn chưa được mới 503.
+  // 4.3. Chỉ `payment.received` (VND) từ sourceId đã ghim (R-1, ADR-094). Chưa ghim -> thử đăng ký NGAY (R2-1), vẫn
+  // chưa được thì 503 để hub retry — không xử lý tiền khi chưa biết nguồn nào tin được (R-8).
   if (hub && registration.trustedSourceIds.length === 0 && !(await registration.ensureNow())) {
     return res.status(503).json({ error: 'Shop chưa đăng ký xong với hub' });
   }
   const p = readPayment(req.body, undefined, hub ? registration.trustedSourceIds : undefined);
   if ('skip' in p || !eventId) {
-    if ('skip' in p && p.skip === 'UNMATCHED') logger.warn({ eventId }, '[Shop] Không tìm thấy mã đơn DHxxx trong memo/reference');
+    if ('skip' in p && p.skip === 'UNMATCHED') logger.warn({ eventId }, '[Shop] Không tìm thấy mã đơn DH trong memo/reference');
     return res.status(200).json({ success: true, status: 'skip' in p ? p.skip : 'IGNORED' });
   }
-  const { orderCode, amount } = p;
+  const { orderCodes, amount, source, paidAt } = p;
+  let orderCode = orderCodes[0];
 
-  // 4.4. Chống trùng BỀN VỮNG + cộng dồn trong CÙNG transaction (ADR-034): ghi event-id và
-  // paidAmount cùng commit hoặc cùng rollback -> mỗi khoản chỉ cộng một lần, thứ tự đến không quan trọng.
-  // Khoá hàng đơn (FOR UPDATE) trước tiên: mọi webhook/reconcile trên CÙNG đơn chạy tuần tự, không
-  // có xung đột version -> không trả 4xx mà hub coi là non-retryable (DEAD).
+  // 4.4. Chống trùng BỀN VỮNG + cộng dồn trong CÙNG transaction (ADR-034): event-id và paidAmount cùng commit/rollback.
+  // Khoá hàng đơn (FOR UPDATE) trước: webhook/reconcile trên CÙNG đơn chạy tuần tự -> không 4xx (hub coi là DEAD).
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM shop.orders WHERE order_code = ${orderCode} FOR UPDATE`;
-      if (locked.length === 0) return { status: 'ORDER_NOT_FOUND' };
+      const locked = await tx.$queryRaw<{ order_code: string }[]>`SELECT order_code FROM shop.orders WHERE order_code = ANY(${orderCodes}) FOR UPDATE`;
+      const code = pickOrderCode(orderCodes, locked.map((r) => r.order_code)); // M-3: mã có thật, không phải tiền tố lạ
+      if (!code) return { status: 'ORDER_NOT_FOUND' };
+      orderCode = code;
       if (await tx.processedHubEvent.findUnique({ where: { eventId } })) return { status: 'DUPLICATE' };
       const order = await tx.order.findUniqueOrThrow({ where: { orderCode } });
+      if (!creditsOrder(order.paymentProvider, source)) return { status: 'OTHER_CHANNEL' }; // M-2: không cộng đôi
       await tx.processedHubEvent.create({ data: { eventId, orderId: order.id, amount: BigInt(amount) } });
-      const next = applyPayment(order, BigInt(amount));
-      // Phòng thủ thêm (đã khoá hàng nên lẽ ra không xảy ra): lệch version -> rollback cả event-id
-      const updated = await tx.order.updateMany({
-        where: { id: order.id, version: order.version },
-        data: { status: next.status, paidAmount: next.paidAmount, version: { increment: 1 } },
-      });
+      const next = applyPayment(order, BigInt(amount), paidAt);
+      // Phòng thủ (đã khoá hàng nên lẽ ra không xảy ra): lệch version -> rollback cả event-id
+      const updated = await tx.order.updateMany({ where: { id: order.id, version: order.version }, data: { status: next.status, paidAmount: next.paidAmount, version: { increment: 1 } } });
       if (updated.count === 0) throw new Error('VERSION_CONFLICT');
       return { status: next.outcome, paidAmount: Number(next.paidAmount) };
     });
-    if (result.status === 'LATE_PAYMENT' || result.status === 'EXTRA_PAYMENT') {
-      logger.warn({ orderCode, amount, eventId }, `[Shop] ${result.status}: tiền về đơn đã đóng, cần đối soát/hoàn tiền`);
+    if (['LATE_PAYMENT', 'EXTRA_PAYMENT', 'OTHER_CHANNEL'].includes(result.status)) {
+      logger.warn({ orderCode, amount, source, eventId }, `[Shop] ${result.status}: tiền không cộng vào đơn đang mở, cần đối soát/hoàn tiền`);
     } else {
       logger.info({ orderCode, amount, ...result }, `[Shop] Webhook đơn ${orderCode}: ${result.status}`);
     }

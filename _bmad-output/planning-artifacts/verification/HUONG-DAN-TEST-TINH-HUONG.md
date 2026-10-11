@@ -133,8 +133,8 @@
 
 **Nếu không thấy:**
 - Shop vẫn *"Đang chờ thanh toán…"* và delivery tới `shop` ở trạng thái **RETRYING** (503): Shop đang ngủ hoặc chưa đăng ký xong với hub. Hub tự gửi lại (10 giây → 1 phút → 5 phút…), chỉ cần chờ.
-- Có sự kiện nhưng đơn không đổi: nội dung PayOS không chứa đúng mã `DH…` (Shop ghi *UNMATCHED*), hoặc số tiền nhỏ hơn giá đơn (đơn thành **UNDERPAID**, Shop hiện *"Đã nhận …, còn thiếu …"*).
-- Đơn ghi *"Đơn đã hết hạn"*: đã quá hạn đơn (mặc định 30 phút). Link PayOS cũng hết hạn cùng lúc nên PayOS không cho trả nữa. Tạo đơn mới. Nếu tiền vẫn về sau hạn (chuyển khoản thẳng), Shop ghi nhận và hiện *"Đơn đã hết hạn nhưng Shop đã nhận …"* (không mất tiền, ADR-141).
+- Có sự kiện nhưng đơn không đổi: nội dung PayOS không chứa đúng mã `DH…` (Shop ghi *UNMATCHED*), hoặc tiền đến từ **kênh khác** kênh đã chọn khi tạo đơn (Shop ghi *OTHER_CHANNEL*, không cộng — tránh cộng đôi khi một tài khoản đứng sau cả PayOS lẫn SePay), hoặc số tiền nhỏ hơn giá đơn (đơn thành **UNDERPAID**, Shop hiện *"Đã nhận …, còn thiếu …"*).
+- Đơn ghi *"Đơn đã hết hạn"*: đã quá hạn đơn (mặc định 30 phút). Link PayOS hết hạn **sớm hơn đơn 5 phút** nên PayOS không cho trả sát hạn. Khoản đã trả **đúng hạn** luôn được tính theo giờ trả (`paidAt`), kể cả khi hub/Shop vừa ngủ dậy và webhook tới muộn (ADR-144). Tạo đơn mới. Nếu tiền về **sau** hạn thật (chuyển khoản thẳng), Shop ghi nhận và hiện *"Đơn đã hết hạn nhưng Shop đã nhận …"* (không mất tiền).
 - Bấm **Tạo đơn** báo *"Không tạo được link thanh toán PayOS"*: khoá PayOS trên service `shop` sai/thiếu (log shop có `PayOS <mã lỗi>`). Chọn **Chuyển khoản ngân hàng** để tiếp tục.
 - Không có sự kiện nào: PayOS chưa trỏ đúng URL, hoặc hub vừa ngủ dậy và PayOS gọi trượt (PayOS sẽ tự gọi lại).
 

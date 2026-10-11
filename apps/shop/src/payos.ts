@@ -1,10 +1,19 @@
 // P1 (ADR-141): tạo link thanh toán PayOS THẬT (POST /v2/payment-requests) bằng fetch + crypto, không thêm SDK.
 import { createHmac } from 'crypto';
 import { timingSafeCompare } from '@hub/crypto';
+import { payosOrderNumber } from './payment';
 
 export interface PayosConfig { clientId: string; apiKey: string; checksumKey: string; apiBase: string }
 export interface PayosLinkInput { orderCode: number; amount: number; description: string; returnUrl: string; cancelUrl: string; expiredAt: number }
 export interface PayosLink { checkoutUrl: string; qrCode: string; paymentLinkId: string }
+export const PAYOS_DUPLICATE_ORDER = '231'; // "Đơn thanh toán đã tồn tại" — kênh PayOS nhớ orderCode vĩnh viễn
+
+/** L-5: nối dây link — orderCode SỐ, description = mã đơn (9 ký tự), expiredAt GIÂY, SỚM hơn hạn đơn 5 phút (≤ nửa TTL, M-1). */
+export function payosLinkInput(o: { orderCode: string; amount: number; createdAt: Date; expiresAt: Date }, webUrl: string): PayosLinkInput {
+  const back = `${webUrl}?order=${o.orderCode}`;
+  const margin = Math.min(5 * 60_000, (o.expiresAt.getTime() - o.createdAt.getTime()) / 2);
+  return { orderCode: payosOrderNumber(o.orderCode), amount: o.amount, description: o.orderCode, returnUrl: back, cancelUrl: `${back}&cancel=1`, expiredAt: Math.floor((o.expiresAt.getTime() - margin) / 1000) };
+}
 
 /** Cùng kênh PayOS với source của hub. Base API tên riêng của Shop (KHÔNG dùng PAYOS_BASE_URL — SDK của hub đọc nó). */
 export function payosConfig(env: NodeJS.ProcessEnv = process.env): PayosConfig | null {
@@ -33,7 +42,7 @@ export async function createPaymentLink(cfg: PayosConfig, i: PayosLinkInput, fet
     signal: AbortSignal.timeout(10_000),
   });
   const body: any = await res.json().catch(() => null);
-  if (!res.ok || body?.code !== '00' || !body?.data) throw new Error(`PayOS ${res.status} ${body?.code ?? ''} ${body?.desc ?? ''}`.trim());
+  if (!res.ok || body?.code !== '00' || !body?.data) throw Object.assign(new Error(`PayOS ${res.status} ${body?.code ?? ''} ${body?.desc ?? ''}`.trim()), { code: body?.code });
   if (!verifyResponse(body.data, body.signature, cfg.checksumKey)) throw new Error('PayOS: chữ ký phản hồi sai');
   return { checkoutUrl: body.data.checkoutUrl, qrCode: body.data.qrCode, paymentLinkId: body.data.paymentLinkId };
 }

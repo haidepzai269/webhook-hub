@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 import { NodeCryptoProvider } from '@payos/node/lib/crypto/node-crypto';
-import { createPaymentLink, payosConfig, signPaymentRequest, verifyResponse } from '../src/payos';
+import { createPaymentLink, PAYOS_DUPLICATE_ORDER, payosConfig, payosLinkInput, signPaymentRequest, verifyResponse } from '../src/payos';
 import { bankQrUrl, EXPIRE_AFTER_MS, newOrderCode, payosOrderNumber } from '../src/payment';
 
 /**
@@ -63,6 +63,11 @@ describe('PayOS — createPaymentLink (fetch giả)', () => {
     await expect(createPaymentLink(cfg, input, forged)).rejects.toThrow(/chữ ký/);
   });
 
+  it('L-3: PayOS báo orderCode đã tồn tại -> lỗi mang code để Shop sinh mã mới', async () => {
+    const dup: any = async () => ({ ok: true, status: 200, json: async () => ({ code: PAYOS_DUPLICATE_ORDER, desc: 'Đơn thanh toán đã tồn tại', data: null }) });
+    await expect(createPaymentLink(cfg, input, dup)).rejects.toMatchObject({ code: PAYOS_DUPLICATE_ORDER });
+  });
+
   it('payosConfig: thiếu một khoá -> null (Shop không mời chọn PayOS); base mặc định là API chính thức', () => {
     expect(payosConfig({ PAYOS_CLIENT_ID: 'a', PAYOS_API_KEY: 'b' } as any)).toBeNull();
     expect(payosConfig({ PAYOS_CLIENT_ID: 'a', PAYOS_API_KEY: 'b', PAYOS_CHECKSUM_KEY: 'c' } as any)?.apiBase).toBe('https://api-merchant.payos.vn');
@@ -89,7 +94,19 @@ describe('Mã đơn + QR ngân hàng (P1)', () => {
     expect(bankQrUrl({ SHOP_BANK_CODE: 'MB' } as any, 1, 'DH1')).toBeNull();
   });
 
-  it('hạn đơn mặc định 30 phút', () => {
-    expect(EXPIRE_AFTER_MS).toBe(30 * 60 * 1000);
+  it('L-5/M-1: nối dây link PayOS — orderCode SỐ, description = mã đơn (≤ 9 ký tự), expiredAt GIÂY và SỚM hơn hạn đơn', () => {
+    const createdAt = new Date('2026-10-11T10:00:00Z');
+    const expiresAt = new Date(createdAt.getTime() + EXPIRE_AFTER_MS);
+    const i = payosLinkInput({ orderCode: 'DH1234567', amount: 138000, createdAt, expiresAt }, 'https://shop.example/shop');
+    expect(i).toMatchObject({ orderCode: 1234567, amount: 138000, description: 'DH1234567', returnUrl: 'https://shop.example/shop?order=DH1234567', cancelUrl: 'https://shop.example/shop?order=DH1234567&cancel=1' });
+    expect(i.description.length).toBeLessThanOrEqual(9);
+    expect(Number.isInteger(i.expiredAt)).toBe(true);
+    expect(i.expiredAt).toBeLessThan(2 ** 31); // Int32 giây, không phải ms
+    const marginS = expiresAt.getTime() / 1000 - i.expiredAt;
+    expect(marginS).toBeGreaterThanOrEqual(Math.min(300, EXPIRE_AFTER_MS / 2000));
+    expect(i.expiredAt).toBeGreaterThan(createdAt.getTime() / 1000);
+    // TTL rất ngắn (2 phút): link vẫn sống tới nửa TTL, không hết hạn trước khi tạo
+    const short = payosLinkInput({ orderCode: 'DH1234567', amount: 1, createdAt, expiresAt: new Date(createdAt.getTime() + 120_000) }, 'https://x');
+    expect(short.expiredAt).toBe(createdAt.getTime() / 1000 + 60);
   });
 });

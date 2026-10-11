@@ -3,7 +3,10 @@
 ## Q1 — Đơn đã hết hạn mà tiền ĐỦ vẫn về: hồi sinh thành PAID?
 - Hiện tại (giữ ADR-034, Admin đã chốt "không hồi sinh"): đơn ở EXPIRED, `paidAmount` được cộng (không mất), log cảnh báo,
   khách thấy "đã hết hạn nhưng Shop đã nhận X — gọi hotline", reconcile trả `lateMoneyOrders`.
-- Link PayOS hết hạn cùng lúc với đơn (`expiredAt`), nên trả muộn chỉ còn xảy ra với chuyển khoản thẳng (SePay).
+- ~~Link PayOS hết hạn cùng lúc với đơn, nên trả muộn chỉ còn xảy ra với SePay~~ — SAI (review M-1). Đã sửa ở ADR-144:
+  hạn xét theo `paidAt` (lúc khách trả) chứ không theo lúc webhook tới, và link PayOS hết hạn sớm hơn đơn 5 phút. Khoản
+  trả ĐÚNG hạn luôn được tính (kể cả khi cron đã EXPIRE trước khi webhook tới). Q1 giờ chỉ còn hỏi về tiền trả SAU hạn
+  thật (chủ yếu chuyển khoản thẳng SePay).
 - Phương án khác: EXPIRED + đủ tiền → PAID (outcome `LATE_PAID`). Đổi ~3 dòng ở `applyPayment` + test. Chọn?
 
 ## Q2 — Tài khoản ngân hàng của kênh PayOS có "liên kết qua payOS" không?
@@ -13,6 +16,10 @@
 ## Q3 — Ảnh QR PayOS vẽ qua api.qrserver.com
 - Chuỗi VietQR (số tài khoản, số tiền, nội dung) đi qua bên thứ ba để vẽ ảnh. Muốn vẽ tại trình duyệt thì thêm thư viện QR
   vào `apps/web` (đụng package-lock — chưa làm vì agent khác đang chạy song song).
+
+## Q4 — Hai kênh cùng một tài khoản (ADR-144, M-2)
+- Shop giờ chỉ cộng tiền từ đúng kênh khách chọn (`OTHER_CHANNEL` = bỏ qua + log). Nếu PayOS và SePay là HAI tài khoản
+  khác nhau và khách cố ý chuyển sang kênh kia, khoản đó phải đối soát tay. Chấp nhận?
 
 ## Việc Admin làm trên hạ tầng (agent KHÔNG làm)
 - Render → service `shop` → Environment: `SHOP_WEB_URL`, `SHOP_BANK_CODE`, `SHOP_BANK_ACCOUNT`, `SHOP_BANK_ACCOUNT_NAME`

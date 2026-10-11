@@ -21,6 +21,8 @@ export interface Gate {
   include: (file: string) => boolean;
   /** Trả các dòng vi phạm (1-based) của một file. */
   check: (text: string, file: string) => { line: number; text: string }[];
+  /** Luật trên TỔNG các file thuộc phạm vi (vd trần dòng của cả một thư mục). Chạy trước `check` từng file. */
+  checkAll?: (files: { file: string; text: string }[]) => GateViolation[];
   exceptions?: GateException[];
 }
 
@@ -226,12 +228,13 @@ export const GATES: Gate[] = [
   },
   {
     id: 'shop-size',
-    rule: 'apps/shop/src/main.ts ≤ 300 dòng',
-    source: 'CLAUDE.md',
-    include: (f) => f === 'apps/shop/src/main.ts',
-    check: (text) => {
-      const n = text.replace(/\r?\n$/, '').split(/\r?\n/).length;
-      return n > 300 ? [{ line: n, text: `${n} dòng > 300` }] : [];
+    rule: 'Tổng apps/shop/src/**/*.ts ≤ 450 dòng',
+    source: 'CLAUDE.md, ADR-141',
+    include: (f) => /^apps\/shop\/src\/.*\.ts$/.test(f),
+    check: () => [],
+    checkAll: (files) => {
+      const n = files.reduce((sum, f) => sum + f.text.replace(/\r?\n$/, '').split(/\r?\n/).length, 0);
+      return n > 450 ? [{ file: 'apps/shop/src', line: n, text: `${n} dòng > 450` }] : [];
     },
   },
 ];
@@ -240,8 +243,9 @@ export function runGates(gates: Gate[], files: string[], read: (f: string) => st
   return gates.map((gate) => {
     const violations: GateViolation[] = [];
     const excepted: GateViolation[] = [];
-    for (const file of files) {
-      if (!gate.include(file)) continue;
+    const scoped = files.filter((f) => gate.include(f));
+    if (gate.checkAll) violations.push(...gate.checkAll(scoped.map((file) => ({ file, text: read(file) }))));
+    for (const file of scoped) {
       for (const hit of gate.check(read(file), file)) {
         const ex = gate.exceptions?.find((e) => e.file === file && (!e.match || new RegExp(e.match).test(hit.text)));
         if (ex) excepted.push({ file, ...hit, reason: ex.reason });

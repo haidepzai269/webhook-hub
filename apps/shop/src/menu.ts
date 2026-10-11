@@ -1,15 +1,5 @@
 // Menu + tính tiền phía server (ADR-024, ADR-027). Không import Prisma để test thuần được.
-export interface MenuItem {
-  id: string;
-  name: string;
-  category: string;
-  price: number;
-  oldPrice: number;
-  image: string;
-  description: string;
-  rating: number;
-  tags: string[];
-}
+export interface MenuItem { id: string; name: string; category: string; price: number; oldPrice: number; image: string; description: string; rating: number; tags: string[] }
 
 const img = (n: number) => `/shop-assets/img/menu/${n}.jpg`;
 
