@@ -29,6 +29,14 @@ function payosSign(data, key) {
   return crypto.createHmac('sha256', key).update(s).digest('hex');
 }
 
+/**
+ * Giờ VIỆT NAM (+07:00, không đổi giờ mùa) theo khuôn PayOS thật `YYYY-MM-DD HH:mm:ss`, KHÔNG kèm múi giờ — adapter đọc
+ * như +07:00 (parseProviderTime). Gửi giờ UTC thì paidAt lệch sớm 7 giờ (REVIEW-P1P2-R2 R2-L3).
+ */
+function vnLocalTime(now = Date.now()) {
+  return new Date(now + 7 * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 function postJson(target, obj) {
   return new Promise((resolve) => {
     let u;
@@ -126,7 +134,7 @@ function createFakeProviders(env = process.env) {
         description: parsed.description || `FAKE${seq}`,
         accountNumber: '0001234',
         reference: `FT${Date.now()}${seq}`,
-        transactionDateTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        transactionDateTime: vnLocalTime(),
         currency: 'VND',
         paymentLinkId: crypto.randomBytes(16).toString('hex'),
         code: '00',
@@ -176,4 +184,4 @@ function createFakeProviders(env = process.env) {
   };
 }
 
-module.exports = { createFakeProviders, payosSign };
+module.exports = { createFakeProviders, payosSign, vnLocalTime };

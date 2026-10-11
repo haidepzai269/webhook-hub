@@ -3,6 +3,8 @@ import * as crypto from 'crypto';
 import { AddressInfo } from 'net';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createSink } = require('../../tools/verify-sink/sink.js');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { vnLocalTime } = require('../../tools/verify-sink/fake-providers.js');
 
 /** KN2 (SPEC-ket-noi §4.6): PayOS/Stripe giả trong sink — CI không gọi provider thật. */
 describe('[KN2] verify-sink fake providers', () => {
@@ -59,5 +61,15 @@ describe('[KN2] verify-sink fake providers', () => {
     expect(await (await fetch(`${base}/_fake/stripe/v1/webhook_endpoints/${ep.id}`, { method: 'DELETE', headers: h })).json()).toMatchObject({ deleted: true });
     expect((await fetch(`${base}/_fake/stripe/v1/webhook_endpoints/${ep.id}`, { headers: h })).status).toBe(404);
     expect((await fetch(`${base}/_fake/stripe/v1/webhook_endpoints`, { method: 'POST', headers: { ...h, authorization: 'Bearer sk_live_x' }, body: '' })).status).toBe(401);
+  });
+
+  it('PayOS send-payment: transactionDateTime là giờ VIỆT NAM khuôn "YYYY-MM-DD HH:mm:ss" (không múi giờ) — như PayOS thật (R2-L3)', async () => {
+    expect(vnLocalTime(Date.UTC(2026, 9, 11, 17, 30, 5))).toBe('2026-10-12 00:30:05');
+    const before = Date.now();
+    const r = await (await post('/_fake/payos/send-payment', { webhookUrl: recvUrl, amount: 2000 })).json();
+    const t: string = r.data.transactionDateTime;
+    expect(t).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    const asVn = Date.parse(`${t.replace(' ', 'T')}+07:00`);
+    expect(Math.abs(asVn - before)).toBeLessThan(5_000);
   });
 });
