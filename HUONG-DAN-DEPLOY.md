@@ -199,7 +199,9 @@ Nhắn: **"seed neon"**. Agent chạy seed từ máy local với khối `[hub-ap
 | `PAYOS_CLIENT_ID/API_KEY/CHECKSUM_KEY` | CÙNG kênh PayOS với source `src_payos_main` — Shop tạo link thật (ADR-141)|
 | `SHOP_WEB_URL`                         | `https://webhook-hub-xxxx.vercel.app/shop` — PayOS đưa khách về đây sau khi trả |
 | `SHOP_BANK_CODE`, `SHOP_BANK_ACCOUNT`, `SHOP_BANK_ACCOUNT_NAME` | tài khoản nhận tiền (VietQR cho lựa chọn SePay). Trống = không hiện QR SePay |
-| `SHOP_ORDER_TTL_MIN`                   | (tuỳ chọn) hạn đơn, phút — mặc định `30`; link PayOS hết hạn cùng lúc |
+| `SHOP_ORDER_TTL_MIN`                   | (tuỳ chọn) hạn đơn, phút — mặc định `30`; link PayOS hết hạn sớm hơn hạn đơn 5 phút (tối đa nửa TTL, ADR-144) |
+
+   > `SHOP_PUBLIC_URL` chưa biết trước (Render tự thêm hậu tố vào tên). Cứ để trống khi Create; URL hiện ngay đầu trang service **sau khi bấm Create** (build còn chạy). Vào **Environment** đặt `SHOP_PUBLIC_URL=https://shop-xxxx.onrender.com` (không `/` cuối) → Save → Render deploy lại. Trong lúc thiếu biến này Shop tự thử đăng ký lại, không hỏng gì.
 
    > Không đặt `PAYOS_BASE_URL` / `SHOP_PAYOS_API_BASE` trên Render (mặc định là API thật của PayOS). PayOS gửi webhook thanh toán về **hub** (URL đặt ở §9), không về Shop — Shop biết đơn đã trả qua `payment.received` hub giao tới.
 
