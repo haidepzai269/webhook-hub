@@ -27,5 +27,15 @@ export function testOnlyConfigProblems(env: Record<string, string | undefined>):
   if ((env.GOOGLE_OAUTH_FAKE_BASE_URL ?? '').trim()) {
     problems.push('GOOGLE_OAUTH_FAKE_BASE_URL chỉ dành cho kiểm chứng — production phải dùng Google thật');
   }
+  // KN2 (SPEC-ket-noi §4.5): mọi fake provider của connector (PAYOS_/STRIPE_/GITHUB_FAKE_BASE_URL…) chỉ ở stack kiểm chứng.
+  // Luật chung theo hậu tố — connector mới tự được che, không phải nhớ thêm tên vào đây.
+  for (const [key, value] of Object.entries(env)) {
+    if (key !== 'GOOGLE_OAUTH_FAKE_BASE_URL' && /_FAKE_BASE_URL$/.test(key) && (value ?? '').trim()) {
+      problems.push(`${key} chỉ dành cho kiểm chứng — production phải gọi provider thật`);
+    }
+  }
+  if ((env.CONNECTOR_INGEST_BASE_URL ?? '').trim()) {
+    problems.push('CONNECTOR_INGEST_BASE_URL chỉ dành cho kiểm chứng — production đăng ký URL ingest theo HUB_PUBLIC_URL');
+  }
   return problems;
 }

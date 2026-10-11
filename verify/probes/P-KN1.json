@@ -1,0 +1,14 @@
+{
+  "id": "P-KN1",
+  "claim": "Lõi kết nối rẽ nhánh theo provider (if (provider === 'payos')) → gate đỏ (luận điểm: thêm provider = class adapter + registry)",
+  "file": "apps/hub-api/src/modules/console/source-connection.service.ts",
+  "find": "    const connector = ProviderRegistry.get(provider).connector;\n",
+  "replace": "    const connector = ProviderRegistry.get(provider).connector;\n    if (provider === 'payos') void 0;\n",
+  "expectRed": [
+    "[KN2] gate P-KN1"
+  ],
+  "layer": "L0",
+  "testFile": [
+    "apps/hub-api/test/source-connections.spec.ts"
+  ]
+}

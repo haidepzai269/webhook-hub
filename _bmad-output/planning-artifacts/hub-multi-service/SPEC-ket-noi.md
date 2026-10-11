@@ -346,10 +346,18 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
   - U4 "đếm pool": kiểm bằng **tính thấy được** — trong lúc challenge treo 3 s, một kết nối khác đã thấy endpoint + subscription + audit (tx đã COMMIT ⇒ kết nối đã trả về pool). Ổn định hơn đếm `pg_stat_activity` khi nhiều test chạy song song.
   - `WindowLimiter(5/phút)` của console là instance riêng (không chung bộ đếm với `/v1/p`).
   - UI: nút "Tạo endpoint webhook" + hộp chi tiết (delivery gần đây, Verify lại, Xoay secret) ở trang Đích; form cũ chỉ còn telegram/discord. Chưa có trang route riêng `endpoints`.
+- **KN2 (ADR-146):**
+  - `ConnectorSpec` thêm các trường để lõi KHÔNG phải biết provider: `sourceSecretField` (PayOS `checksumKey` → SourceSecret v1 trước khi gọi), `overwriteWarning` (có → bắt buộc `acknowledgeOverwrite: true`, 422 `overwrite_not_acknowledged`), `keyHint`, `manualDisconnect`, `defaultBaseUrl`, `fakeBaseUrlEnv`. `status?` nhận thêm `ingestUrl` (Stripe so URL). `connectorBaseUrl(spec, env)` thay cho `connectorBaseUrl(provider)` (không bảng tên provider ở lõi).
+  - Route thêm `GET /api/v1/connectors` (UI dựng form từ `spec.fields`). `retry` 200 (không phải 201); `connect` luôn 201 kể cả FAILED. Retry không đòi lại `acknowledgeOverwrite` (đã xác nhận lúc kết nối).
+  - Audit: `source.create` (TX1, `via:"connect"`) + `source.connect` / `source.reconnect` (TX2, có `status`, `error`, `fields` = tên trường) + `source.disconnect` + `source.credentials_delete`.
+  - `HUB_PUBLIC_URL` "không công khai" gồm cả tên một nhãn (`hub-api`) và `.local/.internal/.lan/.home`. Stack kiểm chứng đặt `CONNECTOR_INGEST_BASE_URL` (chỉ ngoài production; production có biến này → không khởi động).
+  - P-KN1 "grep gate": hiện là test L0 `[KN2] gate P-KN1` trong `apps/hub-api/test/source-connections.spec.ts` (quét `source-connection.service.ts`, `source-connections.controller.ts`, `endpoints.controller.ts`), không nằm trong `verify/lib/gates.ts` (phiên VF đang sửa file đó). Probe `verify/probes/P-KN1..4.json`.
+  - Gỡ cấu hình cũ khi kết nối lại (Stripe xoá `we_` cũ) làm ở khung chung: provider trả `remoteRef` khác cái đang lưu và có `disconnect?` → gọi `disconnect(cũ)`; lỗi ở bước này chỉ log.
+  - UI: trang Nguồn có "Kết nối provider" (form từ `spec.fields`, ô xác nhận ghi đè) và nút 🔗 từng dòng (tình trạng, Thử lại, Ngắt, Xoá credentials).
 
 ## 12. Checklist và kết quả
 
-- [x] KN1 · [ ] KN1b (tuỳ chọn) · [ ] KN2 · [ ] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
+- [x] KN1 · [ ] KN1b (tuỳ chọn) · [x] KN2 · [ ] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
 - ADR mới: …
 
 | Kịch bản | PASS/FAIL | Ghi chú | Ngày |

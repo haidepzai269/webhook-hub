@@ -38,6 +38,17 @@ enum EndpointVerification {
   @@schema("hub")
 }
 
+/// KN2 (ADR-138): trạng thái kết nối hub -> provider (biến thể A).
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  FAILED
+  DRIFTED
+  DISCONNECTED
+
+  @@schema("hub")
+}
+
 enum RawStatus {
   ACCEPTED
   REJECTED
@@ -243,9 +254,11 @@ model Source {
   verificationConfig Json?        @map("verification_config")
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  secrets   SourceSecret[]
-  rawEvents RawEvent[]
+  secrets     SourceSecret[]
+  rawEvents   RawEvent[]
+  connections SourceConnection[] // tối đa MỘT (source_connections.source_id UNIQUE); khai mảng vì FK ghép (id, tenant_id)
 
+  @@unique([id, tenantId]) // KN2: đích của khoá ngoại ghép source_connections(source_id, tenant_id)
   @@map("sources")
   @@schema("hub")
 }
@@ -261,6 +274,33 @@ model SourceSecret {
   source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@map("source_secrets")
+  @@schema("hub")
+}
+
+/// KN2 (SPEC-ket-noi §4.2, ADR-138): hub đã đăng ký URL ingest của source tại provider. Credentials MÃ HOÁ
+/// (AES-256-GCM, MASTER_KEY), không route nào trả ra. RLS + TenantScopedRepository (BB-5).
+model SourceConnection {
+  id                   String           @id @default(uuid()) @db.Uuid
+  tenantId             String           @map("tenant_id") @db.Uuid
+  sourceId             String           @unique @map("source_id") @db.Uuid
+  provider             ProviderEnum
+  credentialsEncrypted String?          @map("credentials_encrypted") @db.Text
+  status               ConnectionStatus @default(PENDING)
+  remoteRef            String?          @map("remote_ref") @db.VarChar(255)
+  display              String?          @db.VarChar(255)
+  ingestUrl            String           @map("ingest_url") @db.Text
+  lastError            String?          @map("last_error") @db.VarChar(255)
+  lastFix              String?          @map("last_fix") @db.Text
+  connectedAt          DateTime?        @map("connected_at") @db.Timestamptz(6)
+  lastCheckedAt        DateTime?        @map("last_checked_at") @db.Timestamptz(6)
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Khoá ngoại GHÉP (source_id, tenant_id): DB từ chối kết nối trỏ sang source của project khác.
+  source Source @relation(fields: [sourceId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("source_connections")
   @@schema("hub")
 }
 

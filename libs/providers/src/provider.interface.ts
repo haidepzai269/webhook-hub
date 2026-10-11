@@ -40,6 +40,70 @@ export interface Diagnosis {
   field?: string;
 }
 
+/**
+ * KN2 (SPEC-ket-noi §4.1, ADR-138): NĂNG LỰC TUỲ CHỌN "hub tự đăng ký URL ingest tại provider" (biến thể A).
+ * Lõi chỉ hỏi `adapter.connector ? … : 422 connector_unsupported` — không bao giờ `switch (provider)`.
+ * Mọi từ vựng của provider (tên trường, URL API, cách gọi) nằm trong connector của chính adapter đó.
+ */
+export interface ConnectorField {
+  name: string;
+  label: string;
+  /** true -> UI dùng ô mật khẩu, response chỉ có 4 ký tự cuối. */
+  secret: boolean;
+  help: string;
+}
+
+export interface ConnectorSpec {
+  /** UI dựng form từ đây. */
+  fields: ConnectorField[];
+  /** Trường credentials CŨNG là secret ký mà `adapter.verify` dùng (PayOS `checksumKey`) -> hub lưu SourceSecret TRƯỚC khi gọi provider. */
+  sourceSecretField?: string;
+  /** Có -> kết nối THAY cấu hình đang có ở provider; body bắt buộc `acknowledgeOverwrite: true` (422 nếu thiếu). */
+  overwriteWarning?: string;
+  /** Gợi ý quyền tối thiểu cho key (§4.3 điều 6). */
+  keyHint: string;
+  /** Không có `disconnect` -> câu hướng dẫn ngắt tay hiện ở UI. */
+  manualDisconnect?: string;
+  /** URL API thật (production luôn dùng cái này, không đọc env). */
+  defaultBaseUrl: string;
+  /** Tên biến môi trường trỏ tới fake provider — CHỈ đọc ngoài production (production có biến này -> app không khởi động). */
+  fakeBaseUrlEnv: string;
+}
+
+export interface ConnectResult {
+  /** id phía provider: PayOS số tài khoản đã che, Stripe `we_…`. Không nhạy cảm. */
+  remoteRef: string;
+  /** Dòng hiển thị, vd "CAFE ABC · ****1234". */
+  display: string;
+  /** Provider SINH secret ký (Stripe) -> hub lưu thành SourceSecret version mới. */
+  sourceSecret?: string;
+}
+
+export interface ConnectorCallInput {
+  credentials: Record<string, string>;
+  baseUrl: string;
+}
+
+export interface ProviderConnector {
+  spec: ConnectorSpec;
+  /** `secretForSource`: secret ký mà `adapter.verify` sẽ dùng, nếu dev nhập (PayOS `checksumKey`). */
+  connect(input: ConnectorCallInput & { ingestUrl: string; secretForSource?: string }): Promise<ConnectResult>;
+  status?(input: ConnectorCallInput & { remoteRef: string; ingestUrl: string }): Promise<'ok' | 'drifted' | 'gone'>;
+  disconnect?(input: ConnectorCallInput & { remoteRef: string }): Promise<void>;
+}
+
+/** Lỗi của provider khi kết nối — `code` ngắn (lưu `last_error`), `fix` theo khuôn ADR-136 (lưu `last_fix`). Không bao giờ chứa credentials. */
+export class ConnectorError extends Error {
+  constructor(
+    readonly code: string,
+    readonly fix: string,
+    message?: string,
+  ) {
+    super(message ?? code);
+    this.name = 'ConnectorError';
+  }
+}
+
 export interface ProviderAdapter {
   readonly provider: ProviderType;
 
@@ -94,4 +158,7 @@ export interface ProviderAdapter {
    * Phản hồi HTTP status và body đúng định dạng provider mong đợi.
    */
   buildAck(result: IngestResult): { status: number; body: unknown };
+
+  /** KN2: hub tự đăng ký URL ingest tại provider. Không có -> 422 `connector_unsupported` (dán URL tay). */
+  readonly connector?: ProviderConnector;
 }

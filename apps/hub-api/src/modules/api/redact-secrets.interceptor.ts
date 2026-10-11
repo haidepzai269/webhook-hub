@@ -10,6 +10,8 @@ const SECRET_KEYS: Record<string, string> = {
   secretEncrypted: 'hasSecret',
   configEncrypted: 'hasConfig',
   signingSecretEncrypted: 'hasSigningSecret',
+  // KN2 (SPEC-ket-noi §4.3 điều 2): credentials provider — chỉ ghi, không bao giờ đọc qua API.
+  credentialsEncrypted: 'hasCredentials',
 };
 
 /**

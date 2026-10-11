@@ -141,6 +141,38 @@ export class TenantScopedRepository {
     });
   }
 
+  /**
+   * KN2 (ADR-138): thêm SourceSecret version mới (max+1) cho source CỦA tenant này. `retireOthersAt` -> các version đang
+   * hiệu lực hết hạn lúc đó (thời gian chồng: cả hai cùng verify trong lúc chuyển). Source khác tenant -> null.
+   */
+  async addSourceSecret(sourceId: string, secretEncrypted: string, retireOthersAt?: Date) {
+    const source = await this.prisma.source.findFirst({ where: { id: sourceId, tenantId: this.tenantId }, include: { secrets: true } });
+    if (!source) return null;
+    if (retireOthersAt) {
+      await this.prisma.sourceSecret.updateMany({
+        where: { sourceId, OR: [{ validUntil: null }, { validUntil: { gt: retireOthersAt } }] },
+        data: { validUntil: retireOthersAt },
+      });
+    }
+    const version = Math.max(0, ...source.secrets.map((x) => x.version)) + 1;
+    return this.prisma.sourceSecret.create({ data: { sourceId, secretEncrypted, version } });
+  }
+
+  // --- Source connections (KN2, ADR-138) — credentials_encrypted chỉ đọc ở service, không bao giờ ra API ---
+  async findSourceConnection(sourceId: string) {
+    return this.prisma.sourceConnection.findFirst({ where: { sourceId, tenantId: this.tenantId } });
+  }
+
+  async createSourceConnection(data: Omit<Prisma.SourceConnectionUncheckedCreateInput, 'tenantId'>) {
+    return this.prisma.sourceConnection.create({ data: { ...data, tenantId: this.tenantId } });
+  }
+
+  async updateSourceConnection(sourceId: string, data: Prisma.SourceConnectionUncheckedUpdateInput) {
+    const r = await this.prisma.sourceConnection.updateMany({ where: { sourceId, tenantId: this.tenantId }, data });
+    if (r.count !== 1) return null;
+    return this.findSourceConnection(sourceId);
+  }
+
   // --- Destinations ---
   async findDestinations(where: Prisma.DestinationWhereInput = {}) {
     return this.prisma.destination.findMany({

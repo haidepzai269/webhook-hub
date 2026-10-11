@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus } from "lucide-react";
+import { Link2, Plug, Plus } from "lucide-react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -21,6 +21,19 @@ import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
+
+import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
+
+/** KN2: nút "Kết nối" trên từng dòng mở hộp tình trạng kết nối. */
+const OpenConnection = createContext<(id: string) => void>(() => undefined);
+function ConnectionButton({ id }: { id: string }) {
+  const open = useContext(OpenConnection);
+  return (
+    <Button size="sm" variant="ghost" onClick={() => open(id)} title="Kết nối provider (hub tự đăng ký URL)">
+      <Link2 />
+    </Button>
+  );
+}
 
 const SECRET_HINT: Record<(typeof PROVIDERS)[number], string> = {
   github: "Webhook secret đặt trong GitHub (HMAC-SHA256 trên raw body).",
@@ -88,12 +101,21 @@ const columns: HubColumn<Source>[] = [
     accessorFn: (s) => s.createdAt,
     cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt)}</span>,
   },
+  {
+    id: "connection",
+    header: "",
+    enableSorting: false,
+    enableHiding: false,
+    cell: ({ row }) => <ConnectionButton id={row.original.id} />,
+  },
 ];
 
 export default function SourcesPage() {
   const { data, isLoading, error } = useSources();
   const create = useCreateSource();
   const [open, setOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectionId, setConnectionId] = useState<string | null>(null);
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { provider: "github", name: "", secret: "" },
@@ -119,21 +141,31 @@ export default function SourcesPage() {
         title="Nguồn (Sources)"
         description="Mỗi nguồn là một endpoint nhận webhook của một provider. Secret được mã hoá AES-256-GCM, không bao giờ hiển thị lại."
         actions={
-          <Button onClick={() => setOpen(true)}>
-            <Plus />
-            Thêm nguồn
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setConnectOpen(true)}>
+              <Plug />
+              Kết nối provider
+            </Button>
+            <Button variant="outline" onClick={() => setOpen(true)}>
+              <Plus />
+              Thêm nguồn (dán URL tay)
+            </Button>
+          </div>
         }
       />
-      <DataTable
-        data={data}
-        columns={columns}
-        getRowId={(s) => s.id}
-        isLoading={isLoading}
-        error={error}
-        searchPlaceholder="Lọc theo tên, provider…"
-        emptyText="Chưa có nguồn nào."
-      />
+      <ConnectSourceDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <ConnectionDialog sourceId={connectionId} onClose={() => setConnectionId(null)} />
+      <OpenConnection.Provider value={setConnectionId}>
+        <DataTable
+          data={data}
+          columns={columns}
+          getRowId={(s) => s.id}
+          isLoading={isLoading}
+          error={error}
+          searchPlaceholder="Lọc theo tên, provider…"
+          emptyText="Chưa có nguồn nào."
+        />
+      </OpenConnection.Provider>
 
       <FormDialog
         open={open}

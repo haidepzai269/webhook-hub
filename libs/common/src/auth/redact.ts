@@ -3,7 +3,9 @@
  * Hai lớp: (1) pino `redact` theo tên khoá; (2) `scrubSecrets` quét CHUỖI (thông điệp log, lỗi) vì
  * bí mật có thể nằm giữa câu chữ, nơi redact theo khoá không với tới.
  */
-const SECRET_KEYS = ['password', 'currentPassword', 'newPassword', 'token', 'refreshToken', 'accessToken', 'ticket', 'code_verifier', 'codeVerifier'];
+const SECRET_KEYS = ['password', 'currentPassword', 'newPassword', 'token', 'refreshToken', 'accessToken', 'ticket', 'code_verifier', 'codeVerifier',
+  // KN2 (SPEC-ket-noi §4.3 điều 3): credentials của connector provider (PayOS, Stripe…) không bao giờ vào log.
+  'credentials', 'apiKey', 'clientId', 'checksumKey', 'secretKey'];
 
 export const LOG_REDACT_OPTIONS = {
   paths: [

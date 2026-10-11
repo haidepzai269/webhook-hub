@@ -10,9 +10,11 @@
  *   DELETE /_requests            xoá hết
  *   GET    /health               200
  *   /fake-google/*                Google OIDC giả cho e2e đăng nhập Google (fake-google.js, ADR-127) — KHÔNG ghi vào _requests
+ *   /_fake/*                      PayOS/Stripe giả cho connector (fake-providers.js, SPEC-ket-noi §4.6) — CÓ ghi vào _requests
  */
 const http = require('http');
 const { createFakeGoogle } = require('./fake-google');
+const { createFakeProviders } = require('./fake-providers');
 
 function createSink(opts = {}) {
   const slowMs = opts.slowMs ?? 30_000;
@@ -20,6 +22,7 @@ function createSink(opts = {}) {
   /** @type {Array<{at:string,method:string,path:string,query:Record<string,string>,headers:Record<string,string>,body:string}>} */
   let requests = [];
   const fakeGoogle = createFakeGoogle();
+  const fakeProviders = createFakeProviders(opts.env);
 
   return http.createServer((req, res) => {
     const url = new URL(req.url, 'http://sink');
@@ -51,6 +54,7 @@ function createSink(opts = {}) {
         body,
       });
       if (requests.length > max) requests.shift();
+      if (fakeProviders(req, res, url, body)) return;
 
       const mode = url.searchParams.get('mode');
       if (mode === 'fail') return json(500, { error: 'sink_mode_fail' });

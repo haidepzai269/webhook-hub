@@ -7,11 +7,17 @@ Spec: `SPEC-ket-noi.md` (ADR-138). Câu hỏi cho Admin: `CAN-ADMIN-QUYET-KN.md`
 - hubv đang được phiên VF dùng cho chaos (Postgres có lúc bị pause → `PrismaClientInitializationError` tạm thời: chạy lại). KHÔNG restart/rebuild hubv.
 - Không commit `verify/baseline.json`, `docs/TEST-MAP.md` (sinh tự động, nhiều phiên cùng sửa).
 
+## Sự cố git (2026-10-11)
+- `c888ef6` (KN1) dùng `git add` + `git commit` trên **index dùng chung**: nuốt luôn file đã stage của phiên DX (M-1/L-5 + ADR-143) và lại thiếu 3 file của KN1 (`service-resources.controller.ts`, `errors/catalog.ts`, ADR-142) do index bị phiên khác đổi giữa lúc stage và commit → HEAD không biên dịch. Sửa bằng `3955b9f` (commit theo đường dẫn, không amend/reset). HEAD sau sửa: tsc hub-api xanh + L0 kiểm ở worktree tạm.
+- Phiên DX viết lại tạm `tenant-scoped.repository.ts` + `docs/ARCHITECTURE.md` để commit theo đường dẫn rồi trả lại; đã kiểm `git diff HEAD`: repo chỉ còn đúng 4 phương thức KN2 của mình (đủ), hunk ARCHITECTURE.md (ghi chú demo §9.1) KHÔNG phải của phiên KN.
+- Commit KN2 trở đi: index TẠM (`GIT_INDEX_FILE`, script scratchpad `commit-kn.sh`): file của mình lấy nguyên bản, `docs/adr/README.md` = HEAD + đúng khối ADR của mình (phiên khác đang có ADR chưa commit trong cùng file); sau đó `git reset -q -- <paths>` để index dùng chung khớp HEAD.
+- **Luật từ giờ:** chỉ commit bằng `git commit -m … -- <path…>` (chỉ các đường dẫn đó, bất kể index đang có gì). Không `git add` rồi commit trơn.
+
 ## Trạng thái
 | Story | Trạng thái | Commit |
 |---|---|---|
-| KN1 | xong (L0+L1 xanh, L2 [KN:T1] NOT RUN — hubv chưa rebuild) | xem `git log --grep KN1` |
-| KN2 | đang làm | |
+| KN1 | xong (L0+L1 xanh, L2 [KN:T1] NOT RUN — hubv chưa rebuild) | c888ef6 + 3955b9f |
+| KN2 | xong (L0 772/0/0, L1 xanh sau chạy lại — lần đầu 21 đỏ do tranh chấp hubv/Redis rate-limit với phiên VF), probe P-KN1..4 đỏ ✓ | (commit KN2) |
 | KN3 | chưa | |
 | KN4 | chưa | |
 

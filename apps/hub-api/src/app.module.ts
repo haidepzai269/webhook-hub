@@ -18,6 +18,7 @@ import { ApiKeyGuard } from './modules/service-api/api-key.guard';
 import { EndpointVerifier } from './modules/service-api/endpoint-verifier';
 import { FlowModule } from './modules/flow/flow.module';
 import { ConsoleEndpointsController } from './modules/console/endpoints.controller';
+import { SourceConnectionsController } from './modules/console/source-connections.controller';
 
 /**
  * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
@@ -26,6 +27,7 @@ import { ConsoleEndpointsController } from './modules/console/endpoints.controll
 export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE_ENV) {
   const base = [IngestController, HealthController, ApiController, ProjectsController, MembersController, ServiceApiController, ServiceResourcesController, MetricsController,
     ConsoleEndpointsController, // KN1 (ADR-138): console tạo endpoint — controller riêng, không sửa ApiController
+    SourceConnectionsController, // KN2 (ADR-138): hub tự đăng ký URL ingest tại provider
   ];
   return nodeEnv === 'production' ? base : [...base, MockController];
 }

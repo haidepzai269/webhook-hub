@@ -1,0 +1,14 @@
+{
+  "id": "P-KN3",
+  "claim": "Bỏ redact credentialsEncrypted ở interceptor → ciphertext credentials có thể ra API",
+  "file": "apps/hub-api/src/modules/api/redact-secrets.interceptor.ts",
+  "find": "  credentialsEncrypted: 'hasCredentials',\n",
+  "replace": "",
+  "expectRed": [
+    "[KN:U10]"
+  ],
+  "layer": "L1",
+  "testFile": [
+    "apps/hub-api/test/source-connections-db.spec.ts"
+  ]
+}

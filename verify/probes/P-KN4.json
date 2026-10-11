@@ -1,0 +1,14 @@
+{
+  "id": "P-KN4",
+  "claim": "Ghi credentials thẳng vào audit.metadata",
+  "file": "apps/hub-api/src/modules/console/source-connection.service.ts",
+  "find": "fields: Object.keys(credentials), secretRotated",
+  "replace": "fields: Object.keys(credentials), credentials, secretRotated",
+  "expectRed": [
+    "[KN:U11]"
+  ],
+  "layer": "L1",
+  "testFile": [
+    "apps/hub-api/test/source-connections-db.spec.ts"
+  ]
+}
