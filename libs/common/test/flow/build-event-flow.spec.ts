@@ -132,7 +132,7 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
     expect(f.summary[5]).toEqual({ stage: 'delivering', status: 'skipped', okCount: 0, total: 0 });
   });
 
-  it('[KN:U16] L-A1: event probe của provider → routed skipped với lý do provider_probe (cố ý, không phải no_subscription), không gợi ý sửa cấu hình', () => {
+  it('[KN:U16] (phần k) L-A1: event probe của provider → routed skipped với lý do provider_probe (cố ý, không phải no_subscription), không gợi ý sửa cấu hình', () => {
     const f = flow({ event: event({ type: 'payos.webhook_test', normalized: false, probe: true }), deliveries: [] });
     const r = f.stages.find((s) => s.key === 'routed')!;
     expect(r.status).toBe('skipped');
@@ -143,7 +143,7 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
     expect(f.failedAt).toBeNull();
   });
 
-  it('[KN:U16] L-A1: probe thắng cả lý do subscription tắt (subscription bị bỏ vì là probe, không vì cấu hình)', () => {
+  it('[KN:U16] (phần l) L-A1: probe thắng cả lý do subscription tắt (subscription bị bỏ vì là probe, không vì cấu hình)', () => {
     const f = flow({
       event: event({ type: 'payos.webhook_test', normalized: false, probe: true }),
       deliveries: [],

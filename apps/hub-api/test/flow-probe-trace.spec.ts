@@ -40,7 +40,7 @@ describe('FlowService.getEventFlow — event probe', () => {
   const routed = (f: { flow?: { stages: { key: string; reason?: { code: string } }[] }; stages?: { key: string; reason?: { code: string } }[] }) =>
     (f.flow?.stages ?? f.stages ?? []).find((s) => s.key === 'routed');
 
-  it('[KN:U16] probe=true → routed.reason = provider_probe', async () => {
+  it('[KN:U16] (phần m) probe=true → routed.reason = provider_probe', async () => {
     const f: any = await serviceWith(true).getEventFlow('t-1', EVENT_ID);
     expect(routed(f)?.reason?.code).toBe('provider_probe');
   });
