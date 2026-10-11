@@ -61,7 +61,11 @@ export function stepToasts<T extends ToastableTrace>(
       flushInMs: null,
     };
   }
-  return { toast: null, cursor: { watermark, lastToastAt: cur.lastToastAt, pending, latest }, flushInMs: windowMs - since };
+  return {
+    toast: null,
+    cursor: { watermark, lastToastAt: cur.lastToastAt, pending, latest },
+    flushInMs: windowMs - since,
+  };
 }
 
 /**
@@ -159,10 +163,28 @@ export function describeVerification(
   verification: string | undefined | null,
   code: string | undefined | null,
 ): { label: string; tone: VerificationTone; reason: string | null } {
-  if (verification === "PENDING") return { label: "PENDING", tone: "wait", reason: "Đang chờ endpoint trả lời challenge." };
+  if (verification === "PENDING")
+    return { label: "PENDING", tone: "wait", reason: "Đang chờ endpoint trả lời challenge." };
   if (verification !== "FAILED") return { label: "VERIFIED", tone: "ok", reason: null };
   if (!code) return { label: "FAILED", tone: "bad", reason: "Xác minh thất bại." };
   const http = /^http_(\d{3})$/.exec(code);
-  const reason = http ? `Endpoint trả HTTP ${http[1]} cho challenge (phải trả 200).` : (VI_VERIFICATION[code] ?? `Lỗi xác minh: ${code}`);
+  const reason = http
+    ? `Endpoint trả HTTP ${http[1]} cho challenge (phải trả 200).`
+    : (VI_VERIFICATION[code] ?? `Lỗi xác minh: ${code}`);
   return { label: "FAILED", tone: "bad", reason };
+}
+
+/**
+ * Nút 🔗 trên một dòng Nguồn (lỗi production 2026-10-12): nguồn CHƯA từng kết nối (vd `src_payos_main` của seed) mà provider
+ * có connector -> mở hộp "Kết nối provider" điền sẵn nguồn này; đã có kết nối -> hộp tình trạng (chỉ xem/thao tác);
+ * provider không có connector -> giải thích là nguồn dán URL tay.
+ */
+export function connectionDialogMode(
+  connection: unknown | null | undefined,
+  provider: string,
+  connectorProviders: string[] | undefined,
+): "loading" | "status" | "connect" | "manual" {
+  if (connection === undefined || connectorProviders === undefined) return "loading";
+  if (connection) return "status";
+  return connectorProviders.includes(provider) ? "connect" : "manual";
 }

@@ -3,11 +3,12 @@ import * as path from "path";
 
 import {
   AUDIT_KEY,
+  connectionDialogMode,
   countdownTicker,
   describeDeleteConflict,
   describeVerification,
-  errorMessageOf,
   emptyToastCursor,
+  errorMessageOf,
   keysAfterAudited,
   stepToasts,
   TOAST_WINDOW_MS,
@@ -57,7 +58,12 @@ describe("countdownTicker — tự clearInterval khi về 0", () => {
     let now = 0;
     const seen: number[] = [];
     const id = setInterval(
-      countdownTicker(3000, (n) => seen.push(n), () => clearInterval(id), () => now),
+      countdownTicker(
+        3000,
+        (n) => seen.push(n),
+        () => clearInterval(id),
+        () => now,
+      ),
       1000,
     );
     for (let i = 0; i < 10; i++) {
@@ -88,10 +94,14 @@ describe("invalidate ['audit'] sau mọi mutation có audit", () => {
 
 describe("describeDeleteConflict — thông báo 409 dễ hiểu", () => {
   it("subscription còn delivery -> gợi ý Tắt", () => {
-    expect(describeDeleteConflict({ status: 409, body: { deliveryCount: 4 }, message: "x" })).toMatch(/4 delivery.*Tắt/);
+    expect(describeDeleteConflict({ status: 409, body: { deliveryCount: 4 }, message: "x" })).toMatch(
+      /4 delivery.*Tắt/,
+    );
   });
   it("đích còn subscription -> nêu số subscription", () => {
-    expect(describeDeleteConflict({ status: 409, body: { subscriptionCount: 2, deliveryCount: 9 } })).toMatch(/2 subscription/);
+    expect(describeDeleteConflict({ status: 409, body: { subscriptionCount: 2, deliveryCount: 9 } })).toMatch(
+      /2 subscription/,
+    );
   });
   it("không phải 409 -> null", () => {
     expect(describeDeleteConflict({ status: 500 })).toBeNull();
@@ -101,11 +111,17 @@ describe("describeDeleteConflict — thông báo 409 dễ hiểu", () => {
 
 describe("errorMessageOf — DX1: console giữ câu tiếng Việt (ADR-136)", () => {
   it("ưu tiên detail; thiếu detail -> câu Việt theo mã; mã lạ -> message; 5xx kèm requestId", () => {
-    expect(errorMessageOf({ error: "bad_request", message: "The request is invalid.", detail: "range phải là '24h' hoặc '7d'" })).toBe(
-      "range phải là '24h' hoặc '7d'",
-    );
+    expect(
+      errorMessageOf({
+        error: "bad_request",
+        message: "The request is invalid.",
+        detail: "range phải là '24h' hoặc '7d'",
+      }),
+    ).toBe("range phải là '24h' hoặc '7d'");
     expect(errorMessageOf({ error: "not_found", message: "The resource was not found." })).toMatch(/Không tìm thấy/);
-    expect(errorMessageOf({ error: "internal_error", message: "Internal error.", requestId: "r-123" })).toMatch(/r-123/);
+    expect(errorMessageOf({ error: "internal_error", message: "Internal error.", requestId: "r-123" })).toMatch(
+      /r-123/,
+    );
     expect(errorMessageOf({ error: "zzz", message: "Plain" })).toBe("Plain");
     expect(errorMessageOf({ message: ["a", "b"] })).toBe("a, b");
     expect(errorMessageOf(null)).toBe("");
@@ -136,5 +152,15 @@ describe("L-6: đổi project thì xoá trace cũ (TraceFeed không hiện trace
     const block = src.slice(src.indexOf("useProjectStore.subscribe("), src.indexOf("const onConnect"));
     expect(block).toMatch(/traces: \[\]/);
     expect(block).toMatch(/toastCursor: emptyToastCursor\(\)/);
+  });
+});
+
+describe("connectionDialogMode — nút Kết nối trên dòng Nguồn", () => {
+  it("chưa kết nối + provider có connector -> mở hộp kết nối điền sẵn; đã kết nối -> tình trạng; không connector -> dán tay", () => {
+    expect(connectionDialogMode(null, "payos", ["payos", "stripe"])).toBe("connect");
+    expect(connectionDialogMode({ status: "CONNECTED" }, "payos", ["payos"])).toBe("status");
+    expect(connectionDialogMode(null, "github", ["payos", "stripe"])).toBe("manual");
+    expect(connectionDialogMode(undefined, "payos", ["payos"])).toBe("loading");
+    expect(connectionDialogMode(null, "payos", undefined)).toBe("loading");
   });
 });

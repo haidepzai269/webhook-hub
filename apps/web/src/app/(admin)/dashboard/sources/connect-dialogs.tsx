@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
+import { connectionDialogMode } from "@/lib/hub/ui-logic";
 
 /** KN2 (SPEC-ket-noi §4, ADR-138): form dựng từ `spec.fields` của connector — UI không biết provider nào có ô gì. */
 interface ConnectorInfo {
@@ -64,22 +65,31 @@ function StatusLine({ c }: { c: ConnectionView }) {
   );
 }
 
-export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+/** `preset`: mở từ nút 🔗 của một nguồn chưa kết nối -> chọn sẵn provider + "Kết nối nguồn có sẵn" = nguồn đó. */
+export function ConnectSourceDialog({
+  open,
+  onOpenChange,
+  preset,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  preset?: { provider: string; sourceId: string } | null;
+}) {
   const connectors = useQuery({
     queryKey: ["connectors"],
     queryFn: () => hubFetch<ConnectorInfo[]>("/api/v1/connectors"),
     enabled: open,
   });
   const refresh = useRefresh();
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState<string>(preset?.provider ?? "");
   const [name, setName] = useState("");
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [ack, setAck] = useState(false);
   const [result, setResult] = useState<ConnectionView | null>(null);
   const [secretChanged, setSecretChanged] = useState(false);
   // H-1 (ADR-151): "nguồn có sẵn" (giữ sourceKey — service đang ghim nguồn đó vẫn nhận) hay "tạo nguồn mới".
-  const [mode, setMode] = useState<"existing" | "new" | null>(null);
-  const [existingId, setExistingId] = useState<string>("");
+  const [mode, setMode] = useState<"existing" | "new" | null>(preset ? "existing" : null);
+  const [existingId, setExistingId] = useState<string>(preset?.sourceId ?? "");
   const [sourceKey, setSourceKey] = useState("");
   const sources = useSources();
   const spec = (connectors.data ?? []).find((c) => c.provider === provider) ?? connectors.data?.[0];
@@ -96,10 +106,13 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
         ...(spec?.overwriteWarning ? { acknowledgeOverwrite: ack } : {}),
       };
       return effMode === "existing" && target
-        ? hubFetch<{ connection: ConnectionView; secretChanged?: boolean }>(`/api/v1/sources/${encodeURIComponent(target.id)}/connect`, {
-            method: "POST",
-            body: JSON.stringify(common),
-          })
+        ? hubFetch<{ connection: ConnectionView; secretChanged?: boolean }>(
+            `/api/v1/sources/${encodeURIComponent(target.id)}/connect`,
+            {
+              method: "POST",
+              body: JSON.stringify(common),
+            },
+          )
         : hubFetch<{ connection: ConnectionView; secretChanged?: boolean }>("/api/v1/sources/connect", {
             method: "POST",
             body: JSON.stringify({
@@ -132,7 +145,8 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
     spec &&
     sourcesReady &&
     (effMode === "existing" ? !!target : !!name.trim()) &&
-    spec.fields.every((f) => creds[f.name]?.trim()) && (!spec.overwriteWarning || ack);
+    spec.fields.every((f) => creds[f.name]?.trim()) &&
+    (!spec.overwriteWarning || ack);
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -148,9 +162,9 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
             <StatusLine c={result} />
             {secretChanged && (
               <p className="rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                ⚠️ Secret ký (vd checksumKey) khác key hiện tại — hub sẽ giữ <b>cả hai</b> cho tới khi webhook thật xác minh
-                bằng key mới. Nếu webhook thật chỉ khớp key cũ, mục kết nối của nguồn sẽ báo <code>secret_mismatch</code>:
-                nhập lại đúng key rồi bấm &quot;Thử lại&quot;.
+                ⚠️ Secret ký (vd checksumKey) khác key hiện tại — hub sẽ giữ <b>cả hai</b> cho tới khi webhook thật xác
+                minh bằng key mới. Nếu webhook thật chỉ khớp key cũ, mục kết nối của nguồn sẽ báo{" "}
+                <code>secret_mismatch</code>: nhập lại đúng key rồi bấm &quot;Thử lại&quot;.
               </p>
             )}
           </div>
@@ -171,7 +185,9 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
                     type="button"
                     size="sm"
                     variant={spec?.provider === c.provider ? "default" : "outline"}
-                    onClick={() => (setProvider(c.provider), setCreds({}), setAck(false), setMode(null), setExistingId(""))}
+                    onClick={() => (
+                      setProvider(c.provider), setCreds({}), setAck(false), setMode(null), setExistingId("")
+                    )}
                   >
                     {c.provider}
                   </Button>
@@ -220,8 +236,8 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
                     ))}
                   </select>
                   <FieldDescription>
-                    Secret ký nhập vào khác key nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh bằng
-                    key mới (không tự xoá key cũ).
+                    Secret ký nhập vào khác key nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh
+                    bằng key mới (không tự xoá key cũ).
                   </FieldDescription>
                   <FieldDescription>
                     Hub đăng ký đúng URL của nguồn này (/hooks/{target.provider}/{target.sourceKey}) — service đang tin
@@ -291,8 +307,22 @@ export function ConnectSourceDialog({ open, onOpenChange }: { open: boolean; onO
 }
 
 /** Tình trạng kết nối của một nguồn: Thử lại (không nhập lại), Ngắt, Xoá credentials. */
-export function ConnectionDialog({ sourceId, onClose }: { sourceId: string | null; onClose: () => void }) {
+export function ConnectionDialog({
+  source,
+  onClose,
+  onConnect,
+}: {
+  source: { id: string; provider: string } | null;
+  onClose: () => void;
+  onConnect: (s: { id: string; provider: string }) => void;
+}) {
+  const sourceId = source?.id ?? null;
   const refresh = useRefresh();
+  const connectors = useQuery({
+    queryKey: ["connectors"],
+    queryFn: () => hubFetch<ConnectorInfo[]>("/api/v1/connectors"),
+    enabled: Boolean(sourceId),
+  });
   const q = useQuery({
     queryKey: ["connection", sourceId],
     queryFn: () =>
@@ -314,6 +344,18 @@ export function ConnectionDialog({ sourceId, onClose }: { sourceId: string | nul
     onSettled: refresh,
   });
   const c = q.data;
+  const mode = connectionDialogMode(
+    q.isSuccess ? c : undefined,
+    source?.provider ?? "",
+    connectors.isSuccess ? connectors.data.map((x) => x.provider) : connectors.isError ? [] : undefined,
+  );
+  // Chưa từng kết nối mà provider có connector -> chuyển sang hộp kết nối điền sẵn nguồn này.
+  useEffect(() => {
+    if (mode === "connect" && source) {
+      onClose();
+      onConnect(source);
+    }
+  }, [mode, source, onClose, onConnect]);
   return (
     <Dialog open={Boolean(sourceId)} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -321,7 +363,7 @@ export function ConnectionDialog({ sourceId, onClose }: { sourceId: string | nul
           <DialogTitle>Kết nối provider</DialogTitle>
           <DialogDescription className="font-mono text-xs">{c?.ingestUrl ?? ""}</DialogDescription>
         </DialogHeader>
-        {q.isLoading ? (
+        {mode === "loading" || mode === "connect" ? (
           <p className="text-sm">Đang tải…</p>
         ) : !c ? (
           <p className="text-muted-foreground text-sm">

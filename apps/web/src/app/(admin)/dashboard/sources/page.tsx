@@ -116,6 +116,8 @@ export default function SourcesPage() {
   const [open, setOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [preset, setPreset] = useState<{ provider: string; sourceId: string } | null>(null);
+  const connectionSource = data?.find((s) => s.id === connectionId) ?? null;
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { provider: "github", name: "", secret: "" },
@@ -142,7 +144,7 @@ export default function SourcesPage() {
         description="Mỗi nguồn là một endpoint nhận webhook của một provider. Secret được mã hoá AES-256-GCM, không bao giờ hiển thị lại."
         actions={
           <div className="flex gap-2">
-            <Button onClick={() => setConnectOpen(true)}>
+            <Button onClick={() => (setPreset(null), setConnectOpen(true))}>
               <Plug />
               Kết nối provider
             </Button>
@@ -153,8 +155,17 @@ export default function SourcesPage() {
           </div>
         }
       />
-      <ConnectSourceDialog open={connectOpen} onOpenChange={setConnectOpen} />
-      <ConnectionDialog sourceId={connectionId} onClose={() => setConnectionId(null)} />
+      <ConnectSourceDialog
+        key={preset?.sourceId ?? "new"}
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        preset={preset}
+      />
+      <ConnectionDialog
+        source={connectionSource}
+        onClose={() => setConnectionId(null)}
+        onConnect={(s) => (setPreset({ provider: s.provider, sourceId: s.id }), setConnectOpen(true))}
+      />
       <OpenConnection.Provider value={setConnectionId}>
         <DataTable
           data={data}
