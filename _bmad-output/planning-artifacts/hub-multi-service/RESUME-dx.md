@@ -26,3 +26,10 @@
 - Q1 = (a) (Admin 11/10): `rejectAck` trong ingest.service — 401/422 ở /hooks qua `adapter.buildAck`, status lõi giữ. ADR-139
   (137/138 là phiên khác). RED trước (`ingest-reject-ack.spec.ts` 5 fail), xanh sau; L0 đầy đủ 101 suite / 750 test pass;
   redis-budget xanh; `verify/test/hub-sim-adapters.spec.ts` xanh (fixture hub-sim chỉ kỳ vọng status — không vỡ, không cần VF sửa).
+- Live (Admin 11/10): df 16 GB trống ≥ 8 → `docker compose -p webhook-hub build hub-api hub-worker shop web` + `up -d` (KHÔNG đụng hubv,
+  không down -v, không xoá image/volume). Compose chạy hub-api bằng `hub_app` → không gặp lỗi AU6 (lỗi đó chỉ khi chạy từ source
+  với `.env` dev, vốn dùng `hub_user` superuser). TX1/TX3 (`--from latest`)/TX4 PASS — ghi ở SPEC §9.
+- hub-sim trên stack dev sau Q1: `payos/bad-sig` → 401 `{"code":"01",…}` ✓, `sepay/auth-no-prefix` → 401 `{"success":false,…}` ✓;
+  `github/ping` → 401 (mong 200) vì secret GitHub của stack dev ≠ secret giả `.env.verify` — KHÔNG phải hồi quy, status/body GitHub
+  giữ `{error}`. Stripe/Generic không có source ở stack dev → chỉ kiểm bằng unit (`ingest-reject-ack.spec.ts`). Fixture hub-sim chỉ
+  kỳ vọng status nên không cần VF sửa.

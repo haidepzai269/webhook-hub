@@ -332,9 +332,9 @@ HUB_URL=$HUB_URL_KA HUB_LISTEN_SECRET=whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3R0ZXN0 npx
 | Kịch bản | PASS/FAIL | Ghi chú / output | Ngày |
 |---|---|---|---|
 | UX1–UX16 | | | |
-| TX1 | | | |
+| TX1 | PASS (phiên DEV, stack dev `webhook-hub` build lại từ `9243043`) | key chỉ `read:events` POST /events → 403 `missing_scope`, `required=publish:events`, `fix` nhắc `publish:events`, `docsUrl=docs/ERRORS.md#missing_scope`, header `x-request-id` = body `requestId`; key sai → 401 `invalid_api_key` + fix; `after=abc` → 400 `invalid_cursor`; `after=latest` → 200 `{events:[],nextCursor:"68"}`; requestId tìm thấy trong `docker logs webhook-hub-api`; không response nào chứa key | 2026-10-11 |
 | TX2 | | **số giây:** … · chỗ bị khựng: … · ai thắng cược ☕: … | |
-| TX3 | (một phần, phiên DEV) | độ trễ đo được (local, stack dev, SePay mock → app local, N=10): p50 0,62 s · p95 1,70 s · max 1,70 s; app mẫu in event sau ~1,05 s; secret sai → `→ 401`. Chưa chạy `--from latest` (image API cũ) | 2026-10-11 |
-| TX4 | | | |
+| TX3 | PASS (phiên DEV) | `--from latest` → "from cursor 68"; SePay mock → app mẫu (examples/quickstart-node) in `payment.received 50000 evt_…`: 5 lần 1087/403/495/894/519 ms (max 1,09 s ≤ 5 s); đổi secret app → listen in `→ 401`; dừng (abort = Ctrl+C) → mã 0, `Forwarded 6 events (1 failed). Last cursor: 92. Resume with --from 92`; chạy lại `--from 91` → event cuối forward lại, cùng `evt_…` (webhook-id), `→ 200`; không lộ key. Lượt đo trước (image cũ, `--from <cursor>`, N=10): p50 0,62 s · p95 1,70 s | 2026-10-11 |
+| TX4 | PASS (phiên DEV) | 6 event của TX3 → đúng 6 delivery (1/event), tất cả tới subscription thật đang bật (`payment.*` của cafe); tổng delivery của project tăng đúng 6 trong phiên → `listen` không sinh delivery | 2026-10-11 |
 | TX5 | | | |
 | Demo bước 0 | | | |
