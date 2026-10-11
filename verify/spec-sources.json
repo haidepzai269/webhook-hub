@@ -192,6 +192,20 @@
         }
       },
       "note": "SPEC-ket-noi §8.2 — L2 trên hubv."
+    },
+    {
+      "ns": "SK",
+      "file": "_bmad-output/planning-artifacts/hub-multi-service/SPEC-shop-ket-noi-project.md",
+      "pattern": "^\\|\\s*`\\[SK:((?:U|T)\\d+)\\]`\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (SK\\d+)",
+        "groups": {
+          "SK1": "U6",
+          "SK2": "U1-U5",
+          "SK4": "U7"
+        }
+      },
+      "note": "SPEC-shop-ket-noi-project §7 (cách B). T1 = L2 trên hubv, bắt buộc khi mọi story [x]."
     }
   ],
   "inline": [
