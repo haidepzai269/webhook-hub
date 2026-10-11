@@ -23,3 +23,6 @@
   `after=latest` chỉ kiểm bằng unit + DB thật (UX11). Chạy hub-api từ source không được: `.env` dev dùng role superuser (AU6 chặn).
 - Docs xong: ARCHITECTURE §18 "Trải nghiệm dev", CLAUDE.md Trạng thái, SPEC-dev-experience §8 (checklist + 10 lệch) + §9 TX3 (một phần).
   Toàn bộ L0 `npx jest -w 2`: 98 suite pass, 736 test pass, 0 fail (DB suite skip ở L0; UX11 DB chạy riêng: xanh).
+- Q1 = (a) (Admin 11/10): `rejectAck` trong ingest.service — 401/422 ở /hooks qua `adapter.buildAck`, status lõi giữ. ADR-139
+  (137/138 là phiên khác). RED trước (`ingest-reject-ack.spec.ts` 5 fail), xanh sau; L0 đầy đủ 101 suite / 750 test pass;
+  redis-budget xanh; `verify/test/hub-sim-adapters.spec.ts` xanh (fixture hub-sim chỉ kỳ vọng status — không vỡ, không cần VF sửa).

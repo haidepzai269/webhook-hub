@@ -33,6 +33,26 @@ interface TraceState {
   rawEventId?: string;
 }
 
+/**
+ * ADR-139 (Q1 = a): ack TỪ CHỐI (401 chữ ký / 422 thiếu khoá chống trùng) theo định dạng của CHÍNH provider
+ * (`adapter.buildAck`) — GenericAdapter kèm `fix` cho dev đang cấu hình nguồn. STATUS do lõi quyết, adapter chỉ
+ * quyết body (không provider nào đổi được 401/422). `message` là hằng của lõi — không bao giờ chứa secret hay body
+ * request. Hàm thuần, không I/O: không thêm gì vào đường nóng. buildAck lỗi -> body cũ.
+ */
+function rejectAck(
+  adapter: { buildAck(r: IngestResult): { status: number; body: unknown } },
+  status: 401 | 422,
+  message: string,
+  log: { warn: (o: unknown, m?: string) => void },
+): { status: number; body: unknown } {
+  try {
+    return { status, body: adapter.buildAck({ accepted: false, status, message }).body };
+  } catch (err: any) {
+    log.warn({ err: err?.message }, 'buildAck lỗi khi dựng ack từ chối -> dùng body mặc định');
+    return { status, body: { error: message } };
+  }
+}
+
 @Injectable()
 export class IngestService {
   /** S1-4: trần 20 bản ghi REJECTED/phút/source, trong bộ nhớ (không tốn Redis). */
@@ -287,7 +307,7 @@ export class IngestService {
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
       await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
       trace.outcome = 'REJECTED';
-      return { status: 401, body: { error: 'Chữ ký webhook không hợp lệ (Unauthorized)' } };
+      return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log);
     }
 
     // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)
@@ -301,7 +321,7 @@ export class IngestService {
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
       await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log);
       trace.outcome = 'REJECTED';
-      return { status: 422, body: { error: 'missing_idempotency_key' } };
+      return rejectAck(adapter, 422, 'missing_idempotency_key', log);
     }
     const persisted = await this.persistAccepted(source, req, idempotencyKey, correlationId, {
       headers: storedHeaders as Record<string, unknown>,

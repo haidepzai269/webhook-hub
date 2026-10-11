@@ -43,7 +43,7 @@ describe('IngestService + GenericAdapter (S8)', () => {
     // ngoài transaction). Điều cần giữ: KHÔNG có outbox / sự kiện nào cho request bị từ chối.
     const { svc, prisma, tx } = build(HMAC);
     const b = '{"soTien":1}';
-    expect(await svc.ingestWebhook(req(b, { 'x-signature': sig(b) }))).toEqual({ status: 422, body: { error: 'missing_idempotency_key' } });
+    expect(await svc.ingestWebhook(req(b, { 'x-signature': sig(b) }))).toEqual({ status: 422, body: { ok: false, error: 'missing_idempotency_key', fix: expect.any(String) } }); // ADR-139: ack qua GenericAdapter.buildAck
     expect(tx.rawEvent.create.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED', signatureValid: true });
     expect(tx.outbox.create).not.toHaveBeenCalled();
     expect(prisma.rawEvent.create).not.toHaveBeenCalled(); // không còn ghi raw_events ngoài transaction có project
