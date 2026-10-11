@@ -1,7 +1,8 @@
 # VF7 (SPEC-verification §7, ADR-067): CI bắt buộc. Repo PUBLIC → không có secret thật nào ở đây; chỉ .env.verify.
 #
 # Job: unit (L0 + map + grep §7.3) · db (L1 trên service container) · secrets (gitleaks toàn lịch sử)
-#      · e2e (L2 trên compose hubv, mọi push — VF8) · chaos (L3 + verify:probe --all, nightly + bấm tay — VF8).
+#      · e2e (L2 trên compose hubv, mọi push — VF8) · chaos (L3, nightly + bấm tay) · probe (verify:probe --all,
+#      job RIÊNG, nightly + bấm tay, không phụ thuộc chaos — M-5).
 # Bảo vệ nhánh (Admin bật trên GitHub): `unit` + `db` là required check để merge vào main.
 name: verify
 
@@ -16,9 +17,10 @@ on:
   schedule:
     - cron: '0 19 * * *'
 
+# M-5: lượt đêm (schedule) có nhóm riêng — push lúc đêm không huỷ chaos/probe đang chạy, và ngược lại.
 concurrency:
-  group: verify-${{ github.ref }}
-  cancel-in-progress: true
+  group: verify-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || 'push' }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 permissions:
   contents: read
@@ -158,12 +160,12 @@ jobs:
             verify/.results/
           if-no-files-found: ignore
 
-  # VF8: L3 chaos + probe — nightly và bấm tay (kill/restart container hubv của CHÍNH runner, không đụng gì khác).
+  # VF8: L3 chaos — nightly và bấm tay (kill/restart container hubv của CHÍNH runner, không đụng gì khác).
   chaos:
-    name: chaos (L3) + probe
+    name: chaos (L3)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
     env:
       VERIFY_WITH_WEB: '1'
     steps:
@@ -177,8 +179,6 @@ jobs:
       - run: npm run verify:up
       - name: L3 chaos
         run: npm run verify:chaos
-      - name: verify:probe --all (mỗi probe phải làm test đích đỏ; cây làm việc không đổi)
-        run: npm run verify:probe -- --all
       - name: Log khi đỏ
         if: failure()
         run: docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify logs --no-color > hubv-logs.txt || true
@@ -189,4 +189,31 @@ jobs:
           path: |
             hubv-logs.txt
             verify/.results/
+          if-no-files-found: ignore
+
+  # M-5: probe tách job riêng — ~2 lượt jest/probe (đối chứng + phá), ~40 probe → 2–3 giờ trên runner; không phụ thuộc
+  # chaos (chaos đỏ thì probe vẫn chạy). L1 probe cần Postgres/Redis của hubv nên vẫn verify:up.
+  probe:
+    name: probe (verify:probe --all)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      VERIFY_JEST_WORKERS: '4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run verify:up
+      - name: verify:probe --all (đối chứng xanh + phá thì đỏ ĐÚNG LÝ DO; INVALID = đỏ)
+        run: npm run verify:probe -- --all
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-probe
+          path: verify/.results/
           if-no-files-found: ignore
