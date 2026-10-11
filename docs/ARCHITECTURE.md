@@ -872,6 +872,24 @@ laptop dev:  hub listen ──GET /v1/p/cafe/events?after=<cursor>&wait=20──
 - **Quickstart:** `docs/QUICKSTART.md` (5 bước) + `examples/quickstart-node` (34 dòng). Độ trễ `listen` đo local: p50 ≈ 0,6 s,
   p95 ≈ 1,7 s (vòng long-poll truy vấn lại mỗi 1 s + normalize).
 
+## 19. Kết nối provider — hub tự đăng ký URL ingest (biến thể A, ADR-138, ADR-142, ADR-146)
+
+Console có hai nút "một bước" thay cho làm tay ở hai đầu:
+
+- **Tạo endpoint webhook** (`POST /api/v1/endpoints`): hub sinh `whsec_` (hiện MỘT lần), challenge, tạo subscription — lõi `EndpointService` dùng chung với `/v1/p/:project/endpoints`. Thứ tự: TX tạo PENDING + subscription → COMMIT → challenge ngoài tx → ghi kết quả.
+- **Kết nối provider** (`POST /api/v1/sources/connect`): năng lực tuỳ chọn `adapter.connector?` (PayOS `confirm-webhook`; Stripe `webhook_endpoints` — KN4). Lõi chỉ đọc `connector.spec` (ô form, trường nào là secret ký, có phải xác nhận ghi đè không), không `if (provider === …)`.
+
+**Thứ tự cố định (lời giải cạm bẫy 4):**
+
+```
+1. TX: Source + SourceSecret (secret ký dev nhập, vd checksumKey) + source_connections PENDING + audit  → COMMIT
+2. NGOÀI TX: connector.connect(ingestUrl = HUB_PUBLIC_URL/hooks/<provider>/<sourceKey>)
+      ↳ provider bắn request kiểm tra vào ingest NGAY lúc này → source phải tồn tại, verify được, trả 200
+3. TX: CONNECTED + display (+ SourceSecret do provider sinh) | FAILED + last_error/last_fix (source giữ lại, "Thử lại")
+```
+
+Đảo 1 và 2 thì provider gọi vào source chưa tồn tại (probe P-KN2 làm `[KN:U8]` đỏ). Credentials provider **được lưu** (`source_connections.credentials_encrypted`, AES-256-GCM `MASTER_KEY`, RLS + FORCE, chỉ ghi — không route nào trả, audit/log chỉ tên trường, nút "Xoá credentials"); an toàn ngang `MASTER_KEY` (ADR-138). Base URL provider tường minh (`connectorBaseUrl(spec)`): production luôn URL cứng; `*_FAKE_BASE_URL` chỉ ngoài production (production có → không khởi động). `HUB_PUBLIC_URL` localhost / IP nội bộ → 422 `public_url_required`, không gọi provider. PayOS chỉ một URL/kênh → bắt buộc `acknowledgeOverwrite: true`; request kiểm tra của PayOS chưa được nhận diện (KQ1, `isPayosConfirmProbe` TODO).
+
 ## Tham khảo
 
 PayOS https://payos.vn/docs · SePay https://developer.sepay.vn · SePay Test Mode https://docs.sepay.vn/test-mode.html · GitHub Webhooks https://docs.github.com/en/webhooks · Standard Webhooks https://www.standardwebhooks.com · CloudEvents https://cloudevents.io · RabbitMQ DLX https://www.rabbitmq.com/docs/dlx · Transactional Outbox https://microservices.io/patterns/data/transactional-outbox.html

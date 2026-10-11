@@ -40,7 +40,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 1. `NestFactory.create(AppModule, { rawBody: true })` — thiếu là chữ ký sai 100% mà log không nói gì.
 2. cloudflared phải là **named tunnel** — URL đổi mỗi lần restart thì provider trỏ vào hư không.
 3. Đổi `x-message-ttl` của queue đã tồn tại → `PRECONDITION_FAILED`. Xoá queue trước.
-4. Đăng ký webhook PayOS **sau** khi adapter chạy — PayOS bắn request kiểm tra đòi 200.
+4. Đăng ký webhook PayOS **sau** khi adapter chạy — PayOS bắn request kiểm tra đòi 200. Nút **"Kết nối PayOS"** ở console đã lo thứ tự (source + secret COMMIT rồi mới gọi PayOS, ADR-146); dán URL tay thì vẫn phải đúng thứ tự.
 5. k6 bắn vào **localhost**, không qua tunnel — không thì đo ra độ trễ của Cloudflare.
 
 ## Ngăn xếp
@@ -70,4 +70,5 @@ Ràng buộc deployed phải nhớ khi code:
 - **2026-09-17** — chốt kiến trúc + triển khai, viết `docs/`. Chưa có code.
 - **2026-09-18** — Ngày 1.
 - **2026-10-11** — Đa service (S1–S12, ADR-071..082): Project + API key + connection string, `/v1/p/:project/*` (publish, polling A theo `seq`, endpoint có challenge, subscription `sourceIds`, source GenericAdapter + chế độ lắng nghe), push ký Standard Webhooks (bỏ `X-Hub-*`), `@hub/sdk`, Shop tự đăng ký endpoint, demo `cafe`/`bookstore` (`docs/DEMO-MULTI-PROJECT.md`).
+- **2026-10-11** — Kết nối hai đầu (SPEC-ket-noi KN1–KN3, ADR-138/142/146): console tạo endpoint (hub sinh `whsec_` + challenge + subscription cùng tx); "Kết nối PayOS" — hub tự `confirm-webhook` sau khi source COMMIT; credentials provider lưu mã hoá theo project (`source_connections`, RLS).
 - **2026-10-11** — Trải nghiệm dev phương án A (ADR-133/134/136): `hub listen`/`hub trigger` (polling A + ký phía client, `toWebhookBody` dùng chung với WebhookSender, `after=latest`), khuôn lỗi `{error, message, fix, docsUrl, requestId}` + `x-request-id` (`docs/ERRORS.md`), `docs/QUICKSTART.md` + `examples/quickstart-node`.

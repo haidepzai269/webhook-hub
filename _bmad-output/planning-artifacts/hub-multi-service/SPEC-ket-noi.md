@@ -337,7 +337,7 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
 
 ## 11. Lệch so với spec (phiên DEV ghi)
 
-- KQ1, bằng chứng request kiểm tra PayOS: …
+- **KQ1, bằng chứng request kiểm tra PayOS: CHƯA CÓ.** Tài liệu chính thức (payos.vn/docs/api, mục confirm-webhook) chỉ ghi PayOS gửi "dữ liệu mẫu kèm thông tin giao dịch ngân hàng mẫu" và kiểm chữ ký HMAC_SHA256; không có cờ nhận diện. Mẫu webhook trong tài liệu: `orderCode 123, amount 3000, description "VQRIO123", accountNumber "12345678", reference "TF230204212323", paymentLinkId "124c33293c43417ab7879e14c8d9eb18"`. Không đủ chắc để nhận diện → hook `isPayosConfirmProbe()` (PayosAdapter) LUÔN false + TODO; `[KN:U16]` mồ côi có lý do; câu hỏi ở `CAN-ADMIN-QUYET-KN.md` (KQ1). Coordinator ghi body thật (đã che) vào đây khi Admin "Kết nối PayOS" trên bản deployed.
 - **KN1 (ADR-142):**
   - Route console nằm ở controller riêng `apps/hub-api/src/modules/console/endpoints.controller.ts` (không sửa `ApiController` ngoài 1 dòng 422 `use_endpoints_route`). Thêm `GET /api/v1/endpoints/:id` (trang chi tiết) và `GET /api/v1/catalog/event-types` (UI tick theo catalog — một nguồn ở `libs/common/src/canonical`).
   - "eventTypes kiểm theo catalog": chỉ siết trong không gian dành riêng `payment.*`/`repo.*` (`payment.recieved` → 422 `validation_failed`); kiểu riêng của service (`order.*`) vẫn hợp lệ — service publish kiểu riêng qua `/v1/p/:project/events`.
@@ -354,10 +354,15 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
   - P-KN1 "grep gate": hiện là test L0 `[KN2] gate P-KN1` trong `apps/hub-api/test/source-connections.spec.ts` (quét `source-connection.service.ts`, `source-connections.controller.ts`, `endpoints.controller.ts`), không nằm trong `verify/lib/gates.ts` (phiên VF đang sửa file đó). Probe `verify/probes/P-KN1..4.json`.
   - Gỡ cấu hình cũ khi kết nối lại (Stripe xoá `we_` cũ) làm ở khung chung: provider trả `remoteRef` khác cái đang lưu và có `disconnect?` → gọi `disconnect(cũ)`; lỗi ở bước này chỉ log.
   - UI: trang Nguồn có "Kết nối provider" (form từ `spec.fields`, ô xác nhận ghi đè) và nút 🔗 từng dòng (tình trạng, Thử lại, Ngắt, Xoá credentials).
+- **KN3:**
+  - Connector PayOS gọi `POST {base}/confirm-webhook` bằng `fetch` (header `x-client-id`/`x-api-key`, body `{webhookUrl}`) thay vì `new PayOS(...).webhooks.confirm()`: SDK 2.0.5 nối path TUYỆT ĐỐI vào `baseURL` (`new URL('/confirm-webhook', base)` làm mất tiền tố `/_fake/payos`), tự đọc `PAYOS_*` từ env, mặc định retry 2–3 lần (mỗi lần PayOS bắn thêm một request kiểm tra) và log debug có header. Cùng API, cùng header, cùng body như SDK.
+  - `remoteRef` = `****<4 số cuối>` (PayOS không có id webhook). Lỗi: HTTP 401/403 → `invalid_credentials`; còn lại → `webhook_rejected` (fix nhắc HUB_PUBLIC_URL công khai + Checksum Key đúng kênh); mạng → `provider_unreachable`/`provider_timeout`.
+  - Retry với checksumKey khác → SourceSecret version mới TRƯỚC khi gọi PayOS (bản cũ còn verify 24 giờ).
+  - Fake PayOS bắn request kiểm tra bằng đúng mẫu tài liệu (trên) — có chữ ký thật theo checksum của fake.
 
 ## 12. Checklist và kết quả
 
-- [x] KN1 · [ ] KN1b (tuỳ chọn) · [x] KN2 · [ ] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
+- [x] KN1 · [ ] KN1b (tuỳ chọn) · [x] KN2 · [x] KN3 · [ ] KN4 · [ ] KN5 (hoãn) · [ ] KN6 (chờ SePay)
 - ADR mới: …
 
 | Kịch bản | PASS/FAIL | Ghi chú | Ngày |

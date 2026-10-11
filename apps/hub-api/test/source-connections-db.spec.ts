@@ -71,7 +71,7 @@ describeDb('[KN2] khung connector (Postgres)', () => {
 
   let sourceId = '';
 
-  it('[KN:U8] Source + SourceSecret COMMIT trước lời gọi provider: lúc provider gọi ingest, ingest đã thấy source và secret ký', async () => {
+  it('[KN:U8] (phần a) Source + SourceSecret COMMIT trước lời gọi provider: lúc provider gọi ingest, ingest đã thấy source và secret ký', async () => {
     behaviour = 'ok';
     during.length = 0;
     const r: any = await conn.connect(tenant, 'user:u1', { provider: 'github', name: 'repo hooks', credentials: SECRET });

@@ -39,7 +39,7 @@ describe('[KN2] kết nối provider — L0', () => {
     expect(publicIngestBase({ NODE_ENV: 'production', HUB_PUBLIC_URL: 'http://localhost:4000', CONNECTOR_INGEST_BASE_URL: 'http://hub-api:4000' })).toBeNull();
   });
 
-  it('[KN:U12] production + *_FAKE_BASE_URL -> app không khởi động; production bỏ qua fake; PAYOS_BASE_URL không đổi được host connector', () => {
+  it('[KN:U12] (phần a) production + *_FAKE_BASE_URL -> app không khởi động; production bỏ qua fake; PAYOS_BASE_URL không đổi được host connector', () => {
     for (const k of ['PAYOS_FAKE_BASE_URL', 'STRIPE_FAKE_BASE_URL', 'GITHUB_FAKE_BASE_URL', 'CONNECTOR_INGEST_BASE_URL']) {
       expect(testOnlyConfigProblems({ NODE_ENV: 'production', [k]: 'http://sink:4100/_fake/x' }).join()).toContain(k);
       expect(testOnlyConfigProblems({ NODE_ENV: 'development', [k]: 'http://sink:4100/_fake/x' })).toEqual([]);

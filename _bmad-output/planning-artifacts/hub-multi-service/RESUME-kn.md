@@ -18,7 +18,7 @@ Spec: `SPEC-ket-noi.md` (ADR-138). Câu hỏi cho Admin: `CAN-ADMIN-QUYET-KN.md`
 |---|---|---|
 | KN1 | xong (L0+L1 xanh, L2 [KN:T1] NOT RUN — hubv chưa rebuild) | c888ef6 + 3955b9f |
 | KN2 | xong (L0 772/0/0, L1 xanh sau chạy lại — lần đầu 21 đỏ do tranh chấp hubv/Redis rate-limit với phiên VF), probe P-KN1..4 đỏ ✓ | (commit KN2) |
-| KN3 | chưa | |
+| KN3 | xong trừ KQ1 (U16 mồ côi có lý do, hook `isPayosConfirmProbe` TODO) — L0 786/0/0, L1 KN 14/14 | (commit KN3) |
 | KN4 | chưa | |
 
 ## KN1 — đã làm
@@ -31,3 +31,11 @@ Spec: `SPEC-ket-noi.md` (ADR-138). Câu hỏi cho Admin: `CAN-ADMIN-QUYET-KN.md`
 - `libs/providers/src/provider.interface.ts`: `ConnectorSpec/ProviderConnector/ConnectorError` (đã viết), `connector-base-url.ts` (đã viết), `test-only-config.ts` luật `*_FAKE_BASE_URL` (đã viết).
 - Prisma `SourceConnection` + migration `20261012010000_source_connections` (RLS/FORCE/policy/FK ghép/GRANT) — đã viết, cần `prisma migrate deploy` lên DB hubv (chỉ DDL cộng thêm) trước khi chạy L1.
 - Còn: repo methods, `SourceConnectionService` + controller console, redact `credentialsEncrypted`, pino redact, sink fake routes, UI form từ `spec.fields`, test U6–U12, U17, U18.
+
+## KN2/KN3 — đã làm
+- KN2: `source-connection.service.ts`, `source-connections.controller.ts`, bảng `source_connections` (migration đã `migrate deploy` lên hubv), fake PayOS/Stripe `tools/verify-sink/fake-providers.js`, UI `sources/connect-dialogs.tsx`. Probe `verify/probes/P-KN1..4.json` (chạy tay bằng scratchpad `probe.js`: 4/4 đỏ).
+- KN3: `libs/providers/src/connectors/{http,payos.connector}.ts`, `PayosAdapter.connector`, hook KQ1 `isPayosConfirmProbe`. Test `payos-connector.spec.ts` (U12b, U13), `payos-connect-db.spec.ts` (U8b với fake PayOS + ingest tối thiểu). Docs: ARCHITECTURE §19, CLAUDE.md cạm bẫy 4 + Trạng thái, SPEC-verification §9.1 bước 10. ADR-149.
+
+## Bước tiếp
+- KN4 Stripe: `libs/providers/src/connectors/stripe.connector.ts` (POST/GET/DELETE `{base}/v1/webhook_endpoints`, form-encoded, `enabled_events[]` = 3 kiểu trong STRIPE_PAYMENT_TYPES), `StripeAdapter.connector`; secret do Stripe sinh -> `result.sourceSecret` (khung KN2 đã lưu version + chồng 24h + gỡ we_ cũ). Test U14, U15 (+ L1 với fake Stripe của sink).
+- `KICH-BAN-TEST-DA-SERVICE.md` chặng C (theo route thật) — chưa làm.
