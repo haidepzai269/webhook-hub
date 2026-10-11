@@ -459,3 +459,19 @@ button.sovcat {
   outline: 2px solid var(--secondary);
   outline-offset: 3px;
 }
+
+/* SK4: đơn đang mở luôn hiện mã + nút tạo đơn mới (không quét nhầm QR của đơn cũ) */
+.ckcurrent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px dashed #c8102e;
+  border-radius: 8px;
+  font-size: 15px;
+}
+.ckcurrent .ckcancel {
+  margin: 0;
+}

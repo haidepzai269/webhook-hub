@@ -146,7 +146,7 @@ app.post('/hub-webhook', async (req: any, res: Response) => {
       return { status: next.outcome, paidAmount: Number(next.paidAmount) };
     });
     if (['LATE_PAYMENT', 'EXTRA_PAYMENT', 'OTHER_CHANNEL'].includes(result.status)) {
-      logger.warn({ orderCode, amount, source, eventId }, `[Shop] ${result.status}: tiền không cộng vào đơn đang mở, cần đối soát/hoàn tiền`);
+      logger.warn({ orderCode, amount, source, eventId }, `[Shop] ${result.status}: ${({ LATE_PAYMENT: 'trả sau hạn, ĐÃ cộng dồn vào đơn nhưng chưa đủ (hoặc đơn đã huỷ) — chờ khoản sau hoặc đối soát/hoàn tiền', EXTRA_PAYMENT: 'đơn đã PAID, khoản này được ghi thêm — cần hoàn phần dư', OTHER_CHANNEL: 'tiền về kênh khác kênh của đơn, KHÔNG cộng — cần đối soát' } as Record<string, string>)[result.status]}`); // L-2
     } else {
       logger.info({ orderCode, amount, ...result }, `[Shop] Webhook đơn ${orderCode}: ${result.status}`);
     }

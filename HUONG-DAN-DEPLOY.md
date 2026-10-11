@@ -202,10 +202,14 @@ Nhắn: **"seed neon"**. Agent chạy seed từ máy local với khối `[hub-ap
 | `SHOP_WEB_URL`                         | `https://webhook-hub-xxxx.vercel.app/shop` — PayOS đưa khách về đây sau khi trả |
 | `SHOP_BANK_CODE`, `SHOP_BANK_ACCOUNT`, `SHOP_BANK_ACCOUNT_NAME` | tài khoản nhận tiền (VietQR cho lựa chọn SePay). Trống = không hiện QR SePay |
 | `SHOP_ORDER_TTL_MIN`                   | (tuỳ chọn) hạn đơn, phút — mặc định `30`; link PayOS hết hạn sớm hơn hạn đơn 5 phút (tối đa nửa TTL, ADR-144) |
+| `SHOP_SETTINGS_KEY`                    | **Mới (cách B, ADR-155).** `openssl rand -base64 32` — khoá AES-256-GCM cho bí mật lưu ở trang **Shop › Cài đặt** (bảng `shop.settings`). Mất khoá = phải nhập lại ở trang Cài đặt (Shop rơi về env, không sập). Thiếu = trang Cài đặt chỉ xem, không lưu được |
+| `SHOP_ADMIN_TOKEN`                     | **Mới (cách B, ADR-155).** Chuỗi dài ngẫu nhiên (`openssl rand -base64 24`) — "mã quản trị" để mở `/shop/settings`. **Không đặt = tắt hẳn** trang Cài đặt (route trả 404) |
 
    > Nên dùng CÙNG tài khoản ngân hàng cho PayOS và SHOP_BANK_* — khi đó một lần chuyển sinh 2 sự kiện nhưng Shop chỉ cộng theo kênh khách đã chọn (ADR-144 M-2, Admin chốt Q4 — ADR-154).
 
    > `SHOP_PUBLIC_URL` chưa biết trước (Render tự thêm hậu tố vào tên). Cứ để trống khi Create; URL hiện ngay đầu trang service **sau khi bấm Create** (build còn chạy). Vào **Environment** đặt `SHOP_PUBLIC_URL=https://shop-xxxx.onrender.com` (không `/` cuối) → Save → Render deploy lại. Trong lúc thiếu biến này Shop tự thử đăng ký lại, không hỏng gì.
+
+   > **Cách B (ADR-155):** mọi giá trị `HUB_URL`, `SHOP_PAYMENT_SOURCE_KEYS`, `PAYOS_*`, `SHOP_BANK_*` lưu ở `/shop/settings` (bảng `shop.settings`, migration `20261012020000_shop_settings` — chạy `prisma migrate deploy` trước khi deploy Shop) **thắng env**. Chưa lưu gì thì Shop chạy y như trước bằng env ở bảng trên. Lưu xong Shop tự đăng ký lại endpoint vào project mới, không cần redeploy. Migration tự GRANT cho `shop_user` (không cần chạy SQL tay).
 
    > Không đặt `PAYOS_BASE_URL` / `SHOP_PAYOS_API_BASE` trên Render (mặc định là API thật của PayOS). PayOS gửi webhook thanh toán về **hub** (URL đặt ở §9), không về Shop — Shop biết đơn đã trả qua `payment.received` hub giao tới.
 

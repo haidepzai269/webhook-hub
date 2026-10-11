@@ -19,12 +19,43 @@ import {
   simulateSepayTransfer,
 } from "@/lib/shop/api";
 import { cartSubtotal, useCart } from "@/lib/shop/cart";
-import { isFinalStatus, paymentQr, pollDeadline } from "@/lib/shop/order-status";
+import {
+  canTopUp,
+  cartSignature,
+  isFinalStatus,
+  orderCodeFromSearch,
+  parseSavedOrder,
+  paymentQr,
+  pollDeadline,
+  shouldStartNewOrder,
+} from "@/lib/shop/order-status";
 import { useShopUi } from "@/lib/shop/ui";
 
 const POLL_MS = 2000;
 const POLL_TIMEOUT_MS = 30 * 60 * 1000; // dự phòng khi server không trả expiresAt
 const PHONE_RE = /^[0-9+\s.-]{8,20}$/; // khớp validate của apps/shop
+const SAVED_ORDER_KEY = "shop:order"; // M-2 (SK4): đơn đang xử lý sống qua tải lại trang, chỉ trong tab này
+
+/** Đơn phía web: kèm chữ ký giỏ lúc tạo (giỏ đổi -> đơn mới, không dùng lại QR cũ). */
+type ShopOrder = CreatedOrder & { cartSig?: string };
+
+const session = {
+  get: () => {
+    try {
+      return sessionStorage.getItem(SAVED_ORDER_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set: (o: ShopOrder | null) => {
+    try {
+      if (o) sessionStorage.setItem(SAVED_ORDER_KEY, JSON.stringify(o));
+      else sessionStorage.removeItem(SAVED_ORDER_KEY);
+    } catch {
+      /* tab không cho lưu: chỉ mất khi tải lại */
+    }
+  },
+};
 
 type Errors = Partial<Record<keyof CustomerInput, string>>;
 
@@ -48,7 +79,7 @@ export function CheckoutModal() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Đơn hiện tại sống qua việc đóng/mở modal: đóng lúc đang chờ thì mở lại vẫn thấy QR.
-  const [order, setOrder] = useState<CreatedOrder | null>(null);
+  const [order, setOrder] = useState<ShopOrder | null>(null);
   const [state, setState] = useState<OrderState | null>(null);
   const [pollStartedAt, setPollStartedAt] = useState(0);
   const [timedOut, setTimedOut] = useState(false);
@@ -110,11 +141,47 @@ export function CheckoutModal() {
     if (status === "PAID") clearCart();
   }, [status, clearCart]);
 
-  // Mở lại modal khi đơn cũ đã kết thúc → về form mới (kể cả khi trước đó đóng bằng Esc)
+  // M-2 (SK4): tải lại trang -> lấy lại đơn của tab; PayOS đưa khách về `?order=DH…` -> mở modal xem trạng thái đơn đó.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chỉ chạy một lần khi mount
+  useEffect(() => {
+    const code = orderCodeFromSearch(window.location.search);
+    const saved = parseSavedOrder<ShopOrder>(session.get());
+    if (saved && (!code || saved.orderCode === code)) setOrder(saved);
+    else if (code) {
+      fetchOrder(code)
+        .then((s) =>
+          setOrder({
+            orderCode: s.orderCode,
+            amount: s.amount,
+            status: s.status,
+            items: [],
+            paymentProvider: "payos", // chỉ returnUrl của PayOS mang ?order=
+            expiresAt: s.expiresAt ?? new Date().toISOString(),
+            payment: { qrImageUrl: null },
+          }),
+        )
+        .catch(() => undefined);
+    }
+    if (code) {
+      setCheckoutOpen(true);
+      window.history.replaceState(null, "", window.location.pathname); // không mở lại mỗi lần F5
+    }
+  }, []);
+
+  useEffect(() => session.set(order), [order]);
+
+  // Mở modal: giỏ đã khác lúc tạo đơn -> đơn mới (lỗi QR cũ); còn lại -> hỏi trạng thái MỘT lần (M-2: trả muộn vẫn thấy PAID).
   // biome-ignore lint/correctness/useExhaustiveDependencies: chỉ chạy ở cạnh "mở modal"
   useEffect(() => {
-    if (open && (finished || timedOut)) resetOrder();
-  }, [open]);
+    if (!open || !order) return;
+    if (shouldStartNewOrder(order, cartSignature(items))) {
+      resetOrder();
+      return;
+    }
+    fetchOrder(order.orderCode)
+      .then(setState)
+      .catch(() => undefined);
+  }, [open, order?.orderCode]);
 
   // Esc đóng modal
   useEffect(() => {
@@ -156,7 +223,7 @@ export function CheckoutModal() {
         },
         provider,
       );
-      setOrder(created);
+      setOrder({ ...created, cartSig: cartSignature(items) });
       setState(null);
       setTimedOut(false);
       setPollStartedAt(Date.now());
@@ -301,6 +368,14 @@ export function CheckoutModal() {
 
         {order && status !== "PAID" && (
           <div className="ckpay">
+            <div className="ckcurrent">
+              <span>
+                Đơn <strong>{order.orderCode}</strong> · {formatVnd(amount)}
+              </span>
+              <button type="button" className="ckcancel" onClick={resetOrder}>
+                Tạo đơn mới
+              </button>
+            </div>
             <h4 className="cktitle">Quét VietQR bằng app ngân hàng</h4>
             {qr?.kind === "code" ? (
               // Q3 (ADR-154): vẽ VietQR của PayOS ngay tại trình duyệt — dữ liệu thanh toán không đi qua bên thứ ba
@@ -376,19 +451,25 @@ export function CheckoutModal() {
                 <>
                   <i className="fas fa-exclamation-triangle" /> Đã nhận {formatVnd(paid)}, còn thiếu{" "}
                   <strong>{formatVnd(Math.max(0, amount - paid))}</strong>. Vui lòng gọi hotline 1900 6868 kèm mã{" "}
-                  {order.orderCode} hoặc chuyển thêm phần còn thiếu với cùng nội dung (Shop cộng dồn các lần chuyển).
+                  {order.orderCode}
+                  {canTopUp(order.paymentProvider)
+                    ? " hoặc chuyển thêm phần còn thiếu với cùng nội dung (Shop cộng dồn các lần chuyển)."
+                    : "."}
                 </>
               ) : status === "EXPIRED" && paid > 0 ? (
                 <>
                   <i className="fas fa-exclamation-triangle" /> Đơn đã hết hạn, Shop đã nhận{" "}
                   <strong>{formatVnd(paid)}</strong>, còn thiếu <strong>{formatVnd(Math.max(0, amount - paid))}</strong>
-                  . Chuyển thêm phần còn thiếu với cùng nội dung để hoàn tất đơn, hoặc gọi hotline 1900 6868 kèm mã{" "}
-                  {order.orderCode} để được hoàn tiền.
+                  .{" "}
+                  {canTopUp(order.paymentProvider)
+                    ? "Chuyển thêm phần còn thiếu với cùng nội dung để hoàn tất đơn, hoặc gọi"
+                    : "Vui lòng gọi"}{" "}
+                  hotline 1900 6868 kèm mã {order.orderCode} để được giao món hoặc hoàn tiền.
                 </>
               ) : status === "EXPIRED" && !finished && !timedOut ? (
                 <>
-                  <i className="fas fa-spinner fa-spin" /> Đơn đã quá hạn. Nếu bạn vừa chuyển khoản, Shop đang chờ xác nhận
-                  (tối đa vài phút)…
+                  <i className="fas fa-spinner fa-spin" /> Đơn đã quá hạn. Nếu bạn vừa chuyển khoản, Shop đang chờ xác
+                  nhận (tối đa vài phút)…
                 </>
               ) : status === "EXPIRED" || status === "CANCELLED" ? (
                 <>
@@ -427,7 +508,7 @@ export function CheckoutModal() {
               </button>
             ) : (
               <button type="button" className="ckcancel mt-3" onClick={resetOrder}>
-                Đổi món / tạo đơn khác
+                Đổi món / tạo đơn mới
               </button>
             )}
           </div>

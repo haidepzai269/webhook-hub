@@ -127,7 +127,7 @@ describeDb('console: project + API key theo membership (Postgres, S2 + AU1)', ()
     await expect(ctrl.revokeKey(op.id, DEFAULT_TENANT_ID, k.id)).rejects.toMatchObject({ status: 404 });
   });
 
-  it('[SK:U6] connection string tạo ở console dùng được ngay (ApiKeyGuard nhận đúng project); thu hồi -> service nhận 401', async () => {
+  it('[SK:U6] (phần b) connection string tạo ở console dùng được ngay (ApiKeyGuard nhận đúng project); thu hồi -> service nhận 401', async () => {
     const p = await ctrl.create(req(alice), alice.id, { slug: `sk-${run}`, name: 'SK' });
     created.push(p.id);
     const k = await ctrl.createKey(req(alice), alice.id, p.id, { serviceName: 'shop', scopes: ['manage:endpoints', 'read:events'] });

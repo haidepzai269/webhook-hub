@@ -24,7 +24,7 @@ describeDb('shop.settings (Postgres, SK2)', () => {
     await db.$disconnect();
   });
 
-  it('[SK:U4] cột *_encrypted trong DB không chứa plaintext; đọc lại giải mã đúng; chỉ có MỘT dòng', async () => {
+  it('[SK:U4] (phần b) cột *_encrypted trong DB không chứa plaintext; đọc lại giải mã đúng; chỉ có MỘT dòng', async () => {
     const s = new ShopSettings(prismaStore(db), env, log);
     await s.save(parseInput({ hubConnectionUrl: conn, payosApiKey: 'payos-api-key-PLAINTEXT-1', paymentSourceKeys: ['src_payos_q'], bankCode: 'MB' }) as any);
     await s.save(parseInput({ payosChecksumKey: 'checksum-PLAINTEXT-2' }) as any); // lần 2: upsert, giữ trường cũ

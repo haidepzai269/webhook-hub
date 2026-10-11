@@ -92,7 +92,7 @@ function setup(env: NodeJS.ProcessEnv = ENV, row: SettingsRow | null = null) {
 }
 
 describe('Shop — cài đặt kết nối (SK2)', () => {
-  it('[SK:U2] chưa lưu gì -> env y như trước (HUB_URL, nguồn tin cậy, PayOS, VietQR); nguồn = env/none', () => {
+  it('[SK:U2] (phần a) chưa lưu gì -> env y như trước (HUB_URL, nguồn tin cậy, PayOS, VietQR); nguồn = env/none', () => {
     const r = resolveSettings(null, ENV, SETTINGS_KEY);
     for (const k of ['HUB_URL', 'SHOP_PAYMENT_SOURCE_KEYS', 'PAYOS_CLIENT_ID', 'PAYOS_API_KEY', 'PAYOS_CHECKSUM_KEY', 'SHOP_BANK_CODE', 'SHOP_BANK_ACCOUNT', 'SHOP_BANK_ACCOUNT_NAME']) {
       expect(r.env[k]).toBe(ENV[k]);
@@ -106,7 +106,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect(resolveSettings(null, E({ ...ENV, SHOP_SETTINGS_KEY: undefined }), null).env.HUB_URL).toBe(CS_A);
   });
 
-  it('[SK:U2] DB có giá trị thì thắng env, từng trường; trường DB trống vẫn lấy env', async () => {
+  it('[SK:U2] (phần b) DB có giá trị thì thắng env, từng trường; trường DB trống vẫn lấy env', async () => {
     const { settings } = setup();
     await settings.save(parseInput({ hubConnectionUrl: CS_B, paymentSourceKeys: ['src_payos_b'], payosApiKey: SECRETS.payosApiKey }) as any);
     const r = await settings.get();
@@ -117,7 +117,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect(r.sources).toMatchObject({ hubConnectionUrl: 'db', paymentSourceKeys: 'db', payosApiKey: 'db', payosClientId: 'env' });
   });
 
-  it('[SK:U4] cột bí mật lưu ciphertext AES-256-GCM, không chứa plaintext; sai khoá -> không giải được, rơi về env', async () => {
+  it('[SK:U4] (phần a) cột bí mật lưu ciphertext AES-256-GCM, không chứa plaintext; sai khoá -> không giải được, rơi về env', async () => {
     const { settings, mem } = setup();
     await settings.save(parseInput({ hubConnectionUrl: CS_B, ...SECRETS }) as any);
     const raw = JSON.stringify(mem.s.row);
@@ -156,7 +156,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U3] PUT đổi HUB_URL -> client mới, ensure chạy lại với payment_source_keys mới NGAY; webhook từ source cũ không còn được tin', async () => {
+  it('[SK:U3] (phần a) PUT đổi HUB_URL -> client mới, ensure chạy lại với payment_source_keys mới NGAY; webhook từ source cũ không còn được tin', async () => {
     const { settings, link, ensure } = setup();
     link.apply((await settings.get()).env);
     expect(await link.registration.ensureNow()).toBe(true);
@@ -178,7 +178,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U3] đăng ký FAILED -> trả verificationFix; ensure cũ còn bay không ghi đè nguồn tin cậy mới', async () => {
+  it('[SK:U3] (phần b) đăng ký FAILED -> trả verificationFix; ensure cũ còn bay không ghi đè nguồn tin cậy mới', async () => {
     const { settings } = setup();
     let release: (v: string[]) => void = () => undefined;
     const ensure = jest

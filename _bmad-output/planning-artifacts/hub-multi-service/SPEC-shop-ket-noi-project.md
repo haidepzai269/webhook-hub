@@ -11,7 +11,7 @@ Hiện Shop chỉ nối được vào project `default` của operator, và mọ
 - muốn đổi project của Shop phải sửa env trên Render rồi redeploy.
 
 **Thước đo (kịch bản demo):** dev mới, không đụng Render:
-> đăng ký → tạo project → tạo API key (copy connection string) → Sources → **Kết nối PayOS** (hub sinh source mới) → mở **Shop → Cài đặt** → dán connection string + chọn source + dán khoá PayOS → **Lưu** → Shop tự đăng ký endpoint vào project đó → mua món 5.000đ → PAID, và cả luồng hiện trong console **của project dev đó**.
+> đăng ký (project có sẵn từ lúc đăng ký, §8) → tạo API key (copy connection string) → Sources → **Kết nối PayOS** (hub sinh source mới) → mở **Shop → Cài đặt** → dán connection string + chọn source + dán khoá PayOS → **Lưu** → Shop tự đăng ký endpoint vào project đó → mua món 5.000đ → PAID, và cả luồng hiện trong console **của project dev đó**.
 
 ## 2. Vì sao khoá PayOS nằm ở HAI chỗ (trả lời câu hỏi của Admin; ghi ADR)
 
@@ -119,7 +119,10 @@ Phần này vượt trần 450 dòng (ADR-141/144). **Nới trần lên ~600 dò
 - **SK2 — `PUT` thêm `clear: [field]`** để xoá giá trị DB, quay về env.
 - **SK2 — rate-limit:** sai 5 lần trong cửa sổ 1 phút/IP → 429 cho tới hết cửa sổ (kể cả token đúng). Trong bộ nhớ, mất khi restart.
 - **SK2 — trần Shop:** đúng 600/600 dòng sau SK2 (ADR-156).
+- **SK4 — thêm theo coordinator (lỗi production):** (a) QR PayOS của đơn CŨ hiện lại khi mở modal → khung "Đơn DH… + Tạo đơn mới", giỏ đổi thì tự tạo đơn mới (ADR-158); (b) "stale project" sau đăng xuất → lựa chọn project theo user, xoá khi logout, mặc định project là thành viên, badge operator; (c) nút 🔗 trên nguồn chưa kết nối mở hộp Kết nối điền sẵn; (d) chặn trình duyệt tự điền đăng nhập vào ô credential, giá trị có "@" bị từ chối; 422 `public_url_required` nói rõ đặt `HUB_PUBLIC_URL` ở Render › hub-api.
+- **SK4 — M-2:** hỏi trạng thái MỘT lần mỗi lần mở modal có đơn cũ (thay `resetOrder()`); `?order=` mở modal với đơn tối thiểu (chỉ trạng thái, không món/QR).
+- **[SK:T1]** chưa chạy L2 trên hubv: phải rebuild image hub-api/shop/web của hubv (phiên dev không được rebuild/restart container). Phủ ở L0/L1: `settings.spec` (U1–U5), `settings-db.spec` (U4 + GRANT trên Postgres hubv), `console-projects-db.spec` (U6). Ghi `acceptedOrphans`.
 
 ## 9. Checklist
 
-- [x] SK1 · [x] SK2 · [x] SK3 · [ ] SK4
+- [x] SK1 · [x] SK2 · [x] SK3 · [x] SK4

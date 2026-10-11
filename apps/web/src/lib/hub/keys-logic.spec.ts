@@ -23,7 +23,7 @@ describe("console Project + API key (SK1)", () => {
     connectionString: "hubs://hk_test_ab12SECRETSECRETSECRETSECRETSECRETSECRET1@hub.example/cafe",
   };
 
-  it("[SK:U6] connection string chỉ có ở response tạo key: dòng HUB_URL= dựng từ nó; bản giữ trong danh sách KHÔNG còn key", () => {
+  it("[SK:U6] (phần a) connection string chỉ có ở response tạo key: dòng HUB_URL= dựng từ nó; bản giữ trong danh sách KHÔNG còn key", () => {
     expect(envLine(created.connectionString)).toBe(`HUB_URL=${created.connectionString}`);
     const s = toSummary(created);
     expect(JSON.stringify(s)).not.toContain("SECRET");

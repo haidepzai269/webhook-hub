@@ -366,6 +366,39 @@ Dùng khi chỉ cần chứng minh luồng, không cần tiền thật.
 
 ---
 
+## Kịch bản 10 — Cắm Shop vào project của bạn (cách B, không đụng Render)
+
+**Mục tiêu:** một dev mới tự nối Shop vào project hub của chính mình chỉ bằng giao diện: không sửa env, không redeploy (SPEC-shop-ket-noi-project, ADR-155/157).
+
+**Chuẩn bị (một lần, người deploy):** Render › `shop` có `SHOP_SETTINGS_KEY` và `SHOP_ADMIN_TOKEN` (HUONG-DAN-DEPLOY §8); Render › `hub-api` có `HUB_PUBLIC_URL` (bắt buộc cho nút Kết nối, §12). Biết mã quản trị.
+
+> Không có bước tạo project: mỗi tài khoản đã có sẵn một project từ lúc đăng ký ("<tên>'s project"), console chọn sẵn nó. Tạo thêm project chỉ khi cần tách môi trường, sản phẩm hoặc thành viên (ADR-038).
+
+1. **Đăng ký** tài khoản mới (Kịch bản 1a), đăng nhập. Bộ chọn project ở thanh bên đang là project của bạn.
+2. Thanh bên › **Project › API key** → **Tạo API key**: tên `shop`, giữ tick mặc định `manage:endpoints` + `read:events` (tick thêm `manage:sources` nếu muốn Shop liệt kê source để chọn) → **Tạo key**. Hộp **"Chỉ hiện một lần"** hiện `HUB_URL=hubs://…` → copy phần sau dấu `=`.
+3. **Nguồn (Sources) › Kết nối provider › payos**: dán Client ID, Api Key, Checksum Key của kênh PayOS → tick "Tôi hiểu URL cũ sẽ bị thay" → **Kết nối**. Thấy ✅ CONNECTED. Ghi lại sourceKey (phần cuối Webhook URL).
+4. Mở `https://<web>/shop/settings` → nhập **mã quản trị** → **Mở**.
+5. **Bước 1:** dán HUB_URL → **Kiểm tra**. Thấy "✅ Đã nối project … với tư cách service shop". Tick source PayOS vừa tạo (key có `manage:sources`) hoặc gõ sourceKey (key không có `manage:sources`).
+6. **Bước 2:** dán CÙNG ba khoá PayOS (chỗ này để Shop **tạo link thanh toán**; hub giữ riêng để **nhận webhook** — ADR-157). Đối chiếu 4 ký tự cuối checksum với source ở console.
+7. **Lưu và kết nối** → thấy "✅ Endpoint của Shop đã VERIFIED trong project …".
+8. Về `/shop`, mua món **Trà đá thử nghiệm 5.000đ**, chọn PayOS, quét QR, trả.
+
+**Bạn sẽ thấy:** đơn chuyển **Đã thanh toán!**. Console (project của bạn) › Hành trình sự kiện có `payment.received` từ source PayOS mới, delivery tới endpoint `shop` SUCCEEDED. Đăng nhập operator, project `default` **không** có sự kiện này. Tải lại `/shop/settings`: các ô bí mật chỉ hiện "Đang dùng …abcd (đã lưu ở trang này)", không bao giờ hiện giá trị.
+
+**Kiểm thêm:**
+- Mã quản trị sai → "Sai mã quản trị"; sai 5 lần trong 1 phút → bị khoá 1 phút.
+- Console › API key › **Thu hồi** key `shop` → `/shop/settings` › Kiểm tra lại → "Hub từ chối key (401)" kèm cách sửa.
+- Mở lại giỏ sau khi trả: modal hiện form đơn mới (không còn QR cũ). Đổi món khi đơn đang chờ → tự tạo đơn mới. Khung đầu bước thanh toán luôn ghi "Đơn DHxxxxxxx" + nút **Tạo đơn mới**.
+
+**Nếu không thấy:**
+- `/shop/settings` báo "Shop chưa bật trang cài đặt" → thiếu `SHOP_ADMIN_TOKEN` trên Render › shop.
+- Nút Lưu bị khoá, cảnh báo SHOP_SETTINGS_KEY → thiếu biến đó.
+- Kết nối PayOS báo `HUB_PUBLIC_URL` → đặt trên Render › hub-api (HUONG-DAN-DEPLOY §12).
+- ❌ đăng ký endpoint kèm "Cách sửa" → làm theo dòng đó (thường là Shop chưa có `SHOP_PUBLIC_URL` đúng, hoặc hub đang ngủ: thử lại sau 1 phút).
+- Trả tiền xong mà đơn không PAID, delivery 401 ở hub → checksumKey ở Shop và ở source PayOS bên hub là hai kênh khác nhau.
+
+---
+
 ## Bảng kết quả (Admin điền)
 
 | # | Kịch bản | Đạt / Không | Ghi chú (thời gian, ảnh chụp, mã lỗi) |
@@ -387,3 +420,4 @@ Dùng khi chỉ cần chứng minh luồng, không cần tiền thật.
 | 7 | API key: scope 403, thu hồi → 401 | | |
 | 8 | B không thấy dữ liệu của A | | |
 | 9 | Bản đồ luồng realtime + Audit | | |
+| 10 | Cách B: đăng ký → API key → Kết nối PayOS → Shop Cài đặt → Lưu → trả 5.000đ → PAID trong project mới | | |

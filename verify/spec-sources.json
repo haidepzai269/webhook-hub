@@ -245,6 +245,7 @@
     }
   ],
   "acceptedOrphans": {
+    "SK:T1": "L2 trên hubv chưa chạy: cần rebuild image hub-api/shop/web của hubv với code SK (phiên dev không được rebuild/restart container). Phủ ở L0 settings.spec [SK:U1]-[SK:U5], L1 settings-db.spec [SK:U4] + GRANT shop_user, console-projects-db.spec [SK:U6]. Kịch bản tay: HUONG-DAN-TEST-TINH-HUONG Kịch bản 10.",
     "VF:VT14": "demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì",
     "VF:VT11": "Chứng minh bằng chính lệnh `npm run verify:probe -- --all` (bảng probe + kiểm VT11: đột biến không rò ra cây thật, không worktree sót) — job CI `probe` chạy đêm (riêng, không phụ thuộc chaos); con số --all theo luật phán mới (đối chứng + đỏ đúng lý do, H-1/L-R2-1) chờ lượt `--all` đầu tiên, chưa có",
     "VF:VT12": "Probe P-VT12-01 (ownerAsApp): chạy rls-db.spec bằng DATABASE_URL owner → [AU:TA12][BB:5] (phần a) đỏ ở assert tiền đề; kiểm bằng verify:probe, không phải tên test",

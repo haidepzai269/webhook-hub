@@ -27,3 +27,41 @@ export function paymentQr(p: { qrImageUrl: string | null; qrCode?: string }): Pa
   if (p.qrImageUrl && !p.qrImageUrl.includes("qrserver.com")) return { kind: "image", url: p.qrImageUrl };
   return null;
 }
+
+/**
+ * M-1 (REVIEW-ADR154): "chuyển thêm phần còn thiếu cùng nội dung" chỉ đúng cho chuyển khoản thẳng (SePay). Đơn PayOS: link
+ * đã hết hạn, chuyển thẳng vào tài khoản thì tiền về từ nguồn sepay -> OTHER_CHANNEL, không cộng vào đơn -> chỉ hotline.
+ */
+export const canTopUp = (paymentProvider: string | undefined) => paymentProvider !== "payos";
+
+/** Chữ ký giỏ (thứ tự không quan trọng) — so với lúc tạo đơn để biết giỏ đã đổi chưa. */
+export const cartSignature = (items: { id: string; qty: number }[]) =>
+  items
+    .filter((l) => l.qty > 0)
+    .map((l) => `${l.id}:${l.qty}`)
+    .sort()
+    .join(",");
+
+/**
+ * Lỗi production (2026-10-12): mở lại modal vẫn thấy QR PayOS của đơn CŨ — khách quét lại, ngân hàng báo "đã thanh toán".
+ * Mở modal mà giỏ đã khác lúc tạo đơn -> bỏ đơn cũ, tạo đơn mới (đơn cũ PENDING tự hết hạn ở server).
+ */
+export function shouldStartNewOrder(order: { cartSig?: string } | null, currentCartSig: string): boolean {
+  return !!order && order.cartSig !== undefined && order.cartSig !== currentCartSig;
+}
+
+/** M-2: `?order=DH…` trong returnUrl của PayOS. Chỉ nhận đúng khuôn mã đơn (DH + 7 hoặc 10 số). */
+export function orderCodeFromSearch(search: string): string | null {
+  const v = new URLSearchParams(search).get("order");
+  return v && /^DH(?:\d{7}|\d{10})$/.test(v) ? v : null;
+}
+
+/** M-2: đơn lưu trong sessionStorage của tab — đọc lại an toàn (rác/khác khuôn -> null). */
+export function parseSavedOrder<T extends { orderCode: string }>(raw: string | null): T | null {
+  try {
+    const o = raw ? (JSON.parse(raw) as T) : null;
+    return o && typeof o.orderCode === "string" && /^DH\d+$/.test(o.orderCode) ? o : null;
+  } catch {
+    return null;
+  }
+}

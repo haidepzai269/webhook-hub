@@ -191,7 +191,7 @@ describe('Shop Webhook Logic & Security (§10 & BB-1)', () => {
       expect(r.items.map((l) => l.price)).toEqual([69000, 45000]);
     });
 
-    it('món thử thanh toán thật m7 = 5.000đ (trên mức tối thiểu 2.000đ của PayOS), tính tiền như mọi món', () => {
+    it('món thử thanh toán thật m7 = 5.000đ (L-1: docs PayOS không ghi mức tối thiểu; 2.000 chỉ là giá trị ví dụ của SDK), tính tiền như mọi món', () => {
       expect(MENU.find((m) => m.id === 'm7')).toMatchObject({ price: 5000, category: 'desserts', tags: ['Thử nghiệm'] });
       expect(priceOrder({ items: [{ id: 'm7', qty: 1 }], customer })).toMatchObject({ ok: true, amount: 5000 });
     });
