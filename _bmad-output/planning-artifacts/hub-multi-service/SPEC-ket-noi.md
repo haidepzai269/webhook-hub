@@ -298,6 +298,9 @@ Mỗi story theo vòng đời RED → GREEN → GATED → PROBED → REVIEWED (S
 | `[KN:U24]` | (M-1) TX lưu kết quả kết nối lại lỗi → `we_` cũ còn nguyên, DB trỏ `we_` cũ, `we_` mới mồ côi bị dọn; lần sau thành công mới gỡ `we_` cũ (sau COMMIT) |
 | `[KN:U25]` | (H-R2-1) key cũ ĐÚNG, dán key mới SAI → CONNECTED nhưng sau khi "tua" 25 giờ key đúng vẫn verify; webhook thật chỉ khớp key cũ → `secret_mismatch`, không retire gì |
 | `[KN:U26]` | (H-R2-1) FAILED với checksumKey khác → không retire version nào |
+| `[KN:U27]` | (M-R3-1) A cũ → xoay sang B, dán B, webhook ký B → dán nhầm lại A: không retire B, báo `secret_mismatch` (event mới nhất quyết định) |
+| `[KN:U28]` | (L-R3-1) GET tình trạng song song lượt connect không đè CONNECTED bằng PENDING đã đọc (compare-and-set) |
+| `[KN:U29]` | (L-R3-2) raw_events REJECTED không phải bằng chứng để retire |
 
 ### 8.2 E2E trên hubv (`npm run verify`, L2)
 
@@ -378,6 +381,7 @@ Câu nói khi bảo vệ: *"Hub tạo source và commit trước, rồi mới g�
   - M-1: gỡ cấu hình cũ ở provider SAU COMMIT; TX lỗi → dọn cấu hình mới + FAILED `save_failed`; gỡ cũ lỗi → `last_error=previous_remote_not_removed`, vẫn CONNECTED.
   - L-1: P2002 → 409 `conflict` (`field:sourceKey`, `code:source_key_taken`); L-3: 409 `conflict` `code:connection_in_progress` (PENDING < 60 s).
 - **Sau REVIEW-KN-R2 (ADR-152):** secret do người dùng nhập không tự hết hạn bản cũ (thay luật "bản cũ còn 24 giờ" ở KN3 §11 cho checksumKey); retire khi webhook thật verify bằng key mới, phát hiện lúc `GET …/connection` (đối chiếu lười, không chạm ingest); `secret_mismatch` khi webhook thật chỉ khớp key cũ. Response `connect`/`retry` có `secretChanged`.
+- **Sau REVIEW-KN-R3 (ADR-153):** đối chiếu quyết theo raw_event ACCEPTED MỚI NHẤT verify được bằng một version hiện hành (không phải bất kỳ event nào khớp key nhập); `status()` ghi kiểu compare-and-set.
 
 ## 12. Checklist và kết quả
 
