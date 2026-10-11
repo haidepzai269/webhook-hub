@@ -18,9 +18,10 @@ on:
     - cron: '0 19 * * *'
 
 # M-5: lượt đêm (schedule) có nhóm riêng — push lúc đêm không huỷ chaos/probe đang chạy, và ngược lại.
+# L-R2-6: bấm tay (workflow_dispatch, chạy chaos/probe tới 4 giờ) cũng nhóm riêng và không bị huỷ bởi push.
 concurrency:
-  group: verify-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || 'push' }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  group: verify-${{ github.ref }}-${{ (github.event_name == 'schedule' && 'nightly') || (github.event_name == 'workflow_dispatch' && 'manual') || 'push' }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read

@@ -112,7 +112,13 @@ const file: ScenarioFile = {
         for (const c of cases) {
           const u = uniq();
           for (let i = 0; i < 3; i++) {
-            if (i > 0) await flushIdempotencyKeys(); // M-6: lần 2, 3 không được nhờ đường tắt Redis
+            if (i > 0) {
+              // M-6: lần 2, 3 không được nhờ đường tắt Redis. L-R2-4: lần 1 đã 200 => SET NX (sau COMMIT) đã ghi khoá
+              // idem:* — trước lần 2 xoá 0 khoá nghĩa là đang trỏ nhầm Redis và "Redis trống" là suông. (Bản trùng do PG
+              // phán KHÔNG ghi lại khoá, nên trước lần 3 có thể là 0.)
+              const flushed = await flushIdempotencyKeys();
+              if (i === 1) expect(flushed >= 1, `${c.id} lần 2: xoá ${flushed} khoá idem:* (mong >= 1 — VERIFY_REDIS_URL có phải Redis của hubv?)`);
+            }
             const r = await sendFixture(c.id, w.sources[c.provider].webhookUrl, u);
             expect(r.status === 200, `${c.id} lần ${i + 1} → ${r.status} ${r.text}`);
           }
