@@ -673,6 +673,17 @@ export class TenantScopedRepository {
     });
   }
 
+  /**
+   * C-1 (ADR-131): audit MỚI NHẤT của một thực thể trong các `actions`, chỉ xét `created_at >= since` (cửa sổ ngắn ->
+   * quét đoạn đầu index `(tenant_id, created_at DESC)`, không cần index theo entity). Dùng để chống spam audit.
+   */
+  async findLatestAuditForEntity(entityType: string, entityId: string, actions: string[], since: Date) {
+    return this.prisma.auditLog.findFirst({
+      where: { tenantId: this.tenantId, entityType, entityId, action: { in: actions }, createdAt: { gte: since } },
+      orderBy: { id: 'desc' },
+    });
+  }
+
   /** Phân trang lùi theo `id` (bigint tăng dần): `before` = id nhỏ nhất của trang trước. */
   async findAuditLogs(opts: { limit: number; before?: bigint }) {
     return this.prisma.auditLog.findMany({

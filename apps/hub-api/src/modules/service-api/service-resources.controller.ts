@@ -109,6 +109,32 @@ export class WindowLimiter {
   }
 }
 
+/** C-1 (ADR-131): đường nào gây ra challenge — để audit nói rõ lần thất bại đến từ đâu (vòng ensure của service = rotate). */
+type VerifyAttempt = 'create' | 'verify' | 'rotate' | 'adopt';
+const VERIFY_AUDIT_ACTIONS = ['endpoint.verified', 'endpoint.verification_failed', 'endpoint.adopted'];
+/** Cửa sổ chống spam audit verify thất bại: lỗi y hệt lặp lại trong 1 giờ chỉ ghi một lần. */
+export const VERIFY_FAILURE_AUDIT_DEDUPE_MS = 60 * 60_000;
+
+/**
+ * C-1 (ADR-131): MỌI lần verify thất bại phải để lại dấu vết (trước đây xoay secret / adopt FAILED trả về im lặng ->
+ * Shop retry `ensure` vào URL bị chặn mà console trống trơn). Chống spam từ vòng retry: nếu audit verify MỚI NHẤT của
+ * endpoint trong 1 giờ là `verification_failed` cùng mã lỗi + cùng attempt -> bỏ qua. Bền (đọc Postgres, đúng với
+ * nhiều instance, 0 lệnh Redis). Metadata CHỈ có mã lỗi + attempt — không url, không secret.
+ */
+async function auditVerificationFailure(
+  repo: TenantScopedRepository,
+  id: string,
+  code: string | null,
+  attempt: VerifyAttempt,
+  actor: string,
+  extra: Record<string, unknown> = {},
+): Promise<boolean> {
+  const last: any = await repo.findLatestAuditForEntity('destination', id, VERIFY_AUDIT_ACTIONS, new Date(Date.now() - VERIFY_FAILURE_AUDIT_DEDUPE_MS));
+  if (last?.action === 'endpoint.verification_failed' && last.metadata?.verificationError === code && last.metadata?.attempt === attempt) return false;
+  await repo.createAuditLog({ action: 'endpoint.verification_failed', entityType: 'destination', entityId: id, actor, metadata: { verificationError: code, attempt, ...extra } });
+  return true;
+}
+
 /** R-1/R-2 (ADR-094): endpoint là webhook VÀ do chính key đang gọi tạo (NULL = đích operator, /v1/p không quản). */
 function ownsEndpoint(d: any, req: RequestWithPrincipal): boolean {
   return !!d && d.type === 'webhook' && !!d.createdByKeyId && d.createdByKeyId === req.apiKey?.id;
@@ -197,7 +223,7 @@ export class ServiceResourcesController {
       return d;
     });
     const outcome = await this.verifier.challenge(url, signingSecret);
-    const updated = await this.recordVerification(tenantId, created.id, outcome, `key:${req.apiKey!.id}`);
+    const updated = await this.recordVerification(tenantId, created.id, outcome, `key:${req.apiKey!.id}`, 'create');
     return { ...publicEndpoint(updated ?? created, url), ...(given === undefined ? { signingSecret } : {}) };
   }
 
@@ -232,6 +258,8 @@ export class ServiceResourcesController {
     }
     const outcome: VerificationOutcome = secret ? await this.verifier.challenge(url, secret) : { verification: 'FAILED', verificationError: 'no_signing_secret' };
     if (outcome.verification !== 'VERIFIED') {
+      // C-1 (ADR-131): 409 vẫn để lại audit trên endpoint cũ (chủ/secret/trạng thái KHÔNG đổi).
+      await this.withAudit(tenantId, (repo) => auditVerificationFailure(repo, d.id, outcome.verificationError, 'adopt', actor));
       throw new HttpException(
         { error: 'adoption_not_verified', verificationError: outcome.verificationError, message: 'Endpoint không chứng minh được secret — không chuyển chủ' },
         HttpStatus.CONFLICT,
@@ -272,10 +300,13 @@ export class ServiceResourcesController {
       if (typeof next !== 'string' || next.length < 16 || next.length > 256) {
         unprocessable({ error: 'validation_failed', field: 'signingSecret', message: 'signingSecret là chuỗi 16–256 ký tự' });
       }
-      if (!url) return { verification: 'FAILED', verificationError: 'invalid_url', secretRotated: false };
-      const o = await this.verifier.challenge(url, next);
-      if (o.verification !== 'VERIFIED') return { ...o, secretRotated: false };
-      await this.recordVerification(tenantId, d.id, o, `key:${req.apiKey!.id}`, aesGcmEncrypt(next, getMasterKey()));
+      const o: VerificationOutcome = url ? await this.verifier.challenge(url, next) : { verification: 'FAILED', verificationError: 'invalid_url' };
+      if (o.verification !== 'VERIFIED') {
+        // C-1 (ADR-131): trạng thái + secret cũ GIỮ NGUYÊN (MS-R4), nhưng lần thất bại phải thấy được trong audit.
+        await this.withAudit(tenantId, (repo) => auditVerificationFailure(repo, d.id, o.verificationError, 'rotate', `key:${req.apiKey!.id}`, { secretRotated: false }));
+        return { ...o, secretRotated: false };
+      }
+      await this.recordVerification(tenantId, d.id, o, `key:${req.apiKey!.id}`, 'rotate', aesGcmEncrypt(next, getMasterKey()));
       return { ...o, secretRotated: true };
     }
     let secret: string | null = null;
@@ -286,12 +317,15 @@ export class ServiceResourcesController {
     }
     const outcome: VerificationOutcome =
       url && secret ? await this.verifier.challenge(url, secret) : { verification: 'FAILED', verificationError: url ? 'no_signing_secret' : 'invalid_url' };
-    await this.recordVerification(tenantId, d.id, outcome, `key:${req.apiKey!.id}`);
+    await this.recordVerification(tenantId, d.id, outcome, `key:${req.apiKey!.id}`, 'verify');
     return outcome;
   }
 
-  /** Ghi kết quả challenge + audit `endpoint.verified` / `endpoint.verification_failed` cùng transaction. */
-  private recordVerification(tenantId: string, id: string, o: VerificationOutcome, actor: string, newSecretEncrypted?: string) {
+  /**
+   * Ghi kết quả challenge + audit cùng transaction. Trạng thái endpoint cập nhật MỌI lần; audit thất bại đi qua
+   * `auditVerificationFailure` (C-1, ADR-131: không spam khi retry).
+   */
+  private recordVerification(tenantId: string, id: string, o: VerificationOutcome, actor: string, attempt: VerifyAttempt, newSecretEncrypted?: string) {
     return this.withAudit(tenantId, async (repo) => {
       const u = await repo.updateDestination(id, {
         ...(newSecretEncrypted ? { signingSecretEncrypted: newSecretEncrypted } : {}),
@@ -299,13 +333,17 @@ export class ServiceResourcesController {
         verificationError: o.verificationError,
         verifiedAt: o.verification === 'VERIFIED' ? new Date() : null,
       });
-      await repo.createAuditLog({
-        action: o.verification === 'VERIFIED' ? 'endpoint.verified' : 'endpoint.verification_failed',
-        entityType: 'destination',
-        entityId: id,
-        actor,
-        metadata: { verificationError: o.verificationError, ...(newSecretEncrypted ? { secretRotated: true } : {}) },
-      });
+      if (o.verification === 'VERIFIED') {
+        await repo.createAuditLog({
+          action: 'endpoint.verified',
+          entityType: 'destination',
+          entityId: id,
+          actor,
+          metadata: { verificationError: null, attempt, ...(newSecretEncrypted ? { secretRotated: true } : {}) },
+        });
+      } else {
+        await auditVerificationFailure(repo, id, o.verificationError, attempt, actor);
+      }
       return u;
     });
   }

@@ -1,7 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
-import { ServiceResourcesController } from '../src/modules/service-api/service-resources.controller';
+import { ServiceResourcesController, WindowLimiter } from '../src/modules/service-api/service-resources.controller';
 
 // Tự đủ: không dựa vào test khác trong cùng worker đặt MASTER_KEY (thứ tự jest không cố định).
 process.env.MASTER_KEY = process.env.MASTER_KEY || 'test-master-key-at-least-32-characters!!';
@@ -78,7 +78,23 @@ describe('Service API — endpoint + subscription (S5)', () => {
             .filter((s) => !where.destination || match(destinations.find((d) => d.id === s.destinationId) ?? {}, where.destination)),
         ),
       },
-      auditLog: { create: jest.fn(async ({ data }: any) => audits.push(data)) },
+      auditLog: {
+        create: jest.fn(async ({ data }: any) => audits.push({ id: BigInt(audits.length + 1), createdAt: new Date(), ...data })),
+        // C-1 (ADR-131): audit verify gần nhất của một endpoint (lọc tenant + entity + action + createdAt >= since)
+        findFirst: jest.fn(
+          async ({ where }: any) =>
+            [...audits]
+              .reverse()
+              .find(
+                (a) =>
+                  a.tenantId === where.tenantId &&
+                  a.entityType === where.entityType &&
+                  a.entityId === where.entityId &&
+                  (!where.action?.in || where.action.in.includes(a.action)) &&
+                  (!where.createdAt?.gte || a.createdAt >= where.createdAt.gte),
+              ) ?? null,
+        ),
+      },
       apiKey: { findMany: jest.fn(async ({ where }: any) => apiKeys.filter((k) => k.tenantId === where.tenantId)) },
     };
     const prisma: any = {
@@ -316,6 +332,96 @@ describe('Service API — endpoint + subscription (S5)', () => {
     expect(row).toMatchObject({ createdByKeyId: 'key-old', signingSecretEncrypted: oldSecret, verification: 'VERIFIED', verificationError: null });
     expect(destinations).toHaveLength(before);
     expect(audits.map((a) => a.action)).not.toContain('endpoint.adopted');
+  });
+
+  // C-1 (ADR-131): verify thất bại KHÔNG được im lặng — mọi đường verify/create/adopt FAILED đều để lại audit
+  // `endpoint.verification_failed {verificationError, attempt}`; vòng retry (Shop ensure, backoff ≤ 60 s) không spam:
+  // trùng (cùng mã lỗi + cùng attempt) với audit verify gần nhất trong 1 giờ thì bỏ qua.
+  describe('C-1: verify thất bại phải để lại audit, không spam', () => {
+    const NEW = 'whsec_bmV3LXNlY3JldC1mb3ItbXMtcjQtdGVzdA==';
+    const failedAudits = (audits: any[]) => audits.filter((a) => a.action === 'endpoint.verification_failed');
+
+    it('xoay secret (ensure của Shop) FAILED ssrf_blocked -> audit attempt=rotate; secret + trạng thái cũ GIỮ NGUYÊN; audit không lộ url/secret', async () => {
+      const { controller, req, verdict, destinations, audits } = build();
+      const before = destinations.find((d) => d.id === EA).signingSecretEncrypted;
+      verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
+      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'ssrf_blocked', secretRotated: false });
+      expect(destinations.find((d) => d.id === EA)).toMatchObject({ signingSecretEncrypted: before, verification: 'VERIFIED' });
+      expect(failedAudits(audits)).toHaveLength(1);
+      expect(failedAudits(audits)[0]).toMatchObject({
+        tenantId: PA,
+        entityType: 'destination',
+        entityId: EA,
+        actor: 'key:key-1',
+        metadata: { verificationError: 'ssrf_blocked', attempt: 'rotate', secretRotated: false },
+      });
+      const dump = JSON.stringify(audits, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+      expect(dump).not.toContain('a.example');
+      expect(dump).not.toContain('whsec_');
+    });
+
+    it('vòng retry: cùng mã lỗi lặp lại -> CHỈ MỘT audit; mã khác -> audit mới; sau VERIFIED, lỗi cũ quay lại -> audit mới', async () => {
+      const { controller, req, verdict, audits } = build();
+      verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
+      for (let i = 0; i < 3; i++) await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW });
+      expect(failedAudits(audits)).toHaveLength(1);
+      verdict.next = { verification: 'FAILED', verificationError: 'timeout' };
+      await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW });
+      expect(failedAudits(audits).map((a) => a.metadata.verificationError)).toEqual(['ssrf_blocked', 'timeout']);
+      (controller as any).verifyLimiter = new WindowLimiter(100, 60_000);
+      verdict.next = { verification: 'VERIFIED', verificationError: null };
+      await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW });
+      verdict.next = { verification: 'FAILED', verificationError: 'timeout' };
+      await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW });
+      expect(failedAudits(audits).map((a) => a.metadata.verificationError)).toEqual(['ssrf_blocked', 'timeout', 'timeout']);
+    });
+
+    it('audit trùng nhưng cũ hơn 1 giờ -> ghi lại (lỗi kéo dài vẫn để dấu vết định kỳ)', async () => {
+      const { controller, req, verdict, audits } = build();
+      verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
+      await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW });
+      failedAudits(audits)[0].createdAt = new Date(Date.now() - 61 * 60_000);
+      await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW });
+      expect(failedAudits(audits)).toHaveLength(2);
+    });
+
+    it('/verify không secret FAILED lặp lại -> trạng thái endpoint cập nhật mỗi lần, audit chỉ một lần (attempt=verify)', async () => {
+      const { controller, req, verdict, audits, destinations } = build();
+      verdict.next = { verification: 'FAILED', verificationError: 'http_500' };
+      for (let i = 0; i < 3; i++) await controller.verifyEndpoint(req(PA), EA);
+      expect(destinations.find((d) => d.id === EA)).toMatchObject({ verification: 'FAILED', verificationError: 'http_500' });
+      expect(failedAudits(audits)).toHaveLength(1);
+      expect(failedAudits(audits)[0].metadata).toEqual({ verificationError: 'http_500', attempt: 'verify' });
+    });
+
+    it('url hỏng khi xoay secret (invalid_url) -> vẫn có audit, không gọi challenge', async () => {
+      const { controller, req, audits, destinations, verifier } = build();
+      destinations.find((d) => d.id === EA).configEncrypted = 'hong';
+      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'invalid_url', secretRotated: false });
+      expect(verifier.challenge).not.toHaveBeenCalled();
+      expect(failedAudits(audits)[0].metadata).toEqual({ verificationError: 'invalid_url', attempt: 'rotate', secretRotated: false });
+    });
+
+    it('nhận lại endpoint (adopt) FAILED -> vẫn 409 + audit attempt=adopt trên endpoint cũ, không spam khi retry; chủ/trạng thái giữ nguyên', async () => {
+      const { controller, req, destinations, audits, verdict } = build();
+      const url = 'https://a.example/old';
+      const ID = '99999999-9999-4999-8999-999999999997';
+      destinations.push({ id: ID, tenantId: PA, name: 'old', type: 'webhook', configEncrypted: aesGcmEncrypt(JSON.stringify({ url }), getMasterKey()), signingSecretEncrypted: aesGcmEncrypt('whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw', getMasterKey()), verification: 'VERIFIED', verificationError: null, createdByKeyId: 'key-old' });
+      verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
+      for (let i = 0; i < 3; i++) {
+        expect(await status(controller.createEndpoint(req(PA), { name: 'cafe', url, signingSecret: NEW }))).toMatchObject({ status: 409 });
+      }
+      expect(failedAudits(audits)).toHaveLength(1);
+      expect(failedAudits(audits)[0]).toMatchObject({ entityId: ID, actor: 'key:key-1', metadata: { verificationError: 'ssrf_blocked', attempt: 'adopt' } });
+      expect(destinations.find((d) => d.id === ID)).toMatchObject({ createdByKeyId: 'key-old', verification: 'VERIFIED' });
+    });
+
+    it('tạo endpoint FAILED -> audit attempt=create', async () => {
+      const { controller, req, verdict, audits } = build();
+      verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
+      await controller.createEndpoint(req(PA), { name: 'x', url: 'http://10.0.0.1/h', signingSecret: NEW });
+      expect(failedAudits(audits)[0].metadata).toEqual({ verificationError: 'ssrf_blocked', attempt: 'create' });
+    });
   });
 });
 
