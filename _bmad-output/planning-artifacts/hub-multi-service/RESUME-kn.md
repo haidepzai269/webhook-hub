@@ -46,3 +46,15 @@ ode_modules`. `git worktree remove --force` đi XUYÊN junction: xoá sạch `no
 ## Bước tiếp
 - (XONG) KN4 Stripe: `libs/providers/src/connectors/stripe.connector.ts` (POST/GET/DELETE `{base}/v1/webhook_endpoints`, form-encoded, `enabled_events[]` = 3 kiểu trong STRIPE_PAYMENT_TYPES), `StripeAdapter.connector`; secret do Stripe sinh -> `result.sourceSecret` (khung KN2 đã lưu version + chồng 24h + gỡ we_ cũ). Test U14, U15 (+ L1 với fake Stripe của sink).
 - `KICH-BAN-TEST-DA-SERVICE.md` chặng C (theo route thật) — chưa làm.
+
+## Sửa sau REVIEW-KN (2026-10-11, phiên dev thứ hai) — ADR-151
+| Mục | Commit | Ghi chú |
+|---|---|---|
+| H-1 kết nối source có sẵn + UI chọn "có sẵn / tạo mới" | f23f951 | `POST /api/v1/sources/:id/connect` hoặc `sourceId` trong body `sources/connect`; test L1 `[KN:U19..U21]` (payos-connect-db) |
+| L-1 P2002 sourceKey -> 409 | f23f951 | `[KN:U22]`; `POST /api/v1/sources` (dán tay, api.controller) VẪN 500 khi trùng — chưa sửa |
+| L-3 chống bấm hai lần | f23f951 | `claimSourceConnection` (UPDATE có điều kiện, PENDING < 60 s -> 409 `connection_in_progress`); `[KN:U23]` |
+| M-1 gỡ we_ cũ sau COMMIT | f23f951 | `[KN:U24]` (stripe-connect-db, Proxy làm TX3 lỗi P1001) |
+| I-1 + demo/hướng dẫn | 8c5dcbc | DEPLOYMENT §9, HUONG-DAN-DEPLOY §3/§9, SPEC §8.4/§9/§11, HUONG-DAN-TEST-TINH-HUONG 2.0 |
+| expectFailure P-KN* + U10 row thật (L-6) | a780a7c | 5/5 probe ✅ qua `npm run verify:probe` (worktree của runner, không junction) |
+- Kiểm: L0 `npx jest -w 2` 812/0 (2 suite không nạp = L-5 có từ trước); L1 hub_app: payos-connect-db 7/7, stripe-connect-db 4/4, source-connections-db 7/7; `verify:gates` 0 vi phạm; tsc hub-api + web xanh.
+- Còn mở: KQ1/M-2 (chờ production), M-3 L2 T1–T4 (chờ rebuild hubv), L-2, L-4, L-5, L-7, sửa P2002 ở `POST /api/v1/sources`.
