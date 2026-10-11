@@ -41,3 +41,7 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 | N-3 | xong | a20f0e3 | ADR-123 | |
 | N-4 | xong | a20f0e3 | ADR-123; local vẫn tự chọn IP được (ghi rõ), kiểm Vercel thật theo DEPLOYMENT | |
 - Vòng 2 xong: verify L0 628/0/0 · L1 138/0/0 · map 231 mã 0 ma 0 trùng · gates 14/0 · e2e auth 17/17 · smoke OK · demo exit 0.
+
+## Story Admin: MAIL_DRIVER=gmail (ADR-124)
+- xong (commit gmail). Code: libs/common/src/mail/gmail.ts; test L0 libs/common/test/mail-gmail.spec.ts [AU:GM1..GM6] (inline trong spec-sources).
+- Hướng dẫn lấy refresh token: DEPLOYMENT §9 "Lấy GOOGLE_REFRESH_TOKEN". Không có lệnh gọi Google thật nào trong test.

@@ -333,9 +333,14 @@ OAUTH_COOKIE_SECRET=     # cookie state/PKCE của GitHub OAuth (AU5)
 OPERATOR_EMAIL=          # operator = root của hub (seed). Deployed không tự seed: chạy `docker-entrypoint.sh seed` một lần
 OPERATOR_PASSWORD_HASH=  # bcrypt cost 12. Render: dán hash nguyên `$` (không phải `$$` — chỉ compose nội suy)
 WEB_PUBLIC_URL=          # https://<web>.vercel.app — CORS có credentials, link trong mail, OAuth callback
-MAIL_DRIVER=resend       # AU2. KHÔNG dùng `log` trên deployed (link xác minh/đặt lại mật khẩu sẽ nằm trong log Render)
+MAIL_DRIVER=gmail        # ADR-124: gmail (Gmail API qua HTTPS + OAuth2 — Render free CHẶN cổng SMTP) | resend. AU2. KHÔNG dùng `log` trên deployed (link xác minh/đặt lại mật khẩu sẽ nằm trong log Render)
 RESEND_API_KEY=          # Admin cung cấp. Bẫy: chưa xác minh domain (DNS) thì Resend CHỈ gửi tới email chủ tài khoản
-MAIL_FROM=               # vd "Webhook Hub <onboarding@resend.dev>" (chưa có domain) hoặc no-reply@<domain đã xác minh>
+MAIL_FROM=               # resend: "Webhook Hub <onboarding@resend.dev>" hoặc no-reply@<domain đã xác minh>
+                         # gmail: ĐÚNG địa chỉ Gmail đã cấp refresh token, vd "Webhook Hub <ban@gmail.com>"
+GOOGLE_CLIENT_ID=        # gmail: OAuth client (Web application) — xem "Lấy GOOGLE_REFRESH_TOKEN" dưới khối này
+GOOGLE_CLIENT_SECRET=    # gmail: KHÔNG commit, không log
+GOOGLE_REFRESH_TOKEN=    # gmail: scope https://www.googleapis.com/auth/gmail.send. Thiếu biến nào -> hub-api thoát lúc khởi động
+                         # Token bị thu hồi/hết hạn -> log "invalid_grant" chỉ cách lấy lại; đăng ký/quên mật khẩu vẫn trả ngay (gửi chạy nền)
 GITHUB_OAUTH_CLIENT_ID=  # AU5: GitHub → Settings → Developer settings → OAuth Apps. KHÁC GITHUB_WEBHOOK_SECRET
 GITHUB_OAUTH_CLIENT_SECRET=
                          # Authorization callback URL = https://<web>.vercel.app/auth/github/callback (qua proxy web)
@@ -389,6 +394,21 @@ WEB_PROXY_SECRET=          # RUNTIME (không phải NEXT_PUBLIC_, không vào bu
 NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
 NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel
 ```
+
+### Lấy GOOGLE_REFRESH_TOKEN (MAIL_DRIVER=gmail, ADR-124)
+
+1. **Google Cloud Console** → tạo/chọn project → *APIs & Services → Library* → bật **Gmail API**.
+2. *OAuth consent screen*: User type **External**; điền tên app + email hỗ trợ; *Test users* → thêm đúng địa chỉ Gmail sẽ gửi thư.
+   Sau đó **Publish app → In production**. Nếu để *Testing*, refresh token cho scope Gmail **hết hạn sau 7 ngày** (log sẽ báo `invalid_grant`).
+   App chưa qua xác minh của Google vẫn dùng được cho chính tài khoản của bạn (màn hình cảnh báo "unverified" → *Advanced → Go to …*).
+3. *Credentials → Create credentials → OAuth client ID* → loại **Web application**; *Authorized redirect URIs* thêm
+   `https://developers.google.com/oauthplayground`. Ghi lại Client ID / Client secret → `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+4. Mở **https://developers.google.com/oauthplayground** → bánh răng ⚙ → tick **Use your own OAuth credentials** → dán Client ID/secret.
+5. Ô *Input your own scopes*: `https://www.googleapis.com/auth/gmail.send` → **Authorize APIs** → đăng nhập ĐÚNG Gmail ở bước 2 → cho phép.
+6. **Exchange authorization code for tokens** → chép **Refresh token** → `GOOGLE_REFRESH_TOKEN`. `MAIL_FROM` = chính Gmail đó.
+7. Đặt 4 biến + `MAIL_DRIVER=gmail` trên Render (KHÔNG đặt ở Vercel, không commit), deploy, thử "Quên mật khẩu" với email của bạn.
+   Thu hồi: https://myaccount.google.com/permissions → gỡ app (token chết ngay, log báo `invalid_grant`).
+
 
 > **Nguyên tắc:** adapter **không đọc env**. Secret vào DB qua `source_secrets` (đã mã hoá). Env chỉ để seed lần đầu. Đây là lý do `verify()` nhận `secrets: string[]` làm tham số.
 

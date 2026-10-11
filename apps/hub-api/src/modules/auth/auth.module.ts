@@ -23,7 +23,7 @@ import { createMailSender, MAIL_SENDER } from '@hub/common';
   providers: [
     { provide: AUTH_CONFIG, useFactory: () => loadAuthConfig() },
     { provide: AuthRateLimiter, inject: [RedisService], useFactory: (redis: RedisService) => new AuthRateLimiter(redis.client) },
-    // SPEC-auth §5.9: MAIL_DRIVER=log|resend|capture (capture ở production -> app thoát, test-only-config.ts)
+    // SPEC-auth §5.9: MAIL_DRIVER=log|resend|gmail|capture (capture ở production -> app thoát, test-only-config.ts)
     { provide: MAIL_SENDER, useFactory: () => createMailSender() },
     AuthService,
     SessionGuard,

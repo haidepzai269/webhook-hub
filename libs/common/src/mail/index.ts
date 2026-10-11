@@ -2,10 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { logger } from '../logger';
+import { GmailSender, loadGmailConfig } from './gmail';
+
+export * from './gmail';
 
 /**
  * SPEC-auth §5.9 + SPEC-verification §4.2: một giao diện, ba driver.
  *   log     (mặc định, local): in thư ra log mức info — link nằm trong log, CHỈ dùng ở máy dev;
+ *   gmail   : Gmail API qua HTTPS + OAuth2 refresh token (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN, MAIL_FROM) — ADR-124;
  *   resend  : gọi API Resend (RESEND_API_KEY, MAIL_FROM). Chưa xác minh domain thì Resend chỉ gửi tới email chủ tài khoản;
  *   capture : ghi mỗi thư một file JSON vào MAIL_CAPTURE_DIR — CHỈ stack kiểm chứng (production + capture -> app thoát,
  *             xem test-only-config.ts). Runner e2e đọc link từ file, không grep log.
@@ -60,7 +64,8 @@ export function createMailSender(env: Record<string, string | undefined> = proce
       },
     };
   }
-  throw new Error(`MAIL_DRIVER không hợp lệ: "${driver}" (log | resend | capture)`);
+  if (driver === 'gmail') return new GmailSender(loadGmailConfig(env), fetchImpl);
+  throw new Error(`MAIL_DRIVER không hợp lệ: "${driver}" (log | resend | gmail | capture)`);
 }
 
 function esc(s: string): string {

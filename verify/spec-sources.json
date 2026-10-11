@@ -150,6 +150,12 @@
       "codes": "1-5",
       "requireTest": false,
       "note": "Bất biến BB-1..BB-5 (CLAUDE.md, §8.2). verify:bb (VF6) bắt buộc."
+    },
+    {
+      "ns": "AU",
+      "codes": "GM1-GM6",
+      "requireTest": true,
+      "note": "Driver MAIL_DRIVER=gmail (ADR-124): GM1 cache token · GM2 401 làm mới một lần · GM3 invalid_grant · GM4 MIME/base64url/RFC 2047 · GM5 chống CRLF · GM6 kiểm cấu hình lúc khởi động. Test L0 libs/common/test/mail-gmail.spec.ts (HTTP giả)."
     }
   ],
   "doneOverrides": [

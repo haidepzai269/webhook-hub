@@ -149,10 +149,14 @@ services:
       # Web (CORS có credentials, link trong mail, OAuth callback). Local: web docker ở :3000.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
       - TRUST_PROXY=${TRUST_PROXY:-0}
-      # AU2 (SPEC-auth §5.9): log (in link ra log, CHỈ local) | resend (RESEND_API_KEY + MAIL_FROM) | capture (CHỈ hubv)
+      # AU2 (SPEC-auth §5.9): log (in link ra log, CHỈ local) | resend (RESEND_API_KEY + MAIL_FROM) | gmail (GOOGLE_* + MAIL_FROM, ADR-124) | capture (CHỈ hubv)
       - MAIL_DRIVER=${MAIL_DRIVER:-log}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - MAIL_FROM=${MAIL_FROM:-}
+      # ADR-124: MAIL_DRIVER=gmail — Gmail API + OAuth2 (không SMTP). Trống khi không dùng.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN:-}
       - MAIL_CAPTURE_DIR=${MAIL_CAPTURE_DIR:-}
       # AU5 (SPEC-auth §5.10): GitHub OAuth App — KHÁC GITHUB_WEBHOOK_SECRET. Callback: ${WEB_PUBLIC_URL}/auth/github/callback
       - GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID:-}
