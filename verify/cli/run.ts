@@ -526,6 +526,19 @@ async function main() {
     }
     case 'bb':
       process.exit(await bbCmd((opt('--overlay') ?? '').split(',').filter(Boolean)));
+    case 'files': {
+      // demo:run (VF8): chạy đúng các file test được chỉ, mỗi file ở tầng của nó (L1 có Postgres/Redis hubv).
+      const files = rest.filter((x) => x.endsWith('.spec.ts'));
+      let code = 0;
+      const l0 = files.filter((f) => layerOfFile(f) === 'L0');
+      const l1 = files.filter((f) => layerOfFile(f) === 'L1');
+      if (l0.length) code ||= runJest('L0', l0, l0Env(), ROOT, 'files-L0').summary.fail > 0 ? 1 : 0;
+      if (l1.length) {
+        const r = runJest('L1', l1, l1Env().env, ROOT, 'files-L1').summary;
+        code ||= r.fail > 0 || r.skip > 0 || r.pass === 0 ? 1 : 0;
+      }
+      process.exit(code);
+    }
     case 'map':
       process.exit(mapCmd(opt('--story')));
     default:

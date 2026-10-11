@@ -102,7 +102,7 @@ const file: ScenarioFile = {
     },
     {
       name: '[BB:2] (phần l) gửi lại y hệt 3 lần (SePay, GitHub) → 200 cả 3, đúng MỘT event mỗi loại',
-      tags: ['smoke', 'VF4'],
+      tags: ['smoke', 'VF4', 'demo-redeliver'],
       fn: async () => {
         // Nhận diện lần gửi: GitHub theo header delivery, SePay theo `id` trong body (cả hai chứa số unique `u`).
         const cases = [

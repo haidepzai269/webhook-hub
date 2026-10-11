@@ -1,0 +1,157 @@
+# VF8 (SPEC-verification §9.1) — kịch bản bảo vệ DUY NHẤT: ba hồi, 14 bước, ~10 phút.
+# Thứ tự này THAY ARCHITECTURE §12, đa service §7.3, DX §6.3, auth §10.3 (spec verification thắng về thứ tự).
+#
+# Mỗi bước: say (lời thoại) · do (thao tác) · expect (thấy gì là đúng) · env (local = hubv | deployed = Render/Vercel)
+# · timeoutS (ngân sách thời gian) · check (tuỳ chọn: `npm run demo:run -- --step N` TỰ KIỂM, in ✅/❌):
+#     check.kind = e2e   → chạy kịch bản L2 có tag `check.tag` vào hubv
+#     check.kind = chaos → chạy kịch bản L3 có tag `check.tag` vào hubv
+#     check.kind = jest  → chạy file test `check.file` (L1 dùng Postgres/Redis hubv)
+# Bước không có check: người trình bày bấm Enter khi đã thấy `expect`.
+# Bước env=deployed KHÔNG BAO GIỜ được tự kiểm từ máy dev (không chạy gì vào hạ tầng thật) — chỉ in lời thoại.
+
+steps:
+  # ------------------------------------------------------------------ HỒI 1 — Một service mới vào hub (~3')
+  - step: 1
+    act: 1
+    env: deployed
+    title: Đăng ký bằng email thật — BẤM GIỜ
+    say: "Một dev hoàn toàn mới. Em bấm giờ từ lúc mở trang tới lúc service của dev nhận được sự kiện đầu tiên."
+    do:
+      - Mở web deployed, bấm "Đăng ký", nhập email thật của Admin, đặt mật khẩu.
+      - Bấm đồng hồ.
+    expect: Vào được dashboard (đăng nhập ngay, xác minh email làm ở bước 3).
+    timeoutS: 40
+  - step: 2
+    act: 1
+    env: deployed
+    title: Tạo key → `npx hub listen` → `hub trigger payment.received` → app mẫu in event — DỪNG GIỜ
+    say: "Không cần mở cổng, không cần tunnel: listen là polling ký phía client. Trigger đi đúng đường publish thật."
+    do:
+      - Console → API keys → tạo key (publish:events + read:events) → chép chuỗi kết nối.
+      - Terminal 1 `npx hub listen --forward http://localhost:3000/hub-webhook` (examples/quickstart-node).
+      - Terminal 2 `npx hub trigger payment.received`.
+      - Dừng đồng hồ khi app mẫu in event.
+    expect: App mẫu in `payment.received` đúng khuôn catalog; thời gian Sally ≤ 60 s / Winston ≤ 120 s.
+    timeoutS: 90
+  - step: 3
+    act: 1
+    env: deployed
+    title: Bấm link xác minh trong mail
+    say: "Xác minh email không chặn dev thử hub — nhưng không xác minh thì không mời thành viên, không lên live."
+    do:
+      - Mở hộp thư, bấm link xác minh.
+    expect: Banner "chưa xác minh" biến mất.
+    timeoutS: 20
+  - step: 4
+    act: 1
+    env: deployed
+    title: Key thiếu scope → lỗi kèm `fix`
+    say: "Lỗi của hub nói luôn cách sửa — dev không phải đi hỏi."
+    do:
+      - Dùng key chỉ có read:events để publish (`npx hub trigger …` hoặc curl).
+    expect: 403 `{error, message, fix, docsUrl, requestId}` — `fix` chỉ đúng scope còn thiếu.
+    timeoutS: 20
+
+  # ------------------------------------------------------------------ HỒI 2 — Gãy rồi tự lành (~4', LOCAL hubv)
+  - step: 5
+    act: 2
+    env: local
+    title: k6 50 rps + `--scale hub-worker=3`, Grafana
+    say: "Số đo lấy ở local (ADR-019). Worker scale ngang vì api và worker là hai tiến trình từ ngày 1 (BB-4)."
+    do:
+      - "`VERIFY_WITH_METRICS=1 npm run verify:up` (đã làm ở T-60')."
+      - "`docker compose -p hubv up -d --scale hub-worker=3 hub-worker`"
+      - Chạy k6 vào localhost (KHÔNG qua tunnel — cạm bẫy 5), mở Grafana.
+    expect: Throughput ổn định, p95 trong ngưỡng ARCHITECTURE §13, ba worker cùng nhận việc.
+    timeoutS: 60
+  - step: 6
+    act: 2
+    env: local
+    title: kill worker giữa chừng → đếm 0 mất
+    say: "Em giết worker ngay lúc nó đang giao. Postgres là trọng tài: đếm theo delivery id — không mất, không trùng."
+    do:
+      - "`docker compose -p hubv kill -s SIGKILL hub-worker` giữa luồng → `start` lại."
+    expect: Mọi id có đúng 1 event, đúng 1 delivery SUCCEEDED, 0 trùng.
+    check: { kind: chaos, tag: chaos-worker }
+    timeoutS: 90
+  - step: 7
+    act: 2
+    env: local
+    title: Tắt Shop → RETRYING → bật → tự giao
+    say: "Đích chết thì hub không bỏ cuộc: lùi theo tầng, đếm ngược hiện trên UI."
+    do:
+      - "`docker compose -p hubv stop shop`, thanh toán thử, xem delivery RETRYING + đếm ngược."
+      - "`docker compose -p hubv start shop`."
+    expect: Delivery tự sang SUCCEEDED ở lần thử kế tiếp, đơn PAID.
+    timeoutS: 60
+  - step: 8
+    act: 2
+    env: local
+    title: Đích lỗi → circuit OPEN → DLQ → Replay
+    say: "Đích hỏng lâu thì circuit mở để không đốt tài nguyên; hết lượt thì vào DLQ — Postgres vẫn là sổ cái, Replay một nút."
+    do:
+      - Endpoint trỏ `sink/?mode=fail`, bắn vài event, xem circuit OPEN rồi DEAD.
+      - Sửa endpoint, bấm Replay.
+    expect: Circuit OPEN → HALF_OPEN → CLOSED; delivery DEAD được giao lại SUCCEEDED.
+    timeoutS: 60
+  - step: 9
+    act: 2
+    env: local
+    title: GitHub redeliver ×3 → 1 event
+    say: "Provider gửi lại là chuyện thường. Ba lần cùng một delivery id → đúng một sự kiện, kể cả khi Redis trống."
+    do:
+      - Bấm "Redeliver" 3 lần trên GitHub (hoặc `npm run hub-sim -- send github/push --to … --unique 1` ×3 — NÓI RÕ là phát lại).
+    expect: 3 lần 200, 1 raw_event, 1 event.
+    check: { kind: e2e, tag: demo-redeliver }
+    timeoutS: 40
+
+  # ------------------------------------------------------------------ HỒI 3 — Thật, và cô lập (~3')
+  - step: 10
+    act: 3
+    env: deployed
+    title: Thanh toán PayOS THẬT 2.000đ → đơn PAID
+    say: "Source PayOS này em tự tạo trên web như một user bình thường, dán URL hub vào trang PayOS. Không có gì giả lập."
+    do:
+      - Chiếu trang source + trang cấu hình webhook của PayOS.
+      - Admin quét QR, chuyển 2.000đ.
+    expect: Đơn PAID trên Shop; raw_event ACCEPTED; delivery SUCCEEDED.
+    timeoutS: 60
+  - step: 11
+    act: 3
+    env: deployed
+    title: Ba payload (PayOS, SePay, AB Bank) → một hình dạng
+    say: "Vào nhiều kiểu, ra một kiểu. Shop chỉ có MỘT hàm, không `if` theo provider."
+    do:
+      - Mở ba event `payment.received`, so cột khoá `data`.
+      - Mở `apps/shop/src/main.ts` (readPayment).
+    expect: Khoá `data` giống hệt nhau; không nhánh theo provider. (Tập dượt local — `npm run verify:e2e -- --tag VF3`.)
+    timeoutS: 40
+  - step: 12
+    act: 3
+    env: deployed
+    title: Hai cửa sổ cafe/bookstore — bên kia im lặng, key chéo → 404
+    say: "Biên cô lập là project. Key của cafe gọi vào bookstore: 404 như không tồn tại."
+    do:
+      - Hai cửa sổ ẩn danh, mỗi bên một project; bắn event vào cafe.
+      - Dùng key cafe gọi `/v1/p/bookstore/events`.
+    expect: Bookstore không thấy gì; key chéo → 404.
+    timeoutS: 30
+  - step: 13
+    act: 3
+    env: deployed
+    title: Viewer thử xoá endpoint → 403
+    say: "Quyền theo vai trò: viewer chỉ đọc."
+    do:
+      - Đăng nhập tài khoản viewer của project demo, bấm xoá endpoint.
+    expect: 403, endpoint còn nguyên.
+    timeoutS: 20
+  - step: 14
+    act: 3
+    env: deployed
+    title: psql bằng `hub_app` → 0 dòng
+    say: "Kể cả code của em quên lọc, Postgres vẫn chặn: role của app không superuser, không BYPASSRLS, chưa đặt project thì 0 dòng."
+    do:
+      - "psql vào Neon bằng chuỗi kết nối của role hub_app → `select count(*) from hub.events`."
+      - "Tập dượt ở local: `docker compose -p hubv exec postgres psql -U hub_app -d webhook_hub -c 'select count(*) from hub.events'` + `npm run verify:bb` (dòng BB-5)."
+    expect: "0 dòng dù bảng có dữ liệu; `[AU:TA12][BB:5]` xanh, probe P-BB5-02 đỏ."
+    timeoutS: 30

@@ -44,8 +44,18 @@ export function psql(sql: string): string {
 }
 
 export async function mailLink(to: string, re: RegExp): Promise<string> {
+  // Chỉ đọc thư mới (mtime >= lúc bắt đầu chờ − 5 s): verify/.mail tích hàng nghìn file qua các lượt, đọc hết mỗi
+  // vòng làm vòng chờ chậm tới mức hết giờ trước khi thấy thư (từng chập chờn ở demo bước 9).
+  const since = Date.now() - 5000;
   return waitFor(`thư tới ${to} khớp ${re}`, async () => {
-    const files = fs.existsSync(MAIL_DIR) ? fs.readdirSync(MAIL_DIR).filter((f) => f.endsWith('.json')).sort().reverse() : [];
+    const files = fs.existsSync(MAIL_DIR)
+      ? fs
+          .readdirSync(MAIL_DIR)
+          .filter((f) => f.endsWith('.json'))
+          .filter((f) => fs.statSync(path.join(MAIL_DIR, f)).mtimeMs >= since)
+          .sort()
+          .reverse()
+      : [];
     for (const f of files) {
       try {
         const m = JSON.parse(fs.readFileSync(path.join(MAIL_DIR, f), 'utf8')) as { to?: string; text?: string };
@@ -56,7 +66,7 @@ export async function mailLink(to: string, re: RegExp): Promise<string> {
       }
     }
     return null;
-  }, 10_000, 250);
+  }, 20_000, 250);
 }
 
 export interface Dev {

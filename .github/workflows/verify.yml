@@ -1,7 +1,7 @@
 # VF7 (SPEC-verification §7, ADR-067): CI bắt buộc. Repo PUBLIC → không có secret thật nào ở đây; chỉ .env.verify.
 #
-# Job ở bản này: unit (L0 + map + grep §7.3) · db (L1 trên service container) · secrets (gitleaks toàn lịch sử).
-# Job e2e (mọi push) và chaos (nightly) thêm ở VF8, khi đã có runner L2 (VF4) và L3 (VF5).
+# Job: unit (L0 + map + grep §7.3) · db (L1 trên service container) · secrets (gitleaks toàn lịch sử)
+#      · e2e (L2 trên compose hubv, mọi push — VF8) · chaos (L3 + verify:probe --all, nightly + bấm tay — VF8).
 # Bảo vệ nhánh (Admin bật trên GitHub): `unit` + `db` là required check để merge vào main.
 name: verify
 
@@ -12,6 +12,9 @@ on:
   pull_request:
     paths-ignore: ['**/*.md', 'docs/**', '_bmad-output/**']
   workflow_dispatch:
+  # VF8: chaos + probe chạy đêm (02:00 giờ Việt Nam).
+  schedule:
+    - cron: '0 19 * * *'
 
 concurrency:
   group: verify-${{ github.ref }}
@@ -120,3 +123,70 @@ jobs:
         run: >-
           docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:v8.18.4
           detect --source /repo --redact --verbose --exit-code 1
+
+  # VF8 (SPEC-verification §7.1): L2 — compose `hubv` trên runner ubuntu, kịch bản HTTP thật (đăng ký qua mail capture,
+  # hub-sim, sink, auth-e2e). Repo public → runner chuẩn không giới hạn phút → chạy MỌI push.
+  e2e:
+    name: e2e (L2 trên hubv)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      VERIFY_WITH_WEB: '1' # kịch bản qua proxy web (AR:R-2, R-5, GO9) — không có web thì ∅ = SKIP = đỏ
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: verify:up (build image + seed hubv)
+        run: npm run verify:up
+      - name: L2 e2e (skip > 0 = đỏ)
+        run: npm run verify:e2e
+      - name: Log + mail capture khi đỏ
+        if: failure()
+        run: docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify logs --no-color > hubv-logs.txt || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-e2e
+          path: |
+            hubv-logs.txt
+            verify/.mail/
+            verify/.results/
+          if-no-files-found: ignore
+
+  # VF8: L3 chaos + probe — nightly và bấm tay (kill/restart container hubv của CHÍNH runner, không đụng gì khác).
+  chaos:
+    name: chaos (L3) + probe
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      VERIFY_WITH_WEB: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run verify:up
+      - name: L3 chaos
+        run: npm run verify:chaos
+      - name: verify:probe --all (mỗi probe phải làm test đích đỏ; cây làm việc không đổi)
+        run: npm run verify:probe -- --all
+      - name: Log khi đỏ
+        if: failure()
+        run: docker compose -p hubv -f docker-compose.yml -f docker-compose.verify.yml --env-file .env.verify logs --no-color > hubv-logs.txt || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-chaos
+          path: |
+            hubv-logs.txt
+            verify/.results/
+          if-no-files-found: ignore

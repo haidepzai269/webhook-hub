@@ -16,10 +16,13 @@ polling `after=latest` trong service-resources.controller.ts, docs/ERRORS.md, do
 
 | VF5 L3 chaos | `9a3ce40` | ADR-137. `npm run verify:chaos [-- --tag chaos-pg]`, `verify/scenarios/chaos-l3.ts`. 6/0/0 ~5 phút. docker gọi bằng `spawn` (không spawnSync) để luồng request vẫn bay lúc phá |
 
-| VF6 probe + bb | (xem git log) | ADR-147. `verify:probe`, `verify:bb`, 8 probe mới, 35/35 đúng kỳ vọng. ~2,5 phút/probe → `--all` ~1,5 giờ (chạy nền) |
+| VF6 probe + bb | `d0b84b7` | ADR-147. `verify:probe`, `verify:bb`, 8 probe mới, 35/35 đúng kỳ vọng. ~2,5 phút/probe → `--all` ~1,5 giờ (chạy nền) |
+
+| VF8 demo + CI | (xem git log) | ADR-148. steps.yaml, demo.ts, seed-demo.ts, PREFLIGHT, RUNBOOK, FOR-EXAMINERS, CI e2e+chaos |
 
 ## Đang làm / tiếp theo
 
-- VF8: ĐÃ VIẾT (chưa commit lúc ghi dòng này): `verify/demo/{steps.yaml,PREFLIGHT.md,seed-demo.ts}`, `verify/cli/demo.ts`, `verify/test/demo.spec.ts`, `docs/{RUNBOOK,FOR-EXAMINERS}.md`, ARCHITECTURE §12 trỏ về steps.yaml, job CI `e2e` + `chaos` trong `.github/workflows/verify.yml`, tag `demo-redeliver` trong ingest-e2e. CÒN: áp `scratchpad/vf8a.py` phần `run.ts files` (lệnh `run.ts files <spec>` cho check kind jest), script npm `demo:*`, ADR, tick spec, commit.
-- Luật commit mới (coordinator): CHỈ `git commit -m … -- <paths>`; không add+commit trơn, không amend/reset/rebase. `-- paths` lấy nội dung CÂY LÀM VIỆC của path → file dùng chung (docs/adr/README.md, package.json, verify/baseline.json) kiểm `git diff` trước: có thay đổi của phiên khác thì đừng commit file đó.
+- HẾT danh sách C-1 + VF3→VF8. Còn treo: `docs/adr/README.md` có ADR-147 (VF6) + ADR-148 (VF8) ở cây làm việc nhưng CHƯA commit vì file đang có ADR-146 chưa commit của phiên KN (luật commit theo path sẽ cuốn cả của họ). Khi KN commit README (hoặc coordinator cho phép), commit `docs/adr/README.md`.
+- `verify/baseline.json` không commit phần L0/L2 tăng (gồm test chưa commit của phiên khác); HEAD có L2=25, L3=6.
+- Luật commit (coordinator): CHỈ `git commit -m … -- <paths>`; file mới phải `git add` trước. Không amend/reset/rebase.
 - Câu hỏi Admin: `CAN-ADMIN-QUYET-VF.md` Q1–Q4.

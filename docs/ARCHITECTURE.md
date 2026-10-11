@@ -714,6 +714,10 @@ export interface ProviderAdapter {
 
 ## 12. Kịch bản demo (thứ tự trình bày)
 
+> **Thứ tự trình bày CHÍNH THỨC đã chuyển sang SPEC-verification §9.1** (ba hồi, 14 bước — `verify/demo/steps.yaml`,
+> tập dượt bằng `npm run demo:rehearse`, danh sách trước giờ bảo vệ `verify/demo/PREFLIGHT.md`). Bảng dưới giữ làm
+> nguồn của **hồi 2** ("gãy rồi tự lành" — bước 5–9); mâu thuẫn về thứ tự thì `steps.yaml` thắng.
+>
 > Mở màn bằng cảnh hệ thống **gãy rồi tự lành** — đừng mở bằng mua hàng.
 
 | # | Kịch bản | Chứng minh |
