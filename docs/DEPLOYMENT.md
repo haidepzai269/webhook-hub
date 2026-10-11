@@ -139,7 +139,21 @@ DATABASE_URL=<direct> DIRECT_URL=<direct> npx prisma migrate resolve --applied 0
 
 Trước đó kiểm `npx prisma migrate diff --from-schema-datasource libs/database/prisma/schema.prisma --to-schema-datamodel libs/database/prisma/schema.prisma` ra rỗng.
 
-**User DB riêng cho Shop (ADR-046).** Local: role `shop_user` tạo bởi `docker/postgres/init/02-shop-user.sh`, chỉ thấy schema `shop`. Neon: tạo role tương tự bằng SQL trong script đó (chạy bằng role sở hữu schema, thay `:"migrator"` bằng role chạy migration), rồi đặt connection string của `shop` theo role này.
+**User DB riêng cho Shop (ADR-046, ADR-125).** Local: role `shop_user` tạo bởi `docker/postgres/init/02-shop-user.sh`, chỉ thấy schema `shop`. Deployed **bắt buộc** có role riêng trên Neon — chạy MỘT lần trong SQL Editor của Neon bằng `neondb_owner` (role chạy migration), SAU `prisma migrate deploy`:
+
+```sql
+CREATE ROLE shop_user LOGIN PASSWORD '<mật khẩu mạnh, chỉ chữ/số>';   -- đã có thì: ALTER ROLE shop_user WITH LOGIN PASSWORD '…';
+CREATE SCHEMA IF NOT EXISTS shop;
+GRANT CONNECT ON DATABASE neondb TO shop_user;
+GRANT USAGE ON SCHEMA shop TO shop_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA shop TO shop_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA shop TO shop_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA shop GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO shop_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA shop GRANT USAGE, SELECT ON SEQUENCES TO shop_user;
+-- Cố ý KHÔNG GRANT gì trên schema hub.
+```
+
+Connection string của Shop: `postgresql://shop_user:<pw>@<ep>-pooler.<region>.aws.neon.tech/neondb?sslmode=require&schema=shop`.
 
 `SELECT ... FOR UPDATE SKIP LOCKED` **vẫn chạy đúng** qua pooled vì nó nằm trong transaction tường minh. (`LISTEN/NOTIFY` thì **không** chạy qua transaction pooling — ta không dùng, đừng thêm vào.)
 
@@ -304,7 +318,9 @@ Bật **public status page** → chụp vào báo cáo. Mười phút cấu hìn
 
 ```bash
 # --- Hạ tầng ---
-DATABASE_URL=            # Neon pooled (-pooler, ?pgbouncer=true&connection_limit=1) — ĐĂNG NHẬP BẰNG ROLE hub_app (AU6)
+DATABASE_URL=            # Neon pooled (-pooler) — ĐĂNG NHẬP BẰNG ROLE hub_app (AU6). hub-api VÀ hub-worker: thêm đuôi
+                         # `&pgbouncer=true&connection_limit=1`, vd
+                         # postgresql://hub_app:<pw>@<ep>-pooler.<region>.aws.neon.tech/neondb?sslmode=require&schema=hub&pgbouncer=true&connection_limit=1
 DIRECT_URL=              # Neon direct, role OWNER — chỉ cho prisma migrate + seed
                          # AU6 (RLS, ADR-108) — tạo role hub_app MỘT lần trên Neon (Console → Roles → New role
                          # "hub_app", hoặc SQL Editor bằng owner):
@@ -313,13 +329,17 @@ DIRECT_URL=              # Neon direct, role OWNER — chỉ cho prisma migrate 
                          # rồi chạy `prisma migrate deploy` (DIRECT_URL): migration cấp quyền schema hub + bật RLS.
                          # hub-api/hub-worker THOÁT nếu DATABASE_URL là role superuser/BYPASSRLS (vd neondb_owner).
                          # Seed trên deployed: `docker-entrypoint.sh seed` với DIRECT_URL (seed tự mở phiên hệ thống).
-                         # MIGRATION DỮ LIỆU (R-7, ADR-111): trên Neon owner KHÔNG phải superuser nên FORCE RLS chặn cả
-                         # owner — UPDATE/INSERT/DELETE trên bảng có RLS ảnh hưởng 0 DÒNG mà KHÔNG báo lỗi (local thì
-                         # chạy đúng vì hub_user là superuser → lệch môi trường im lặng). Mọi migration dữ liệu tạo sau
-                         # 20261011110000_rls_hub_app phải mở đầu bằng:
+                         # MIGRATION DỮ LIỆU (R-7, ADR-111, sửa ở ADR-125): trên project Neon của đồ án `neondb_owner` là
+                         # NOSUPERUSER nhưng **BYPASSRLS = true** (đã kiểm 11/10: `SELECT rolsuper, rolbypassrls FROM pg_roles
+                         # WHERE rolname = current_user`) → owner BỎ QUA RLS, migration dữ liệu chạy đủ dòng. Vẫn GIỮ quy ước
+                         # (phòng thủ nhiều lớp, mang sang được nhà cung cấp mà owner không có BYPASSRLS — khi đó FORCE RLS
+                         # làm UPDATE/INSERT/DELETE ảnh hưởng 0 dòng không báo lỗi; đã tái hiện bằng `prisma migrate deploy`):
+                         # mọi migration dữ liệu tạo sau 20261011110000_rls_hub_app mở đầu bằng
                          #   SET LOCAL app.rls_system = 'on';   -- Prisma gửi cả file một lần = một transaction ngầm
-                         # Gate `data-migration-rls` (npm run verify:gates) đỏ nếu thiếu. Đã thử bằng `prisma migrate
-                         # deploy` với owner không superuser: thiếu dòng này → 0 dòng; có → đủ dòng.
+                         # Gate `data-migration-rls` (npm run verify:gates) đỏ nếu thiếu.
+                         # `_prisma_migrations`: DIRECT_URL trên Neon không có ?schema= nên bảng này nằm ở schema `public`
+                         # (local: `hub`). REVOKE trong migration RLS chỉ nhắm `hub._prisma_migrations` → trên Neon không
+                         # trúng gì; hub_app vẫn bị permission denied ở `public._prisma_migrations` (không được cấp quyền).
 REDIS_URL=               # Upstash rediss://
 AMQP_URL=                # CloudAMQP amqps://
 
