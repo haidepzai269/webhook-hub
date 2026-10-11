@@ -60,6 +60,11 @@ export interface FlowEventInput {
   receivedAt: DateLike;
   occurredAt?: DateLike | null;
   data?: unknown;
+  /**
+   * `events.probe` (ADR-159): request kiểm tra kết nối của chính provider — lưu nhưng cố ý KHÔNG định tuyến.
+   * Lõi chỉ đọc cờ chung, không biết provider nào (BB-1).
+   */
+  probe?: boolean;
 }
 
 export interface FlowAttemptInput {
@@ -660,16 +665,18 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
     const skipped = input.skippedSubscriptions ?? [];
     const routedAt = firstDeliveryAt;
     const matched = branches.length;
+    // Probe (L-A1): không có delivery là CỐ Ý — không phải thiếu/tắt subscription, nên không gợi ý sửa cấu hình.
+    const probe = event.probe === true && matched === 0;
     drafts.push({
       id: 'routed',
       key: 'routed',
       status: matched > 0 ? 'ok' : 'skipped',
       startedAt: routedAt,
       endedAt: routedAt,
-      title: matched > 0 ? `Khớp ${matched} subscription` : 'Không subscription nào nhận',
+      title: matched > 0 ? `Khớp ${matched} subscription` : probe ? 'Không định tuyến — sự kiện kiểm tra' : 'Không subscription nào nhận',
       subtitle: skipped.length ? `bỏ qua ${skipped.length}` : undefined,
-      reason: matched > 0 ? undefined : reason(skipped[0]?.reason ?? 'no_subscription'),
-      actions: matched > 0 ? undefined : ['open_config'],
+      reason: matched > 0 ? undefined : probe ? reason('provider_probe') : reason(skipped[0]?.reason ?? 'no_subscription'),
+      actions: matched > 0 || probe ? undefined : ['open_config'],
       detail: {
         matched: branches.map((b) => ({ subscription: b.subscription, destination: b.destination })),
         skipped: skipped.map((s) => ({ id: s.id, name: s.name, eventTypes: s.eventTypes, reason: reason(s.reason) })),

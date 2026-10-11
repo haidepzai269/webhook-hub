@@ -132,6 +132,31 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
     expect(f.summary[5]).toEqual({ stage: 'delivering', status: 'skipped', okCount: 0, total: 0 });
   });
 
+  it('[KN:U16] L-A1: event probe của provider → routed skipped với lý do provider_probe (cố ý, không phải no_subscription), không gợi ý sửa cấu hình', () => {
+    const f = flow({ event: event({ type: 'payos.webhook_test', normalized: false, probe: true }), deliveries: [] });
+    const r = f.stages.find((s) => s.key === 'routed')!;
+    expect(r.status).toBe('skipped');
+    expect(r.reason?.code).toBe('provider_probe');
+    expect(r.reason?.message).toBe(REASON_CODES.provider_probe);
+    expect(r.actions).toBeUndefined();
+    expect(f.executionStatus).toBe('succeeded');
+    expect(f.failedAt).toBeNull();
+  });
+
+  it('[KN:U16] L-A1: probe thắng cả lý do subscription tắt (subscription bị bỏ vì là probe, không vì cấu hình)', () => {
+    const f = flow({
+      event: event({ type: 'payos.webhook_test', normalized: false, probe: true }),
+      deliveries: [],
+      skippedSubscriptions: [{ id: 's9', name: 'Tắt', eventTypes: ['*'], reason: 'subscription_inactive' }],
+    });
+    expect(f.stages.find((s) => s.key === 'routed')!.reason?.code).toBe('provider_probe');
+  });
+
+  it('L-A1: probe:false/undefined giữ hành vi cũ (no_subscription)', () => {
+    const f = flow({ event: event({ probe: false }), deliveries: [] });
+    expect(f.stages.find((s) => s.key === 'routed')!.reason?.code).toBe('no_subscription');
+  });
+
   it('[UI:F1-08] subscription khớp nhưng tắt → routed skipped kèm subscription_inactive', () => {
     const f = flow({ skippedSubscriptions: [{ id: 's9', name: 'Tắt', eventTypes: ['payment.*'], reason: 'subscription_inactive' }] });
     const r = f.stages.find((s) => s.key === 'routed')!;

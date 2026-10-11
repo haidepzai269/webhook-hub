@@ -245,6 +245,8 @@ export class FlowService {
             receivedAt: event.receivedAt,
             occurredAt: event.occurredAt,
             data: event.data,
+            // Cờ chung ADR-159 — lõi không biết provider nào (L-A1: lý do provider_probe thay no_subscription).
+            probe: event.probe === true,
           }
         : null,
       deliveries: event ? toDeliveryInputs(event) : [],

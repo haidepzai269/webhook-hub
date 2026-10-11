@@ -57,6 +57,7 @@ export const REASON_CODES = {
   normalize_skipped: 'Adapter không sinh event nào từ raw event này',
   unmapped_type: 'Kiểu chưa ánh xạ vào catalog — data giữ nguyên dạng { raw }',
   no_subscription: 'Không có subscription nào khớp kiểu sự kiện',
+  provider_probe: 'Sự kiện kiểm tra của provider — không định tuyến (cố ý, ADR-159)',
   subscription_inactive: 'Subscription khớp kiểu nhưng đang tắt',
   endpoint_unverified: 'Endpoint chưa xác minh (challenge)',
   source_filtered: 'Subscription không nhận từ source này',
