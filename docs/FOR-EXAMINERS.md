@@ -12,7 +12,7 @@
 ## Bằng chứng tự động
 
 - **Bản đồ test**: [`docs/TEST-MAP.md`](TEST-MAP.md) — mỗi mã yêu cầu của spec → file:dòng của test chứng minh nó, trạng thái lần chạy cuối.
-- **Năm bất biến** (`npm run verify:bb`): mỗi bất biến có test xanh trên code thật VÀ một "probe" (đột biến có chủ đích trong git worktree tạm) làm test đó đỏ. Một probe chỉ được tính ✅ khi: (1) lượt **đối chứng** trên worktree CHƯA phá chạy cùng test đó và test XANH (kèm kiểm mọi `@hub/*` phân giải vào chính worktree), (2) sau khi phá, test ĐỎ **đúng lý do** — thông điệp lỗi khớp mẫu `expectFailure` khai trong probe (vd assert tiền đề RLS, `toBeGreaterThanOrEqual(500)`), lỗi môi trường (mất kết nối DB, không tìm thấy module, timeout) không bao giờ được tính. Đối chứng không xanh thì probe là **INVALID**, không phải ✅.
+- **Năm bất biến** (`npm run verify:bb`): mỗi bất biến có test xanh trên code thật VÀ một "probe" (đột biến có chủ đích trong git worktree tạm) làm test đó đỏ. Một probe chỉ được tính ✅ khi: (1) lượt **đối chứng** trên worktree CHƯA phá chạy cùng test đó và test XANH (kèm kiểm mọi `@hub/*` phân giải vào chính worktree), (2) sau khi phá, test ĐỎ **đúng lý do** — thông điệp lỗi khớp mẫu `expectFailure` khai trong probe (vd assert tiền đề RLS, `toBeGreaterThanOrEqual(500)`), lỗi môi trường (mất kết nối DB, không tìm thấy module, timeout) không bao giờ được tính — kể cả khi thông điệp tình cờ khớp `expectFailure` (luật là khớp `expectFailure` **và** không phải lỗi môi trường; chỉ probe khai rõ `allowEnvReason` mới được miễn, hiện không probe nào khai). Đối chứng không xanh thì probe là **INVALID**, không phải ✅.
 
 | Bất biến | Nói gì | Test | Probe làm đỏ |
 |---|---|---|---|

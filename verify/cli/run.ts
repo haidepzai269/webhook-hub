@@ -28,7 +28,8 @@ import { analyzeMap, declaredCodes, MapResult, scanTags, SourcesConfig } from '.
 import { layerVerdict, ratchet, relFile, Summary, summarizeJest, unreachableSummary } from '../lib/results';
 import { CHAOS_MODULES, L2Options, runL2 } from '../lib/e2e-runner';
 import { isLocalUrl } from '../lib/local-url';
-import { applyProbe, BB_PROBES, judgeProbe, loadProbes, Probe } from '../lib/probe';
+import { bbLayerCell, LastRun, recordRun } from '../lib/last-run';
+import { applyProbe, BB_PROBES, countsAsLeftoverProbe, judgeProbe, loadProbes, pidAlive, Probe, probeWorktreePid } from '../lib/probe';
 
 const VERIFY_DIR = path.join(ROOT, 'verify');
 const RESULTS_DIR = path.join(VERIFY_DIR, '.results');
@@ -207,12 +208,13 @@ async function verify(layers: Layer[], l2?: L2Options): Promise<number> {
   fs.writeFileSync(BASELINE, JSON.stringify(baseline, null, 2) + '\n');
 
   // Lưu lần chạy cuối (giữ tầng không chạy lần này)
-  const last = readJson<any>(LAST_RUN, { layers: {} });
-  last.at = new Date().toISOString();
-  last.commit = git(['rev-parse', '--short', 'HEAD']);
-  for (const [layer, r] of Object.entries(results)) {
-    last.layers[layer] = { pass: r.summary.pass, fail: r.summary.fail, skip: r.summary.skip, ms: r.ms, note: r.summary.note, at: last.at, tests: r.summary.tests.map(({ failure, ...t }) => t) };
-  }
+  // M-R2-1: commit + thời điểm ghi TRONG từng tầng — tầng không chạy lần này giữ commit của chính nó.
+  const last = recordRun(
+    readJson<LastRun>(LAST_RUN, { layers: {} }),
+    Object.fromEntries(Object.entries(results).map(([layer, r]) => [layer, { ...r.summary, ms: r.ms }])),
+    git(['rev-parse', '--short', 'HEAD']),
+    new Date().toISOString(),
+  );
   fs.writeFileSync(LAST_RUN, JSON.stringify(last, null, 2) + '\n');
 
   const failures = Object.entries(results).flatMap(([layer, r]) => r.summary.tests.filter((t) => t.status === 'failed').map((t) => ({ layer, ...t })));
@@ -404,16 +406,9 @@ function cleanStaleProbeWorktrees(): void {
   spawnSync('git', ['worktree', 'prune'], { cwd: ROOT });
   if (!fs.existsSync(PROBE_WT_DIR)) return;
   for (const name of fs.readdirSync(PROBE_WT_DIR)) {
-    const m = /^probe-P-.+-(\d+)$/.exec(name);
-    if (!m) continue;
-    let alive = false;
-    try {
-      process.kill(Number(m[1]), 0);
-      alive = Number(m[1]) !== process.pid;
-    } catch {
-      alive = false;
-    }
-    if (!alive) {
+    const pid = probeWorktreePid(name);
+    if (pid === null || pid === process.pid) continue;
+    if (!pidAlive(pid)) {
       console.log(`  dọn worktree sót: ${name}`);
       removeWorktree(path.join(PROBE_WT_DIR, name));
     }
@@ -504,7 +499,8 @@ async function probeCmd(ids: string[], overlay: string[]): Promise<number> {
     for (const d of r.detail) console.log(`    ${d}`);
     rows.push(r);
   }
-  const leftover = git(['worktree', 'list']).split(/\r?\n/).filter((l) => /probe-P-/.test(l));
+  // L-R2-3: chỉ đếm worktree của CHÍNH lượt này hoặc của pid đã chết — lượt probe song song còn sống không làm mình đỏ.
+  const leftover = git(['worktree', 'list']).split(/\r?\n/).filter((l) => countsAsLeftoverProbe(l, process.pid, pidAlive));
   const leaked = chosen.filter((p) => {
     if (!p.file || !fs.existsSync(path.join(ROOT, p.file))) return false;
     const mutated = applyProbe(before.get(p.id) ?? '', p);
@@ -532,22 +528,16 @@ async function bbCmd(overlay: string[]): Promise<number> {
   if (l0.length) tests.push(...runJest('L0', l0, l0Env(), ROOT, 'bb-L0').summary.tests);
   if (l1.length) tests.push(...runJest('L1', l1, l1Env().env, ROOT, 'bb-L1').summary.tests);
   const probes = loadProbes(PROBES_DIR);
-  // M-4: cột L2/L3 lấy KẾT QUẢ lần chạy cuối (verify/.last-run.json, kèm commit), không đếm chuỗi trong file kịch bản.
-  const last = readJson<any>(LAST_RUN, { layers: {} });
+  // M-4 + M-R2-1: cột L2/L3 lấy KẾT QUẢ lần chạy cuối của TỪNG tầng (verify/.last-run.json, commit theo tầng),
+  // không đếm chuỗi trong file kịch bản, không mượn commit của lượt verify gần nhất.
+  const last = readJson<LastRun>(LAST_RUN, { layers: {} });
   const head = git(['rev-parse', '--short', 'HEAD']);
   const rows: string[] = [];
   let ok = true;
   for (const n of ['1', '2', '3', '4', '5']) {
     const mine = tests.filter((t) => t.name.includes(`[BB:${n}]`));
     const green = mine.length > 0 && mine.every((t) => t.status === 'passed');
-    const l23 = (['L2', 'L3'] as const).map((L) => {
-      const lay = last.layers?.[L];
-      const rowsL = (lay?.tests ?? []).filter((t: any) => String(t.name).includes(`[BB:${n}]`));
-      if (!lay || rowsL.length === 0) return null;
-      const pass = rowsL.filter((t: any) => t.status === 'passed').length;
-      const stale = last.commit && last.commit !== head ? ` @${last.commit}, KHÁC HEAD ${head}` : ` @${last.commit ?? '?'}`;
-      return `${L} ${pass}/${rowsL.length} pass (${String(lay.at ?? '').slice(0, 16)}${stale})`;
-    });
+    const l23 = (['L2', 'L3'] as const).map((L) => bbLayerCell(L, last, n, head));
     const pr: string[] = [];
     for (const id of BB_PROBES[n]) {
       const p = probes.find((x) => x.id === id);

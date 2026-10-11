@@ -24,6 +24,11 @@ export interface Probe {
    * của chính nhánh bị phá), không phải vì môi trường. Không khai thì vẫn bị chặn bởi WRONG_REASON.
    */
   expectFailure?: string;
+  /**
+   * L-R2-1: mặc định thông điệp đỏ phải khớp `expectFailure` VÀ không khớp WRONG_REASON. Chỉ probe cố ý đỏ vì lý do
+   * kiểu môi trường (vd ECONNREFUSED là chính hành vi cần chứng minh) mới khai cờ này để tắt bộ lọc môi trường.
+   */
+  allowEnvReason?: boolean;
   /** File test đích (một hoặc nhiều); bỏ trống = mọi file của tầng. */
   testFile?: string | string[];
   note?: string;
@@ -66,7 +71,7 @@ export interface ProbeVerdict {
 
 /**
  * H-1: lỗi kiểu MÔI TRƯỜNG — đỏ vì những lý do này không chứng minh test bắt được đột biến. Probe muốn chấp nhận
- * (hiếm) thì phải KHAI `expectFailure` khớp chính lý do đó.
+ * (hiếm) thì phải KHAI `expectFailure` khớp chính lý do đó VÀ `allowEnvReason: true` (L-R2-1).
  */
 export const WRONG_REASON = /ECONNREFUSED|ENOTFOUND|Invalid URL|Cannot find module|TypeError|ReferenceError|SyntaxError|Exceeded timeout|Test suite failed to run|P1001|Can't reach database/i;
 
@@ -75,7 +80,7 @@ const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, '');
 /**
  * So kết quả test. `control` = lượt chạy test đích trên worktree CHƯA phá (bắt buộc): needle phải XANH ở đó, không
  * thì INVALID. `mutated` = lượt trên code BỊ PHÁ: expectRed cần ≥ 1 test khớp ĐỎ và ĐỎ ĐÚNG LÝ DO (khớp
- * `expectFailure` nếu khai; không khai thì không được khớp WRONG_REASON); expectGreen cần mọi test khớp XANH.
+ * `expectFailure` nếu khai, VÀ không khớp WRONG_REASON trừ khi `allowEnvReason`); expectGreen cần mọi test khớp XANH.
  */
 export function judgeProbe(p: Probe, mutated: TestRow[], control: TestRow[] | undefined): ProbeVerdict {
   const detail: string[] = [];
@@ -109,12 +114,13 @@ export function judgeProbe(p: Probe, mutated: TestRow[], control: TestRow[] | un
     }
     const right = failed.filter((t) => {
       const msg = stripAnsi(t.failure ?? '');
-      return want ? want.test(msg) : !WRONG_REASON.test(msg);
+      return (!want || want.test(msg)) && (p.allowEnvReason === true || !WRONG_REASON.test(msg));
     });
     if (right.length === 0) {
       ok = false;
       const msg = stripAnsi(failed[0].failure ?? '').replace(/\s+/g, ' ').slice(0, 160);
-      detail.push(`✗ ${n}: đỏ sai lý do${want ? ` (không khớp expectFailure /${p.expectFailure}/)` : ' (lỗi môi trường)'} — ${msg}`);
+      const why = want && !failed.some((t) => want.test(stripAnsi(t.failure ?? ''))) ? ` (không khớp expectFailure /${p.expectFailure}/)` : ' (lỗi môi trường)';
+      detail.push(`✗ ${n}: đỏ sai lý do${why} — ${msg}`);
       continue;
     }
     detail.push(`✓ ${n}: đối chứng xanh → phá thì đỏ đúng lý do${want ? ` /${p.expectFailure}/` : ''}`);
@@ -136,3 +142,29 @@ export const BB_PROBES: Record<string, string[]> = {
   '4': [],
   '5': ['P-BB5-01', 'P-BB5-02'],
 };
+
+/** L-R2-3: pid nhúng trong tên worktree probe (`probe-<id>-<pid>`), từ tên thư mục hoặc một dòng `git worktree list`. */
+export function probeWorktreePid(nameOrLine: string): number | null {
+  const m = /(?:^|[\\/])probe-P-[^\s\\/]*?-(\d+)(?=\s|$)/.exec(nameOrLine.trim());
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * L-R2-3: worktree probe tính là SÓT (VT11) khi là của chính lượt này hoặc tiến trình tạo ra nó đã chết. Worktree của
+ * một lượt probe KHÁC còn sống (phiên song song) không phải lỗi của lượt này — cùng luật với dọn worktree sót.
+ */
+export function countsAsLeftoverProbe(nameOrLine: string, selfPid: number, isAlive: (pid: number) => boolean): boolean {
+  const pid = probeWorktreePid(nameOrLine);
+  if (pid === null) return false;
+  return pid === selfPid || !isAlive(pid);
+}
+
+/** `process.kill(pid, 0)` không ném = tiến trình còn sống. */
+export function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { applyProbe, BB_PROBES, judgeProbe, loadProbes, Probe } from '../lib/probe';
+import { applyProbe, BB_PROBES, countsAsLeftoverProbe, judgeProbe, loadProbes, Probe, probeWorktreePid } from '../lib/probe';
 
 /** VF6 (SPEC-verification §6.3, §12): logic thuần của `verify:probe` — áp đột biến, phán kết quả. */
 describe('verify:probe — áp + phán', () => {
@@ -68,7 +68,34 @@ describe('verify:probe — áp + phán', () => {
       expect(judgeProbe(q, red('\u001b[2mexpect(\u001b[22mr.status).toBeGreaterThanOrEqual(500)'), green).ok).toBe(true);
       expect(judgeProbe(q, red('expect(x).toBe(1)'), green).ok).toBe(false);
       const env: Probe = { ...p, expectFailure: 'ECONNREFUSED' };
-      expect(judgeProbe(env, red('connect ECONNREFUSED'), green).ok).toBe(true); // lý do môi trường được chấp nhận khi probe KHAI rõ
+      // L-R2-1: khai expectFailure KHÔNG tắt bộ lọc môi trường — muốn chấp nhận lý do môi trường phải khai allowEnvReason.
+      expect(judgeProbe(env, red('connect ECONNREFUSED'), green).ok).toBe(false);
+      expect(judgeProbe({ ...env, allowEnvReason: true }, red('connect ECONNREFUSED'), green).ok).toBe(true);
+    });
+
+    it('VF6 (L-R2-1): expectFailure khớp nhưng thông điệp là lỗi môi trường (TypeError: Invalid URL ... Expected: true) -> đỏ sai lý do', () => {
+      const q: Probe = { ...p, expectFailure: 'Expected: true' };
+      const v = judgeProbe(q, red('TypeError: Invalid URL\nExpected: true\nReceived: false'), green);
+      expect(v.ok).toBe(false);
+      expect(v.detail.join(' ')).toMatch(/sai lý do/);
+      expect(judgeProbe(q, red('expect(received).toBe(expected)\nExpected: true\nReceived: false'), green).ok).toBe(true);
+    });
+  });
+
+  // L-R2-3: kiểm VT11 "worktree sót" không đếm worktree của một lượt probe KHÁC còn sống (phiên song song).
+  describe('L-R2-3: worktree probe sót', () => {
+    const line = (name: string) => `C:/webhook-hub/.claude/worktrees/${name}  1234abc (detached HEAD)`;
+    it('VF6 (L-R2-3): pid lấy từ tên worktree (tên thư mục hoặc dòng `git worktree list`)', () => {
+      expect(probeWorktreePid('probe-P-KN1-12860')).toBe(12860);
+      expect(probeWorktreePid(line('probe-P-BB5-02-777'))).toBe(777);
+      expect(probeWorktreePid(line('khac-1'))).toBeNull();
+    });
+    it('VF6 (L-R2-3): tính là SÓT khi là của chính lượt này hoặc pid đã chết; worktree của tiến trình khác còn sống thì bỏ qua', () => {
+      const alive = (pid: number) => pid === 12860 || pid === 500;
+      expect(countsAsLeftoverProbe(line('probe-P-KN1-12860'), 500, alive)).toBe(false); // phiên KN song song
+      expect(countsAsLeftoverProbe(line('probe-P-SIG-02-500'), 500, alive)).toBe(true); // của mình
+      expect(countsAsLeftoverProbe(line('probe-P-SIG-02-99'), 500, alive)).toBe(true); // pid chết
+      expect(countsAsLeftoverProbe(line('khac-12860'), 500, alive)).toBe(false); // không phải worktree probe
     });
   });
 });
