@@ -9,14 +9,17 @@
  *   GET    /_requests[?path=/x]  danh sách request đã ghi (cũ → mới)
  *   DELETE /_requests            xoá hết
  *   GET    /health               200
+ *   /fake-google/*                Google OIDC giả cho e2e đăng nhập Google (fake-google.js, ADR-127) — KHÔNG ghi vào _requests
  */
 const http = require('http');
+const { createFakeGoogle } = require('./fake-google');
 
 function createSink(opts = {}) {
   const slowMs = opts.slowMs ?? 30_000;
   const max = opts.max ?? 5000;
   /** @type {Array<{at:string,method:string,path:string,query:Record<string,string>,headers:Record<string,string>,body:string}>} */
   let requests = [];
+  const fakeGoogle = createFakeGoogle();
 
   return http.createServer((req, res) => {
     const url = new URL(req.url, 'http://sink');
@@ -38,6 +41,7 @@ function createSink(opts = {}) {
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8');
+      if (fakeGoogle(req, res, url, body)) return;
       requests.push({
         at: new Date().toISOString(),
         method: req.method,

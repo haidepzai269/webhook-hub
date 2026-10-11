@@ -49,4 +49,4 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 
 ## Story AU5b: đăng nhập Google (ADR-127)
 - Phần 1 backend: xong (commit AU5b-1). google-id-token.ts, google-oauth.service.ts, oauth-cookie.ts (dùng chung GitHub), migration users.google_sub, L0 google-oauth.spec (GO1-4, GO8a), L1 google-oauth-db.spec (GO5-7, GO8b).
-- Kế: phần 2 web (nút Google /login /register, lỗi ?error=), phần 3 fake-google trong sink + e2e GO9 + chạy thử dev stack :3000.
+- Phần 2 web: xong. Phần 3 fake-google + e2e GO9: xong (xem commit). Kế: thử dev stack :3000.

@@ -450,6 +450,49 @@ ${r.stderr}`;
     }
   });
 
+  // AU5b (ADR-127) — đăng nhập Google qua fake-google (sink), đi QUA proxy web nếu web chạy (giống người dùng ở :3000).
+  await run.scenario('[AU:GO9] Google qua fake-google: người mới -> /invite (next) + 3 cookie; chiếm trước (đăng ký mật khẩu A rồi Google) -> A 401; sub khác cùng email -> google_account_mismatch; nút Google có trên /login', async () => {
+    await flushRateLimits();
+    const WEBG = process.env.VERIFY_WEB_URL || 'http://localhost:13000';
+    const viaWeb = await fetch(`${WEBG}/login`).then((r) => r.ok).catch(() => false);
+    const base = viaWeb ? WEBG : API;
+    if (viaWeb) expect((await (await fetch(`${WEBG}/login`)).text()).includes('href="/auth/google"'), '/login không có nút "Đăng nhập bằng Google"');
+    const SINK = process.env.VERIFY_SINK_URL || 'http://localhost:14100';
+    const google = async (sub: string, email: string, next?: string) => {
+      const s = new HttpSession(base);
+      const start = await s.get(`/auth/google${next ? `?next=${encodeURIComponent(next)}` : ''}`);
+      expect(start.status === 302 && s.cookie('__Host-hub_oauth'), `/auth/google → ${start.status} ${start.text}`);
+      const auth = new URL(start.headers.get('location')!.replace('http://sink:4100', SINK));
+      expect(auth.searchParams.get('scope') === 'openid email profile' && auth.searchParams.get('prompt') === 'select_account', `tham số auth: ${auth.search}`);
+      auth.searchParams.set('test_sub', sub);
+      auth.searchParams.set('test_email', email);
+      auth.searchParams.set('test_name', `Google ${sub}`);
+      const back = await fetch(auth, { redirect: 'manual' });
+      const cb = new URL(back.headers.get('location')!);
+      const done = await s.get(`${cb.pathname}${cb.search}`);
+      return { s, done, location: done.headers.get('location') ?? '' };
+    };
+    const fresh = `go9-moi-${RUN}@gmail.test`;
+    const a = await google(`go9-sub-a-${RUN}`, fresh, '/invite');
+    expect(a.done.status === 302 && a.location.endsWith('/invite') && a.done.setCookies.length >= 3, `người mới → ${a.done.status} ${a.location} (${a.done.setCookies.length} cookie)`);
+    const me = await a.s.get('/auth/me');
+    expect(me.status === 200 && me.body?.user?.email === fresh && me.body?.user?.emailVerified === true, `/auth/me → ${me.status} ${me.text}`);
+
+    const victim = `go9-nannhan-${RUN}@gmail.test`;
+    expect((await new HttpSession(API).post('/auth/register', { email: victim, name: 'Attacker', password: 'mat-khau-ke-xau-2026' })).status === 201, 'kẻ xấu đăng ký trước');
+    await sleep(500);
+    const v = await google(`go9-sub-v-${RUN}`, victim);
+    expect(v.done.status === 302 && v.location.endsWith('/dashboard'), `nạn nhân đăng nhập Google → ${v.done.status} ${v.location}`);
+    await flushRateLimits();
+    const atk = await new HttpSession(API).post('/auth/login', { email: victim, password: 'mat-khau-ke-xau-2026' });
+    expect(atk.status === 401, `kẻ xấu login bằng mật khẩu A → ${atk.status}`);
+    expect(((await v.s.get('/auth/me')).body?.user?.name ?? '') === `Google go9-sub-v-${RUN}`, 'tên vẫn là của kẻ đăng ký trước');
+
+    const mm = await google(`go9-sub-khac-${RUN}`, fresh);
+    expect(mm.location.endsWith('/login?error=google_account_mismatch') && mm.done.setCookies.filter((c) => c.startsWith('__Host-hub_at')).length === 0, `sub khác → ${mm.location}`);
+    console.log(`  GO9 (${viaWeb ? 'qua web :13000' : 'thẳng API'}): mới → ${a.location} · chiếm trước → A ${atk.status} · sub khác → mismatch`);
+  });
+
   // R-2 (ADR-110) — đi QUA proxy web (cổng 13000, profile `web`). Web chưa chạy -> bỏ qua có ghi rõ (không tính).
   const WEB = process.env.VERIFY_WEB_URL || 'http://localhost:13000';
   const webUp = await fetch(`${WEB}/login`, { redirect: 'manual' }).then((r) => r.status < 500).catch(() => false);

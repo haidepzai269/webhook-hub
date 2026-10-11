@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-11T04:08:09.938Z, commit b754103).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-11T04:19:25.903Z, commit 8afb866).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`verify/scenarios`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 250 mã khai báo · 170 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 250 mã khai báo · 171 mã có test · 0 mồ côi · 12 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -52,10 +52,10 @@ Tổng: 250 mã khai báo · 170 mã có test · 0 mồ côi · 12 mồ côi có
 | `AR:N-2` | REVIEW-AUTH-2026-10-11.md | L0 | apps/web/src/app/(admin)/(auth)/_components/next-path.spec.ts:24 | ✅ pass |
 | `AR:N-3` | REVIEW-AUTH-2026-10-11.md | L0 | apps/hub-api/test/auth-review.spec.ts:136 | ✅ pass |
 | `AR:N-4` | REVIEW-AUTH-2026-10-11.md | L0 | apps/web/src/proxy.spec.ts:19<br>apps/web/src/proxy.spec.ts:27 | ✅ pass |
-| `AR:R-2` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:15<br>apps/hub-api/test/auth-review.spec.ts:22<br>verify/scenarios/auth-e2e.ts:469 | ✅ pass |
+| `AR:R-2` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:15<br>apps/hub-api/test/auth-review.spec.ts:22<br>verify/scenarios/auth-e2e.ts:512 | ✅ pass |
 | `AR:R-3` | REVIEW-AUTH-2026-10-11.md | L0,L2* | apps/hub-api/test/auth-review.spec.ts:48<br>apps/hub-api/test/auth-review.spec.ts:81<br>apps/hub-api/test/auth-review.spec.ts:89<br>verify/scenarios/auth-e2e.ts:404 | ✅ pass |
 | `AR:R-4` | REVIEW-AUTH-2026-10-11.md | L0 | libs/database/test/repo-batch.spec.ts:29 | ✅ pass |
-| `AR:R-5` | REVIEW-AUTH-2026-10-11.md | L2* | verify/scenarios/auth-e2e.ts:459 | chưa chạy |
+| `AR:R-5` | REVIEW-AUTH-2026-10-11.md | L2* | verify/scenarios/auth-e2e.ts:502 | chưa chạy |
 | `AR:R-6` | REVIEW-AUTH-2026-10-11.md | L1,L2* | apps/hub-api/test/auth-mail-db.spec.ts:112<br>verify/scenarios/auth-e2e.ts:148 | ✅ pass |
 | `AR:R-7` | REVIEW-AUTH-2026-10-11.md | L0 | verify/test/gates.spec.ts:79 | ✅ pass |
 | `AR:R-8` | REVIEW-AUTH-2026-10-11.md | L0 | apps/hub-api/test/api-key.guard.spec.ts:111<br>apps/hub-api/test/auth-scope.spec.ts:123 | ✅ pass |
@@ -77,6 +77,7 @@ Tổng: 250 mã khai báo · 170 mã có test · 0 mồ côi · 12 mồ côi có
 | `AU:GO6` | spec-sources.json | L1 | apps/hub-api/test/google-oauth-db.spec.ts:106 | ✅ pass |
 | `AU:GO7` | spec-sources.json | L1 | apps/hub-api/test/google-oauth-db.spec.ts:126 | ✅ pass |
 | `AU:GO8` | spec-sources.json | L1,L0 | apps/hub-api/test/google-oauth-db.spec.ts:143<br>apps/hub-api/test/google-oauth.spec.ts:165 | ✅ pass |
+| `AU:GO9` | spec-sources.json | L2* | verify/scenarios/auth-e2e.ts:454 | chưa chạy |
 | `AU:TA1` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:88 | chưa chạy |
 | `AU:TA2` | SPEC-auth.md · AU2 | L2* | verify/scenarios/auth-e2e.ts:263 | chưa chạy |
 | `AU:TA3` | SPEC-auth.md · AU1 | L2* | verify/scenarios/auth-e2e.ts:117 | chưa chạy |
