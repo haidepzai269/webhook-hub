@@ -98,11 +98,13 @@ describeDb('[KN3] Kết nối PayOS với fake PayOS (Postgres)', () => {
     });
   const sourceCount = () => raw.source.count({ where: { tenantId: tenant } });
   /** Một webhook PayOS thật đã được ingest nhận (ACCEPTED), ký bằng `key` — như hàng ingest ghi vào raw_events. */
-  const realWebhook = (sourceId: string, key: string) => {
+  const realWebhook = (sourceId: string, key: string, opts: { receivedAt?: Date; status?: 'ACCEPTED' | 'REJECTED' } = {}) => {
     const data = { orderCode: 123, amount: 3000, description: 'VQRIO123', accountNumber: '12345678', reference: `TF${randomUUID().slice(0, 8)}`, transactionDateTime: '2026-10-11 10:00:00', currency: 'VND', paymentLinkId: 'x', code: '00', desc: 'success' };
     const body = { code: '00', desc: 'success', success: true, data, signature: payosSign(data, key) };
     const json = JSON.stringify(body);
-    return raw.rawEvent.create({ data: { sourceId, idempotencyKey: `payos:${randomUUID()}`, headers: {}, body, bodyRaw: Buffer.from(json), contentType: 'application/json', signatureValid: true, status: 'ACCEPTED' } });
+    return raw.rawEvent.create({
+      data: { sourceId, idempotencyKey: `payos:${randomUUID()}`, headers: {}, body, bodyRaw: Buffer.from(json), contentType: 'application/json', signatureValid: true, status: opts.status ?? 'ACCEPTED', ...(opts.receivedAt ? { receivedAt: opts.receivedAt } : {}) },
+    });
   };
 
   it('[KN:U19] "Kết nối nguồn có sẵn": KHÔNG tạo source mới, URL đăng ký = /hooks/payos/<sourceKey cũ> (Shop vẫn nhận), checksumKey trùng -> không thêm version', async () => {
@@ -213,5 +215,72 @@ describeDb('[KN3] Kết nối PayOS với fake PayOS (Postgres)', () => {
     expect(ingestHits.length).toBe(hits);
     await raw.$executeRawUnsafe(`UPDATE hub.source_connections SET updated_at = now() - interval '10 minutes' WHERE source_id = $1::uuid`, s.id);
     expect((await conn.retry(tenant, 'user:u1', s.id, {})).connection.status).toBe('CONNECTED');
+  });
+
+  // ---- REVIEW-KN-R3 ----
+  const versionsOf = (sourceId: string) => raw.sourceSecret.findMany({ where: { sourceId }, orderBy: { version: 'asc' } });
+  const recheck = async (sourceId: string) => {
+    await raw.sourceConnection.update({ where: { sourceId }, data: { lastCheckedAt: null } });
+    return conn.status(tenant, sourceId);
+  };
+
+  it('[KN:U27] (M-R3-1) A cũ -> PayOS xoay sang B, dán B, webhook thật ký B -> dán NHẦM lại A: KHÔNG retire B (key đúng), báo secret_mismatch — quyết theo event MỚI NHẤT', async () => {
+    const A = 'checksum-A-truoc-khi-xoay';
+    const s = await manualSource(tenant, A);
+    await raw.$executeRawUnsafe(`UPDATE hub.source_secrets SET valid_from = now() - interval '3 hours' WHERE source_id = $1::uuid`, s.id);
+    await realWebhook(s.id, A, { receivedAt: new Date(Date.now() - 2 * 3600_000) }); // trước khi xoay
+    // Xoay: dán B (= key fake PayOS đang ký) -> v2.
+    expect((await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE })).connection.status).toBe('CONNECTED');
+    await realWebhook(s.id, FAKE.checksumKey); // webhook thật sau khi xoay
+    // Dán nhầm lại A: A vẫn hiện hành -> không thêm version; PayOS confirm vẫn qua (ký B, v2 còn hiệu lực).
+    const back: any = await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: { ...FAKE, checksumKey: A } });
+    expect(back.connection.status).toBe('CONNECTED');
+    const st = await recheck(s.id);
+    expect(st.lastError).toBe('secret_mismatch');
+    expect((await versionsOf(s.id)).map((v) => [v.version, v.validUntil])).toEqual([[1, null], [2, null]]);
+  });
+
+  it('[KN:U28] (L-R3-1) GET tình trạng chạy song song lượt connect: KHÔNG ghi đè kết quả CONNECTED bằng PENDING đã đọc trước đó', async () => {
+    const s = await manualSource(tenant, 'checksum-cu-U28');
+    await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE }); // v2 = FAKE, credentials = FAKE
+    await realWebhook(s.id, FAKE.checksumKey);
+    await raw.sourceConnection.update({ where: { sourceId: s.id }, data: { status: 'PENDING', lastCheckedAt: null } });
+    // Đúng lúc status() đang đối chiếu secret (đã đọc PENDING), lượt connect kia ghi xong CONNECTED.
+    const racing: any = new Proxy(svc, {
+      get(t: any, p) {
+        if (p === 'forTenant') {
+          return (tid: string, tx?: any) => {
+            const repo = t.forTenant(tid, tx);
+            return new Proxy(repo, {
+              get(r: any, q) {
+                if (q === 'findRecentRawEventsForSource') {
+                  return async (...args: any[]) => {
+                    await raw.sourceConnection.update({ where: { sourceId: s.id }, data: { status: 'CONNECTED' } });
+                    return r[q](...args);
+                  };
+                }
+                const v = r[q];
+                return typeof v === 'function' ? v.bind(r) : v;
+              },
+            });
+          };
+        }
+        const v = t[p];
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
+    });
+    const racingConn = new SourceConnectionService(racing, { PAYOS_FAKE_BASE_URL: 'http://127.0.0.1:9/_fake/payos', HUB_PUBLIC_URL: 'https://hub.example.com' });
+    const st = await racingConn.status(tenant, s.id);
+    expect(st.status).toBe('CONNECTED');
+    expect((await raw.sourceConnection.findUniqueOrThrow({ where: { sourceId: s.id } })).status).toBe('CONNECTED');
+  });
+
+  it('[KN:U29] (L-R3-2) hàng raw_events REJECTED (chữ ký đúng nhưng bị từ chối) KHÔNG phải bằng chứng để retire', async () => {
+    const s = await manualSource(tenant, 'checksum-cu-U29');
+    await (conn as any).connectExisting(tenant, 'user:u1', s.id, { acknowledgeOverwrite: true, credentials: FAKE });
+    await realWebhook(s.id, FAKE.checksumKey, { status: 'REJECTED' });
+    const st = await recheck(s.id);
+    expect(st.lastError).toBeNull();
+    expect((await versionsOf(s.id)).map((v) => [v.version, v.validUntil])).toEqual([[1, null], [2, null]]);
   });
 });

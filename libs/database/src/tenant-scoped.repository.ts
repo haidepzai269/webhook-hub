@@ -204,6 +204,19 @@ export class TenantScopedRepository {
   }
 
   /**
+   * L-R3-1: cập nhật kiểu compare-and-set — chỉ khi dòng vẫn đúng `status` + `updatedAt` đã đọc (không có lượt
+   * connect/retry nào ghi xen giữa). Thua -> null (người gọi đọc lại bản mới nhất, không ghi đè).
+   */
+  async updateSourceConnectionIf(sourceId: string, expected: { status: any; updatedAt: Date }, data: Prisma.SourceConnectionUncheckedUpdateInput) {
+    const r = await this.prisma.sourceConnection.updateMany({
+      where: { sourceId, tenantId: this.tenantId, status: expected.status, updatedAt: expected.updatedAt },
+      data,
+    });
+    if (r.count !== 1) return null;
+    return this.findSourceConnection(sourceId);
+  }
+
+  /**
    * L-3 (REVIEW-KN): "giành" kết nối để gọi provider — chỉ cập nhật khi KHÔNG có lượt khác đang PENDING (PENDING cập nhật
    * trước `staleBefore` coi là kẹt, cho chạy lại). Một câu UPDATE có điều kiện = nguyên tử, hai lượt bấm cùng lúc chỉ một
    * lượt thắng. Không giành được (đang PENDING, hoặc source không thuộc tenant) -> null.
@@ -703,10 +716,13 @@ export class TenantScopedRepository {
     });
   }
 
-  /** S9: raw_events mới nhất của MỘT source (scope qua source.tenantId) — cho `inspect`. Không kèm `source`. */
-  async findRecentRawEventsForSource(sourceId: string, since: Date, limit: number) {
+  /**
+   * S9: raw_events mới nhất của MỘT source (scope qua source.tenantId) — cho `inspect`. Không kèm `source`.
+   * `status` (tuỳ chọn): chỉ lấy trạng thái đó (KN L-R3-2: đối chiếu secret chỉ tin hàng ACCEPTED).
+   */
+  async findRecentRawEventsForSource(sourceId: string, since: Date, limit: number, status?: 'ACCEPTED' | 'REJECTED' | 'DUPLICATE') {
     return this.prisma.rawEvent.findMany({
-      where: { sourceId, receivedAt: { gte: since }, source: { tenantId: this.tenantId } },
+      where: { sourceId, receivedAt: { gte: since }, source: { tenantId: this.tenantId }, ...(status ? { status } : {}) },
       orderBy: { receivedAt: 'desc' },
       take: limit,
     });

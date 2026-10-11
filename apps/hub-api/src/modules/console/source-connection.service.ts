@@ -292,7 +292,13 @@ export class SourceConnectionService {
         lastError = null;
         lastFix = null;
       }
-      next = (await this.tx(tenantId, (repo) => repo.updateSourceConnection(sourceId, { status, lastError, lastFix, lastCheckedAt: new Date() }))) ?? conn;
+      // L-R3-1: compare-and-set trên (status, updatedAt) đã đọc — lượt connect/retry ghi xen giữa thì KHÔNG đè, đọc lại bản mới.
+      next =
+        (await this.tx(tenantId, (repo) =>
+          repo.updateSourceConnectionIf(sourceId, { status: conn.status, updatedAt: conn.updatedAt }, { status, lastError, lastFix, lastCheckedAt: new Date() }),
+        )) ??
+        (await this.prisma.forTenant(tenantId).findSourceConnection(sourceId)) ??
+        conn;
     }
     return this.view(next, connector);
   }
@@ -435,9 +441,10 @@ export class SourceConnectionService {
 
   /**
    * H-R2-1 (ADR-152): secret do NGƯỜI DÙNG nhập (`spec.sourceSecretField`, vd checksumKey PayOS) chỉ thay bản cũ khi có
-   * BẰNG CHỨNG: webhook thật (raw_events ACCEPTED, từ lúc key đó được lưu) verify bằng chính key trong credentials.
-   * - có bằng chứng -> retire các version hiện hành KHÁC (+24h cho lượt gửi lại) -> 'confirmed';
-   * - webhook thật chỉ verify bằng version khác -> 'mismatch' (không retire gì; UI báo nhập sai);
+   * BẰNG CHỨNG: webhook thật MỚI NHẤT (raw_events ACCEPTED) verify được bằng một version hiện hành, và đó là key trong
+   * credentials (M-R3-1: event mới nhất quyết định, không phải bất kỳ event nào).
+   * - event mới nhất khớp key nhập -> retire các version hiện hành KHÁC (+24h cho lượt gửi lại) -> 'confirmed';
+   * - event mới nhất chỉ khớp version khác -> 'mismatch' (không retire gì; UI báo nhập sai);
    * - chưa có webhook -> null (giữ cả hai — chiều an toàn).
    * Chạy lười trong lúc kiểm tình trạng (console, ≤ 1 lần/phút/kết nối) — KHÔNG chạm đường ingest: 0 lệnh Redis, không
    * thêm ghi vào TX raw_events (BB-3 giữ nguyên). Secret do provider sinh (Stripe) giữ luật +24h ở `callConnect`.
@@ -461,21 +468,25 @@ export class SourceConnectionService {
     const mine = current.filter((x) => x.value === entered);
     const others = current.filter((x) => x.value !== entered);
     if (mine.length === 0 || others.length === 0) return null;
-    const since = new Date(Math.min(...mine.map((x) => x.validFrom.getTime())));
-    const events = (await this.prisma.forTenant(tenantId).findRecentRawEventsForSource(source.id, since, SECRET_EVIDENCE_SAMPLE)).filter((e: any) => e.signatureValid);
-    if (events.length === 0) return null;
+    // M-R3-1: quyết theo event MỚI NHẤT verify được bằng BẤT KỲ version hiện hành nào (provider đang ký bằng key nào
+    // NGAY BÂY GIỜ), rồi dừng. Không lấy "bất kỳ event nào khớp key nhập": dán lại một key cũ còn hiện hành thì event
+    // cũ ký bằng key đó sẽ "xác nhận" sai và retire key đúng. Cửa sổ = từ version hiện hành cũ nhất; chỉ hàng ACCEPTED (L-R3-2).
+    const since = new Date(Math.min(...current.map((x) => x.validFrom.getTime())));
+    const events = (await this.prisma.forTenant(tenantId).findRecentRawEventsForSource(source.id, since, SECRET_EVIDENCE_SAMPLE, 'ACCEPTED')).filter(
+      (e: any) => e.signatureValid,
+    );
     const adapter = ProviderRegistry.get(source.provider);
     const ctx = { verificationConfig: source.verificationConfig };
-    let otherOnly = false;
     for (const e of events) {
+      // Thứ tự receivedAt giảm dần (repo).
       const req = { provider: source.provider, sourceKey: source.sourceKey, headers: (e.headers ?? {}) as any, rawBody: Buffer.from(e.bodyRaw), body: e.body, contentType: e.contentType ?? undefined };
       if (await adapter.verify(req, [entered], ctx)) {
         await this.tx(tenantId, (repo) => repo.retireSourceSecretVersions(source.id, others.map((x) => x.version), new Date(Date.now() + SECRET_OVERLAP_MS)));
         return 'confirmed';
       }
-      if (await adapter.verify(req, others.map((x) => x.value), ctx)) otherOnly = true;
+      if (await adapter.verify(req, others.map((x) => x.value), ctx)) return 'mismatch';
     }
-    return otherOnly ? 'mismatch' : null;
+    return null;
   }
 
   /** Secret HIỆN HÀNH (không hạn). Bản đang được thay (có `validUntil`) không tính: trùng nó vẫn phải thêm version mới, không thì hết 24 giờ là verify hỏng. */
