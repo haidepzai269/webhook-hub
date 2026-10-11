@@ -26,4 +26,6 @@ regexes = [
   '''hk_(test|live)_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG''',
   # apps/hub-api/test/service-sources.spec.ts — API key SePay giả.
   '''apikey_123456''',
+  # apps/shop/test/settings.spec.ts (SK2) — khoá PayOS giả dạng "<tên>-0123456789-SECRET" (đã xác minh 2026-10-12).
+  '''(cid|apikey|checksum)-0123456789-SECRET''',
 ]
