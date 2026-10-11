@@ -18,11 +18,11 @@ polling `after=latest` trong service-resources.controller.ts, docs/ERRORS.md, do
 
 | VF6 probe + bb | `d0b84b7` | ADR-147. `verify:probe`, `verify:bb`, 8 probe mới, 35/35 đúng kỳ vọng. ~2,5 phút/probe → `--all` ~1,5 giờ (chạy nền) |
 
-| VF8 demo + CI | (xem git log) | ADR-148. steps.yaml, demo.ts, seed-demo.ts, PREFLIGHT, RUNBOOK, FOR-EXAMINERS, CI e2e+chaos |
+| VF8 demo + CI | `9000a53` | ADR-148. steps.yaml, demo.ts, seed-demo.ts, PREFLIGHT, RUNBOOK, FOR-EXAMINERS, CI e2e+chaos |
 
 ## Đang làm / tiếp theo
 
-- HẾT danh sách C-1 + VF3→VF8. Còn treo: `docs/adr/README.md` có ADR-147 (VF6) + ADR-148 (VF8) ở cây làm việc nhưng CHƯA commit vì file đang có ADR-146 chưa commit của phiên KN (luật commit theo path sẽ cuốn cả của họ). Khi KN commit README (hoặc coordinator cho phép), commit `docs/adr/README.md`.
+- HẾT danh sách C-1 + VF3→VF8. ADR-147 + ADR-148 đã commit riêng (docs(adr)) sau khi phiên KN commit ADR-146.
 - `verify/baseline.json` không commit phần L0/L2 tăng (gồm test chưa commit của phiên khác); HEAD có L2=25, L3=6.
 - Luật commit (coordinator): CHỈ `git commit -m … -- <paths>`; file mới phải `git add` trước. Không amend/reset/rebase.
 - Câu hỏi Admin: `CAN-ADMIN-QUYET-VF.md` Q1–Q4.
