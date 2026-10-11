@@ -45,3 +45,4 @@ XONG (11/10). Kiểm cuối trên hubv: verify L0 611/0/0 · L1 136/0/0 · map 2
 ## Story Admin: MAIL_DRIVER=gmail (ADR-124)
 - xong (commit gmail). Code: libs/common/src/mail/gmail.ts; test L0 libs/common/test/mail-gmail.spec.ts [AU:GM1..GM6] (inline trong spec-sources).
 - Hướng dẫn lấy refresh token: DEPLOYMENT §9 "Lấy GOOGLE_REFRESH_TOKEN". Không có lệnh gọi Google thật nào trong test.
+- Review Gmail G-1..G-4: xong (commit G), ADR-126.

@@ -334,7 +334,10 @@ export class AuthService {
     if (!user) throw authError(HttpStatus.UNAUTHORIZED, 'session_expired');
     await this.mailLimit('verify_email', user.email);
     if (user.emailVerifiedAt) return;
-    await this.sendVerification(user.id, user.email, user.name);
+    // G-4: gửi chạy nền như các mail khác — Gmail/Resend treo không giữ request tới ~20 s.
+    void this.sendVerification(user.id, user.email, user.name).catch((err) =>
+      logger.warn({ err: (err as Error).message, to: maskEmail(user.email) }, 'Gửi lại mail xác minh thất bại'),
+    );
     await this.audit(user.id, 'user.verification_resent', ctx.ip);
   }
 

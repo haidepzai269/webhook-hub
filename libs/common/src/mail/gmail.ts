@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { logger } from '../logger';
 import type { MailMessage, MailSender } from './index';
 
@@ -44,9 +44,16 @@ export function loadGmailConfig(env: Record<string, string | undefined>): GmailC
 
 // ------------------------------------------------------------------ MIME (RFC 2822 / 2045 / 2047)
 
+/** G-1: C0 (U+0000–001F), DEL + C1 (U+007F–009F, gồm NEL U+0085), U+2028/2029 — dựng từ mã số cho khỏi lẫn ký tự thô trong nguồn. */
+const CTRL_RE = new RegExp(`[${String.fromCharCode(0)}-${String.fromCharCode(0x1f)}${String.fromCharCode(0x7f)}-${String.fromCharCode(0x9f)}${String.fromCharCode(0x2028, 0x2029)}]`);
+
 /** Header injection: giá trị header KHÔNG được chứa CR/LF (hoặc NUL) — ném thay vì làm sạch ngầm. */
 export function assertHeaderSafe(field: string, value: string): void {
   if (/[\r\n\0]/.test(value)) throw new Error(`Header ${field} chứa ký tự xuống dòng — từ chối (chống CRLF injection)`);
+  // G-1: mọi ký tự điều khiển C0/C1 (gồm U+0085 NEL) và U+2028/2029 cũng bị từ chối.
+  if (CTRL_RE.test(value)) {
+    throw new Error(`Header ${field} chứa ký tự điều khiển — từ chối (chống CRLF/NEL injection)`);
+  }
 }
 
 const ADDR_RE = /^[^\s@<>()",;:\\[\]]+@[^\s@<>()",;:\\[\]]+\.[^\s@<>()",;:\\[\]]+$/;
@@ -56,12 +63,14 @@ export function parseAddress(v: string): { name: string; address: string } | nul
   const m = /^\s*(?:"?([^"<]*?)"?\s*)?<([^<>]+)>\s*$/.exec(v);
   const name = m ? (m[1] ?? '').trim() : '';
   const address = (m ? m[2] : v).trim();
-  return ADDR_RE.test(address) ? { name, address } : null;
+  // G-1: địa chỉ chỉ gồm ASCII in được (không ghi byte lạ vào header dạng thô).
+  return ADDR_RE.test(address) && /^[\x21-\x7e]+$/.test(address) ? { name, address } : null;
 }
 
 /** RFC 2047 encoded-word (UTF-8, B) — chỉ khi có ký tự ngoài ASCII in được; cắt theo ký tự, mỗi word ≤ 39 byte gốc (dòng "Subject: " + word ≤ 78 ký tự). */
 export function encodeHeaderWord(s: string): string {
-  if (/^[\x20-\x7e]*$/.test(s)) return s;
+  // G-2: ASCII ngắn giữ nguyên; ASCII dài (> 70) cũng mã hoá để cắt thành nhiều word (mỗi dòng ≤ 78, RFC 5322).
+  if (/^[\x20-\x7e]*$/.test(s) && s.length <= 70) return s;
   const words: string[] = [];
   let chunk = '';
   for (const ch of s) {
@@ -89,10 +98,14 @@ const b64lines = (s: string) => (Buffer.from(s, 'utf8').toString('base64').match
 /** Thư RFC 2822 multipart/alternative (text + html), thân base64 UTF-8, header đã kiểm CRLF. */
 export function buildMimeMessage(from: string, m: MailMessage, boundary = `hub_${randomBytes(12).toString('hex')}`): string {
   assertHeaderSafe('Subject', m.subject);
+  const fromHeader = formatAddress('From', from);
+  const domain = parseAddress(from)!.address.split('@')[1];
   return [
-    `From: ${formatAddress('From', from)}`,
+    `From: ${fromHeader}`,
     `To: ${formatAddress('To', m.to)}`,
     `Subject: ${encodeHeaderWord(m.subject)}`,
+    `Date: ${new Date().toUTCString()}`, // G-2: RFC 5322 bắt buộc Date
+    `Message-ID: <${randomUUID()}@${domain}>`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',
@@ -172,6 +185,11 @@ export class GmailSender implements MailSender {
       });
     let res = await post(await this.accessToken());
     if (res.status === 401) res = await post(await this.accessToken(true)); // token bị thu hồi sớm: làm mới MỘT lần
-    if (!res.ok) throw new Error(`Gmail send trả HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
+    if (!res.ok) {
+      // G-3: KHÔNG chép body lỗi (có thể chứa header/địa chỉ người nhận) — chỉ status + mã lỗi của Google.
+      const err = ((await res.json().catch(() => ({}))) as { error?: { status?: unknown; errors?: { reason?: unknown }[] } }).error;
+      const code = [err?.status, err?.errors?.[0]?.reason].filter((x): x is string => typeof x === 'string' && /^[A-Za-z_]{1,64}$/.test(x)).join('/');
+      throw new Error(`Gmail send trả HTTP ${res.status}${code ? ` (${code})` : ''}`);
+    }
   }
 }

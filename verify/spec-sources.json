@@ -128,6 +128,16 @@
       "note": "Phát hiện của review AU1–AU6 (2026-10-11). Test sửa lỗi gắn [AR:R-n]; mục chỉ sửa bằng ADR/tài liệu hoặc bị hoãn thì được phép không có test."
     },
     {
+      "ns": "AR",
+      "file": "_bmad-output/planning-artifacts/REVIEW-AUTH-2026-10-11.md",
+      "pattern": "^- \\*\\*(G-\\d+) ·",
+      "requireTest": false,
+      "done": {
+        "all": true
+      },
+      "note": "Phát hiện của review driver Gmail (G-1..G-4); test gắn [AR:G-n] hoặc mã GM tương ứng."
+    },
+    {
       "ns": "VF",
       "file": "_bmad-output/planning-artifacts/verification/SPEC-verification.md",
       "pattern": "^\\|\\s*(VT\\d+)\\s*\\|",

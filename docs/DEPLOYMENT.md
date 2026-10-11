@@ -418,10 +418,14 @@ NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DE
 ### Lấy GOOGLE_REFRESH_TOKEN (MAIL_DRIVER=gmail, ADR-124)
 
 1. **Google Cloud Console** → tạo/chọn project → *APIs & Services → Library* → bật **Gmail API**.
-2. *OAuth consent screen*: User type **External**; điền tên app + email hỗ trợ; *Test users* → thêm đúng địa chỉ Gmail sẽ gửi thư.
-   Sau đó **Publish app → In production**. Nếu để *Testing*, refresh token cho scope Gmail **hết hạn sau 7 ngày** (log sẽ báo `invalid_grant`).
-   App chưa qua xác minh của Google vẫn dùng được cho chính tài khoản của bạn (màn hình cảnh báo "unverified" → *Advanced → Go to …*).
-3. *Credentials → Create credentials → OAuth client ID* → loại **Web application**; *Authorized redirect URIs* thêm
+2. **Google Auth Platform** (menu trái; trước đây gọi là "OAuth consent screen / Credentials"), gồm ba mục *Branding / Audience / Clients*:
+   - 2a. *Get started* / **Branding**: điền tên app + email hỗ trợ → tạo consent screen. Mục *Audience* và *Test users* chỉ hiện SAU bước này.
+   - 2b. **Audience**: User type **External** — tài khoản @gmail cá nhân KHÔNG chọn được *Internal* (chỉ Google Workspace mới có).
+     Rồi **Publish app → In production**: refresh token cho scope Gmail không còn hết hạn sau 7 ngày, và danh sách *Test users*
+     không còn tác dụng (bỏ qua bước thêm test user nếu publish ngay). Nếu ở lại *Testing* thì PHẢI thêm đúng Gmail sẽ gửi thư
+     vào *Test users*, và token chết sau 7 ngày (log báo `invalid_grant`).
+   - App chưa qua xác minh của Google vẫn dùng được cho chính tài khoản của bạn (màn hình "unverified" → *Advanced → Go to …*).
+3. **Clients → Create client** → loại **Web application**; *Authorized redirect URIs* thêm
    `https://developers.google.com/oauthplayground`. Ghi lại Client ID / Client secret → `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 4. Mở **https://developers.google.com/oauthplayground** → bánh răng ⚙ → tick **Use your own OAuth credentials** → dán Client ID/secret.
 5. Ô *Input your own scopes*: `https://www.googleapis.com/auth/gmail.send` → **Authorize APIs** → đăng nhập ĐÚNG Gmail ở bước 2 → cho phép.

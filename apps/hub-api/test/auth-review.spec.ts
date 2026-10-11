@@ -145,3 +145,28 @@ describe('N-3 — mọi POST có body của /auth chỉ nhận JSON', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('G-4 — resend-verification không chờ gửi mail', () => {
+  it('[AR:G-4] mail driver treo (không bao giờ xong) -> resendVerification vẫn trả ngay', async () => {
+    const { AuthService } = require('../src/modules/auth/auth.service');
+    const { AuthRateLimiter } = require('../src/modules/auth/rate-limit');
+    const { JwtService } = require('@nestjs/jwt');
+    const { loadAuthConfig } = require('../src/modules/auth/auth-config');
+    const cfg = loadAuthConfig({ JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40) });
+    const idn = {
+      findUserById: async () => ({ id: 'u1', email: 'an@vi-du.vn', name: 'An', emailVerifiedAt: null }),
+      invalidateEmailTokens: async () => 0,
+      createEmailToken: async () => undefined,
+      recordAuthAudit: async () => undefined,
+    };
+    const store: any = { identity: () => idn, $transaction: async (fn: any) => fn({}) };
+    let sent = 0;
+    const hanging = { send: () => (sent++, new Promise<void>(() => undefined)) };
+    const svc = new AuthService(store, new JwtService({}), cfg, new AuthRateLimiter(null), undefined, hanging);
+    const t0 = Date.now();
+    await svc.resendVerification({ id: 'u1' } as any, { ip: null, userAgent: null });
+    expect(Date.now() - t0).toBeLessThan(1000);
+    await new Promise((r) => setImmediate(r));
+    expect(sent).toBe(1);
+  });
+});

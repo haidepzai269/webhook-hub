@@ -47,7 +47,7 @@ describe('MAIL_DRIVER=gmail (Gmail API + OAuth2, ADR-124)', () => {
     expect(g.sendCalls()[0].init.signal).toBeInstanceOf(AbortSignal); // có timeout
   });
 
-  it('[AU:GM2] Gmail trả 401 -> làm mới token MỘT lần rồi gửi lại; 401 lần nữa -> ném (không lặp vô hạn)', async () => {
+  it('[AU:GM2] (phần a) Gmail trả 401 -> làm mới token MỘT lần rồi gửi lại; 401 lần nữa -> ném (không lặp vô hạn)', async () => {
     const ok = fakeGoogle({ sendStatuses: [401, 200] });
     await new GmailSender(CFG, ok.fetchImpl).send(MSG);
     expect(ok.tokenCalls()).toHaveLength(2);
@@ -71,7 +71,7 @@ describe('MAIL_DRIVER=gmail (Gmail API + OAuth2, ADR-124)', () => {
     }
   });
 
-  it('[AU:GM4] raw = base64url của thư RFC 2822 multipart/alternative: Subject tiếng Việt là encoded-word UTF-8, text + html giải mã ra đúng', async () => {
+  it('[AU:GM4] (phần a) raw = base64url của thư RFC 2822 multipart/alternative: Subject tiếng Việt là encoded-word UTF-8, text + html giải mã ra đúng', async () => {
     const g = fakeGoogle();
     await createMailSender({ MAIL_DRIVER: 'gmail', GOOGLE_CLIENT_ID: CFG.clientId, GOOGLE_CLIENT_SECRET: CFG.clientSecret, GOOGLE_REFRESH_TOKEN: CFG.refreshToken, MAIL_FROM: 'Trạm Webhook <hub.test@gmail.com>' }, g.fetchImpl).send(MSG);
     const raw: string = JSON.parse(g.sendCalls()[0].init.body).raw;
@@ -100,7 +100,7 @@ describe('MAIL_DRIVER=gmail (Gmail API + OAuth2, ADR-124)', () => {
     expect(base64url('ÿÿ>?')).not.toMatch(/[+/=]/);
   });
 
-  it('[AU:GM5] CRLF injection ở To / Subject / From bị TỪ CHỐI (ném trước khi gọi mạng), không làm sạch ngầm', async () => {
+  it('[AU:GM5] (phần a) CRLF injection ở To / Subject / From bị TỪ CHỐI (ném trước khi gọi mạng), không làm sạch ngầm', async () => {
     for (const bad of [
       { ...MSG, to: 'a@b.vn\r\nBcc: victim@x.vn' },
       { ...MSG, subject: 'Xin chào\r\nBcc: victim@x.vn' },
@@ -112,6 +112,45 @@ describe('MAIL_DRIVER=gmail (Gmail API + OAuth2, ADR-124)', () => {
       expect(g.calls).toHaveLength(0);
     }
     expect(() => buildMimeMessage('Hub <a@b.vn>\r\nBcc: x@y.vn', MSG)).toThrow(/CRLF/);
+  });
+
+  it('[AU:GM2] (phần b) G-3: lỗi send chỉ mang status + mã lỗi Google, KHÔNG chép body lỗi (có thể chứa địa chỉ/header)', async () => {
+    const fetchImpl = (async (url: string) => {
+      if (url.includes('oauth2')) return { ok: true, status: 200, json: async () => ({ access_token: 't', expires_in: 3600 }) };
+      const body = { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Invalid To header: nguoi.nhan@vi-du.vn Bcc...', errors: [{ reason: 'invalidArgument' }] } };
+      return { ok: false, status: 400, json: async () => body, text: async () => JSON.stringify(body) };
+    }) as unknown as typeof fetch;
+    const err = await new GmailSender(CFG, fetchImpl).send(MSG).catch((e: Error) => e);
+    expect((err as Error).message).toBe('Gmail send trả HTTP 400 (INVALID_ARGUMENT/invalidArgument)');
+  });
+
+  it('[AU:GM4] (phần b) G-2: có Date (RFC 5322) + Message-ID @ domain của MAIL_FROM; Subject ASCII dài được gập (mọi dòng ≤ 78) và giải ra đúng', async () => {
+    const long = 'Webhook Hub notification '.repeat(48).trim(); // ~1200 ký tự ASCII
+    const mime = buildMimeMessage('Webhook Hub <hub.test@gmail.com>', { ...MSG, subject: long });
+    const head = mime.slice(0, mime.indexOf('\r\n\r\n'));
+    expect(head).toMatch(/\r\nDate: [A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT\r\n/);
+    expect(head).toMatch(/\r\nMessage-ID: <[0-9a-f-]{36}@gmail\.com>\r\n/);
+    for (const line of head.split('\r\n')) expect(line.length).toBeLessThanOrEqual(78);
+    const subj = /Subject: ([\s\S]*?)\r\nDate/.exec(head)![1];
+    const words = [...subj.matchAll(/=\?UTF-8\?B\?([^?]+)\?=/g)].map((w) => Buffer.from(w[1], 'base64').toString('utf8'));
+    expect(words.join('')).toBe(long);
+    expect(encodeHeaderWord('Ngắn')).toMatch(/^=\?UTF-8\?B\?/);
+    expect(encodeHeaderWord('Short ASCII')).toBe('Short ASCII');
+  });
+
+  it('[AU:GM5] (phần b) G-1: ký tự điều khiển không-ASCII (U+0085 NEL, U+2028/2029, C1) trong địa chỉ / Subject / tên -> từ chối, không gọi mạng', async () => {
+    const NEL = String.fromCharCode(0x85);
+    for (const bad of [
+      { ...MSG, to: `a${NEL}b@vi-du.vn` },
+      { ...MSG, to: 'nguời@vi-du.vn' },
+      { ...MSG, subject: `Xin chào${String.fromCharCode(0x2028)}Bcc: x@y.vn` },
+      { ...MSG, subject: `Xin chào${String.fromCharCode(0x9b)}x` },
+    ]) {
+      const g = fakeGoogle();
+      await expect(new GmailSender(CFG, g.fetchImpl).send(bad)).rejects.toThrow(/điều khiển|không hợp lệ/);
+      expect(g.calls).toHaveLength(0);
+    }
+    expect(() => buildMimeMessage(`Hub${String.fromCharCode(0x2029)} <a@b.vn>`, MSG)).toThrow(/điều khiển/);
   });
 
   it('[AU:GM6] kiểm lúc khởi động: MAIL_DRIVER=gmail thiếu biến nào -> nêu TÊN biến (không giá trị); đủ -> không lỗi; driver khác không đòi', () => {
