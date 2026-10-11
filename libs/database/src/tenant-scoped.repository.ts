@@ -397,7 +397,8 @@ export class TenantScopedRepository {
    * trị gán sau luôn lớn hơn mọi giá trị đã thấy: transaction commit muộn nhận poll_seq MỚI, không bao giờ bị cursor
    * vượt qua. Bước 2: đọc `poll_seq > after`. Không có độ trễ 2s, 0 lệnh Redis. API gọi trường này là `cursor` (R2-3).
    * `types` và `readTypes` (mẫu wildcard) là hai điều kiện AND. `failedOnly`: có delivery DEAD/RETRYING ở generation
-   * MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có].
+   * MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có]. KQ1: event `probe` (request kiểm tra của provider)
+   * không bao giờ trả — vẫn được cấp poll_seq (cursor chỉ là vị trí, không lộ nội dung).
    */
   async pollEvents(o: PollEventsOptions): Promise<PolledEvent[]> {
     await this.assignPollSeq();
@@ -415,6 +416,7 @@ export class TenantScopedRepository {
       FROM "hub"."events" e
       WHERE e.tenant_id = ${this.tenantId}::uuid
         AND e.poll_seq > ${o.after}
+        AND NOT e.probe
         AND ${typeFilterSql(o.types)} AND ${typeFilterSql(o.readTypes)}
         ${failed}
       ORDER BY e.poll_seq ASC

@@ -347,6 +347,8 @@ model Event {
   data           Json
   /// S3-2 (ADR-053): true = data theo catalog kiểu chuẩn; false = kiểu chưa ánh xạ, data = { raw }
   normalized     Boolean     @default(true)
+  /// KQ1: request kiểm tra của chính provider (adapter đặt cờ) — lưu cho console, KHÔNG định tuyến, polling KHÔNG trả.
+  probe          Boolean     @default(false)
   origin         EventOrigin @default(webhook)
   occurredAt     DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
   receivedAt     DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)

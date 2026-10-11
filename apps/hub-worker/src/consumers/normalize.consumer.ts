@@ -157,11 +157,18 @@ export class NormalizeConsumer {
             subject: evt.subject,
             data: evt.data,
             normalized: evt.normalized !== false,
+            probe: evt.probe === true,
             origin: evt.origin,
             occurredAt: new Date(evt.occurredAt),
             receivedAt: new Date(evt.receivedAt),
           });
 
+          // KQ1: request kiểm tra của chính provider (adapter đặt `probe`) — lưu event cho console, KHÔNG định tuyến tới
+          // service nào (kể cả subscription `*`). Lõi chỉ đọc cờ, không hỏi provider (BB-1).
+          if (evt.probe === true) {
+            log.info({ eventType: evt.type }, 'Event probe của provider -> lưu, không định tuyến');
+            continue;
+          }
           const subscriptions = await repoTx.findActiveSubscriptionsForEvent(evt.type, sourceId ?? null);
           log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
 

@@ -16,19 +16,28 @@ const payosCrypto = new PayOS({
 }).crypto;
 
 /**
- * TODO(KQ1, SPEC-ket-noi §5.1 + §11, CAN-ADMIN-QUYET-KN.md): nhận diện REQUEST KIỂM TRA mà PayOS bắn vào URL ingest lúc
- * `confirm-webhook`. CHƯA CÓ BẰNG CHỨNG bản thật: tài liệu chính thức (payos.vn/docs/api, mục confirm-webhook) chỉ nói
- * PayOS gửi "dữ liệu mẫu kèm thông tin giao dịch ngân hàng mẫu" — không có cờ/trường nào đánh dấu là kiểm tra. Mẫu webhook
- * trong tài liệu (orderCode 123, description "VQRIO123", accountNumber "12345678", reference "TF230204212323") có thể là
- * đúng request đó, nhưng chưa ai thấy request thật. Đoán sai theo hướng "coi là kiểm tra" thì nuốt mất một giao dịch thật.
- * Vì vậy hook này hiện LUÔN false (hành vi cũ giữ nguyên: request kiểm tra đi qua normalize như giao dịch thường).
- * Khi có bằng chứng (raw_events của bản deployed sau khi Admin "Kết nối PayOS"), cài nhận diện Ở ĐÂY (BB-1: từ vựng
- * PayOS chỉ trong adapter), ghi ADR, và bỏ trạng thái mồ côi có lý do của [KN:U16] trong verify/spec-sources.json.
- * Yêu cầu bất kể bằng chứng: request kiểm tra vẫn LƯU raw (BB-3), vẫn trả 200, và KHÔNG ra `payment.received`.
+ * KQ1 (SPEC-ket-noi §5.1 + §11, ADR-159): nhận diện REQUEST KIỂM TRA mà PayOS bắn vào URL ingest lúc `confirm-webhook`.
+ * Bằng chứng production 2026-10-11: request đó ký HỢP LỆ bằng checksumKey thật, `code "00"`, và `data` là ĐÚNG bộ mẫu cố
+ * định trong tài liệu PayOS (orderCode 123, amount 3000, description "VQRIO123", reference "TF230204212323"). Không có cờ
+ * nào khác -> nhận diện bằng bộ ba, khớp ĐỦ CẢ BA mới là kiểm tra (giao dịch thật có orderCode 123 vẫn có reference ngân
+ * hàng riêng `FT…`). Chỉ gọi trong `normalize` — tức là SAU verify chữ ký (raw_event ACCEPTED), không bao giờ thay verify.
+ * Đánh đổi: PayOS đổi bộ mẫu -> hàm trả false -> quay về hành vi cũ (ra payment.received 3000; Shop bỏ qua vì không có mã DH).
  */
-export function isPayosConfirmProbe(_body: unknown): boolean {
-  return false;
+export const PAYOS_CONFIRM_SAMPLE = { orderCode: 123, description: 'VQRIO123', reference: 'TF230204212323' } as const;
+
+export function isPayosConfirmProbe(body: unknown): boolean {
+  const d = (body as { data?: unknown } | null | undefined)?.data;
+  if (!d || typeof d !== 'object') return false;
+  const x = d as Record<string, unknown>;
+  return (
+    x.orderCode === PAYOS_CONFIRM_SAMPLE.orderCode &&
+    x.description === PAYOS_CONFIRM_SAMPLE.description &&
+    x.reference === PAYOS_CONFIRM_SAMPLE.reference
+  );
 }
+
+/** Kiểu riêng (không thuộc không gian dành riêng `payment.*`) cho request kiểm tra — xem docs/EVENT-CATALOG.md. */
+export const PAYOS_WEBHOOK_TEST_TYPE = 'payos.webhook_test';
 
 export class PayosAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'payos';
@@ -81,8 +90,18 @@ export class PayosAdapter implements ProviderAdapter {
    */
   normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
     const body = req.body || {};
-    // KQ1 (TODO ở isPayosConfirmProbe): request kiểm tra của confirm-webhook không sinh sự kiện chuẩn nào. Hiện luôn false.
-    if (isPayosConfirmProbe(body)) return [];
+    // KQ1: request kiểm tra của confirm-webhook -> kiểu riêng, normalized:false, probe:true (lõi lưu nhưng không định
+    // tuyến, polling không trả). KHÔNG ra payment.received: không service nào thấy khoản 3.000đ ma.
+    if (isPayosConfirmProbe(body)) {
+      return [
+        envelope('payos', context, {
+          type: PAYOS_WEBHOOK_TEST_TYPE,
+          data: { raw: body },
+          normalized: false,
+          probe: true,
+        }),
+      ];
+    }
     const d = body.data || {};
     const ok = body.code === '00' && body.success !== false;
     const type = ok ? 'payment.received' : 'payment.failed';

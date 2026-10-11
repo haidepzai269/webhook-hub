@@ -168,4 +168,21 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     await longPoll(() => repo().pollEvents({ after: 9_000_000_000_000n, limit: 10 }), 20, () => closed);
     expect(Date.now() - t1).toBeLessThan(2500);
   });
+
+  it('[KN:U16] (phần j) event probe của provider (payos.webhook_test, probe:true) KHÔNG bao giờ ra polling — kể cả `*`, `payos.*`, đúng tên kiểu, không lọc', async () => {
+    const probe = await raw.event.create({
+      data: {
+        id: `ev_${run}_probe`, tenantId: tenant, idempotencyKey: `poll:${run}:probe`, correlationId: randomUUID(),
+        type: 'payos.webhook_test', source: 'payos', data: { raw: {} }, normalized: false, probe: true, createdAt: ago(10),
+      },
+    });
+    const real = await mk('payos.other_unmapped', ago(10));
+    const ids = async (types?: string[], readTypes?: string[]) =>
+      (await repo().pollEvents({ after: 0n, limit: 1000, types, readTypes })).map((e) => e.id);
+    for (const [t, rt] of [[undefined, undefined], [['*'], undefined], [['payos.*'], undefined], [['payos.webhook_test'], undefined], [undefined, ['*']]] as const) {
+      const got = await ids(t as any, rt as any);
+      expect(got).not.toContain(probe.id);
+    }
+    expect(await ids(['payos.*'])).toContain(real.id); // normalized:false thường vẫn poll được — chỉ probe bị chặn
+  });
 });

@@ -45,6 +45,13 @@ Body hub gửi tới đích webhook (`apps/hub-worker/src/senders/webhook.sender
 8. **`subject`** không chứa khái niệm của khách hàng: `payment:<providerTxnId>`, `repo:<fullName>`.
 9. Event tạo trước S3-2 (kiểu `payment.succeeded`, `bank.transfer.*`, `repo.<event>`) **không** migrate;
    cột `events.normalized` của chúng mặc định `true`. Retention dọn dần.
+10. **Request kiểm tra của provider (`probe`, KQ1/ADR-159):** adapter nhận ra request kiểm tra kết nối của chính provider
+   thì phát `type = <provider>.webhook_test`, `normalized: false`, `data = { raw }` và đặt cờ `probe: true`. Event
+   probe được **lưu** (console / inspect / raw thấy) nhưng **không bao giờ** tới service: không delivery (kể cả
+   subscription `*` hay `<provider>.*`) và polling `/v1/p/:project/events` không trả (mọi `types`). Hiện có:
+   `payos.webhook_test` — request PayOS bắn lúc `confirm-webhook`, nhận bằng bộ mẫu cố định của tài liệu PayOS
+   (`orderCode 123` + `description "VQRIO123"` + `reference "TF230204212323"`, khớp đủ cả ba). PayOS đổi bộ mẫu →
+   quay về `payment.received` như giao dịch thường (service tự lọc theo mã đơn của mình).
 
 ## 3. Miền thanh toán
 

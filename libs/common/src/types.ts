@@ -48,6 +48,13 @@ export interface NormalizedEvent {
    * validator. false = kiểu chưa có ánh xạ, `data = { raw }`. Thiếu = true (event cũ trước S3-2).
    */
   normalized?: boolean;
+  /**
+   * KQ1 (ADR-159): true = request KIỂM TRA của chính provider (vd PayOS `confirm-webhook` bắn bộ mẫu cố định), không phải
+   * sự kiện nghiệp vụ. Lõi LƯU event (console/inspect thấy) nhưng KHÔNG định tuyến (0 delivery, kể cả subscription `*`) và
+   * polling không trả. Chỉ adapter quyết (từ vựng provider ở adapter — BB-1); lõi chỉ đọc cờ, không hỏi provider nào.
+   * Thiếu = false.
+   */
+  probe?: boolean;
 }
 
 /**

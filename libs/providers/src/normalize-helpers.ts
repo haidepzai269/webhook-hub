@@ -26,10 +26,11 @@ export function receivedTime(ctx: NormalizeContext): string {
 export function envelope(
   provider: ProviderType,
   ctx: NormalizeContext,
-  e: { type: string; subject?: string; data: Record<string, unknown>; occurredAt?: string; normalized: boolean; id?: string },
+  e: { type: string; subject?: string; data: Record<string, unknown>; occurredAt?: string; normalized: boolean; id?: string; probe?: true },
 ): NormalizedEvent {
   const now = receivedTime(ctx);
   return {
+    ...(e.probe ? { probe: true } : {}),
     id: e.id ?? `evt_${ulid()}`,
     tenantId: ctx.tenantId,
     type: e.type,

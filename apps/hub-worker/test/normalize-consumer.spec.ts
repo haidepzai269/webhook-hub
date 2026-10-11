@@ -165,6 +165,34 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(tx.event.create.mock.calls[0][0].data).toMatchObject({ type: 'bank.x', normalized: false });
   });
 
+  it('[KN:U16] (phần e) event probe của provider (PayOS confirm-webhook) -> LƯU event probe:true, KHÔNG tra subscription (kể cả `*`), 0 delivery, 0 outbox, vẫn ack', async () => {
+    // Bộ mẫu cố định của tài liệu PayOS (bằng chứng KQ1, SPEC-ket-noi §11). Lõi không biết đây là PayOS: chỉ đọc cờ `probe`.
+    const data = { orderCode: 123, amount: 3000, description: 'VQRIO123', accountNumber: '12345678', reference: 'TF230204212323', transactionDateTime: '2023-02-04 18:25:00', currency: 'VND', paymentLinkId: '124c33293c43417ab7879e14c8d9eb18' };
+    const findRawEvent = jest.fn().mockResolvedValue({
+      id: rawEventId, headers: {}, body: { code: '00', desc: 'success', success: true, data, signature: 'x' }, bodyRaw: Buffer.from('{}'), contentType: 'application/json',
+    });
+    const { prisma, tx, outboxRows } = buildFakePrisma({ subs: 2, findRawEvent });
+    const channel = buildChannel();
+    const msg = { content: Buffer.from(JSON.stringify({ rawEventId, sourceId: 'src-1', tenantId: TENANT, provider: 'payos', correlationId: 'corr-1' })), properties: { headers: {} } } as any;
+    await new NormalizeConsumer(prisma).handleMessage(msg, channel);
+    expect(tx.event.create).toHaveBeenCalledTimes(1);
+    expect(tx.event.create.mock.calls[0][0].data).toMatchObject({ type: 'payos.webhook_test', normalized: false, probe: true });
+    expect(tx.subscription.findMany).not.toHaveBeenCalled();
+    expect(tx.delivery.create).not.toHaveBeenCalled();
+    expect(outboxRows).toHaveLength(0);
+    expect(tx.processedMessage.create).toHaveBeenCalledTimes(1);
+    expect(channel.ack).toHaveBeenCalledTimes(1);
+    expect(channel.nack).not.toHaveBeenCalled();
+  });
+
+  it('[KN:U16] (phần f) event KHÔNG probe vẫn ghi probe:false và đi định tuyến như cũ', async () => {
+    const { prisma, tx } = buildFakePrisma({ subs: 1 });
+    await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
+    expect(tx.event.create.mock.calls[0][0].data.probe).toBe(false);
+    expect(tx.subscription.findMany).toHaveBeenCalled();
+    expect(tx.delivery.create).toHaveBeenCalledTimes(1);
+  });
+
   it('[AF:#22] S1-5: đọc raw_event qua repo.findRawEventById (scope tenant), không qua prisma.rawEvent', async () => {
     const { prisma, findRawEventById } = buildFakePrisma();
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
