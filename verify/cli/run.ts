@@ -532,15 +532,22 @@ async function bbCmd(overlay: string[]): Promise<number> {
   if (l0.length) tests.push(...runJest('L0', l0, l0Env(), ROOT, 'bb-L0').summary.tests);
   if (l1.length) tests.push(...runJest('L1', l1, l1Env().env, ROOT, 'bb-L1').summary.tests);
   const probes = loadProbes(PROBES_DIR);
-  const scenarioText = walk(path.join(VERIFY_DIR, 'scenarios'), (f) => f.endsWith('.ts'))
-    .map((f) => fs.readFileSync(f, 'utf8'))
-    .join('\n');
+  // M-4: cột L2/L3 lấy KẾT QUẢ lần chạy cuối (verify/.last-run.json, kèm commit), không đếm chuỗi trong file kịch bản.
+  const last = readJson<any>(LAST_RUN, { layers: {} });
+  const head = git(['rev-parse', '--short', 'HEAD']);
   const rows: string[] = [];
   let ok = true;
   for (const n of ['1', '2', '3', '4', '5']) {
     const mine = tests.filter((t) => t.name.includes(`[BB:${n}]`));
     const green = mine.length > 0 && mine.every((t) => t.status === 'passed');
-    const l23 = (scenarioText.match(new RegExp(`\\[BB:${n}\\]`, 'g')) ?? []).length;
+    const l23 = (['L2', 'L3'] as const).map((L) => {
+      const lay = last.layers?.[L];
+      const rowsL = (lay?.tests ?? []).filter((t: any) => String(t.name).includes(`[BB:${n}]`));
+      if (!lay || rowsL.length === 0) return null;
+      const pass = rowsL.filter((t: any) => t.status === 'passed').length;
+      const stale = last.commit && last.commit !== head ? ` @${last.commit}, KHÁC HEAD ${head}` : ` @${last.commit ?? '?'}`;
+      return `${L} ${pass}/${rowsL.length} pass (${String(lay.at ?? '').slice(0, 16)}${stale})`;
+    });
     const pr: string[] = [];
     for (const id of BB_PROBES[n]) {
       const p = probes.find((x) => x.id === id);
@@ -555,10 +562,11 @@ async function bbCmd(overlay: string[]): Promise<number> {
       if (!r.ok) ok = false;
     }
     if (!green) ok = false;
-    const testCol = `${mine.length} test L0/L1${l23 ? ` + ${l23} kịch bản L2/L3` : ''}`;
+    const l23txt = l23.filter(Boolean).join(' · ') || 'L2/L3: chưa chạy';
+    const testCol = `${mine.length} test L0/L1 (chạy ngay) · ${l23txt}`;
     rows.push(`| BB-${n} | ${testCol} | ${green ? '✅' : '❌'} | ${pr.join('<br>') || '— (hình dạng hệ thống, không có nhánh code để phá)'} |`);
   }
-  console.log('\n| bất biến | test | xanh trên code thật | đỏ khi probe |\n|---|---|---|---|');
+  console.log('\n| bất biến | test (L0/L1 chạy ngay; L2/L3 = kết quả lần chạy cuối) | L0/L1 xanh trên code thật | đỏ khi probe |\n|---|---|---|---|');
   for (const r of rows) console.log(r);
   return ok ? 0 : 1;
 }
