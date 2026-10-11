@@ -44,3 +44,7 @@
   nóng; nhánh 413/404/429 của `genericAckFix` để dành nếu sau này làm. R2-L4: không viết lại lịch sử.
   Commit theo luật mới: `git commit -m … -- <paths>`. File lẫn hunk của agent khác (tenant-scoped.repository.ts, ARCHITECTURE.md):
   tạm ghi bản HEAD+mình vào working tree, commit theo path, rồi trả lại bản đầy đủ (kiểm mtime trước khi trả).
+- Review vòng 3: R3-L1 + R3-L2 commit `93366f9`. R3-M1 XONG nhưng CHƯA commit (chờ điều phối vì chạm tenant-scoped.repository.ts):
+  `orchestratorView` (đọc `this.prisma` trong phương thức điều phối -> ném) + `libs/database/test/orchestrated-methods.spec.ts`
+  ((a) client gốc ném ngoài tx: 1 tx/lời gọi; (b) RED trước -> xanh). Lệnh commit khi được phép:
+  `git add -- libs/database/test/orchestrated-methods.spec.ts && git commit -m "fix(review DX-A R3-M1): …" -- libs/database/src/tenant-scoped.repository.ts libs/database/test/orchestrated-methods.spec.ts`
