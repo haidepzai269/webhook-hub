@@ -1651,6 +1651,27 @@ export class TenantScopedRepository {
     return Number(r?.b ?? 0);
   }
 
+  // --- QT5: policy dọn tự động (SPEC §5.4, ADR-186) ---
+
+  /**
+   * Ghi đè (upsert) policy của các mức được gửi — chỉ junk/low/medium (CHECK của bảng chặn thêm một lớp). Gọi trong
+   * transaction có audit của người gọi.
+   */
+  async upsertStoragePolicies(rows: { importance: string; action: string; afterDays: number; trigger: string }[], updatedBy: string): Promise<void> {
+    for (const r of rows) {
+      await this.prisma.storagePolicy.upsert({
+        where: { tenantId_importance: { tenantId: this.tenantId, importance: r.importance } },
+        create: { tenantId: this.tenantId, importance: r.importance, action: r.action, afterDays: r.afterDays, trigger: r.trigger, updatedBy },
+        update: { action: r.action, afterDays: r.afterDays, trigger: r.trigger, updatedBy, updatedAt: new Date() },
+      });
+    }
+  }
+
+  /** Dòng audit mới nhất của một hành động (vd lần dọn tự động gần nhất — "đã giải phóng X MB"). */
+  async findLatestAuditLog(action: string) {
+    return this.prisma.auditLog.findFirst({ where: { tenantId: this.tenantId, action }, orderBy: { createdAt: 'desc' } });
+  }
+
   // --- QT4b: gợi ý dọn (SPEC §5.6, ADR-187) ---
 
   /** Lưu bộ gợi ý mới nhất (ĐÃ qua `assertSuggestionSafe`) vào `project_usage.suggestions`. */

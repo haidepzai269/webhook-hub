@@ -1,11 +1,11 @@
-import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { resolveStorageAutoCleanEnabled, resolveStorageLockEnabled } from '@hub/common';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
-import { StorageFlags, applySuggestion, createCleanJob, getCleanJob, getStorageOverview } from './storage-api';
+import { StorageFlags, applySuggestion, createCleanJob, getCleanJob, getStorageOverview, getStoragePolicies, putStoragePolicies } from './storage-api';
 
 /**
  * QT4 (SPEC-han-muc-dung-luong §5.5, ADR-184): trang "Dung lượng" của một project. Quyền = scope (`storage:read` cho
@@ -39,6 +39,19 @@ export class StorageController {
   @RequireScope('storage:write')
   apply(@Param('projectId') projectId: string, @Param('suggestionId') suggestionId: string, @CurrentUser() actor: string) {
     return applySuggestion(this.prisma, projectId, suggestionId, actor);
+  }
+
+  /** QT5 (§5.4, ADR-186): policy dọn tự động — luôn trả `autoCleanEnabled` + câu nói thật khi cờ tắt (E5). */
+  @Get('storage/policies')
+  @RequireScope('storage:read')
+  policies(@Param('projectId') projectId: string) {
+    return getStoragePolicies(this.prisma, projectId, this.flags);
+  }
+
+  @Put('storage/policies')
+  @RequireScope('storage:write')
+  putPolicies(@Param('projectId') projectId: string, @CurrentUser() actor: string, @Body() body: unknown) {
+    return putStoragePolicies(this.prisma, projectId, body, actor, this.flags);
   }
 
   @Get('storage/clean/:jobId')

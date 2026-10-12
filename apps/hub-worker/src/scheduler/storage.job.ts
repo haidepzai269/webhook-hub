@@ -34,7 +34,7 @@ import Redis from 'ioredis';
 import { hostname } from 'os';
 import { randomUUID } from 'crypto';
 import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
-import { resolveTrafficRetentionDays } from './cleanup.job';
+import { resolveTrafficRetentionDays } from './traffic-retention';
 import { emitHubEvent } from './hub-events';
 import {
   cleanupAdvisorFailOpen,

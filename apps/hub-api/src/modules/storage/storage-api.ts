@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import {
   CleanRequest,
   CleanupSuggestion,
+  DEFAULT_STORAGE_POLICIES,
   Importance,
   RuleAdvisor,
   StorageLevel,
@@ -307,6 +308,109 @@ export async function applySuggestion(
     return insertCleanJob(r, req, actor, { origin: 'suggestion', suggestionId: found.id, advisor: found.advisor });
   });
   return cleanJobView(job);
+}
+
+// ---------------------------------------------------------------- QT5: policy dọn tự động (§5.4, ADR-186)
+
+export interface StoragePolicyView {
+  importance: 'junk' | 'low' | 'medium';
+  action: 'trim' | 'delete' | 'off';
+  afterDays: number;
+  trigger: 'always' | 'above_85';
+  updatedBy: string;
+  updatedAt: string | null;
+}
+
+export interface StoragePoliciesResponse {
+  policies: StoragePolicyView[];
+  /** E5: false = "Đã cài, chưa chạy (người vận hành chưa bật)" — console phải nói câu này, không giả vờ đang dọn. */
+  autoCleanEnabled: boolean;
+  status: 'running' | 'installed_not_running';
+  message: string;
+  /** Lần dọn tự động gần nhất có giải phóng gì ("Lần chạy gần nhất: … đã giải phóng X MB"). */
+  lastRun: { at: string; importance: string; events: number; freedBytes: number } | null;
+}
+
+const POLICY_ORDER = ['junk', 'low', 'medium'] as const;
+const MAX_AFTER_DAYS = 365;
+
+/** `GET …/storage/policies` (scope `storage:read`): ba mức có thể đặt (thiếu dòng -> mặc định Q10, đánh dấu `system`). */
+export async function getStoragePolicies(store: StorageStore, projectId: string, flags: StorageFlags): Promise<StoragePoliciesResponse> {
+  const repo = store.forTenant(projectId);
+  const [rows, last] = await Promise.all([repo.findStoragePolicies(), repo.findLatestAuditLog('storage.auto_clean')]);
+  const by = new Map((rows as { importance: string }[]).map((r) => [r.importance, r as Record<string, unknown>]));
+  const policies = POLICY_ORDER.map((imp) => {
+    const r = by.get(imp);
+    const d = DEFAULT_STORAGE_POLICIES.find((x) => x.importance === imp)!;
+    return {
+      importance: imp,
+      action: ((r?.action as string) ?? d.action) as StoragePolicyView['action'],
+      afterDays: Number(r?.afterDays ?? d.afterDays),
+      trigger: ((r?.trigger as string) ?? d.trigger) as StoragePolicyView['trigger'],
+      updatedBy: (r?.updatedBy as string) ?? 'system',
+      updatedAt: r?.updatedAt instanceof Date ? r.updatedAt.toISOString() : null,
+    };
+  });
+  const meta = (last?.metadata ?? {}) as { importance?: string; events?: number; freedBytes?: number };
+  return {
+    policies,
+    autoCleanEnabled: flags.autoCleanEnabled,
+    status: flags.autoCleanEnabled ? 'running' : 'installed_not_running',
+    message: flags.autoCleanEnabled
+      ? 'Đang bật dọn tự động: hub chạy các policy dưới đây mỗi lượt dọn dẹp (mức Cao và "Giữ lâu" không bao giờ bị dọn tự động).'
+      : 'Đã cài, chưa chạy (người vận hành chưa bật STORAGE_AUTO_CLEAN_ENABLED). Dọn tay vẫn dùng được.',
+    lastRun: last
+      ? { at: last.createdAt.toISOString(), importance: String(meta.importance ?? ''), events: Number(meta.events ?? 0), freedBytes: Number(meta.freedBytes ?? 0) }
+      : null,
+  };
+}
+
+/**
+ * `PUT …/storage/policies` (scope `storage:write`): `{ policies: [{ importance, action, afterDays, trigger }] }` — chỉ
+ * junk/low/medium (Cao/Giữ KHÔNG đặt được: 400), Rác chỉ `delete`/`off`, `afterDays` nguyên 1–365 (≥ 1 ngày > sàn retry
+ * window ~2,6 giờ), `trigger` `always`|`above_85`. Ghi + `audit_logs` `storage.policies.update` (trước/sau) CÙNG transaction.
+ */
+export async function putStoragePolicies(store: StorageStore, projectId: string, body: unknown, actor: string, flags: StorageFlags, floorMs = TOTAL_RETRY_WINDOW_MS): Promise<StoragePoliciesResponse> {
+  const list = (body as { policies?: unknown } | null)?.policies;
+  if (!Array.isArray(list) || list.length === 0 || list.length > POLICY_ORDER.length) {
+    throw hubError('bad_request', { field: 'policies' }, 'policies là mảng 1–3 phần tử { importance, action, afterDays, trigger }');
+  }
+  const seen = new Set<string>();
+  const rows: { importance: string; action: string; afterDays: number; trigger: string }[] = [];
+  for (const raw of list as Record<string, unknown>[]) {
+    const imp = raw?.importance;
+    if (imp === 'high' || imp === 'keep') throw hubError('bad_request', { field: 'importance' }, 'Mức Cao và "Giữ lâu" không đặt dọn tự động được');
+    if (!(POLICY_ORDER as readonly unknown[]).includes(imp)) throw hubError('bad_request', { field: 'importance' }, 'importance chỉ nhận junk, low, medium');
+    if (seen.has(imp as string)) throw hubError('bad_request', { field: 'importance' }, `importance "${imp}" lặp lại`);
+    seen.add(imp as string);
+    const action = raw.action;
+    if (action !== 'trim' && action !== 'delete' && action !== 'off') throw hubError('bad_request', { field: 'action' }, 'action là trim (Dọn), delete (Xoá hẳn) hoặc off');
+    if (imp === 'junk' && action === 'trim') throw hubError('bad_request', { field: 'action' }, 'Mẫu request bị từ chối (junk) chỉ Xoá hẳn hoặc tắt');
+    const afterDays = raw.afterDays;
+    if (typeof afterDays !== 'number' || !Number.isInteger(afterDays) || afterDays < 1 || afterDays > MAX_AFTER_DAYS || afterDays * DAY_MS <= floorMs) {
+      throw hubError('bad_request', { field: 'afterDays' }, `afterDays là số ngày nguyên 1–${MAX_AFTER_DAYS} (lớn hơn cửa sổ retry)`);
+    }
+    const trigger = raw.trigger ?? 'always';
+    if (trigger !== 'always' && trigger !== 'above_85') throw hubError('bad_request', { field: 'trigger' }, 'trigger là always hoặc above_85');
+    rows.push({ importance: imp as string, action, afterDays, trigger });
+  }
+  await store.tenantTx(projectId, async (tx) => {
+    const r = store.forTenant(projectId, tx);
+    const before = await r.findStoragePolicies();
+    await r.upsertStoragePolicies(rows, actor);
+    await r.createAuditLog({
+      action: 'storage.policies.update',
+      entityType: 'project',
+      entityId: projectId,
+      actor,
+      metadata: {
+        before: (before as { importance: string; action: string; afterDays: number; trigger: string }[]).map(({ importance, action, afterDays, trigger }) => ({ importance, action, afterDays, trigger })),
+        after: rows,
+        autoCleanEnabled: flags.autoCleanEnabled,
+      },
+    });
+  });
+  return getStoragePolicies(store, projectId, flags);
 }
 
 /** `GET …/storage/clean/:jobId` (scope `storage:read`) — lệnh của project khác / id rác -> 404 như không tồn tại. */

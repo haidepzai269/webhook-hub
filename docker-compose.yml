@@ -117,6 +117,8 @@ services:
       - INGEST_RATE_LIMIT_PER_MIN=${INGEST_RATE_LIMIT_PER_MIN:-100}
       # QT3 E5 (ADR-189): khoá chiều ghi (507) khi project đầy hạn mức. Local/hubv BẬT để đo/demo; production mặc định 0.
       - STORAGE_LOCK_ENABLED=${STORAGE_LOCK_ENABLED:-1}
+      # QT5 E5 (ADR-189): console nói thật trạng thái dọn tự động (hub-worker mới là nơi chạy). Local/hubv BẬT; production 0.
+      - STORAGE_AUTO_CLEAN_ENABLED=${STORAGE_AUTO_CLEAN_ENABLED:-1}
       # QT9 (Q11): trần source chưa lưu trữ mỗi project (409 source_limit), operator miễn
       - SOURCE_LIMIT_PER_PROJECT=${SOURCE_LIMIT_PER_PROJECT:-20}
       # Deployed: đặt để chặn /metrics bằng Bearer token; local để trống
@@ -263,6 +265,10 @@ services:
       - PROJECT_STORAGE_QUOTA_MB=${PROJECT_STORAGE_QUOTA_MB:-50}
       - STORAGE_LEVEL_INTERVAL_MS=${STORAGE_LEVEL_INTERVAL_MS:-60000}
       - STORAGE_RECALIBRATE_INTERVAL_MS=${STORAGE_RECALIBRATE_INTERVAL_MS:-86400000}
+      # QT5 E5 (ADR-189): dọn tự động theo policy trong cleanup job. Local/hubv BẬT để demo; production mặc định 0.
+      - STORAGE_AUTO_CLEAN_ENABLED=${STORAGE_AUTO_CLEAN_ENABLED:-1}
+      # QT4 (ADR-184): nhịp worker thăm dò lệnh dọn (SKIP LOCKED, 0 lệnh Redis)
+      - STORAGE_CLEAN_POLL_MS=${STORAGE_CLEAN_POLL_MS:-5000}
       - DB_DISK_BUDGET_MB=${DB_DISK_BUDGET_MB:-512}
       # CB5 (ADR-173): vòng gửi email cảnh báo — cùng driver mail với hub-api; WEB_PUBLIC_URL = gốc deep link trong thư.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}

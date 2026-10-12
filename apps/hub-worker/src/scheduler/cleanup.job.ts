@@ -1,7 +1,19 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
-import { fastFailRedisOptions, logger } from '@hub/common';
+import {
+  POLICY_IMPORTANCES,
+  fastFailRedisOptions,
+  logger,
+  parseStorageLevel,
+  quotaBytesFor,
+  resolveProjectStorageQuotaMb,
+  resolveStorageAutoCleanEnabled,
+} from '@hub/common';
+import { StorageJob } from './storage.job';
+import { DEFAULT_TRAFFIC_RETENTION_DAYS, resolveTrafficRetentionDays } from './traffic-retention';
+import { runCleanBatch, toMb } from './storage-clean';
+import { storageCleanBatches, storageCleanFreedBytes } from '../metrics';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 import { hostname } from 'os';
@@ -65,21 +77,30 @@ export interface CleanupResult {
   ingestDuplicates: number;
   /** EG4 (ADR-179): lưu lượng theo phút quá `TRAFFIC_RETENTION_DAYS`. */
   sourceTraffic: number;
+  /** QT5 (§5.4, ADR-186): dọn tự động theo policy — `enabled=false` khi `STORAGE_AUTO_CLEAN_ENABLED=0` (E5). */
+  autoClean: AutoCleanResult;
 }
+
+export interface AutoCleanResult {
+  enabled: boolean;
+  projects: number;
+  events: number;
+  rejectedSamples: number;
+  freedBytes: number;
+}
+
+/** QT5: trần lô mỗi (project, policy) mỗi lượt cleanup — lượt sau làm tiếp; một project lớn không chiếm cả lượt. */
+export const AUTO_CLEAN_MAX_BATCHES = 20;
+const AUTO_CLEAN_OFF: AutoCleanResult = { enabled: false, projects: 0, events: 0, rejectedSamples: 0, freedBytes: 0 };
 
 /** SPEC-auth §5.3: giữ phiên đã hết hạn thêm 30 ngày (điều tra reuse_detected), token mail thêm 7 ngày. */
 export const AUTH_SESSION_KEEP_DAYS = 30;
 export const EMAIL_TOKEN_KEEP_DAYS = 7;
 /** CB6: nhận định `I-dup` chỉ đọc "hôm nay" — giữ 30 ngày bucket giờ để tra lại, hơn nữa là rác. */
 export const INGEST_DUPLICATES_KEEP_DAYS = 30;
-/** EG4 (ADR-179): lưu lượng theo phút giữ 7 ngày (khối "Lưu lượng" xem tối đa 7 ngày). Kẹp 1–90. */
-export const DEFAULT_TRAFFIC_RETENTION_DAYS = 7;
-export function resolveTrafficRetentionDays(v: string | undefined = process.env.TRAFFIC_RETENTION_DAYS): number {
-  const n = v === undefined || v === '' ? NaN : Number(v);
-  if (!Number.isFinite(n)) return DEFAULT_TRAFFIC_RETENTION_DAYS;
-  return Math.min(90, Math.max(1, Math.round(n)));
-}
-const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0, sourceTraffic: 0 };
+/** EG4 (ADR-179): nguồn ở traffic-retention.ts (QT5 — tránh vòng import với storage.job); re-export giữ API cũ. */
+export { DEFAULT_TRAFFIC_RETENTION_DAYS, resolveTrafficRetentionDays };
+const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0, sourceTraffic: 0, autoClean: AUTO_CLEAN_OFF };
 
 
 @Injectable()
@@ -91,10 +112,18 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
   private readonly retentionDays: number;
   private readonly intervalMs: number;
   private readonly lockTtlSeconds: number;
+  /** E5: `STORAGE_AUTO_CLEAN_ENABLED` — đọc MỘT lần lúc khởi động; 0 = policy đã cài nhưng KHÔNG chạy (dọn tay vẫn chạy). */
+  readonly autoCleanEnabled = resolveStorageAutoCleanEnabled();
+  private readonly defaultQuotaMb = resolveProjectStorageQuotaMb();
+  /** Byte giải phóng bởi retention trong lượt hiện tại, theo tenant — tính lại nấc cuối lượt (E2: hạ nấc ngay). */
+  private retentionFreed = new Map<string, number>();
+  /** Đặt bởi `stop()` — vòng dọn tự động dừng ở ranh giới project. */
+  private stopped = false;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() redisClient?: Redis,
+    @Optional() private readonly storage?: StorageJob,
   ) {
     this.retentionDays = resolveRetentionDays();
     const interval = parseInt(process.env.CLEANUP_INTERVAL_MS || '', 10);
@@ -127,6 +156,7 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
 
   stop() {
     this.running = false;
+    this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -161,12 +191,9 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
             SELECT consumer, message_id FROM hub.processed_messages
             WHERE created_at < now() - make_interval(secs => ${secs}::double precision)
             LIMIT ${CLEANUP_BATCH})`),
-        rejectedRawEvents: await this.deleteInBatches(Prisma.sql`
-          DELETE FROM hub.raw_events WHERE id IN (
-            SELECT id FROM hub.raw_events
-            WHERE status = 'REJECTED' AND received_at < now() - make_interval(secs => ${secs}::double precision)
-            LIMIT ${CLEANUP_BATCH})`),
-        events: await this.loopBatches(() => this.prisma.deleteExpiredEventsBatch(secs, CLEANUP_BATCH)),
+        // QT5 (E2): retention trừ byte giải phóng vào project_usage của từng tenant trong CÙNG câu lệnh.
+        rejectedRawEvents: await this.loopBatches(() => this.accounted(this.prisma.deleteExpiredRejectedBatchAccounted(secs, CLEANUP_BATCH))),
+        events: await this.loopBatches(() => this.accounted(this.prisma.deleteExpiredEventsBatchAccounted(secs, CLEANUP_BATCH))),
         // Bảng danh tính chỉ qua IdentityRepository (SPEC-auth §5.1) — mở rộng job sẵn có, không job mới.
         authSessions: await this.loopBatches(() => this.prisma.identity().deleteExpiredSessionsBatch(AUTH_SESSION_KEEP_DAYS, CLEANUP_BATCH)),
         emailTokens: await this.loopBatches(() => this.prisma.identity().deleteExpiredEmailTokensBatch(EMAIL_TOKEN_KEEP_DAYS, CLEANUP_BATCH)),
@@ -182,12 +209,106 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
             SELECT tenant_id, source_id, minute, outcome FROM hub.source_traffic_minutely
             WHERE minute < now() - make_interval(days => ${resolveTrafficRetentionDays()}::int)
             LIMIT ${CLEANUP_BATCH})`),
+        autoClean: AUTO_CLEAN_OFF, // điền sau retention (QT5)
       };
+      await this.recomputeLevelsAfterRetention();
+      // QT5 (§5.4): dọn tự động theo policy — CÙNG khoá Redis của lượt cleanup này.
+      result.autoClean = this.autoCleanEnabled ? await this.runAutoClean() : AUTO_CLEAN_OFF;
+      if (!this.autoCleanEnabled) logger.debug('Cleanup: STORAGE_AUTO_CLEAN_ENABLED=0 — policy dọn tự động đã cài nhưng không chạy');
       logger.info({ ...result, retentionDays: this.retentionDays }, 'Cleanup: hoàn tất một lượt');
       return result;
     } finally {
       // Không nhả lock: TTL tự hết sau ~0,9 chu kỳ (kể cả khi lượt lỗi — không thành bão thử lại).
     }
+  }
+
+  /** QT5: cộng byte retention đã trừ vào bảng tạm theo tenant (để tính lại nấc cuối lượt); trả số dòng xoá cho loopBatches. */
+  private async accounted(p: Promise<{ deleted: number; freed: { tenantId: string; bytes: number }[] }>): Promise<number> {
+    const r = await p;
+    for (const f of r.freed) {
+      this.retentionFreed.set(f.tenantId, (this.retentionFreed.get(f.tenantId) ?? 0) + f.bytes);
+      storageCleanFreedBytes.inc({ trigger: 'retention' }, f.bytes);
+    }
+    return r.deleted;
+  }
+
+  /** E2: retention đã trừ `used_bytes` trong cùng câu xoá -> tính lại nấc NGAY cho các project bị đụng (không chờ lượt 60s). */
+  private async recomputeLevelsAfterRetention(): Promise<void> {
+    const freed = this.retentionFreed;
+    this.retentionFreed = new Map();
+    for (const tenantId of freed.keys()) {
+      try {
+        const quotaBytes = quotaBytesFor(((await this.prisma.findProjectById(tenantId)) as { storageQuotaMb?: number | null } | null)?.storageQuotaMb ?? null, this.defaultQuotaMb);
+        const c = await this.prisma.forTenant(tenantId).recomputeStorageLevel(quotaBytes);
+        if (c && c.from !== c.to) {
+          await this.storage?.reportLevelChange({ tenantId, from: parseStorageLevel(c.from), to: parseStorageLevel(c.to), usedBytes: c.usedBytes, quotaBytes });
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message, tenantId }, 'Cleanup: không tính lại được nấc sau retention (lượt nấc 60s sẽ sửa)');
+      }
+    }
+  }
+
+  /**
+   * QT5 (§5.4, ADR-186, QT:T18): dọn tự động theo policy user đặt. Chỉ mức CÓ policy `action <> 'off'` (junk/low/medium —
+   * Cao/Giữ không có trong bảng, lọc thêm ở đây); `trigger=above_85` chỉ chạy khi project ≥ 85% hạn mức; Rác chỉ Xoá hẳn.
+   * Mỗi lô là MỘT transaction ngắn (`runCleanBatch` — cùng bất biến với lệnh dọn tay: không đụng delivery đang chạy, sàn
+   * retry, source "Giữ lâu", audit_logs). Có dọn được gì thì ghi MỘT dòng audit `storage.auto_clean` actor
+   * `system:auto-clean` (số dòng + MB) — không ghi khi 0 dòng (audit_logs không bao giờ dọn được, đừng làm nó phình).
+   */
+  async runAutoClean(tenantIds?: string[]): Promise<AutoCleanResult> {
+    const out: AutoCleanResult = { enabled: true, projects: 0, events: 0, rejectedSamples: 0, freedBytes: 0 };
+    const targets = await this.prisma.storageAutoCleanTargetsAcrossTenants(tenantIds);
+    for (const t of targets) {
+      if (this.stopped) break; // đang tắt: phần còn lại để lượt sau
+      const quotaBytes = quotaBytesFor(t.quotaMb, this.defaultQuotaMb);
+      const above85 = quotaBytes > 0 && t.usedBytes >= 0.85 * quotaBytes;
+      let touched = false;
+      for (const p of t.policies) {
+        if (!(POLICY_IMPORTANCES as readonly string[]).includes(p.importance)) continue; // Cao/Giữ không bao giờ
+        if (p.action !== 'trim' && p.action !== 'delete') continue;
+        if (p.importance === 'junk' && p.action !== 'delete') continue;
+        if (p.trigger === 'above_85' && !above85) continue;
+        if (!Number.isInteger(p.afterDays) || p.afterDays < 1) continue;
+        const spec = { action: p.action as 'trim' | 'delete', importance: [p.importance], cutoff: new Date(Date.now() - p.afterDays * DAY_MS), sourceId: null };
+        const sum = { events: 0, rejected: 0, freed: 0 };
+        try {
+          for (let i = 0; i < AUTO_CLEAN_MAX_BATCHES; i++) {
+            const r = await runCleanBatch(this.prisma, t.tenantId, spec, quotaBytes);
+            storageCleanBatches.inc({ trigger: 'auto', result: 'ok' });
+            sum.events += r.events;
+            sum.rejected += r.rejected;
+            sum.freed += r.freedBytes;
+            if (r.level && r.level.from !== r.level.to) {
+              await this.storage?.reportLevelChange({ tenantId: t.tenantId, from: parseStorageLevel(r.level.from), to: parseStorageLevel(r.level.to), usedBytes: r.level.usedBytes, quotaBytes });
+            }
+            if (r.done) break;
+          }
+        } catch (err: any) {
+          storageCleanBatches.inc({ trigger: 'auto', result: 'error' });
+          logger.warn({ err: err?.message, tenantId: t.tenantId, importance: p.importance }, 'Cleanup: dọn tự động lỗi (bỏ qua policy này, lượt sau thử lại)');
+        }
+        if (sum.events + sum.rejected === 0) continue;
+        touched = true;
+        out.events += sum.events;
+        out.rejectedSamples += sum.rejected;
+        out.freedBytes += sum.freed;
+        if (sum.freed > 0) storageCleanFreedBytes.inc({ trigger: 'auto' }, sum.freed);
+        try {
+          await this.prisma.forTenant(t.tenantId).createAuditLog({
+            action: 'storage.auto_clean',
+            entityType: 'storage_policy',
+            entityId: p.importance,
+            actor: 'system:auto-clean',
+            metadata: { importance: p.importance, action: p.action, afterDays: p.afterDays, trigger: p.trigger, events: sum.events, rejectedSamples: sum.rejected, freedBytes: sum.freed, freedMb: toMb(sum.freed) },
+          });
+        } catch (err: any) {
+          logger.warn({ err: err?.message, tenantId: t.tenantId }, 'Cleanup: không ghi được audit dọn tự động');
+        }
+      }
+      if (touched) out.projects++;
+    }
+    return out;
   }
 
   /** AU6: dọn xuyên project có chủ đích -> đường hệ thống có tên (RLS). */

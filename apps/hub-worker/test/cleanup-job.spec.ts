@@ -47,7 +47,8 @@ describe('CleanupJob (S1-4)', () => {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
       systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
       $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(0),
-      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
+      deleteExpiredRejectedBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
     const redis = buildRedis('OK');
@@ -55,8 +56,22 @@ describe('CleanupJob (S1-4)', () => {
 
     // MS-P2-6: lock giữ ~90% chu kỳ (mặc định 1h -> 3240s) và KHÔNG nhả khi xong -> N worker = 1 lượt/chu kỳ
     expect(redis.set).toHaveBeenCalledWith(CLEANUP_LOCK_KEY, expect.any(String), 'EX', 3240, 'NX');
-    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0, sourceTraffic: 0 });
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(6); // + ingest_duplicates (CB6) + source_traffic_minutely (EG4)
+    expect(result).toEqual({
+      skipped: false,
+      outbox: CLEANUP_BATCH + 12,
+      processedMessages: 3,
+      rejectedRawEvents: 0,
+      events: 0,
+      authSessions: 0,
+      emailTokens: 0,
+      ingestDuplicates: 0,
+      sourceTraffic: 0,
+      // QT5: STORAGE_AUTO_CLEAN_ENABLED mặc định 0 -> không chạy dọn tự động
+      autoClean: { enabled: false, projects: 0, events: 0, rejectedSamples: 0, freedBytes: 0 },
+    });
+    // outbox ×2 + processed + ingest_duplicates (CB6) + source_traffic_minutely (EG4); mẫu REJECTED đi escape hatch có tên (QT5)
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(5);
+    expect(prisma.deleteExpiredRejectedBatchAccounted).toHaveBeenCalledTimes(1);
     expect(redis.eval).not.toHaveBeenCalled();
   });
 
@@ -78,12 +93,13 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
       $executeRaw: jest.fn().mockResolvedValue(0),
-      deleteExpiredEventsBatch: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(7),
+      deleteExpiredEventsBatchAccounted: jest.fn().mockResolvedValueOnce({ deleted: CLEANUP_BATCH, freed: [] }).mockResolvedValueOnce({ deleted: 7, freed: [] }),
+      deleteExpiredRejectedBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
     const result = await new CleanupJob(prisma, buildRedis('OK')).runOnce();
     expect(result.events).toBe(CLEANUP_BATCH + 7);
-    expect(prisma.deleteExpiredEventsBatch).toHaveBeenCalledWith(9 * 86_400, CLEANUP_BATCH);
+    expect(prisma.deleteExpiredEventsBatchAccounted).toHaveBeenCalledWith(9 * 86_400, CLEANUP_BATCH);
     const sqls = prisma.$executeRaw.mock.calls.map((c: any) => c[0].strings.join('?'));
     expect(sqls.some((q: string) => /raw_events/.test(q) && /ACCEPTED/.test(q))).toBe(false);
   });
@@ -94,7 +110,8 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
       $executeRaw: jest.fn().mockResolvedValue(0),
-      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
+      deleteExpiredRejectedBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
       identity: () => ({ deleteExpiredSessionsBatch: sessions, deleteExpiredEmailTokensBatch: tokens }),
     };
     const result = await new CleanupJob(prisma, buildRedis('OK')).runOnce();
@@ -107,7 +124,8 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       systemTx: jest.fn(function (this: any, _r: any, fn: any) { return fn(prisma); }),
       $executeRaw: jest.fn().mockResolvedValue(0),
-      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
+      deleteExpiredRejectedBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
     prisma.$executeRaw.mockImplementation(async (q: any) => (/ingest_duplicates/.test(q.strings.join('?')) ? (prisma.dupCalls = (prisma.dupCalls ?? 0) + 1) === 1 ? CLEANUP_BATCH : 9 : 0));
@@ -127,7 +145,8 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       systemTx: jest.fn(function (this: any, _r: any, fn: any) { return fn(prisma); }),
       $executeRaw: jest.fn().mockResolvedValue(0),
-      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
+      deleteExpiredRejectedBatchAccounted: jest.fn().mockResolvedValue({ deleted: 0, freed: [] }),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
     prisma.$executeRaw.mockImplementation(async (q: any) => (/source_traffic_minutely/.test(q.strings.join('?')) ? (prisma.n = (prisma.n ?? 0) + 1) === 1 ? CLEANUP_BATCH : 4 : 0));

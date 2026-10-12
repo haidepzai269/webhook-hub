@@ -130,12 +130,58 @@ export class PrismaService {
    * hơn `olderThanSeconds`, XUYÊN project (job cleanup không thuộc tenant nào). FK CASCADE kéo theo
    * `deliveries` -> `delivery_attempts`. KHÔNG đụng `raw_events` (ACCEPTED giữ vô hạn, ADR-045). Chỉ CleanupJob gọi.
    */
-  public deleteExpiredEventsBatch(olderThanSeconds: number, limit: number): Promise<number> {
-    return this.systemTx('cleanup: retention events', (tx) => tx.$executeRaw`
-      DELETE FROM "hub"."events" WHERE id IN (
-        SELECT id FROM "hub"."events"
+  public async deleteExpiredEventsBatch(olderThanSeconds: number, limit: number): Promise<number> {
+    return (await this.deleteExpiredEventsBatchAccounted(olderThanSeconds, limit)).deleted;
+  }
+
+  /**
+   * QT5 (SPEC-han-muc-dung-luong E2, ADR-184): retention xoá events quá N ngày VÀ trừ byte giải phóng (công thức §2 —
+   * `events.data` + deliveries + attempts; raw ACCEPTED KHÔNG bị retention xoá nên không tính) vào `project_usage` của từng
+   * tenant trong CÙNG câu lệnh (cùng transaction). Trả số dòng xoá + byte theo tenant (người gọi tính lại nấc).
+   */
+  public async deleteExpiredEventsBatchAccounted(olderThanSeconds: number, limit: number): Promise<{ deleted: number; freed: { tenantId: string; bytes: number }[] }> {
+    const [r] = await this.systemTx('cleanup: retention events', (tx) => tx.$queryRaw<{ n: number; freed: { t: string; b: number }[] | null }[]>`
+      WITH v AS (
+        SELECT id, tenant_id FROM "hub"."events"
         WHERE received_at < now() - make_interval(secs => ${olderThanSeconds}::double precision)
-        LIMIT ${limit})`);
+        LIMIT ${limit} FOR UPDATE SKIP LOCKED),
+      sz AS (
+        SELECT v.tenant_id, sum(COALESCE(pg_column_size(e.data), 0)
+               + COALESCE((SELECT sum(COALESCE(pg_column_size(d.last_error), 0)
+                                      + COALESCE((SELECT sum(COALESCE(pg_column_size(a.request_body), 0) + COALESCE(pg_column_size(a.response_body), 0)
+                                                             + COALESCE(pg_column_size(a.error), 0)) FROM "hub"."delivery_attempts" a WHERE a.delivery_id = d.id), 0))
+                           FROM "hub"."deliveries" d WHERE d.event_id = e.id), 0))::bigint AS b
+        FROM v JOIN "hub"."events" e ON e.id = v.id GROUP BY v.tenant_id),
+      del AS (DELETE FROM "hub"."events" e USING v WHERE e.id = v.id RETURNING e.id),
+      acc AS (
+        UPDATE "hub"."project_usage" pu SET freed_since_calibration = pu.freed_since_calibration + sz.b,
+               used_bytes = GREATEST(0, pu.used_bytes - sz.b), measured_at = now()
+        FROM sz WHERE pu.tenant_id = sz.tenant_id AND sz.b > 0 RETURNING pu.tenant_id)
+      SELECT (SELECT count(*) FROM del)::int AS n,
+             (SELECT json_agg(json_build_object('t', tenant_id, 'b', b)) FROM sz WHERE b > 0) AS freed`);
+    return { deleted: Number(r?.n ?? 0), freed: (r?.freed ?? []).map((x) => ({ tenantId: x.t, bytes: Number(x.b) })) };
+  }
+
+  /**
+   * QT5 (E2): retention xoá mẫu REJECTED quá N ngày (S1-4) VÀ trừ `octet_length(body_raw)` vào `project_usage` của tenant
+   * sở hữu source — cùng câu lệnh. Mẫu của source "Giữ lâu" vẫn theo retention (retention là trần cứng của hub, không phải
+   * dọn theo gợi ý).
+   */
+  public async deleteExpiredRejectedBatchAccounted(olderThanSeconds: number, limit: number): Promise<{ deleted: number; freed: { tenantId: string; bytes: number }[] }> {
+    const [r] = await this.systemTx('cleanup: retention mẫu REJECTED', (tx) => tx.$queryRaw<{ n: number; freed: { t: string; b: number }[] | null }[]>`
+      WITH v AS (
+        SELECT r.id, s.tenant_id FROM "hub"."raw_events" r JOIN "hub"."sources" s ON s.id = r.source_id
+        WHERE r.status = 'REJECTED' AND r.received_at < now() - make_interval(secs => ${olderThanSeconds}::double precision)
+        LIMIT ${limit} FOR UPDATE OF r SKIP LOCKED),
+      del AS (DELETE FROM "hub"."raw_events" r USING v WHERE r.id = v.id RETURNING v.tenant_id, octet_length(r.body_raw) AS b),
+      sz AS (SELECT tenant_id, sum(b)::bigint AS b FROM del GROUP BY tenant_id),
+      acc AS (
+        UPDATE "hub"."project_usage" pu SET freed_since_calibration = pu.freed_since_calibration + sz.b,
+               used_bytes = GREATEST(0, pu.used_bytes - sz.b), measured_at = now()
+        FROM sz WHERE pu.tenant_id = sz.tenant_id AND sz.b > 0 RETURNING pu.tenant_id)
+      SELECT (SELECT count(*) FROM del)::int AS n,
+             (SELECT json_agg(json_build_object('t', tenant_id, 'b', b)) FROM sz WHERE b > 0) AS freed`);
+    return { deleted: Number(r?.n ?? 0), freed: (r?.freed ?? []).map((x) => ({ tenantId: x.t, bytes: Number(x.b) })) };
   }
 
   // ================== Project + API key (S1, ADR-038) ==================
@@ -523,6 +569,31 @@ export class PrismaService {
     });
   }
 
+  /**
+   * QT5 (§5.4, ADR-186): project có policy dọn tự động đang bật (`action <> 'off'`) kèm số đo hiện tại — đọc XUYÊN project
+   * cho lượt dọn tự động của cleanup job (cùng khoá Redis). Chỉ junk/low/medium tồn tại trong bảng (CHECK). Thân dọn chạy
+   * qua `forTenant` (RLS). `tenantIds`: CHỈ test.
+   */
+  public storageAutoCleanTargetsAcrossTenants(tenantIds?: string[]): Promise<StorageAutoCleanTarget[]> {
+    const scope = tenantIds ? Prisma.sql`AND sp.tenant_id = ANY(${tenantIds}::uuid[])` : Prisma.empty;
+    return this.systemTx('storage: policy dọn tự động', async (tx) => {
+      const rows = await tx.$queryRaw<{ tenantId: string; quotaMb: number | null; usedBytes: bigint | null; importance: string; action: string; afterDays: number; trigger: string }[]>(Prisma.sql`
+        SELECT sp.tenant_id AS "tenantId", p.storage_quota_mb AS "quotaMb", pu.used_bytes AS "usedBytes",
+               sp.importance, sp.action, sp.after_days AS "afterDays", sp.trigger
+        FROM hub.storage_policies sp JOIN hub.projects p ON p.id = sp.tenant_id
+        LEFT JOIN hub.project_usage pu ON pu.tenant_id = sp.tenant_id
+        WHERE sp.action <> 'off' ${scope}
+        ORDER BY sp.tenant_id, sp.importance`);
+      const by = new Map<string, StorageAutoCleanTarget>();
+      for (const r of rows) {
+        const t = by.get(r.tenantId) ?? { tenantId: r.tenantId, quotaMb: r.quotaMb, usedBytes: Number(r.usedBytes ?? 0), policies: [] };
+        t.policies.push({ importance: r.importance, action: r.action, afterDays: r.afterDays, trigger: r.trigger });
+        by.set(r.tenantId, t);
+      }
+      return [...by.values()];
+    });
+  }
+
   /** §6 (ADR-185): kích thước cả database — không đọc dữ liệu tenant nào (catalog của Postgres). */
   public async databaseSizeBytes(): Promise<number> {
     const [r] = await this.client.$queryRaw<{ n: bigint }[]>`SELECT pg_database_size(current_database()) AS n`;
@@ -717,3 +788,11 @@ interface IngestSourceRow {
  * nấc dung lượng của project, JOIN trong cùng câu. null = chưa đo (coi như OK).
  */
 export type IngestSource = Source & { secrets: SourceSecret[]; storageLevel: string | null };
+
+/** QT5: một project có policy dọn tự động đang bật (đọc xuyên project cho cleanup job). */
+export interface StorageAutoCleanTarget {
+  tenantId: string;
+  quotaMb: number | null;
+  usedBytes: number;
+  policies: { importance: string; action: string; afterDays: number; trigger: string }[];
+}

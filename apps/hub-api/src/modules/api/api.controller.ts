@@ -198,12 +198,19 @@ export class ApiController {
   /** Chỉ đổi tên / bật-tắt. Không xoá source: raw_events (bằng chứng đã nhận) sẽ mất theo. */
   @Patch('sources/:id')
   @RequireScope('manage:sources')
-  async updateSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any) {
+  async updateSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any, @Req() req?: RequestWithPrincipal) {
     assertUuid(id, 'Source');
-    const data: { name?: string; isActive?: boolean } = {};
+    const data: { name?: string; isActive?: boolean; keepLonger?: boolean } = {};
     if (typeof body?.name === 'string' && body.name.trim()) data.name = body.name.trim();
     if (typeof body?.isActive === 'boolean') data.isActive = body.isActive;
-    if (Object.keys(data).length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive)');
+    // QT5 (§5.5, E1/ADR-189): cờ "Giữ lâu" do user TỰ gắn — đổi cách hub giữ dữ liệu (nhận tới 110%, không gợi ý, không dọn
+    // tự động) nên cần thêm `storage:write` (owner + người vận hành), không chỉ `manage:sources`.
+    if (body?.keepLonger !== undefined) {
+      if (typeof body.keepLonger !== 'boolean') throw hubError('bad_request', { field: 'keepLonger' }, 'keepLonger là boolean');
+      requireAlsoScope(req, 'storage:write');
+      data.keepLonger = body.keepLonger;
+    }
+    if (Object.keys(data).length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive, keepLonger)');
     const updated = await this.withAudit(tenantId, async (repo) => {
       const u = await repo.updateSource(id, data);
       if (!u) throw new NotFoundException('Source không tồn tại');
