@@ -15,6 +15,8 @@ import { ScenarioFile, waitFor } from '../lib/scenario';
 
 const EDGE = process.env.VERIFY_EDGE_URL || 'http://localhost:18080';
 const EDGE_SINK = process.env.VERIFY_EDGE_SINK_URL || 'http://localhost:18090';
+/** IP cố định của service edge trên edge_net của hubv (docker-compose.verify.yml) = TRUST_PROXY của hub-api hubv. */
+const EDGE_IP = process.env.VERIFY_EDGE_IP || '10.250.251.6';
 
 /**
  * Nguồn SEED của hubv (tenant default, secret = GITHUB_WEBHOOK_SECRET / PAYOS_CHECKSUM_KEY của .env.verify — đúng secret
@@ -120,7 +122,7 @@ const file: ScenarioFile = {
         expect(/^[0-9a-f]{32}$/.test(s.headers['x-request-id'] ?? ''), `/socket.io/: x-request-id sai khuôn "abc" phải bị thay, nhận ${s.headers['x-request-id']}`);
         expect(s.headers.host === new URL(EDGE_SINK).host, `/socket.io/: Host bị đổi thành ${s.headers.host}`);
 
-        // hub-api qua edge (review feat/edge): hub-api CHỈ tin edge (TRUST_PROXY=10.250.250.6) -> req.ip = IP client mà nginx
+        // hub-api qua edge (review feat/edge): hub-api CHỈ tin edge (TRUST_PROXY=EDGE_IP) -> req.ip = IP client mà nginx
         // thấy (khoá rl:login:ip:<ip đó>), KHÔNG phải IP container edge, KHÔNG phải 6.6.6.6. Gọi thẳng :14000 với XFF giả
         // -> không được tin (đường k6). Khoá: auth.service `rl:login:ip:<req.ip>`.
         const redis = new Redis(process.env.VERIFY_REDIS_URL || hostUrls().REDIS_URL, { maxRetriesPerRequest: 1 });
@@ -130,11 +132,11 @@ const file: ScenarioFile = {
           const viaEdge = await fetch(`${EDGE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', ...spoof }, body });
           expect([400, 401, 403, 429].includes(viaEdge.status), `login qua edge -> ${viaEdge.status}`);
           const line = await waitFor('log edge của /auth/login', async () => edgeLogLines('edge', loginSince).filter((x) => x.uri_path === '/auth/login').pop());
-          expect(line.ip && line.ip !== '6.6.6.6' && line.ip !== '10.250.250.6', `nginx ghi ip=${line.ip}`);
+          expect(line.ip && line.ip !== '6.6.6.6' && line.ip !== EDGE_IP, `nginx ghi ip=${line.ip}`);
           const keys = await redis.keys('*rl:login:ip:*');
           const mine = keys.filter((k) => k.endsWith(`:${line.ip}`));
           expect(mine.length > 0, `hub-api KHÔNG thấy IP client ${line.ip} (khoá hiện có: ${keys.join(', ')}) — TRUST_PROXY của hub-api chưa tin edge?`);
-          expect(!keys.some((k) => k.endsWith(':10.250.250.6')), `hub-api thấy IP container edge: ${keys.join(', ')}`);
+          expect(!keys.some((k) => k.endsWith(`:${EDGE_IP}`)), `hub-api thấy IP container edge: ${keys.join(', ')}`);
           const direct = await fetch(`${hostUrls().HUB_API_URL}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '7.7.7.7' }, body });
           expect([400, 401, 403, 429].includes(direct.status), `login thẳng hub-api -> ${direct.status}`);
           const all = await redis.keys('*rl:login:ip:*');

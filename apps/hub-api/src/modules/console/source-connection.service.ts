@@ -6,7 +6,7 @@ import { logger } from '@hub/common';
 import { ConnectorError, ProviderConnector, ProviderRegistry, connectorBaseUrl } from '@hub/providers';
 import { unprocessable } from '../service-api/service-api.controller';
 import { hubError } from '../errors/hub-error';
-import { SOURCE_KEY_RE, generateSourceKey } from './source-key';
+import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from './source-key';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** `GET …/connection` gọi `status?` của provider tối đa 1 lần / phút / kết nối (đọc `last_checked_at`, 0 lệnh Redis). */
@@ -130,7 +130,7 @@ export class SourceConnectionService {
     if (!name || name.length > 255) unprocessable({ error: 'validation_failed', field: 'name', message: 'name là chuỗi 1–255 ký tự' });
     const sourceKey = body?.sourceKey === undefined || body?.sourceKey === null || body?.sourceKey === '' ? generateSourceKey(provider) : body.sourceKey;
     if (typeof sourceKey !== 'string' || !SOURCE_KEY_RE.test(sourceKey)) {
-      unprocessable({ error: 'validation_failed', field: 'sourceKey', message: 'sourceKey: 3–64 ký tự a-z 0-9 _' });
+      unprocessable({ error: 'validation_failed', field: 'sourceKey', message: SOURCE_KEY_RULE });
     }
     const credentials = parseCredentials(connector, body?.credentials);
     this.requireAck(connector, body);

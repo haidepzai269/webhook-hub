@@ -27,7 +27,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { RequestWithPrincipal } from '../service-api/principal';
 import { hubError } from '../errors/hub-error';
-import { SOURCE_KEY_RE, generateSourceKey } from '../console/source-key';
+import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from '../console/source-key';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
@@ -160,7 +160,7 @@ export class ApiController {
     // nginx trả 404 ở /hooks/* mà source vẫn được tạo.
     const custom = body?.sourceKey;
     if (custom !== undefined && custom !== null && custom !== '' && (typeof custom !== 'string' || !SOURCE_KEY_RE.test(custom))) {
-      throw hubError('bad_request', { field: 'sourceKey' }, 'sourceKey: 3–64 ký tự a-z 0-9 _ (bỏ trống để hub tự sinh)');
+      throw hubError('validation_failed', { field: 'sourceKey' }, SOURCE_KEY_RULE);
     }
     const sourceKey: string = custom || generateSourceKey(input.provider);
 

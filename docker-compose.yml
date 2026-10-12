@@ -149,7 +149,7 @@ services:
       # Web (CORS có credentials, link trong mail, OAuth callback). Local: web docker ở :3000.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
       # Chỉ tin X-Forwarded-For từ service `edge` (IP cố định trên mạng edge_net) — gọi thẳng :4000 (k6) KHÔNG giả được IP.
-      - TRUST_PROXY=${TRUST_PROXY:-10.250.250.6}
+      - TRUST_PROXY=${TRUST_PROXY:-${EDGE_IP:-10.250.250.6}}
       # AU2 (SPEC-auth §5.9): log (in link ra log, CHỈ local) | resend (RESEND_API_KEY + MAIL_FROM) | gmail (GOOGLE_* + MAIL_FROM, ADR-124) | capture (CHỈ hubv)
       - MAIL_DRIVER=${MAIL_DRIVER:-log}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
@@ -327,7 +327,7 @@ services:
       - EDGE_TRUSTED_PROXIES=${EDGE_TRUSTED_PROXIES:-}
     networks:
       edge_net:
-        ipv4_address: 10.250.250.6
+        ipv4_address: ${EDGE_IP:-10.250.250.6}
     # nginx: SIGQUIT = tắt êm (trả nốt request đang proxy); SIGTERM của nginx là tắt NHANH.
     stop_signal: SIGQUIT
     stop_grace_period: 25s
@@ -363,13 +363,15 @@ services:
         condition: service_started
 
 networks:
-  # EG1: mạng riêng edge <-> hub-api, subnet cố định để TRUST_PROXY của hub-api trỏ đúng một IP (10.250.250.6 = edge).
+  # EG1: mạng riêng edge <-> hub-api, subnet cố định để TRUST_PROXY của hub-api trỏ đúng một IP (EDGE_IP = edge).
+  # Stack hubv đè sang 10.250.251.0/29 (docker-compose.verify.yml) — hai stack chạy cùng lúc không "Pool overlaps".
+  # Đổi subnet thì đổi cả ba biến EDGE_NET_SUBNET / EDGE_NET_RANGE / EDGE_IP cho khớp.
   edge_net:
     ipam:
       config:
-        - subnet: 10.250.250.0/29
+        - subnet: ${EDGE_NET_SUBNET:-10.250.250.0/29}
           # Cấp IP động chỉ trong .1–.3 (hub-api nhận .2) -> .6 cố định của edge không bao giờ bị container khác chiếm.
-          ip_range: 10.250.250.0/30
+          ip_range: ${EDGE_NET_RANGE:-10.250.250.0/30}
 
 volumes:
   pgdata:

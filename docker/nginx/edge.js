@@ -117,7 +117,7 @@ function realIpBlock(env) {
  * service `edge`: $PORT + EDGE_UPSTREAM).
  * @returns {{vars: Record<string,string>, warnings: {level:number, msg:string}[]}}
  */
-function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout' }) {
+function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout', requireTrusted = false }) {
   const port = parseInt(String(listenPort), 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`cổng nginx không hợp lệ: ${listenPort}`);
   if (!/^[A-Za-z0-9.-]+:\d{1,5}$/.test(String(upstream))) throw new Error(`EDGE_UPSTREAM phải là host:port, nhận: ${upstream}`);
@@ -132,16 +132,17 @@ function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout'
   const trusted = String(env.EDGE_TRUSTED_PROXIES ?? '').trim();
   /** @type {{level:number, msg:string}[]} */
   const warnings = [];
-  // Review EG1 #3: trên Render (env RENDER) mọi kết nối tới container đến từ proxy Render. Không khai proxy tin cậy =
-  // req.ip của MỌI người là IP Render: rate limit đăng nhập chung một xô, limit_conn thành trần chung, hộp phạt EG2
-  // phạt tất cả. Từ chối khởi động, trừ khi cố ý vượt bằng EDGE_ALLOW_NO_REAL_IP=1 (khi đó vẫn cảnh báo level 50).
-  if (!trusted && env.RENDER) {
+  // Review EG1 #3 + spec EG D11: hub-all (EDGE_NGINX=1, `requireTrusted`) hoặc chạy trên Render (env RENDER) thì mọi kết
+  // nối tới nginx đến từ proxy phía trước. Không khai proxy tin cậy = req.ip của MỌI người là IP proxy: rate limit đăng
+  // nhập chung một xô, limit_conn thành trần chung, hộp phạt EG2 phạt tất cả. Từ chối khởi động, trừ khi cố ý vượt bằng
+  // EDGE_ALLOW_NO_REAL_IP=1 (cảnh báo level 50). Service `edge` của compose (không proxy phía trước) không bị áp.
+  if (!trusted && (requireTrusted || env.RENDER)) {
     if (!on(env.EDGE_ALLOW_NO_REAL_IP)) {
       throw new Error(
-        'EDGE_NGINX trên Render cần EDGE_TRUSTED_PROXIES (lần đầu: 0.0.0.0/0,::/0 + EDGE_REAL_IP_RECURSIVE=off, xem DEPLOYMENT §3.6). Trống = mọi request mang IP proxy Render. Cố ý chạy vậy: EDGE_ALLOW_NO_REAL_IP=1',
+        'EDGE_NGINX cần EDGE_TRUSTED_PROXIES (Render: 0.0.0.0/0,::/0 + EDGE_REAL_IP_RECURSIVE=off, xem DEPLOYMENT §3.6). Trống = mọi request mang IP của proxy phía trước. Cố ý chạy vậy (không có proxy phía trước): EDGE_ALLOW_NO_REAL_IP=1',
       );
     }
-    warnings.push({ level: 50, msg: 'EDGE_ALLOW_NO_REAL_IP=1: chạy sau proxy Render mà KHÔNG đọc IP thật — req.ip của mọi người là IP proxy (rate limit IP, limit_conn, hộp phạt dùng chung một khoá).' });
+    warnings.push({ level: 50, msg: 'EDGE_ALLOW_NO_REAL_IP=1: nginx KHÔNG đọc IP thật — nếu có proxy phía trước (Render) thì req.ip của mọi người là IP proxy (rate limit IP, limit_conn, hộp phạt dùng chung một khoá).' });
   }
   if (fuse && !trusted) {
     warnings.push({
@@ -183,8 +184,8 @@ function renderTemplate(vars, { template = TEMPLATE, envsubst = 'envsubst' } = {
 }
 
 /** Dựng thư mục làm việc + file cấu hình. Trả đường dẫn và lệnh chạy nginx (foreground). */
-function prepareEdge(env, { listenPort, upstream, prefix = env.EDGE_PREFIX || '/tmp/edge-nginx', envsubst, accessLog } = {}) {
-  const { vars, warnings } = edgeVars(env, { listenPort, upstream, prefix, accessLog });
+function prepareEdge(env, { listenPort, upstream, prefix = env.EDGE_PREFIX || '/tmp/edge-nginx', envsubst, accessLog, requireTrusted } = {}) {
+  const { vars, warnings } = edgeVars(env, { listenPort, upstream, prefix, accessLog, requireTrusted });
   const conf = renderTemplate(vars, { envsubst });
   fs.mkdirSync(prefix, { recursive: true });
   const confPath = path.join(prefix, 'nginx.conf');

@@ -200,7 +200,7 @@ function buildSpecs(env, opts = {}) {
   const publicPort = String(env.PORT || '10000');
   const apiPort = String(env.EDGE_API_PORT || '4000');
   if (apiPort === publicPort) throw new Error(`EDGE_API_PORT (${apiPort}) trùng PORT — nginx và hub-api không thể cùng cổng`);
-  const prepared = edge.prepareEdge(env, { listenPort: publicPort, upstream: `127.0.0.1:${apiPort}`, ...opts });
+  const prepared = edge.prepareEdge(env, { listenPort: publicPort, upstream: `127.0.0.1:${apiPort}`, requireTrusted: true, ...opts });
   api.env = { ...apiEnv, PORT: apiPort, HOST: '127.0.0.1', TRUST_PROXY: '1' };
   api.stopAfter = 'edge';
   api.stopAfterMaxMs = edgeDrainMs(env, timeoutMs);

@@ -46,7 +46,7 @@ jobs:
         run: npm run verify:gates
       # EG1 (ADR-175): nginx THẬT cho [EG:T9]/[EG:T11] (phần d) — không có thì T9 chạy nginx giả, T11 (phần d) skip.
       - name: Cài nginx (EG1)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends nginx gettext-base
+        run: command -v nginx || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends nginx gettext-base)
       - name: L0 unit
         env:
           EDGE_NGINX_BIN: /usr/sbin/nginx

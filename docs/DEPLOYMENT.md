@@ -167,8 +167,9 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 - **RAM:** nginx 1 worker ≈ 7 MB (master) + 6 MB (worker) RSS, đo trong container `edge` của hubv.
 - **Lỗi cấu hình** → supervisor in lỗi và thoát 1 ngay lúc khởi động: `EDGE_TRUSTED_PROXIES` sai khuôn; `EDGE_API_PORT` trùng
   `PORT`; dải tin cậy **quá rộng** (`/0`, IPv4 < /8, IPv6 < /16) mà `EDGE_REAL_IP_RECURSIVE=on` (nginx sẽ lấy phần tử
-  **đầu** của XFF = IP client tự đặt); **trên Render (env `RENDER`) mà `EDGE_TRUSTED_PROXIES` trống** (mọi người mang IP
-  proxy Render — chỉ chạy được khi cố ý đặt `EDGE_ALLOW_NO_REAL_IP=1`, kèm cảnh báo level 50); nginx không chạy được (thiếu binary…) → coi như con chết ngoài ý muốn, cả nhóm dừng, Render khởi động lại.
+  **đầu** của XFF = IP client tự đặt); **`EDGE_NGINX=1` mà `EDGE_TRUSTED_PROXIES` trống** (spec EG D11 — mọi người mang IP
+  proxy Render; chỉ chạy được khi cố ý đặt `EDGE_ALLOW_NO_REAL_IP=1`, kèm cảnh báo level 50); `TRUST_PROXY` của hub-api
+  không phải `0`/`1`/IP/CIDR (vd `true`, `yes`) hoặc dải quá rộng → hub-api thoát; nginx không chạy được (thiếu binary…) → coi như con chết ngoài ý muốn, cả nhóm dừng, Render khởi động lại.
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
@@ -179,7 +180,7 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 | `EDGE_CONN_PER_IP` | 50 | kết nối đồng thời/IP cho `/hooks/*` (`limit_conn`, luôn bật khi có nginx) |
 | `EDGE_TRUSTED_PROXIES` | trống | IP/CIDR tin cậy cho `set_real_ip_from`, cách nhau dấu phẩy/khoảng trắng. Trống = không tin `X-Forwarded-For` (IP = địa chỉ kết nối TCP — trên Render đó là IP proxy, CHUNG cho mọi người) |
 | `EDGE_REAL_IP_RECURSIVE` | `on` | `real_ip_recursive`. `off` = lấy phần tử **cuối** của XFF. Dải quá rộng (`/0`…) BẮT BUỘC `off` |
-| `EDGE_ALLOW_NO_REAL_IP` | tắt | `1` = cho chạy trên Render khi `EDGE_TRUSTED_PROXIES` trống (cố ý; cảnh báo level 50). Không đặt thì từ chối khởi động |
+| `EDGE_ALLOW_NO_REAL_IP` | tắt | `1` = cho `EDGE_NGINX=1` chạy khi `EDGE_TRUSTED_PROXIES` trống (cố ý, chỉ hợp lý khi KHÔNG có proxy phía trước; cảnh báo level 50). Không đặt thì từ chối khởi động |
 | `EDGE_API_PORT` | 4000 | cổng nội bộ của hub-api khi có nginx (phải khác `PORT`) |
 | `EDGE_DRAIN_MS` | 16000 | hub-api chờ nginx thoát tối đa chừng này khi tắt máy (kẹp để còn ≥ 6 s trước mốc SIGKILL); `worker_shutdown_timeout` của nginx = giá trị này − 1 s |
 | `HOST` | trống | địa chỉ hub-api nghe. `hub-all` tự đặt `127.0.0.1` khi `EDGE_NGINX=1`; trống = mọi interface như cũ. Không đặt tay trên Render |
@@ -224,14 +225,19 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
   `npm run verify:e2e -- --tag EG1` ([EG:T2], [EG:T10], [EG:T11]).
 - Compose dev: `edge` nghe :8080 (cầu chì bật, không có proxy phía trước nên IP kết nối là IP thật). k6 vẫn bắn thẳng
   `hub-api:4000`; số đo bắn qua `edge` phải ghi rõ trong báo cáo.
-- Compose (dev + hubv): `edge` nằm RIÊNG trên mạng `edge_net` (10.250.250.0/29) với IP cố định `10.250.250.6`; hub-api có
-  `TRUST_PROXY=10.250.250.6` (`main.ts` nhận danh sách IP/CIDR, `apps/hub-api/src/trust-proxy.ts`) → qua edge, `req.ip` của
-  hub-api = IP client mà nginx thấy (từ máy host là gateway `10.250.250.1`); gọi thẳng :4000/:14000 với XFF giả thì **không**
-  được tin. Đổi IP/subnet phải đổi cả hai chỗ.
+- Compose: `edge` nằm RIÊNG trên mạng `edge_net` với IP cố định; hub-api có `TRUST_PROXY` = đúng IP đó (`main.ts` nhận danh
+  sách IP/CIDR, `apps/hub-api/src/trust-proxy.ts`) → qua edge, `req.ip` của hub-api = IP client mà nginx thấy (từ máy host là
+  gateway `.1` của edge_net); gọi thẳng :4000/:14000 với XFF giả thì **không** được tin.
+  - dev: `EDGE_NET_SUBNET=10.250.250.0/29`, `EDGE_NET_RANGE=10.250.250.0/30`, `EDGE_IP=10.250.250.6` (mặc định, đổi được qua env;
+    `TRUST_PROXY` mặc định theo `EDGE_IP`). **Đừng đặt `TRUST_PROXY=0` trong `.env` local** — đè mặc định, qua edge thì
+    `req.ip` thành IP container.
+  - hubv: `docker-compose.verify.yml` đè sang `10.250.251.0/29`, edge `10.250.251.6`, hub-api `TRUST_PROXY=10.250.251.6` →
+    stack dev và hubv chạy cùng lúc không bị `Pool overlaps` (đã thử: tạo mạng 10.250.250.0/29 trong lúc hubv chạy).
 - Bằng chứng regex `sourceKey` (2026-10-12, DB hubv, chỉ đọc): `SELECT count(*), count(*) FILTER (WHERE ('/hooks/'||provider||'/'||source_key)
   !~ '^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$') FROM hub.sources` → **29 source, 0 không khớp**, key dài nhất 40 ký tự
-  (payos 6, sepay 4, github 3, stripe 2, generic 2, api 12). Từ EG1, `POST /api/v1/sources` từ chối `sourceKey` tự đặt sai
-  `SOURCE_KEY_RE` (`^[a-z0-9_]{3,64}$`) bằng 400 `bad_request` — key nào tạo được cũng qua được nginx. Chạy lại query này
+  (payos 6, sepay 4, github 3, stripe 2, generic 2, api 12). Từ EG1 (spec D13), mọi đường tạo source (`POST /api/v1/sources`,
+  "Kết nối provider") kiểm `sourceKey` tự đặt bằng `SOURCE_KEY_RE` = `^[A-Za-z0-9_-]{1,64}$` — TRÙNG phần sourceKey của regex
+  nginx ([EG:T3] so hai regex) — sai thì 422 `validation_failed` (field `sourceKey`): key nào tạo được cũng qua được nginx. Chạy lại query này
   trên Neon trước khi bật `EDGE_NGINX` (key tạo trước EG1 qua API có thể lệch).
 
 ---

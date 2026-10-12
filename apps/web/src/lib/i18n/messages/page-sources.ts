@@ -59,7 +59,7 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.connect.name-aria": "Tên nguồn",
     "page.sources.connect.name-placeholder": "Tên nguồn, VD: PayOS kênh cà phê",
     "page.sources.connect.key-aria": "Mã nguồn sourceKey, không bắt buộc",
-    "page.sources.connect.key-placeholder": "Mã nguồn sourceKey (không bắt buộc, a-z 0-9 _) — bỏ trống để hub tự sinh",
+    "page.sources.connect.key-placeholder": "Mã nguồn sourceKey (không bắt buộc, 1–64 ký tự A-Z a-z 0-9 _ -) — bỏ trống để hub tự sinh",
     "page.sources.connect.new-url-warning":
       "Nguồn mới có URL mới: nhà cung cấp sẽ gửi vào nguồn mới, dịch vụ đang ghim nguồn cũ sẽ KHÔNG nhận nữa.",
     "page.sources.connect.ack-overwrite": "Tôi hiểu URL cũ sẽ bị thay.",
@@ -135,7 +135,7 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.connect.name-aria": "Source name",
     "page.sources.connect.name-placeholder": "Source name, e.g. PayOS cafe channel",
     "page.sources.connect.key-aria": "sourceKey, optional",
-    "page.sources.connect.key-placeholder": "sourceKey (optional, a-z 0-9 _) — leave empty to let the hub generate one",
+    "page.sources.connect.key-placeholder": "sourceKey (optional, 1–64 chars A-Z a-z 0-9 _ -) — leave empty to let the hub generate one",
     "page.sources.connect.new-url-warning":
       "A new source has a new URL: the provider will send to the new source, and services pinned to the old source will NO LONGER receive events.",
     "page.sources.connect.ack-overwrite": "I understand the old URL will be replaced.",

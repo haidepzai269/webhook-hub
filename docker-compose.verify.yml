@@ -53,6 +53,8 @@ services:
 
   hub-api:
     container_name: !reset null
+    environment:
+      - TRUST_PROXY=10.250.251.6
     ports: !override
       - "14000:4000"
     # AU2 (SPEC-verification §4.2): MAIL_DRIVER=capture ghi mỗi thư một file JSON -> runner e2e đọc link từ verify/.mail
@@ -89,6 +91,10 @@ services:
     container_name: !reset null
     # Tên image cố định để edge-sink dùng CHUNG (không build hai lần).
     image: hubv-edge
+    # Subnet riêng của hubv (khác stack dev 10.250.250.0/29) — khớp TRUST_PROXY của hub-api bên trên + ipam cuối file.
+    networks: !override
+      edge_net:
+        ipv4_address: 10.250.251.6
     ports: !override
       - "18080:8080"
     environment:
@@ -135,3 +141,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+# EG1: edge_net của hubv dùng subnet KHÁC stack dev (10.250.250.0/29) -> chạy song song không "Pool overlaps".
+networks:
+  edge_net:
+    ipam: !override
+      config:
+        - subnet: 10.250.251.0/29
+          ip_range: 10.250.251.0/30
