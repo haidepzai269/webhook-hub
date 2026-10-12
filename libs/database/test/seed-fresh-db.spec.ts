@@ -12,8 +12,8 @@ describeDb('Seed trên DB rỗng (MS-P2-2)', () => {
   const ROOT = path.resolve(__dirname, '../../..');
   const owner = newTestPrisma('owner');
   const dbName = `seedfresh_${randomUUID().slice(0, 8)}`;
-  // describe.skip (không có DB) vẫn chạy thân describe -> URL giữ chỗ để `npx jest` trần không vỡ suite.
-  const base = new URL(testDbUrl('owner') ?? 'postgresql://skipped@localhost/skipped');
+  // describe.skip (không có DB) vẫn chạy thân describe -> URL giữ chỗ để `npx jest` trần không vỡ suite; RUN_DB_TESTS=1 mà thiếu URL thì báo rõ.
+  const base = new URL(testDbUrl('owner') ?? (process.env.RUN_DB_TESTS === '1' ? (() => { throw new Error('RUN_DB_TESTS=1 cần VERIFY_DB_OWNER_URL/DATABASE_URL'); })() : 'postgresql://skipped@localhost/skipped'));
   const freshUrl = (() => {
     const u = new URL(base.toString());
     u.pathname = `/${dbName}`;

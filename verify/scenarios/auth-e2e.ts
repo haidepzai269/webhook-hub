@@ -318,7 +318,13 @@ async function main() {
     const random = await B.s.get(`/api/v1/events?projectId=${randomUUID()}`);
     // Khuôn lỗi DX (ADR-136): requestId khác nhau theo từng request — "giống hệt" là mọi trường TRỪ requestId (SPEC-dev-experience UX2).
     const sansRequestId = (text: string) => {
-      const { requestId: _r, ...rest } = JSON.parse(text);
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error(`body 404 không phải JSON (khuôn lỗi ADR-136 mong JSON): ${text.slice(0, 200)}`);
+      }
+      const { requestId: _r, ...rest } = parsed;
       return JSON.stringify(rest);
     };
     expect(cross.status === 404 && random.status === 404 && sansRequestId(cross.text) === sansRequestId(random.text), `chéo → ${cross.status} ${cross.text} vs ngẫu nhiên ${random.text}`);

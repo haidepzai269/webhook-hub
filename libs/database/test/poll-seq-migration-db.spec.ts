@@ -14,8 +14,8 @@ describeDb('Migration poll_seq trên DB có dữ liệu (R2-4)', () => {
   const owner = newTestPrisma('owner');
   const dbName = `pollseq_${randomUUID().slice(0, 8)}`;
   const url = (() => {
-    // describe.skip (không có DB) vẫn chạy thân describe -> URL giữ chỗ để `npx jest` trần không vỡ suite.
-    const u = new URL(testDbUrl('owner') ?? 'postgresql://skipped@localhost/skipped');
+    // describe.skip (không có DB) vẫn chạy thân describe -> URL giữ chỗ để `npx jest` trần không vỡ suite; RUN_DB_TESTS=1 mà thiếu URL thì báo rõ.
+    const u = new URL(testDbUrl('owner') ?? (process.env.RUN_DB_TESTS === '1' ? (() => { throw new Error('RUN_DB_TESTS=1 cần VERIFY_DB_OWNER_URL/DATABASE_URL'); })() : 'postgresql://skipped@localhost/skipped'));
     u.pathname = `/${dbName}`;
     return u.toString();
   })();
