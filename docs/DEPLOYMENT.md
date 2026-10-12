@@ -433,6 +433,7 @@ METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub
                          # (Prometheus không tự đọc env trong file cấu hình). Local: để trống.
 WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
 INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
+DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078)
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần
                          # WEB_PUBLIC_URL (gốc deep link trong thư) + MAIL_DRIVER/MAIL_FROM/GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN
                          # giống hub-api. Cấu hình mail sai không làm worker chết: email thử 3 lần rồi FAILED (log + metric)

@@ -103,7 +103,7 @@ Tách ra mua được ba thứ:
 +-------------------+          +------------------+    +---------------+
 ```
 
-**Tại sao gộp normalize + route (ADR-002):** route chỉ là hàm thuần trên `(event, subscriptions cache)`. Tách thành hop riêng chỉ thêm một chỗ nữa phải lo idempotency / ack / DLQ — không thêm khả năng scale nào. Vẫn còn **2 hop** để chứng minh luận điểm "tách nhận khỏi xử lý".
+**Tại sao gộp normalize + route (ADR-002):** route chỉ là hàm thuần trên `(event, subscriptions)`. Tách thành hop riêng chỉ thêm một chỗ nữa phải lo idempotency / ack / DLQ — không thêm khả năng scale nào. Vẫn còn **2 hop** để chứng minh luận điểm "tách nhận khỏi xử lý".
 
 ### 3.1. Ingest — thứ tự BẮT BUỘC (đã sửa lỗi nghiêm trọng của bản gốc)
 
@@ -111,9 +111,12 @@ Tách ra mua được ba thứ:
 
 ```
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
-2.  Rate limit theo source (cửa sổ CỐ ĐỊNH 60s, 1 lệnh EVAL INCR+EXPIRE, trần INGEST_RATE_LIMIT_PER_MIN;
-    Redis chết -> fail-OPEN + log cảnh báo)
-3.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant) · adapter.verify(rawBytes, headers, secrets[])
+2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant)
+       không có / tắt / đã lưu trữ -> 404 -> DỪNG
+3.  Rate limit theo source (cửa sổ CỐ ĐỊNH 60s, 1 lệnh EVAL INCR+EXPIRE, trần INGEST_RATE_LIMIT_PER_MIN;
+    Redis chết -> fail-OPEN + log cảnh báo) -> vượt trần: 429 -> DỪNG
+    Sau bước 2 vì khoá `rate:source:{source.id}` cần source.id; sourceKey rác bị 404 trước, không tốn EVAL Redis
+    adapter.verify(rawBytes, headers, secrets[])
        sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) -> 401 -> DỪNG
     Header nhạy cảm che trước khi lưu (ADR-051); signature_header = adapter.extractSignature(req) (S3-1)
 4.  key = adapter.extractIdempotencyKey(req)
@@ -149,11 +152,11 @@ Rollback vì lý do khác (không phải unique) → trả **5xx** để provide
 0. Message chỉ mang tham chiếu (ADR-042); nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
 1. Kiểm **circuit breaker** — một lệnh: `MGET`, hoặc một `EVAL` gộp circuit + throttle khi đích có `rate_limit_rps` (review #2, ADR-064). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần `CIRCUIT_MAX_DEFERRALS` (ADR-048/054).
 2. Áp **outbound throttle** (cửa sổ cố định 1 giây, chỉ khi `rate_limit_rps > 0` và circuit CLOSED; bộ đếm đã tăng trong lệnh ở bước 1). Vượt → `q.delivery.retry.10s`, `ack`. *(§5.4b)*
-3. Render template → gọi HTTP, timeout cứng 5s (`AbortSignal.timeout`), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
+3. Render template → gọi HTTP, timeout tổng mặc định 5s (`AbortSignal.timeout`), cấu hình `DELIVERY_TIMEOUT_MS` kẹp 1–10s (ADR-078), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
 4. INSERT `delivery_attempts` (status code, duration_ms, response body cắt 2KB, error).
 5. `2xx` → `SUCCEEDED`, reset circuit (0 lệnh Redis nếu chưa từng lỗi), `ack`. Chỉ `5xx`/`408`/`429`/lỗi mạng tính vào circuit.
 6. Lỗi **retryable** (`5xx`, `408`, `429`, timeout, lỗi mạng) → tăng `x-attempt` → publish vào tầng retry tương ứng → `ack` message cũ.
-7. Lỗi **non-retryable** (`4xx` trừ 408/429 — lỗi cấu hình, retry vô nghĩa) → `DEAD` ngay, không đốt 5 lần retry.
+7. Lỗi **non-retryable** (`4xx` trừ 408/429 — lỗi cấu hình, retry vô nghĩa) → `DEAD` ngay, không đốt 5 tầng retry (tổng 6 lần gửi = 1 lần đầu + 5).
 8. Quá tầng cuối → trạng thái `DEAD` trong Postgres (**nguồn sự thật của DLQ**) + một bản sao vào `q.delivery.dlq` để quan sát.
 9. Mọi đổi trạng thái → publish Redis pub/sub → Socket.IO đẩy lên dashboard.
 
@@ -181,6 +184,7 @@ x.hub.delivery (direct, durable)
    | q.delivery.retry.5m     x-message-ttl = 300000               |
    | q.delivery.retry.30m    x-message-ttl = 1800000              |
    | q.delivery.retry.2h     x-message-ttl = 7200000              |
+   |   5 tầng retry -> tổng 6 lần gửi (1 lần đầu + 5)              |
    |   mỗi queue: x-dead-letter-exchange     = x.hub.delivery      |
    |              x-dead-letter-routing-key  = deliver             |
    |   -> TTL hết thì TỰ ĐỘNG quay về q.delivery.main              |
@@ -511,9 +515,9 @@ Cập nhật dùng optimistic locking: `UPDATE ... WHERE id = ? AND version = ?`
 
 | Biện pháp | Chi tiết |
 |---|---|
-| Xác thực | PayOS: checksum HMAC-SHA256 trên `data` đã sort key (tính bằng SDK, **so bằng `timingSafeEqual` của ta**, S3-1) · SePay: **không ký nội dung** — chỉ là **API key dùng chung** trong `Authorization: Apikey <key>` (bắt buộc tiền tố) · GitHub: `X-Hub-Signature-256` HMAC-SHA256 trên **raw body** · Stripe: `Stripe-Signature` (SDK, raw body) |
+| Xác thực | PayOS: checksum HMAC-SHA256 trên `data` đã sort key (tính bằng SDK, **so bằng `timingSafeEqual` của ta**, S3-1) · SePay: **không ký nội dung** — chỉ là **API key dùng chung** trong `Authorization: Apikey <key>` (bắt buộc tiền tố) · GitHub: `X-Hub-Signature-256` HMAC-SHA256 trên **raw body**, verify bằng `@octokit/webhooks-methods` `verifyWithFallback` (constant-time, xoay secret; ADR-174) · Stripe: `Stripe-Signature` (SDK, raw body) |
 | Raw body | `NestFactory.create(AppModule, { rawBody: true })` — **cấu hình NGÀY 1** |
-| So sánh | `crypto.timingSafeEqual` — luôn luôn, kể cả khi so API key |
+| So sánh | **Không bao giờ** so bằng `!==`/`===`. Tự so bằng `crypto.timingSafeEqual` (kể cả khi so API key), hoặc dùng SDK đã so constant-time (ADR-174) |
 | URL khó đoán | `/hooks/:provider/:sourceKey`, `sourceKey` ngẫu nhiên 32 ký tự |
 | Giới hạn | payload ≤ 1MB · rate limit cửa sổ cố định 60s theo source (mặc định 100/phút) |
 | Lưu cả request hỏng | chữ ký sai vẫn INSERT `status=REJECTED` để điều tra — chỉ 4KB đầu, ≤ 20 bản/phút/source; header nhạy cảm đã che (ADR-045, ADR-051) |
@@ -796,7 +800,7 @@ export interface ProviderAdapter {
 Provider yêu cầu phản hồi nhanh (GitHub ~10s). Gọi Telegram ngay trong request mà đích chậm → provider timeout → gửi lại → trùng. Hàng đợi tách *nhận* khỏi *xử lý*: ingest luôn nhanh, và hai phần scale độc lập.
 
 **Q: Tại sao dùng cả Redis lẫn RabbitMQ?**
-RabbitMQ = giao message tin cậy (ack, retry có độ trễ, DLQ, routing). Redis = bộ nhớ nhanh độ trễ thấp (đường tắt chống trùng, rate limit, circuit breaker, cache subscription, pub/sub cho Socket.IO). Bổ trợ, không thay thế.
+RabbitMQ = giao message tin cậy (ack, retry có độ trễ, DLQ, routing). Redis = bộ nhớ nhanh độ trễ thấp (đường tắt chống trùng, rate limit nguồn, circuit breaker, throttle chiều ra, pub/sub cho Socket.IO). Bổ trợ, không thay thế.
 
 **Q: Làm sao đảm bảo không mất sự kiện?**
 Transactional Outbox + publisher confirms + manual ack + đối soát PayOS. Và: **không bao giờ ACK trước khi COMMIT** (BB-3).

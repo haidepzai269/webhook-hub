@@ -14,7 +14,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 | [`docs/adr/README.md`](docs/adr/README.md) | Nhật ký quyết định — **append-only, ghi ngay khi quyết định** |
 | `webhook-hub-y-tuong.md` | Ý tưởng gốc. **Chỉ tham khảo.** Mâu thuẫn với ARCHITECTURE.md → ARCHITECTURE.md thắng. |
 
-## Bốn bất biến — phá một cái là bug kiến trúc, không phải đánh đổi
+## Năm bất biến — phá một cái là bug kiến trúc, không phải đánh đổi
 
 1. **BB-1 — Hub không biết "đơn hàng" là gì.** Không có `orderCode`, regex `DH\d+`, hay bảng `orders` trong `apps/hub-*`. Nghiệp vụ thuộc `apps/shop`.
 2. **BB-2 — PostgreSQL là trọng tài duy nhất của idempotency.** Redis chỉ là đường tắt và *được phép sai*. Redis mất dữ liệu → hệ thống chậm đi, **không sai**.
@@ -28,7 +28,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 - **Topology RabbitMQ khai báo ở MỘT chỗ duy nhất:** `libs/messaging/topology.ts`. Rải rác → `PRECONDITION_FAILED`, app không lên.
 - **`apps/shop/src` trần cứng ~600 dòng** (ADR-141 link PayOS thật; ADR-156 trang Cài đặt kết nối — cách B). Vượt = đang lạc đề, dừng lại. Giỏ hàng chỉ ở client, server tự tính tổng (ADR-024). Không đăng nhập, không kho.
 - **Thêm provider = viết một class `ProviderAdapter` + đăng ký registry.** Không sửa ingest/worker/DB. Đây là luận điểm chính của đề tài — đừng phá nó bằng một cái `if (provider === 'x')` trong lõi.
-- **Mọi so sánh chữ ký dùng `crypto.timingSafeEqual`.** Luôn luôn — kể cả khi SDK provider có hàm verify riêng (PayOS SDK so bằng `!==`, ADR-058).
+- **Không bao giờ so chữ ký bằng `!==`/`===`.** Tự so bằng `crypto.timingSafeEqual` — kể cả khi SDK provider có hàm verify riêng mà so bằng `!==` (PayOS, ADR-058). Chỉ được giao cho SDK đã so constant-time (GitHub/octokit `verifyWithFallback`, ADR-174).
 - **Khoá chống trùng không bao giờ ngẫu nhiên** — thiếu id của provider thì `bodyHashKey(rawBody)`.
 - **Adapter ra kiểu chuẩn** theo `docs/EVENT-CATALOG.md`; `payment.*`/`repo.*` sai khuôn là lỗi normalize vĩnh viễn, không hạ cấp âm thầm.
 - **HMAC tính trên `body_raw` (bytes), không phải trên JSON đã parse.**
