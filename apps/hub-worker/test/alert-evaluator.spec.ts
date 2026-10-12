@@ -37,13 +37,17 @@ function world() {
     attempts: [] as { destinationId: string; status: number | null; at: Date }[],
     dead: 0,
     fail: new Set<string>(),
+    openTruncated: false,
+    destinationsLimitHit: false,
   };
   const guard = (name: string) => {
     if (data.fail.has(name)) throw new Error(`boom:${name}`);
   };
   const repo = {
-    async findOpenAlerts() {
+    async findOpenAlerts(limit = 500) {
       guard('findOpenAlerts');
+      // giả lập chạm trần: `limit` dòng OPEN KHÁC (ngoài store), dòng thật bị cắt khỏi ảnh chụp
+      if (data.openTruncated) return Array.from({ length: limit }, () => ({ id: randomUUID(), rule: 'normalize.backlog', subjectId: randomUUID(), severity: 'warning', openedAt: NOW, facts: {} }));
       return alerts.filter((a) => a.state === 'OPEN');
     },
     async upsertOpenAlert(i: any) {
@@ -66,6 +70,12 @@ function world() {
       Object.assign(cur, { state: 'RESOLVED', resolvedAt: now, facts: { ...cur.facts, ...patch } });
       return cur;
     },
+    async resolveAlertById(id: string, now: Date, patch: any) {
+      const cur = alerts.find((a) => a.id === id && a.state === 'OPEN');
+      if (!cur) return null;
+      Object.assign(cur, { state: 'RESOLVED', resolvedAt: now, facts: { ...cur.facts, ...patch } });
+      return cur;
+    },
     async enqueueAlertEmails(alertId: string, kind: string, users: string[]) {
       for (const userId of users) if (!emails.some((e) => e.alertId === alertId && e.userId === userId && e.kind === kind)) emails.push({ alertId, userId, kind });
       return users.length;
@@ -78,6 +88,8 @@ function world() {
     },
     async findAlertDestinations() {
       guard('findAlertDestinations');
+      // giả lập chạm LIMIT: trả đủ 1000 dòng (đích khác), đích có cảnh báo bị cắt mất
+      if (data.destinationsLimitHit) return Array.from({ length: 1000 }, () => ({ id: randomUUID(), isActive: true, archivedAt: null, circuitState: 'CLOSED' }));
       return data.destinations;
     },
     async findAlertSources() {
@@ -270,5 +282,44 @@ describe('CB2 AlertEvaluator (đi dây, repo giả)', () => {
     expect(res.aborted).toBe(true);
     expect(calls).toBe(1);
     expect(await ev.evaluateOnce(at(MIN))).toMatchObject({ aborted: true, projects: 0 });
+  });
+
+  it('đọc thiếu không bao giờ đóng cảnh báo: danh sách đích chạm LIMIT -> đích vắng mặt KHÔNG bị đóng "như đã xoá"', async () => {
+    const w = world();
+    const ev = new AlertEvaluator(w.prisma, fakeRedis() as any);
+    w.data.attempts = [401, 401, 401].map((status, i) => ({ destinationId: DEST, status, at: at(-(i + 1) * MIN) }));
+    await ev.evaluateOnce(NOW);
+    w.data.destinationsLimitHit = true;
+    await ev.evaluateOnce(at(MIN));
+    expect(auth(w)[0].state).toBe('OPEN');
+  });
+
+  it('ảnh chụp OPEN chạm trần -> cảnh báo ngoài ảnh chụp vẫn đóng được theo (rule, subject); trong ảnh chụp đóng theo id (không đóng nhầm dòng OPEN mới)', async () => {
+    const w = world();
+    const ev = new AlertEvaluator(w.prisma, fakeRedis() as any);
+    w.data.attempts = [401, 401, 401].map((status, i) => ({ destinationId: DEST, status, at: at(-(i + 1) * MIN) }));
+    await ev.evaluateOnce(NOW);
+    w.data.openTruncated = true;
+    w.data.destinations[0].isActive = false;
+    const r = await ev.evaluateOnce(at(MIN));
+    expect(auth(w)[0]).toMatchObject({ state: 'RESOLVED', facts: { reason: 'inactive' } });
+    expect(r.transitions).toBe(1);
+
+    // theo id: dòng trong ảnh chụp đã bị evaluator khác đóng, rồi một dòng OPEN mới xuất hiện -> lượt này không đóng dòng mới
+    const w2 = world();
+    const ev2 = new AlertEvaluator(w2.prisma, fakeRedis() as any);
+    w2.data.attempts = [401, 401, 401].map((status, i) => ({ destinationId: DEST, status, at: at(-(i + 1) * MIN) }));
+    await ev2.evaluateOnce(NOW);
+    const repo = w2.prisma.forTenant();
+    const origFind = repo.findOpenAlerts;
+    repo.findOpenAlerts = async () => {
+      const snap = (await origFind()).map((a: any) => ({ ...a }));
+      await repo.resolveAlert('destination.auth_rejected', DEST, at(MIN), {}); // evaluator khác đóng
+      await repo.upsertOpenAlert({ rule: 'destination.auth_rejected', severity: 'critical', subjectType: 'destination', subjectId: DEST, facts: {}, now: at(MIN) }); // rồi mở lại
+      return snap;
+    };
+    w2.data.destinations[0].isActive = false;
+    await ev2.evaluateOnce(at(2 * MIN));
+    expect(auth(w2).map((a) => a.state)).toEqual(['RESOLVED', 'OPEN']);
   });
 });

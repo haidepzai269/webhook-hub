@@ -37,6 +37,8 @@ import {
   toAlertChangedNotice,
 } from '@hub/common';
 import {
+  ALERT_ATTEMPT_ROWS_LIMIT,
+  ALERT_INPUT_LIMIT,
   AlertAttemptRow,
   AlertDestinationRow,
   AlertEmailRecipient,
@@ -70,6 +72,9 @@ export const SILENT_EVENTS_PER_SOURCE = 500;
 /** Trần đếm `delivery.dead_spike` (ngưỡng là 10). */
 export const DEAD_SPIKE_COUNT_CAP = 1000;
 
+/** Trần cảnh báo OPEN đọc mỗi project; chạm trần -> không suy "không có trong ảnh chụp" = "không mở" (Thấp 4). */
+export const OPEN_ALERTS_READ_LIMIT = 500;
+
 /** Cửa sổ chung của truy vấn attempt cho hai luật chuỗi (cửa sổ chuỗi + cửa sổ "im"). */
 const STREAK_LOOKBACK_MS = Math.max(AUTH_REJECTED_WINDOW_MS, CLIENT_ERROR_WINDOW_MS, STREAK_QUIET_CLOSE_MS);
 /** Đối tượng có cảnh báo OPEN nhưng không còn trong DB (đã xoá cứng) -> đóng như lưu trữ. */
@@ -93,13 +98,24 @@ type OpenAlert = { id: string; rule: string; subjectId: string; severity: AlertS
 /** Dữ liệu dùng chung giữa các luật của MỘT project trong MỘT lượt (mỗi truy vấn chạy tối đa một lần). */
 class ProjectLap {
   private memo = new Map<string, Promise<unknown>>();
+  /** Danh sách đích/source chạm LIMIT: đối tượng vắng mặt có thể chỉ bị cắt -> KHÔNG được đóng "như đã xoá". */
+  destinationsTruncated = false;
+  sourcesTruncated = false;
 
   constructor(
     readonly tenantId: string,
     readonly now: Date,
     readonly repo: TenantScopedRepository,
     readonly open: Map<string, OpenAlert>,
+    /** Ảnh chụp cảnh báo OPEN chạm trần đọc: thiếu trong ảnh chụp KHÔNG có nghĩa là chưa mở. */
+    readonly openTruncated: boolean,
   ) {}
+
+  private hitLimit(what: string, n: number, limit: number): boolean {
+    if (n < limit) return false;
+    logger.warn({ tenantId: this.tenantId, what, limit }, 'Alert evaluator: truy vấn đầu vào chạm LIMIT — kết quả có thể thiếu');
+    return true;
+  }
 
   once<T>(key: string, load: () => Promise<T>): Promise<T> {
     if (!this.memo.has(key)) this.memo.set(key, load());
@@ -115,16 +131,25 @@ class ProjectLap {
   }
 
   destinations(): Promise<AlertDestinationRow[]> {
-    return this.once('destinations', () => this.repo.findAlertDestinations(this.openSubjectIds('destination.')));
+    return this.once('destinations', async () => {
+      const rows = await this.repo.findAlertDestinations(this.openSubjectIds('destination.'), ALERT_INPUT_LIMIT);
+      this.destinationsTruncated = this.hitLimit('destinations', rows.length, ALERT_INPUT_LIMIT);
+      return rows;
+    });
   }
 
   sources(): Promise<AlertSourceRow[]> {
-    return this.once('sources', () => this.repo.findAlertSources(this.openSubjectIds('source.')));
+    return this.once('sources', async () => {
+      const rows = await this.repo.findAlertSources(this.openSubjectIds('source.'), ALERT_INPUT_LIMIT);
+      this.sourcesTruncated = this.hitLimit('sources', rows.length, ALERT_INPUT_LIMIT);
+      return rows;
+    });
   }
 
   streakAttempts(): Promise<Map<string, AlertAttemptRow[]>> {
     return this.once('streakAttempts', async () => {
-      const rows = await this.repo.findRecentAttemptsByDestination(this.since(STREAK_LOOKBACK_MS), STREAK_ATTEMPTS_PER_DESTINATION);
+      const rows = await this.repo.findRecentAttemptsByDestination(this.since(STREAK_LOOKBACK_MS), STREAK_ATTEMPTS_PER_DESTINATION, ALERT_ATTEMPT_ROWS_LIMIT);
+      this.hitLimit('streakAttempts', rows.length, ALERT_ATTEMPT_ROWS_LIMIT);
       const by = new Map<string, AlertAttemptRow[]>();
       for (const r of rows) by.set(r.destinationId, [...(by.get(r.destinationId) ?? []), r]); // SQL đã xếp mới nhất trước
       return by;
@@ -147,7 +172,10 @@ function lifecycleOf(row: { isActive: boolean; archivedAt: Date | null }): Subje
 
 @Injectable()
 export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
-  private readonly redis: Redis;
+  /** Redis publisher: tiêm vào (test) hoặc tạo LƯỜI ở lần publish đầu (giới hạn kết nối Upstash — worker không có cảnh báo nào thì không mở kết nối). */
+  private redis: Redis | null;
+  private readonly ownsRedis: boolean;
+  private connecting: Promise<void> | null = null;
   private readonly intervalMs: number;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -161,13 +189,8 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     const env = process.env.ALERT_EVAL_INTERVAL_MS;
     const n = env === undefined || env === '' ? ALERT_EVAL_INTERVAL_MS : parseInt(env, 10);
     this.intervalMs = Number.isFinite(n) && n >= 0 ? n : ALERT_EVAL_INTERVAL_MS;
-    if (redisClient) {
-      this.redis = redisClient;
-    } else {
-      this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', fastFailRedisOptions());
-      this.redis.on('error', (err) => logger.warn({ err: err.message }, 'Redis pub (alerts) lỗi'));
-      if (this.intervalMs > 0) this.redis.connect().catch(() => {});
-    }
+    this.redis = redisClient ?? null;
+    this.ownsRedis = !redisClient;
   }
 
   onModuleInit() {
@@ -176,6 +199,11 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     await this.stop();
+    if (this.ownsRedis && this.redis) {
+      const r = this.redis;
+      this.redis = null;
+      await r.quit().catch(() => r.disconnect());
+    }
   }
 
   start() {
@@ -259,8 +287,11 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     const out = { transitions: 0, errors: 0, aborted: false, openBySeverity: null as Record<AlertSeverity, number> | null };
     const repo = this.prisma.forTenant(tenantId);
     let open: Map<string, OpenAlert>;
+    let openTruncated = false;
     try {
-      const rows = await repo.findOpenAlerts();
+      const rows = await repo.findOpenAlerts(OPEN_ALERTS_READ_LIMIT);
+      openTruncated = rows.length >= OPEN_ALERTS_READ_LIMIT;
+      if (openTruncated) logger.warn({ tenantId, limit: OPEN_ALERTS_READ_LIMIT }, 'Alert evaluator: cảnh báo OPEN chạm trần đọc — đóng theo (rule, subject) cho đối tượng ngoài ảnh chụp');
       open = new Map(
         rows.map((a) => [
           key(a.rule, a.subjectId),
@@ -273,7 +304,7 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
       out.errors++;
       return out;
     }
-    const lap = new ProjectLap(tenantId, now, repo, open);
+    const lap = new ProjectLap(tenantId, now, repo, open, openTruncated);
     const finalOpen = new Map<string, AlertSeverity>([...open].map(([k, a]) => [k, a.severity]));
 
     for (const rule of ALERT_RULE_CODES) {
@@ -284,14 +315,18 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
       try {
         const candidates = await this.candidates(rule, lap);
         const covered = new Set(candidates.map((c) => c.subjectId));
-        // Cảnh báo OPEN mà đối tượng không còn trong DB (xoá cứng) -> đóng như lưu trữ.
+        // Cảnh báo OPEN mà đối tượng không còn trong DB (xoá cứng) -> đóng như lưu trữ. CHỈ khi danh sách đối tượng đọc
+        // trọn (không chạm LIMIT): lượt đọc bị cắt không bao giờ được đóng cảnh báo.
+        const st = ALERT_RULES[rule].subjectType;
+        const truncated = (st === 'destination' && lap.destinationsTruncated) || (st === 'source' && lap.sourcesTruncated);
         for (const a of open.values()) {
-          if (a.rule === rule && !covered.has(a.subjectId)) candidates.push({ subjectId: a.subjectId, decide: () => ({ open: false, facts: { reason: 'archived' } }) });
+          if (a.rule === rule && !covered.has(a.subjectId) && !truncated) candidates.push({ subjectId: a.subjectId, decide: () => ({ open: false, facts: { reason: 'archived' } }) });
         }
         for (const c of candidates) {
+          if (this.stopping) break; // shutdown: không ghi thêm, dừng ngay giữa luật (phần đã ghi là trạng thái hợp lệ)
           const current = open.get(key(rule, c.subjectId)) ?? null;
           const decision = c.decide({ now, current: current ? { openedAt: current.openedAt, facts: current.facts } : null });
-          const changed = await this.apply(lap, rule, c.subjectId, decision, !!current, recipients);
+          const changed = await this.apply(lap, rule, c.subjectId, decision, current, recipients);
           if (changed) out.transitions++;
           if (decision.open) finalOpen.set(key(rule, c.subjectId), ALERT_RULES[rule].severity);
           else finalOpen.delete(key(rule, c.subjectId));
@@ -304,7 +339,9 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     }
     const counts: Record<AlertSeverity, number> = { critical: 0, warning: 0, info: 0 };
     for (const sev of finalOpen.values()) counts[sev]++;
-    out.openBySeverity = counts;
+    // Ảnh chụp bị cắt -> tổng không đáng tin, gauge giữ giá trị cũ. Dừng giữa chừng cũng vậy.
+    if (this.stopping) out.aborted = true;
+    out.openBySeverity = openTruncated || out.aborted ? null : counts;
     return out;
   }
 
@@ -323,7 +360,8 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
         }));
       }
       case 'destination.failing': {
-        const [dests, rows] = await Promise.all([lap.destinations(), repo.countAttemptStatusesByDestination(lap.since(FAILING_WINDOW_MS))]);
+        const [dests, rows] = await Promise.all([lap.destinations(), repo.countAttemptStatusesByDestination(lap.since(FAILING_WINDOW_MS), ALERT_ATTEMPT_ROWS_LIMIT)]);
+        if (rows.length >= ALERT_ATTEMPT_ROWS_LIMIT) logger.warn({ tenantId, what: 'failingStatuses' }, 'Alert evaluator: truy vấn đầu vào chạm LIMIT — kết quả có thể thiếu');
         const statuses = new Map<string, (number | null)[]>();
         for (const r of rows) statuses.set(r.destinationId, [...(statuses.get(r.destinationId) ?? []), ...Array<number | null>(r.n).fill(r.status)]);
         return dests.map((d) => ({ subjectId: d.id, decide: (ctx) => evalDestinationFailing({ destination: lifecycleOf(d), statuses: statuses.get(d.id) ?? [] }, ctx) }));
@@ -395,7 +433,7 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     rule: AlertRuleCode,
     subjectId: string,
     decision: RuleDecision,
-    hadOpen: boolean,
+    current: OpenAlert | null,
     recipients: AlertEmailRecipient[],
   ): Promise<boolean> {
     const { tenantId, now } = lap;
@@ -411,10 +449,12 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
       this.transitioned(alert, rule, 'OPEN');
       return true;
     }
-    if (!hadOpen) return false;
+    // Không có trong ảnh chụp: chưa mở -> thôi; NHƯNG ảnh chụp bị cắt thì có thể đang mở -> đóng theo (rule, subject).
+    if (!current && !lap.openTruncated) return false;
     const resolved = await this.prisma.tenantTx(tenantId, async (tx) => {
       const repo = this.prisma.forTenant(tenantId, tx);
-      const row = await repo.resolveAlert(rule, subjectId, now, decision.facts);
+      // Đóng ĐÚNG dòng trong ảnh chụp (theo id, còn OPEN) — không đóng nhầm dòng OPEN mới evaluator khác vừa mở.
+      const row = current ? await repo.resolveAlertById(current.id, now, decision.facts) : await repo.resolveAlert(rule, subjectId, now, decision.facts);
       if (row) await this.enqueueResolvedEmails(repo, row, recipients);
       return row;
     });
@@ -452,10 +492,18 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     logger.info({ tenantId: alert.tenantId, alertId: alert.id, rule, subjectId: alert.subjectId, to }, 'Cảnh báo đổi trạng thái');
     const notice = toAlertChangedNotice({ id: alert.id, tenantId: alert.tenantId, rule, state: to });
     // BB-2: Redis chỉ là đường realtime — lỗi (đồng bộ hay bất đồng bộ) bị nuốt, trạng thái trong Postgres đã COMMIT.
-    try {
-      this.redis.publish(ALERT_REALTIME_CHANNEL, JSON.stringify(notice)).catch(() => {});
-    } catch {
-      /* realtime mất một thông báo — chuông vẫn poll 30s (§5.3) */
+    // Mất một thông báo thì chuông vẫn poll 30s (§5.3).
+    this.publish(JSON.stringify(notice)).catch(() => {});
+  }
+
+  private async publish(message: string): Promise<void> {
+    if (!this.redis) {
+      const r = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', fastFailRedisOptions());
+      r.on('error', (err) => logger.warn({ err: err.message }, 'Redis pub (alerts) lỗi'));
+      this.redis = r;
+      this.connecting = r.connect().catch(() => {});
     }
+    if (this.connecting) await this.connecting;
+    await this.redis.publish(ALERT_REALTIME_CHANNEL, message);
   }
 }

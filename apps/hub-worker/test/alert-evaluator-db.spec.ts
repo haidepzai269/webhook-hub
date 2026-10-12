@@ -50,13 +50,16 @@ describeDb('CB2 AlertEvaluator (Postgres, hub_app)', () => {
     return { destId: dest.id, subId: sub.id, eventId: evt.id };
   }
 
-  /** Một delivery (generation riêng) + MỘT attempt với HTTP `status` lúc `at`. */
-  async function attempt(tenantId: string, f: { subId: string; eventId: string }, status: number, at: Date, deliveryStatus: 'DEAD' | 'SUCCEEDED', lastError?: string) {
+  /** Một sự kiện MỚI + delivery generation 1 + MỘT attempt với HTTP `status` lúc `at` (mỗi delivery một sự kiện: không cái nào "đã bị replay"). */
+  async function attempt(tenantId: string, f: { subId: string }, status: number, at: Date, deliveryStatus: 'DEAD' | 'SUCCEEDED', lastError?: string) {
+    const evt = await owner.event.create({
+      data: { id: `CB2${run}${++seq}`.slice(0, 36), tenantId, idempotencyKey: `cb2:${run}:${seq}`, correlationId: randomUUID(), type: 't.cb2', source: 'test', data: {} },
+    });
     const d = await owner.delivery.create({
-      data: { tenantId, eventId: f.eventId, subscriptionId: f.subId, attemptGeneration: ++seq, status: deliveryStatus, attemptCount: 1, lastError: lastError ?? null },
+      data: { tenantId, eventId: evt.id, subscriptionId: f.subId, attemptGeneration: 1, status: deliveryStatus, attemptCount: 1, lastError: lastError ?? null },
     });
     await owner.deliveryAttempt.create({ data: { deliveryId: d.id, attemptNo: 1, responseStatus: status, createdAt: at } });
-    return d.id;
+    return { deliveryId: d.id, eventId: evt.id };
   }
 
   async function operator(emailOnResolve: boolean) {
@@ -139,12 +142,37 @@ describeDb('CB2 AlertEvaluator (Postgres, hub_app)', () => {
     expect(await owner.alert.count({ where: { tenantId: P3, subjectId: gone.destId } })).toBe(0);
 
     const live = await flow(P3);
-    for (let i = 0; i < 10; i++) await attempt(P3, live, 500, new Date(now.getTime() - (i + 1) * 1000), 'DEAD', 'http 500');
+    const dead: { eventId: string }[] = [];
+    for (let i = 0; i < 10; i++) dead.push(await attempt(P3, live, 500, new Date(now.getTime() - (i + 1) * 1000), 'DEAD', 'http 500'));
     await ev.evaluateProject(P3, new Date(now.getTime() + 1000));
     const spike = await alertsOf(P3, 'delivery.dead_spike');
     expect(spike).toHaveLength(1);
     expect(spike[0]).toMatchObject({ state: 'OPEN', subjectType: 'project', subjectId: P3 });
     expect(spike[0].facts).toMatchObject({ count: 10 });
+
+    // "Phát lại hàng loạt" (generation mới) -> bản DEAD đã bị thay không còn tính (cùng điều kiện DLQ) -> đóng
+    await owner.delivery.create({ data: { tenantId: P3, eventId: dead[0].eventId, subscriptionId: live.subId, attemptGeneration: 2, status: 'PENDING' } });
+    await ev.evaluateProject(P3, new Date(now.getTime() + 2000));
+    expect((await alertsOf(P3, 'delivery.dead_spike'))[0]).toMatchObject({ state: 'RESOLVED' });
+  });
+
+  it('source.silent tính cả sự kiện API publish (origin api), không tính replay', async () => {
+    const src = await owner.source.create({ data: { tenantId: P3, provider: 'api', name: `cb2-api-${run}`, sourceKey: `src_cb2_api_${run}` } });
+    const now = new Date();
+    const ev = async (i: number, origin: 'api' | 'replay', minutesAgo: number) =>
+      owner.event.create({
+        data: {
+          id: `CB2A${run}${origin}${i}`.slice(0, 36), tenantId: P3, sourceId: src.id, idempotencyKey: `cb2a:${run}:${origin}:${i}`, correlationId: randomUUID(),
+          type: 'x.y', source: 'api', data: {}, origin, receivedAt: new Date(now.getTime() - minutesAgo * MIN),
+        },
+      });
+    // 25 sự kiện API mỗi phút, cái cuối 7 giờ trước; replay mới đây KHÔNG được tính là "còn gửi"
+    for (let i = 0; i < 25; i++) await ev(i, 'api', 7 * 60 + i);
+    await ev(0, 'replay', 1);
+    await new AlertEvaluator(svc1, redis()).evaluateProject(P3, now);
+    const silent = (await alertsOf(P3, 'source.silent')).filter((a) => a.subjectId === src.id);
+    expect(silent).toHaveLength(1);
+    expect(silent[0].facts).toMatchObject({ baseline: 25 });
   });
 
   it('[CB:T5] probe (GitHub ping / PayOS confirm = event probe) không tính: không làm baseline source.silent, không vào mẫu số/tử số source.signature_failing', async () => {

@@ -1081,6 +1081,18 @@ export class TenantScopedRepository {
     return row ?? null;
   }
 
+  /**
+   * CB2: đóng ĐÚNG dòng đã đọc ở ảnh chụp (theo id, chỉ khi còn OPEN) — không đóng nhầm một dòng OPEN MỚI của cùng
+   * (rule, subject) mà evaluator khác vừa mở sau ảnh chụp. Không còn OPEN -> null (không publish lần hai).
+   */
+  async resolveAlertById(id: string, now: Date, factsPatch: Record<string, unknown> = {}): Promise<AlertRow | null> {
+    const [row] = await this.prisma.$queryRaw<AlertRow[]>(Prisma.sql`
+      UPDATE hub.alerts SET state = 'RESOLVED', resolved_at = ${now}, facts = facts || ${JSON.stringify(factsPatch)}::jsonb
+      WHERE tenant_id = ${this.tenantId}::uuid AND id = ${id}::uuid AND state = 'OPEN'
+      RETURNING ${ALERT_RETURNING}`);
+    return row ?? null;
+  }
+
   /** Cảnh báo đang OPEN của project (evaluator đọc để áp hysteresis / đóng). Dùng index (tenant_id, state, opened_at DESC). */
   async findOpenAlerts(limit = 500) {
     return this.prisma.alert.findMany({
@@ -1157,14 +1169,14 @@ export class TenantScopedRepository {
 
   /**
    * Đích của project để đánh giá luật destination.*: còn dùng (`archived_at IS NULL`) + đích đã lưu trữ đang có cảnh báo
-   * OPEN (`includeIds`, để đóng với lý do). Cũng là đầu vào của `destination.circuit_open` (cột `circuit_state`).
+   * OPEN (`includeIds`, để đóng với lý do — xếp TRƯỚC nên LIMIT không cắt mất chúng). Cũng là đầu vào của `destination.circuit_open` (cột `circuit_state`).
    */
   async findAlertDestinations(includeIds: string[], limit = ALERT_INPUT_LIMIT): Promise<AlertDestinationRow[]> {
     return this.prisma.$queryRaw<AlertDestinationRow[]>(Prisma.sql`
       SELECT id, is_active AS "isActive", archived_at AS "archivedAt", circuit_state::text AS "circuitState"
       FROM hub.destinations
       WHERE tenant_id = ${this.tenantId}::uuid AND (archived_at IS NULL OR id = ANY(${uuidArray(includeIds)}))
-      ORDER BY created_at
+      ORDER BY (id = ANY(${uuidArray(includeIds)})) DESC, created_at
       LIMIT ${limit}`);
   }
 
@@ -1180,7 +1192,7 @@ export class TenantScopedRepository {
       FROM hub.sources s
       LEFT JOIN hub.source_connections c ON c.source_id = s.id AND c.tenant_id = s.tenant_id
       WHERE s.tenant_id = ${this.tenantId}::uuid AND (s.archived_at IS NULL OR s.id = ANY(${uuidArray(includeIds)}))
-      ORDER BY s.created_at
+      ORDER BY (s.id = ANY(${uuidArray(includeIds)})) DESC, s.created_at
       LIMIT ${limit}`);
   }
 
@@ -1233,7 +1245,8 @@ export class TenantScopedRepository {
 
   /**
    * `delivery.dead_spike`: số delivery thành DEAD từ `since` trong project, ĐÃ loại D9 (DEAD vì đích lưu trữ: `last_error`
-   * có tiền tố `archivedErrorPrefix`, hoặc subscription / đích có `archived_at`), dừng đếm ở `cap`. Cùng index một phần.
+   * có tiền tố `archivedErrorPrefix`, hoặc subscription / đích có `archived_at`) và loại bản DEAD đã bị replay (cùng điều
+   * kiện `notSuperseded` với DLQ — "Phát lại hàng loạt" làm cảnh báo hạ xuống), dừng đếm ở `cap`. Cùng index một phần.
    */
   async countDeadForSpike(since: Date, archivedErrorPrefix: string, cap: number): Promise<number> {
     const [row] = await this.prisma.$queryRaw<{ n: bigint }[]>(Prisma.sql`
@@ -1244,6 +1257,7 @@ export class TenantScopedRepository {
         WHERE d.tenant_id = ${this.tenantId}::uuid AND d.status = 'DEAD' AND d.updated_at >= ${since}
           AND s.archived_at IS NULL AND dst.archived_at IS NULL
           AND (d.last_error IS NULL OR left(d.last_error, ${archivedErrorPrefix.length}::int) <> ${archivedErrorPrefix})
+          AND ${notSuperseded}
         LIMIT ${cap}
       ) x`);
     return Number(row?.n ?? 0);
@@ -1267,7 +1281,7 @@ export class TenantScopedRepository {
   }
 
   /**
-   * Nhịp của từng source trong baseline (`source.silent`): sự kiện webhook KHÔNG probe từ `since`, tối đa `perSource` mốc
+   * Nhịp của từng source trong baseline (`source.silent`): sự kiện webhook/API publish (không replay/đối soát/dẫn xuất), KHÔNG probe từ `since`, tối đa `perSource` mốc
    * gần nhất mỗi source -> số mốc khác nhau, mốc cuối, trung vị khoảng cách (ms; bỏ khoảng 0 của nhiều event cùng một
    * request). Index `events(tenant_id, received_at DESC)`.
    */
@@ -1284,7 +1298,7 @@ export class TenantScopedRepository {
           FROM (
             SELECT e.received_at AS t FROM hub.events e
             WHERE e.tenant_id = ${this.tenantId}::uuid AND e.source_id = src.id AND e.received_at >= ${since}
-              AND NOT e.probe AND e.origin = 'webhook'
+              AND NOT e.probe AND e.origin IN ('webhook', 'api')
             ORDER BY e.received_at DESC
             LIMIT ${perSource}
           ) recent

@@ -102,6 +102,12 @@ describeDb('CB1 alerts (Postgres, hub_app)', () => {
     expect(await repoB.resolveAlert(alertA.rule, alertA.subjectId, now)).toBeNull();
     // khoá ngoại ghép (alert_id, tenant_id): B không gắn được email vào alert của A
     await expect(repoB.enqueueAlertEmails(alertA.id, 'OPEN', [users[0]])).rejects.toThrow();
+    // alert của A ĐÃ có (users[0], OPEN): ON CONFLICT DO NOTHING bỏ dòng trước khi kiểm khoá ngoại -> 0, dòng của A không đổi
+    const backlogA = (await owner.alert.findFirst({ where: { tenantId: A, rule: 'normalize.backlog' } }))!;
+    const before = await owner.alertEmail.findMany({ where: { alertId: backlogA.id }, orderBy: { id: 'asc' } });
+    expect(before.some((e) => e.userId === users[0] && e.kind === 'OPEN')).toBe(true);
+    expect(await repoB.enqueueAlertEmails(backlogA.id, 'OPEN', [users[0]])).toBe(0);
+    expect(await owner.alertEmail.findMany({ where: { alertId: backlogA.id }, orderBy: { id: 'asc' } })).toEqual(before);
 
     expect(await app.alert.count({ where: { tenantId: { in: [A, B] } } })).toBe(0);
     expect(await app.alertEmail.count({ where: { tenantId: { in: [A, B] } } })).toBe(0);

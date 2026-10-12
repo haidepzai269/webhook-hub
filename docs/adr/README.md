@@ -1653,6 +1653,14 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - **Realtime:** `hub:realtime:alerts` mang `{id, tenantId, rule, severity, state, titleKey}` (`titleKey = alerts.rules.<rule>.title`, web dịch). D5: `providerLabel` = mã provider của kết nối (dữ liệu), web dịch thành tên.
 - **Metric:** `hub_alerts_open{severity}` đặt cuối mỗi lượt trọn vẹn — N worker báo cùng con số, panel dùng `max`; `hub_alert_transitions_total` chỉ đếm lần chuyển chính worker đó ghi được.
 **Đánh đổi:** Thêm hai index trên đường giao (INSERT attempt, chuyển DEAD) — nhỏ nhưng có. Cửa sổ attempt quét mọi tenant trong 30 phút rồi lọc tenant (attempt không mang `tenant_id`); chấp nhận ở quy mô đồ án, đo lại nếu k6 thấy ảnh hưởng. Chống flapping theo cảnh báo (không theo người): người vừa bật email trong lúc flapping có thể lỡ một email OPEN. Chu kỳ khác 60s qua env không tự đổi `CALM_MIN_SPACING_MS` (hằng tính từ mặc định).
+**Bổ sung (review CB2, 2026-10-12, append):**
+- **`source.silent` tính cả `origin='api'`** (source `api` chỉ nhận qua `POST /v1/p/:project/events`); vẫn loại replay/đối soát/dẫn xuất và probe.
+- **`delivery.dead_spike` loại bản DEAD đã bị replay** (cùng điều kiện `notSuperseded` với DLQ): "Phát lại hàng loạt" làm số đếm hạ và cảnh báo đóng theo, khớp với bảng DLQ.
+- **Đọc thiếu không bao giờ đóng cảnh báo.** Danh sách đích/source xếp id đang có cảnh báo OPEN lên trước; chạm LIMIT (1000) thì bỏ bước "đối tượng vắng mặt = đã xoá". Ảnh chụp OPEN chạm trần (500) -> log cảnh báo, đối tượng ngoài ảnh chụp đóng theo (rule, subject), gauge giữ giá trị cũ. Truy vấn attempt chạm 20 000 dòng -> log cảnh báo.
+- **Đóng theo id của ảnh chụp** (`resolveAlertById`, chỉ khi còn OPEN): không đóng nhầm dòng OPEN mới mà evaluator khác vừa mở sau ảnh chụp.
+- **Redis publisher tạo lười** ở lần publish đầu và `quit()` khi module huỷ — worker không có cảnh báo nào thì không mở thêm kết nối (giới hạn kết nối Upstash).
+- **Shutdown:** chờ lượt cảnh báo dừng ở ranh giới luật SONG SONG với chờ handler (một ngân sách 25s); vòng ghi trong một luật cũng kiểm cờ dừng.
+- **Đo k6 (local):** chạy với `ALERT_EVAL_INTERVAL_MS=0` để số p95 không lẫn chi phí evaluator, hoặc ghi rõ evaluator đang bật (mỗi 60s, vài truy vấn tổng hợp / project) cạnh số liệu.
 
 ---
 

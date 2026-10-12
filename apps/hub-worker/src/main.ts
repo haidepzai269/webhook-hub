@@ -163,8 +163,8 @@ async function bootstrap() {
           // Chừa ~5s cuối cho việc đóng kết nối, trong ngân sách SHUTDOWN_TIMEOUT_MS (25s < SIGKILL 30s của Render).
           await normalizeChannel.cancel(normalizeTag.consumerTag).catch(() => {});
           await deliveryChannel.cancel(deliveryTag.consumerTag).catch(() => {});
-          await alertsStopped;
-          const idle = await inFlight.waitIdle(Math.max(0, shutdownTimeoutMs - 5_000));
+          // Lượt cảnh báo dừng ở ranh giới luật SONG SONG với chờ handler — cùng một ngân sách 25s, không cộng dồn.
+          const [, idle] = await Promise.all([alertsStopped, inFlight.waitIdle(Math.max(0, shutdownTimeoutMs - 5_000))]);
           logger.info({ idle, stillRunning: inFlight.count }, 'Đã chờ handler đang chạy trước khi đóng channel');
           await normalizeChannel.close();
           await deliveryChannel.close();
