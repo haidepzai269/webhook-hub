@@ -202,6 +202,43 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
     });
   });
 
+  describe("review R3 L2: tập id đã thấy không phình — cắt về OPEN khi danh sách ĐẦY ĐỦ", () => {
+    it("1000 episode mở rồi đóng (flapping): seen/socketOpened chỉ còn id đang OPEN; cái đã báo không toast lại", () => {
+      const mem = createFeedMemory();
+      takeArrivals(mem, [alert("steady", "warning")], { asOf: "2026-10-12T10:00:00Z", complete: true });
+      for (let i = 0; i < 1000; i++) {
+        const id = `ep-${i}`;
+        noteSocketNotice(mem, { id, state: "OPEN" });
+        const rows = [alert("steady", "warning"), alert(id, "critical")];
+        expect(takeArrivals(mem, rows, { complete: true }).map((a) => a.id)).toEqual([id]);
+        // Poll lại khi vẫn mở -> không toast lại.
+        expect(takeArrivals(mem, rows, { complete: true })).toEqual([]);
+        // Đóng: vắng khỏi danh sách đầy đủ.
+        expect(takeArrivals(mem, [alert("steady", "warning")], { complete: true })).toEqual([]);
+      }
+      expect([...mem.seen]).toEqual(["steady"]);
+      expect([...mem.socketOpened]).toEqual([]);
+      // Cái đang OPEN đã báo vẫn không bật lại sau khi cắt.
+      expect(takeArrivals(mem, [alert("steady", "warning")], { complete: true })).toEqual([]);
+    });
+
+    it("tin socket tới trước lượt poll thấy dòng: không bị cắt -> vẫn ra banner; danh sách bị cắt thì không cắt gì", () => {
+      const mem = createFeedMemory();
+      takeArrivals(mem, [alert("a", "warning")], { asOf: "2026-10-12T12:00:00Z", complete: false });
+      noteSocketNotice(mem, { id: "c-new", state: "OPEN" });
+      // Lượt poll khởi động trước khi c-new commit: đầy đủ nhưng chưa có c-new.
+      expect(takeArrivals(mem, [alert("a", "warning")], { complete: true })).toEqual([]);
+      expect(mem.socketOpened.has("c-new")).toBe(true);
+      const fresh = takeArrivals(mem, [alert("a", "warning"), alert("c-new", "critical", { openedAt: "2026-10-12T11:00:00Z" })], { complete: true });
+      expect(fresh.map((a) => a.id)).toEqual(["c-new"]);
+      expect(routeArrival(fresh[0], mem)).toEqual({ kind: "banner" });
+      // Bị cắt: id vắng mặt có thể chỉ nằm ngoài trang -> giữ nguyên, không toast lại khi nó quay vào trang.
+      takeArrivals(mem, [alert("a", "warning")], { complete: false });
+      expect(mem.seen.has("c-new")).toBe(true);
+      expect(takeArrivals(mem, [alert("c-new", "critical", { openedAt: "2026-10-12T11:00:00Z" })], { complete: false })).toEqual([]);
+    });
+  });
+
   it("alert.changed RESOLVED không bao giờ ra toast và không mở banner", () => {
     const mem = createFeedMemory();
     noteSocketNotice(mem, { id: "x", state: "RESOLVED" });

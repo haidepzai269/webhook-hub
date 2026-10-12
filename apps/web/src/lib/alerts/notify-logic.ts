@@ -155,7 +155,21 @@ export function takeArrivals(mem: FeedMemory, rows: readonly AlertView[], meta: 
     (r) => !mem.seen.has(r.id) && !r.acknowledgedAt && (mem.socketOpened.has(r.id) || Date.parse(r.openedAt) >= mem.baselineAt),
   );
   for (const r of open) mem.seen.add(r.id);
+  if (meta.complete) pruneToOpen(mem, open);
   return fresh;
+}
+
+/**
+ * Review R3 L2: `seen`/`socketOpened` không phình theo thời gian mở tab. Chỉ cắt khi danh sách OPEN ĐẦY ĐỦ: id vắng mặt
+ * lúc đó đã đóng, và id đã đóng không bao giờ OPEN lại (mỗi episode một uuid mới — `ON CONFLICT … WHERE state='OPEN'`),
+ * nên quên nó không gây toast lại. `socketOpened` giữ id CHƯA từng thấy trong danh sách: tin socket có thể tới trước khi
+ * lượt poll đang bay thấy dòng đó — xoá sớm thì critical của chính phiên rơi từ banner sang toast. (Id socket báo OPEN
+ * rồi đóng trước mọi lượt poll thì còn lại — số ít, chấp nhận.) Danh sách bị cắt: không cắt gì (giữ L3).
+ */
+function pruneToOpen(mem: FeedMemory, open: readonly AlertView[]): void {
+  const openIds = new Set(open.map((r) => r.id));
+  for (const id of mem.socketOpened) if (!openIds.has(id) && mem.seen.has(id)) mem.socketOpened.delete(id);
+  for (const id of mem.seen) if (!openIds.has(id)) mem.seen.delete(id);
 }
 
 export const WARNING_TOAST_MS = 6_000;
