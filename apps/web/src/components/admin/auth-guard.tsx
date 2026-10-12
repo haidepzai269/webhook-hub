@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { type AuthMe, hubFetch, LOGIN_PATH } from "@/lib/hub/client";
 import type { ProjectSummary } from "@/lib/hub/flow-project";
+import { useMeStore } from "@/lib/hub/me-store";
 import { ensureProject } from "@/lib/hub/project-store";
 import { useHubRealtime } from "@/lib/hub/socket";
 
@@ -31,6 +32,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       .then(({ me, projects }) => {
         // Lựa chọn nhớ theo user; mặc định project mình là thành viên (sửa lỗi "stale project").
         ensureProject(projects, me.user.id);
+        useMeStore.setState({ me });
         if (alive) setAuthed(true);
       })
       .catch(() => {

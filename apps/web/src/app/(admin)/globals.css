@@ -9,6 +9,7 @@
 
 /* ADR-163: hiệu ứng mở dòng mới của danh sách cuộn vô hạn */
 @import "../../styles/unroll.css";
+@import "../../styles/alerts.css";
 
 @custom-variant dark (&:is(.dark *));
 

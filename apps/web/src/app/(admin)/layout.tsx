@@ -52,7 +52,8 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
         <TooltipProvider>
           <PreferencesStoreProvider initialValues={PREFERENCE_DEFAULTS}>
             <QueryProvider>{children}</QueryProvider>
-            <Toaster richColors position="top-right" />
+            {/* CB4 §8.3: tối đa 3 toast cùng lúc (toast cảnh báo dùng chung Toaster này). */}
+            <Toaster richColors position="top-right" visibleToasts={3} />
           </PreferencesStoreProvider>
         </TooltipProvider>
       </body>

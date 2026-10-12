@@ -71,11 +71,17 @@ export function refreshSession(): Promise<boolean> {
 }
 
 /**
+ * Route KHÔNG theo project (server đánh dấu `@NoProjectScope`): danh sách project của mình; cảnh báo XUYÊN project của
+ * operator (CB3 — lọc project bằng `?project=`, không phải `projectId`); tuỳ chọn gắn NGƯỜI (`/api/v1/me/*`).
+ */
+const UNSCOPED_PREFIXES = ["/api/v1/projects", "/api/v1/alerts", "/api/v1/me/"];
+
+/**
  * AU3: mọi route `/api/v1/*` theo MỘT project (server: thiếu -> 400 project_required). Gắn project đang chọn nếu path
- * chưa có — trừ `/api/v1/projects` (liệt kê/tạo của chính mình; route con mang id trên path).
+ * chưa có — trừ các route ở UNSCOPED_PREFIXES (route con của `/api/v1/projects` mang id trên path).
  */
 export function scopeToProject(path: string, projectId: string | null = currentProjectId()): string {
-  if (!projectId || !path.startsWith("/api/v1/") || path.startsWith("/api/v1/projects") || /[?&]projectId=/.test(path))
+  if (!projectId || !path.startsWith("/api/v1/") || UNSCOPED_PREFIXES.some((p) => path.startsWith(p)) || /[?&]projectId=/.test(path))
     return path;
   return `${path}${path.includes("?") ? "&" : "?"}projectId=${encodeURIComponent(projectId)}`;
 }
@@ -116,7 +122,8 @@ export async function hubFetch<T>(path: string, init: RequestInit = {}, retried 
 }
 
 export interface AuthMe {
-  user: { id: string; email: string; name: string; emailVerified: boolean };
+  /** `locale` (DINH-CHINH D3) = ngôn ngữ đã lưu; `isOperator` = người vận hành hub (chuông/trang Cảnh báo, CB4). */
+  user: { id: string; email: string; name: string; emailVerified: boolean; locale?: "vi" | "en"; isOperator?: boolean };
   memberships: { projectId: string; slug: string; name: string; environment: string; role: string }[];
 }
 

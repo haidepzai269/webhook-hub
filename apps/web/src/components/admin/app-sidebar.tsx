@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
 import { logout as serverLogout } from "@/lib/hub/client";
+import { useIsOperator } from "@/lib/hub/me-store";
 import { useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -30,6 +31,7 @@ import { sidebarItems } from "./sidebar-items";
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const path = usePathname();
   const t = useT();
+  const operator = useIsOperator();
   const { sidebarVariant, sidebarCollapsible, isSynced } = usePreferencesStore(
     useShallow((s) => ({
       sidebarVariant: s.values.sidebar_variant,
@@ -77,7 +79,9 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
             <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => (
+                {group.items
+                  .filter((item) => operator || !item.operatorOnly)
+                  .map((item) => (
                   <SidebarMenuItem key={item.id}>
                     <SidebarMenuButton asChild tooltip={t(item.titleKey)} isActive={isActive(item.url)}>
                       <Link href={item.url}>

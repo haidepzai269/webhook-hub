@@ -163,6 +163,7 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     // GET /auth/me trả locale đã lưu — web đồng bộ nút Ngôn ngữ ở máy khác
     const cfg = loadAuthConfig({ JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40) });
     const auth = new AuthService(svc, new JwtService({}), cfg, new AuthRateLimiter(null));
-    expect((await auth.me(op)).user).toMatchObject({ id: op, locale: 'en' });
+    // CB4: `isOperator` cho console — chuông/trang Cảnh báo chỉ hiện (và chỉ gọi /alerts*) khi là operator.
+    expect((await auth.me(op)).user).toMatchObject({ id: op, locale: 'en', isOperator: true });
   });
 });

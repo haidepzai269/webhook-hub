@@ -1,0 +1,202 @@
+/**
+ * CB4 (SPEC-canh-bao-nhan-dinh §8.1–8.3, CB:T15): quyết định CHUÔNG / BANNER / TOAST — hàm thuần, không React, để jest
+ * test thẳng. Component chỉ gọi các hàm này rồi vẽ.
+ *
+ * Nguồn tin:
+ *  - Socket `alert.changed` (chỉ operator, chỉ project đang mở — room `project:<id>:ops`): không có facts -> chỉ GHI NHẬN
+ *    id (`noteSocketNotice`) rồi gọi lại API.
+ *  - Danh sách OPEN xuyên project (`GET /alerts?state=OPEN`, poll 30s + gọi lại khi có `alert.changed`): lần tải ĐẦU là
+ *    MỐC (không báo gì — cảnh báo cũ lúc tải trang không bật banner/toast); các lần sau, id CHƯA từng thấy = vừa đến.
+ *
+ * Định tuyến một cảnh báo vừa đến (`routeArrival`):
+ *  - critical + đã nhận `alert.changed` của nó trong phiên này -> BANNER (project đang mở).
+ *  - critical chỉ thấy qua poll (project khác — socket không mang tin project khác) -> TOAST dính (không tự đóng).
+ *  - warning -> TOAST tự đóng sau 6s.  · info -> chỉ chuông.  · đã được ai đó "Đã xem" -> không báo.
+ *  - RESOLVED không bao giờ toast; banner đang hiện đổi sang xanh 4s rồi thu lại.
+ */
+import type { AlertChangedNotice, AlertSeverity, AlertSummary, AlertView } from "./types";
+
+// ------------------------------------------------------------------ chuông
+
+export interface BellBadge {
+  /** Số hiển thị ("99+" khi quá lớn). */
+  label: string;
+  count: number;
+  tone: "critical" | "warning";
+}
+
+/** Badge = số cảnh báo OPEN chưa xem; màu theo mức cao nhất đang mở (đỏ nếu có critical, không thì hổ phách). 0 -> không badge. */
+export function bellBadge(summary: AlertSummary | null | undefined): BellBadge | null {
+  const n = summary?.unacked ?? 0;
+  if (n <= 0) return null;
+  return { count: n, label: n > 99 ? "99+" : String(n), tone: (summary?.openBySeverity.critical ?? 0) > 0 ? "critical" : "warning" };
+}
+
+const RANK: Record<AlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
+
+/** critical trước, rồi mới nhất trước; cùng mốc thì theo id cho ổn định. */
+export function compareForBell(a: AlertView, b: AlertView): number {
+  return RANK[a.severity] - RANK[b.severity] || Date.parse(b.openedAt) - Date.parse(a.openedAt) || (a.id < b.id ? -1 : 1);
+}
+
+export interface BellGroup {
+  project: AlertView["project"];
+  /** Tổng OPEN của project (từ summary nếu có — danh sách có thể bị cắt). */
+  count: number;
+  critical: number;
+  items: AlertView[];
+  /** Số cảnh báo của project không hiện trong popover. */
+  more: number;
+}
+
+/**
+ * Nhóm cho popover: theo project; trong nhóm critical trước rồi mới nhất. Nhóm có critical lên trước (nhiều hơn trước),
+ * rồi nhóm có cảnh báo mới nhất. Mỗi nhóm hiện tối đa `perGroup` dòng.
+ */
+export function groupForBell(rows: AlertView[], summary?: AlertSummary | null, perGroup = 5): BellGroup[] {
+  const by = new Map<string, AlertView[]>();
+  for (const r of rows) {
+    if (r.state !== "OPEN") continue;
+    const list = by.get(r.project.id) ?? [];
+    list.push(r);
+    by.set(r.project.id, list);
+  }
+  const groups = [...by.values()].map((items) => {
+    items.sort(compareForBell);
+    const s = summary?.perProject.find((p) => p.project.id === items[0].project.id);
+    const count = s ? Math.max(s.critical + s.warning + s.info, items.length) : items.length;
+    const critical = s ? s.critical : items.filter((i) => i.severity === "critical").length;
+    const shown = items.slice(0, perGroup);
+    return { project: items[0].project, count, critical, items: shown, more: count - shown.length };
+  });
+  const newest = (g: BellGroup) => Math.max(...g.items.map((i) => Date.parse(i.openedAt)));
+  return groups.sort((a, b) => b.critical - a.critical || newest(b) - newest(a));
+}
+
+// ------------------------------------------------------------------ cảnh báo vừa đến (mốc phiên)
+
+export interface FeedMemory {
+  /** Đã có lần tải đầu (mốc) chưa. */
+  primed: boolean;
+  /** Mọi id OPEN đã thấy trong phiên — không báo lại lần hai. */
+  seen: Set<string>;
+  /** id nhận qua `alert.changed` (state OPEN) trong phiên — chỉ những cảnh báo này được bật banner. */
+  socketOpened: Set<string>;
+}
+
+export function createFeedMemory(): FeedMemory {
+  return { primed: false, seen: new Set(), socketOpened: new Set() };
+}
+
+/** Ghi nhận tin socket. OPEN -> nhớ id (để banner); trả về true = cần gọi lại API (luôn đúng — tin không có facts). */
+export function noteSocketNotice(mem: FeedMemory, n: Pick<AlertChangedNotice, "id" | "state">): true {
+  if (n.state === "OPEN") mem.socketOpened.add(n.id);
+  return true;
+}
+
+/**
+ * Cảnh báo vừa đến kể từ lần trước. Lần đầu (mốc): nhớ hết, trả [] — KHÔNG banner/toast cho cảnh báo cũ lúc tải trang
+ * (CB:T15). Sau đó: dòng OPEN chưa thấy, chưa được ai "Đã xem".
+ */
+export function takeArrivals(mem: FeedMemory, rows: readonly AlertView[]): AlertView[] {
+  const open = rows.filter((r) => r.state === "OPEN");
+  if (!mem.primed) {
+    for (const r of open) mem.seen.add(r.id);
+    mem.primed = true;
+    return [];
+  }
+  const fresh = open.filter((r) => !mem.seen.has(r.id) && !r.acknowledgedAt);
+  for (const r of open) mem.seen.add(r.id);
+  return fresh;
+}
+
+export const WARNING_TOAST_MS = 6_000;
+
+export type ArrivalRoute = { kind: "banner" } | { kind: "toast"; durationMs: number } | { kind: "none" };
+
+export function routeArrival(a: Pick<AlertView, "id" | "severity" | "state" | "acknowledgedAt">, mem: Pick<FeedMemory, "socketOpened">): ArrivalRoute {
+  if (a.state !== "OPEN" || a.acknowledgedAt) return { kind: "none" };
+  if (a.severity === "critical") {
+    return mem.socketOpened.has(a.id) ? { kind: "banner" } : { kind: "toast", durationMs: Number.POSITIVE_INFINITY };
+  }
+  if (a.severity === "warning") return { kind: "toast", durationMs: WARNING_TOAST_MS };
+  return { kind: "none" };
+}
+
+// ------------------------------------------------------------------ banner
+
+export const BANNER_RESOLVED_HOLD_MS = 4_000;
+export const BANNER_ANIMATION_MS = 200;
+
+export interface BannerEntry {
+  alert: AlertView;
+  phase: "open" | "resolved";
+  resolvedAt?: number;
+}
+
+/** Mới nhất ở đầu. Chỉ chứa critical nhận qua `alert.changed` trong phiên. */
+export interface BannerState {
+  entries: BannerEntry[];
+}
+
+export const emptyBanner = (): BannerState => ({ entries: [] });
+
+export function bannerAdd(s: BannerState, alert: AlertView): BannerState {
+  if (s.entries.some((e) => e.alert.id === alert.id)) return s;
+  return { entries: [{ alert, phase: "open" }, ...s.entries] };
+}
+
+/** RESOLVED: banner ĐANG HIỆN đổi xanh (giữ `BANNER_RESOLVED_HOLD_MS`); cảnh báo đang nằm trong "+k" thì bỏ luôn. */
+export function bannerResolve(s: BannerState, id: string, now: number): BannerState {
+  const i = s.entries.findIndex((e) => e.alert.id === id);
+  if (i < 0) return s;
+  if (i > 0) return { entries: s.entries.filter((_, j) => j !== i) };
+  if (s.entries[0].phase === "resolved") return s;
+  return { entries: [{ ...s.entries[0], phase: "resolved", resolvedAt: now }, ...s.entries.slice(1)] };
+}
+
+/** "Đã xem" (ack) -> bỏ khỏi banner ngay (cảnh báo vẫn OPEN trong chuông). */
+export function bannerAck(s: BannerState, id: string): BannerState {
+  return s.entries.some((e) => e.alert.id === id) ? { entries: s.entries.filter((e) => e.alert.id !== id) } : s;
+}
+
+/** Bỏ banner xanh đã giữ đủ 4s. */
+export function bannerExpire(s: BannerState, now: number, holdMs = BANNER_RESOLVED_HOLD_MS): BannerState {
+  const keep = s.entries.filter((e) => e.phase !== "resolved" || now - (e.resolvedAt ?? now) < holdMs);
+  return keep.length === s.entries.length ? s : { entries: keep };
+}
+
+/**
+ * Đối chiếu với danh sách OPEN mới nhất (banner sống qua chuyển trang/đổi project — socket không còn mang tin của
+ * project cũ): đã có người "Đã xem" -> bỏ; còn OPEN -> cập nhật số liệu (khi `lastSeenAt` đổi); vắng mặt và danh sách ĐẦY ĐỦ (không bị cắt)
+ * -> coi như RESOLVED. Danh sách bị cắt thì không suy luận gì từ sự vắng mặt.
+ */
+export function bannerSync(s: BannerState, openRows: readonly AlertView[], complete: boolean, now: number): BannerState {
+  let next = s;
+  for (const e of s.entries) {
+    if (e.phase !== "open") continue;
+    const row = openRows.find((r) => r.id === e.alert.id);
+    if (!row) {
+      if (complete) next = bannerResolve(next, e.alert.id, now);
+    } else if (row.acknowledgedAt) {
+      next = bannerAck(next, e.alert.id);
+    } else if (row.lastSeenAt !== e.alert.lastSeenAt) {
+      // Số liệu mới đi kèm `last_seen_at` mới (upsert ghi cả hai) — so mốc này để poll không tạo state mới khi không đổi gì.
+      next = { entries: next.entries.map((x) => (x.alert.id === row.id ? { ...x, alert: row } : x)) };
+    }
+  }
+  return next;
+}
+
+/** Nhiều critical -> MỘT banner (mới nhất) + "+k cảnh báo nghiêm trọng khác" (k = số còn mở, không tính cái đang hiện). */
+export function selectBanner(s: BannerState): { primary: BannerEntry | null; more: number } {
+  const primary = s.entries[0] ?? null;
+  return { primary, more: s.entries.slice(1).filter((e) => e.phase === "open").length };
+}
+
+/** Chuyển động: trượt xuống 200ms + mờ dần; `prefers-reduced-motion` -> CHỈ mờ dần, không trượt (keyframes ở styles/alerts.css). */
+export function bannerMotion(reducedMotion: boolean): { enter: string; exit: string; durationMs: number } {
+  return reducedMotion
+    ? { enter: "alert-fade-in", exit: "alert-fade-out", durationMs: BANNER_ANIMATION_MS }
+    : { enter: "alert-slide-in", exit: "alert-slide-out", durationMs: BANNER_ANIMATION_MS };
+}

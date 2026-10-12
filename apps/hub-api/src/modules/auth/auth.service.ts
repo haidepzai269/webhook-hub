@@ -23,7 +23,8 @@ export interface ReqCtx {
 export const REGISTER_ACCEPTED = { ok: true, message: 'Kiểm tra email để kích hoạt tài khoản' } as const;
 
 export interface AuthBody {
-  user: { id: string; email: string; name: string; emailVerified: boolean; locale: 'vi' | 'en' };
+  /** `isOperator` (CB4): console chỉ hiện chuông/trang Cảnh báo cho operator và KHÔNG gọi `/alerts*` khi không phải. */
+  user: { id: string; email: string; name: string; emailVerified: boolean; locale: 'vi' | 'en'; isOperator: boolean };
   memberships: { projectId: string; slug: string; name: string; environment: 'test' | 'live'; role: string }[];
 }
 
@@ -529,7 +530,14 @@ export class AuthService {
     const memberships: MembershipView[] = await idn.listMemberships(userId);
     return {
       // CB3 / D3: ngôn ngữ đã lưu (users.locale) — web đồng bộ nút Ngôn ngữ khi đăng nhập ở máy khác.
-      user: { id: user.id, email: user.email, name: user.name, emailVerified: !!user.emailVerifiedAt, locale: user.locale === 'en' ? 'en' : 'vi' },
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        emailVerified: !!user.emailVerifiedAt,
+        locale: user.locale === 'en' ? 'en' : 'vi',
+        isOperator: !!user.isOperator,
+      },
       memberships: memberships.map((m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role })),
     };
   }

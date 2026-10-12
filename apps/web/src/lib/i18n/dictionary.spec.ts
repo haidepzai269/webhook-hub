@@ -38,7 +38,7 @@ describe("i18n dictionary", () => {
   it("mọi id nhóm/mục trong sidebar-items.ts có khoá nav.group.<id> / nav.item.<id>", () => {
     const src = fs.readFileSync(path.join(__dirname, "../../components/admin/sidebar-items.ts"), "utf8");
     const pairs = [...src.matchAll(/id: "([\w-]+)",\s*(labelKey|titleKey): "([\w.-]+)"/g)];
-    expect(pairs.length).toBe(17); // 5 nhóm + 12 mục
+    expect(pairs.length).toBe(18); // 5 nhóm + 13 mục (CB4: + Cảnh báo, chỉ operator)
     for (const [, id, kind, key] of pairs) {
       expect(key).toBe(`nav.${kind === "labelKey" ? "group" : "item"}.${id}`);
       expect(base).toContain(key);

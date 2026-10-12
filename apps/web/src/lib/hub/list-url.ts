@@ -6,6 +6,7 @@
  * Giá trị lạ trên URL (link cũ, gõ tay) bị BỎ QUA thay vì gửi lên server để nhận 400 — trang vẫn mở được.
  */
 
+import { ALERT_RULE_CODES, ALERT_SEVERITIES, ALERT_STATES } from "../alerts/types";
 import type { MessageKey } from "../i18n/dictionary";
 
 export interface ParamSpec {
@@ -65,6 +66,15 @@ export const AUDIT_PARAMS = {
   entityType: { pattern: /^[a-z0-9_]{1,64}$/ },
   from: { pattern: ISO },
   to: { pattern: ISO },
+  ...cursorSpecs,
+} satisfies ParamSpecs;
+
+/** CB4: Cảnh báo (xuyên project, chỉ operator) — dự án, mức, trạng thái, luật. */
+export const ALERT_PARAMS = {
+  project: { pattern: UUID },
+  severity: { allowed: ALERT_SEVERITIES },
+  state: { allowed: ALERT_STATES },
+  rule: { allowed: ALERT_RULE_CODES },
   ...cursorSpecs,
 } satisfies ParamSpecs;
 

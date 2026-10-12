@@ -11,5 +11,9 @@ describe("scopeToProject", () => {
     expect(scopeToProject("/auth/me", P)).toBe("/auth/me");
     expect(scopeToProject("/api/v1/flow/topology?projectId=x", P)).toBe("/api/v1/flow/topology?projectId=x");
     expect(scopeToProject("/api/v1/events", null)).toBe("/api/v1/events");
+    // CB4: cảnh báo xuyên project của operator + tuỳ chọn gắn người — không bị gắn project đang chọn.
+    expect(scopeToProject("/api/v1/alerts/summary", P)).toBe("/api/v1/alerts/summary");
+    expect(scopeToProject(`/api/v1/alerts?project=${P}&state=OPEN`, P)).toBe(`/api/v1/alerts?project=${P}&state=OPEN`);
+    expect(scopeToProject("/api/v1/me/locale", P)).toBe("/api/v1/me/locale");
   });
 });

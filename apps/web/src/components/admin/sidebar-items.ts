@@ -1,5 +1,6 @@
 import {
   Activity,
+  BellRing,
   Cable,
   FlaskConical,
   FolderKanban,
@@ -25,6 +26,8 @@ export interface NavItem {
   titleKey: MessageKey;
   url: string;
   icon: LucideIcon;
+  /** CB4: chỉ người vận hành hub thấy (vd. Cảnh báo — API `/alerts*` trả 403 operator_required cho người khác). */
+  operatorOnly?: boolean;
 }
 
 export interface NavGroup {
@@ -48,7 +51,11 @@ export const sidebarItems: NavGroup[] = [
   {
     id: "overview",
     labelKey: "nav.group.overview",
-    items: [{ id: "dashboard", titleKey: "nav.item.dashboard", url: "/dashboard", icon: LayoutDashboard }],
+    items: [
+      { id: "dashboard", titleKey: "nav.item.dashboard", url: "/dashboard", icon: LayoutDashboard },
+      // CB4 (SPEC-canh-bao-nhan-dinh §8.4): cảnh báo xuyên project — chỉ operator.
+      { id: "alerts", titleKey: "nav.item.alerts", url: "/dashboard/alerts", icon: BellRing, operatorOnly: true },
+    ],
   },
   {
     id: "project",

@@ -6,6 +6,7 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { io, type Socket } from "socket.io-client";
 import { create } from "zustand";
 
+import type { AlertChangedNotice } from "@/lib/alerts/types";
 import { HUB_API_URL } from "@/lib/env";
 
 import { emptyToastCursor, type ToastCursor } from "./ui-logic";
@@ -54,6 +55,8 @@ export interface HubSocketEvents {
   "delivery.attempt": DeliveryAttemptNotice;
   "circuit.changed": CircuitChangedNotice;
   "trace.ingested": TraceIngestedNotice;
+  /** CB4: chỉ operator nhận (room `project:<id>:ops`), chỉ project đang mở; không có facts — chuông/banner gọi lại API. */
+  "alert.changed": AlertChangedNotice;
 }
 type Listener<K extends keyof HubSocketEvents> = (payload: HubSocketEvents[K]) => void;
 const listeners = new Map<keyof HubSocketEvents, Set<(payload: unknown) => void>>();
@@ -187,6 +190,12 @@ export function useHubRealtime() {
         traces: [{ ...n, receivedAt: Date.now() }, ...st.traces].slice(0, MAX_TRACES),
       }));
     };
+    // CB4: cảnh báo — bộ nhớ banner ghi nhận id (AlertNotifier nghe bus), rồi chuông + danh sách gọi lại API (prefix "alerts").
+    // Không lọc `foreign`: cảnh báo là xuyên project; server đã chỉ gửi cho operator.
+    const onAlert = (n: AlertChangedNotice) => {
+      emitLocal("alert.changed", n);
+      invalidate("alerts");
+    };
     const onTick = (tick: MetricsTick) =>
       useRealtimeStore.setState((st) => ({ ticks: [...st.ticks, tick].slice(-MAX_TICKS) }));
 
@@ -196,6 +205,7 @@ export function useHubRealtime() {
     s.on("delivery.attempt", onDelivery);
     s.on("circuit.changed", onCircuit);
     s.on("trace.ingested", onTrace);
+    s.on("alert.changed", onAlert);
     s.on("metrics.tick", onTick);
     useRealtimeStore.setState({ connected: s.connected });
 
@@ -208,6 +218,7 @@ export function useHubRealtime() {
       s.off("delivery.attempt", onDelivery);
       s.off("circuit.changed", onCircuit);
       s.off("trace.ingested", onTrace);
+      s.off("alert.changed", onAlert);
       s.off("metrics.tick", onTick);
       refCount--;
       if (refCount === 0) {

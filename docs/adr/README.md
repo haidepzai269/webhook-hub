@@ -1684,6 +1684,17 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 ---
 
+## ADR-170 — Console cảnh báo: banner chỉ cho critical nhận qua `alert.changed` trong phiên, toast cho project khác qua mốc poll; câu chữ dựng ở web từ `rule + facts` (CB4, 2026-10-12)
+
+**Vấn đề:** Socket chỉ mang `alert.changed` của project đang mở (ADR-169), không có `facts`; chuông thì xuyên project. Phải bật banner/toast cho cảnh báo MỚI mà không bật cho cảnh báo cũ lúc tải trang (CB:T15), báo được cảnh báo của project khác, và người không phải operator không được thấy chuông lẫn gọi `/alerts*` — trong khi web chưa biết ai là operator.
+**Chọn:**
+- **Một nguồn dữ liệu, một bộ nhớ phiên** (`lib/alerts/notify-logic.ts`, hàm thuần): danh sách OPEN xuyên project (`GET /alerts?state=OPEN&limit=100`, poll 30s + gọi lại khi có `alert.changed`). Lần tải đầu là MỐC (không báo gì); sau đó id chưa thấy = vừa đến. `alert.changed` OPEN chỉ ghi nhận id. Định tuyến: critical có `alert.changed` → banner; critical chỉ thấy qua poll (project khác) → toast dính; warning → toast 6s; info/đã xem/RESOLVED → chỉ chuông. Banner sống qua chuyển trang; đối chiếu danh sách OPEN để biết "đã xem ở nơi khác" hoặc đã đóng khi socket không còn theo project đó (chỉ khi danh sách không bị cắt).
+- **Câu chữ ở web** (`lib/alerts/message.ts` + `messages/alerts.ts`): khoá `alerts.rule.<mã luật, '_'→'-'>.<phần>` (khoá từ điển chỉ chữ thường/`.`/`-`; `titleKey` của server không dùng thẳng). `destination.failing` chọn câu "cách sửa" theo loại lỗi trội của `byClass`; tên provider từ `facts.providerLabel` qua bảng tên hiển thị (D5). `facts` hiện dạng bảng đã dịch, không bao giờ JSON thô.
+- **`GET /auth/me` trả thêm `user.isOperator`**; console ẩn chuông/banner/mục "Cảnh báo" và tắt mọi query `/alerts*` khi false. `scopeToProject` không gắn `?projectId=` cho `/api/v1/alerts*` và `/api/v1/me/*` (route `@NoProjectScope`). Tên đối tượng lấy từ `GET /destinations|/sources?projectId=` của các project có cảnh báo (cache 5 phút) vì API cảnh báo chỉ trả `subjectId`.
+**Đánh đổi:** Mỗi operator thêm 2 request/30s (summary + danh sách OPEN); cảnh báo của project khác trễ tối đa 30s và ra toast thay vì banner. Tên đối tượng tốn 2 request mỗi project có cảnh báo (lần đầu) và rơi về "Đích 3fa2c1d0" khi đối tượng đã xoá. Một critical của project đang mở mà poll thấy trước tin socket (cửa sổ rất hẹp) sẽ ra toast dính thay vì banner.
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

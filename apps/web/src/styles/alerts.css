@@ -1,0 +1,103 @@
+/*
+ * CB4 (SPEC-canh-bao-nhan-dinh §8.2–8.3): token màu của cảnh báo + chuyển động banner.
+ * Token riêng (không mượn --destructive): preset "brutalist" đặt --destructive đen/trắng, banner vẫn phải đỏ.
+ * Tương phản AA (≥ 4.5:1 chữ thường) đã kiểm cho từng cặp chữ/nền ở cả hai theme:
+ *   --danger-fg trên --danger-subtle, chữ trắng trên --danger-solid, --warning-fg trên --warning-subtle,
+ *   --on-warning-solid trên --warning-solid, --ok-fg trên --ok-subtle.
+ * Viền/icon (không phải chữ) cần ≥ 3:1: --danger, --warning, --ok đều ≥ 3.1:1 trên nền subtle/nền trang.
+ */
+:root {
+  --danger: #dc2626; /* viền trái / icon */
+  --danger-subtle: #fef2f2;
+  --danger-fg: #7f1d1d; /* 9.2:1 trên subtle */
+  --danger-solid: #b91c1c; /* badge: chữ trắng 6.5:1 */
+  --on-danger-solid: #ffffff;
+  --warning: #d97706;
+  --warning-subtle: #fffbeb;
+  --warning-fg: #78350f; /* 8.8:1 */
+  --warning-solid: #f59e0b;
+  --on-warning-solid: #451a03; /* 7.0:1 */
+  --ok: #16a34a;
+  --ok-subtle: #f0fdf4;
+  --ok-fg: #14532d; /* 8.7:1 */
+  --info: #2563eb;
+}
+
+.dark {
+  --danger: #f87171;
+  --danger-subtle: #2b1416;
+  --danger-fg: #fecaca; /* 12:1 trên subtle tối */
+  --danger-solid: #dc2626; /* chữ trắng 4.8:1 */
+  --on-danger-solid: #ffffff;
+  --warning: #fbbf24;
+  --warning-subtle: #2a1f0b;
+  --warning-fg: #fde68a; /* 13:1 */
+  --warning-solid: #fbbf24;
+  --on-warning-solid: #422006; /* 8.7:1 */
+  --ok: #4ade80;
+  --ok-subtle: #0f2417;
+  --ok-fg: #bbf7d0; /* 13.5:1 */
+  --info: #60a5fa;
+}
+
+/* Banner: trượt xuống 200ms + mờ dần (lib/alerts/notify-logic.ts#bannerMotion chọn tên). */
+@keyframes alert-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes alert-slide-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+/* Giảm chuyển động: CHỈ mờ — không có transform trong hai keyframes này (CB:T15 kiểm). */
+@keyframes alert-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes alert-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alert-bell-pulse {
+    animation: none !important;
+  }
+}
+
+/* Chấm nhịp nhẹ ở badge chuông khi có critical chưa xem — một lần lan ra, không nhấp nháy liên tục. */
+@keyframes alert-bell-ping {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger-solid) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.alert-bell-pulse {
+  animation: alert-bell-ping 1.2s ease-out 2;
+}

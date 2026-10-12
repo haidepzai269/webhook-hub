@@ -30,6 +30,7 @@
  */
 import { DEFAULT_LOCALE, LOCALES, type Locale } from "./locales";
 import { admin } from "./messages/admin";
+import { alerts } from "./messages/alerts";
 import { auth } from "./messages/auth";
 import { common } from "./messages/common";
 import { errors } from "./messages/errors";
@@ -38,6 +39,7 @@ import { header } from "./messages/header";
 import { journey } from "./messages/journey";
 import { layout } from "./messages/layout";
 import { nav } from "./messages/nav";
+import { pageAlerts } from "./messages/page-alerts";
 import { pageApiKeys } from "./messages/page-api-keys";
 import { pageAudit } from "./messages/page-audit";
 import { pageDashboard } from "./messages/page-dashboard";
@@ -76,6 +78,8 @@ const NAMESPACES = {
     ...pageApiKeys.vi,
     ...pagePlayground.vi,
     ...pageAudit.vi,
+    ...alerts.vi,
+    ...pageAlerts.vi,
   },
   en: {
     ...common.en,
@@ -99,6 +103,8 @@ const NAMESPACES = {
     ...pageApiKeys.en,
     ...pagePlayground.en,
     ...pageAudit.en,
+    ...alerts.en,
+    ...pageAlerts.en,
   },
 } satisfies Record<Locale, unknown>;
 

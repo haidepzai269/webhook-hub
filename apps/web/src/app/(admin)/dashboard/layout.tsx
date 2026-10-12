@@ -10,6 +10,9 @@ import { LanguageSwitcher } from "@/components/admin/language-switcher";
 import { LayoutControls } from "@/components/admin/layout-controls";
 import { RealtimeBadge } from "@/components/admin/realtime-badge";
 import { ThemeSwitcher } from "@/components/admin/theme-switcher";
+import { AlertBanner } from "@/components/alerts/alert-banner";
+import { AlertBell } from "@/components/alerts/alert-bell";
+import { AlertNotifier } from "@/components/alerts/alert-notifier";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { createT } from "@/lib/i18n/dictionary";
@@ -61,12 +64,19 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
                 <div className="flex items-center gap-2">
                   <RealtimeBadge />
                   <LayoutControls />
+                  {/* CB4: chuông cảnh báo — chỉ operator (component tự ẩn với người khác). */}
+                  <AlertBell />
                   <LanguageSwitcher />
                   <ThemeSwitcher />
                 </div>
               </div>
             </header>
-            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</div>
+            <div className="min-h-0 min-w-0 flex-1 overflow-x-clip p-4 md:p-6">
+              {/* CB4: banner critical dính đầu vùng nội dung, sống qua chuyển trang; notifier quyết định banner/toast. */}
+              <AlertNotifier />
+              <AlertBanner />
+              {children}
+            </div>
           </SidebarInset>
         </SidebarProvider>
       </AuthGuard>
