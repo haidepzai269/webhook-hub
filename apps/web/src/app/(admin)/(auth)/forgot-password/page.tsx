@@ -52,6 +52,7 @@ export default function ForgotPasswordPage() {
   return (
     <AuthShell
       title={t("auth.forgot.title")}
+      subtitle={t("auth.forgot.subtitle")}
       footerText={t("auth.forgot.footer")}
       footerLinkLabel={t("auth.sign-in")}
       footerHref="/login"

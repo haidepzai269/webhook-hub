@@ -1,0 +1,190 @@
+/*
+ * Mô phỏng webhook (chỉ tải khi bấm), chiếm toàn màn hình thay form. Dùng biến màu --v-* của panel minh hoạ
+ * (.visual, auth.module.css) — kế thừa qua DOM. Canvas là JourneyCanvas của dashboard (flow.css, ép theme tối).
+ */
+
+.panel {
+  --sim-fail: #f87171;
+  --sim-ok: var(--v-accent);
+
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  color: var(--v-text);
+  font-size: 13px;
+}
+
+/* Canvas Hành trình — co giãn theo chỗ trống, tối thiểu đủ một hàng chặng + một nhánh giao. */
+.canvas {
+  flex: 1;
+  min-height: 380px;
+  overflow: hidden;
+  border: 1px solid var(--v-line);
+  border-radius: 12px;
+}
+
+.meta {
+  display: grid;
+  gap: 6px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.chipBtn,
+.ctrl {
+  min-height: 40px;
+  border: 1px solid var(--v-line);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--v-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chipBtn[aria-pressed="true"] {
+  border-color: var(--v-accent);
+  color: var(--v-text);
+}
+
+.chipBtn:hover,
+.ctrl:hover:not(:disabled) {
+  color: var(--v-text);
+}
+
+.chipBtn:focus-visible,
+.ctrl:focus-visible {
+  outline: 2px solid var(--v-accent);
+  outline-offset: 2px;
+}
+
+.controls {
+  display: flex;
+  gap: 6px;
+}
+
+.ctrl {
+  min-width: 40px;
+  border-radius: 8px;
+  color: var(--v-text);
+}
+
+.ctrl:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.caption {
+  display: grid;
+  gap: 4px;
+  min-height: 96px;
+  font-size: 14px;
+}
+
+.head {
+  line-height: 1.45;
+}
+
+.count {
+  color: var(--v-accent);
+  font-family: var(--font-jetbrains-mono, ui-monospace), ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.label[data-fail] {
+  color: var(--sim-fail);
+}
+
+.detail {
+  color: var(--v-muted);
+  line-height: 1.45;
+}
+
+.outcome {
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, var(--sim-ok) 45%, transparent);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--v-text);
+}
+
+.outcome[data-fail] {
+  border-color: color-mix(in srgb, var(--sim-fail) 50%, transparent);
+}
+
+.outcome strong {
+  color: var(--sim-ok);
+  font-family: var(--font-jetbrains-mono, ui-monospace), ui-monospace, monospace;
+}
+
+.outcome[data-fail] strong {
+  color: var(--sim-fail);
+}
+
+.outcomeNote {
+  display: block;
+  margin-top: 2px;
+  color: var(--v-muted);
+  font-size: 12px;
+}
+
+.ref {
+  overflow: hidden;
+  color: var(--v-muted);
+  font-family: var(--font-jetbrains-mono, ui-monospace), ui-monospace, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.components {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--v-muted);
+  font-family: var(--font-jetbrains-mono, ui-monospace), ui-monospace, monospace;
+  font-size: 11px;
+  list-style: none;
+}
+
+.components li[data-on] {
+  color: var(--v-accent);
+}
+
+.components li[data-on]::before {
+  content: "● ";
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

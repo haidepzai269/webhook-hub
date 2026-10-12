@@ -17,6 +17,7 @@ export default async function LoginPage() {
   return (
     <AuthShell
       title={t("auth.login.title")}
+      subtitle={t("auth.login.subtitle")}
       footerText={t("auth.login.footer")}
       footerLinkLabel={t("auth.sign-up")}
       footerHref="/register"

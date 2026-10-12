@@ -1,162 +1,729 @@
-/* Neo Brutalism (mẫu codepen rustcode/dPYoeMe) — màu cố định, không theo theme admin. */
+/*
+ * Trang xác thực — "Đăng nhập là một sự kiện".
+ * Trái: panel minh hoạ pipeline (provider → hub verify→commit→2xx → service), LUÔN tối ở cả hai theme, một màu nhấn.
+ * Phải: form dùng token shadcn của admin (globals.css: --background, --foreground, --border, --primary, --ring…)
+ *       nên tự theo sáng/tối (class `.dark` do ThemeBootScript đặt) và theo preset màu.
+ * Mọi chuyển động nằm trong `prefers-reduced-motion: no-preference`; tắt chuyển động thì trang tĩnh, vẫn đủ nghĩa.
+ */
 
 .page {
-  --primary: #000000;
-  --secondary: #ffffff;
-  --accent: #ff5e5b;
-  --shadow: 8px 8px 0px var(--primary);
+  --auth-radius: 8px;
+  --auth-control-h: 40px;
+  /* KHÔNG dùng --font-mono của globals: ở :root nó trỏ --font-jetbrains-mono (chỉ định nghĩa trên body) → giá trị
+     không hợp lệ, cả khai báo font-family bị bỏ và rơi về Inter. Đọc thẳng biến của next/font, có dự phòng. */
+  --auth-mono: var(--font-jetbrains-mono, ui-monospace), ui-monospace, monospace;
 
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   min-height: 100dvh;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background-color: var(--secondary);
-  color: var(--primary);
-  font-family: "Courier New", monospace;
+  background-color: var(--background);
+  color: var(--foreground);
 }
 
-.page * {
-  font-family: inherit;
+/* ── Panel minh hoạ (aria-hidden) ─────────────────────────────────────────────────────────────────────── */
+
+.visual {
+  --v-bg: #0a0b0f;
+  --v-surface: #11131a;
+  --v-line: rgb(255 255 255 / 0.14);
+  --v-text: #e4e4e7;
+  --v-muted: #a1a1aa;
+  --v-accent: #34d399;
+  --v-accent-soft: rgb(52 211 153 / 0.45);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  overflow: hidden;
+  /* Viền mảnh tách panel khỏi form khi theme tối (hai nền gần như cùng màu). */
+  border-right: 1px solid rgb(255 255 255 / 0.08);
+  padding: 40px 48px;
+  background-color: var(--v-bg);
+  background-image:
+    radial-gradient(ellipse 60% 45% at 45% 45%, rgb(52 211 153 / 0.08), transparent 70%),
+    radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size:
+    auto,
+    22px 22px;
+  color: var(--v-text);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brandMark {
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--v-accent);
+  border-radius: 5px;
+  background: radial-gradient(circle at 50% 50%, var(--v-accent) 0 3px, transparent 3.5px);
+}
+
+.visualBody {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+.eyebrow {
+  color: var(--v-muted);
+  font-family: var(--auth-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/*
+ * Ba luồng song song, phân biệt bằng sắc độ nhẹ cùng tông (emerald chủ đạo, cyan, violet nhạt).
+ * `--flow` = màu luồng; `--flow-delay` = lệch pha 1/3 chu kỳ (4.8s / 3 = 1.6s; trễ âm để cả ba chạy ngay khi tải).
+ * Thứ tự xuất phát: PayOS → GitHub (+1.6s ≡ -3.2s) → Stripe (+3.2s ≡ -1.6s).
+ */
+.visual [data-flow="0"] {
+  --flow: #34d399;
+  --flow-delay: 0s;
+}
+
+.visual [data-flow="1"] {
+  --flow: #22d3ee;
+  --flow-delay: -3.2s;
+}
+
+.visual [data-flow="2"] {
+  --flow: #a78bfa;
+  --flow-delay: -1.6s;
+}
+
+.wireLit,
+.packet {
+  fill: none;
+  stroke-width: 1.25;
+}
+
+.wireLit {
+  stroke: color-mix(in srgb, var(--flow) 42%, transparent);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--flow) 30%, transparent));
+}
+
+/* Gói tin: một đoạn nét ngắn trên đường dài 100 (pathLength). Tĩnh thì ẩn — ba đường sáng đã đủ kể chuyện. */
+.packet {
+  stroke: var(--flow);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 3 200;
+  stroke-dashoffset: 3;
+  opacity: 0;
+  filter: drop-shadow(0 0 4px var(--flow));
+}
+
+.chip rect {
+  fill: var(--v-surface);
+  stroke: color-mix(in srgb, var(--flow, #ffffff) 30%, transparent);
+}
+
+.chip text {
+  fill: var(--v-text);
+  font-family: var(--auth-mono);
+  font-size: 12px;
+}
+
+.chipTarget rect {
+  stroke: color-mix(in srgb, var(--flow) 45%, transparent);
+}
+
+.hub > rect {
+  fill: #0d1014;
+  stroke: var(--v-accent-soft);
+}
+
+.hub text {
+  font-family: var(--auth-mono);
+}
+
+.hubLabel {
+  fill: var(--v-muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stageRail {
+  stroke: var(--v-line);
+}
+
+.stage circle {
+  fill: var(--v-bg);
+  stroke: var(--v-accent);
+}
+
+.stage text {
+  fill: var(--v-text);
+  font-size: 12px;
+}
+
+.stage .stageTag {
+  fill: var(--v-muted);
+  font-size: 10px;
+}
+
+.log {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--v-line);
+  padding-top: 16px;
+  color: var(--v-muted);
+  font-family: var(--auth-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.log li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logVerb {
+  color: var(--v-text);
+}
+
+.log .logVerb[data-flow] {
+  color: var(--flow);
+}
+
+.logNote {
+  color: var(--v-text);
+}
+
+/* Nút mở mô phỏng — nhỏ, tinh tế; mô phỏng chỉ được tải (import động) khi bấm. */
+.simTrigger {
+  justify-self: start;
+  align-self: flex-start;
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid var(--v-line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--v-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.simTrigger:hover:not(:disabled) {
+  border-color: var(--v-accent-soft);
+}
+
+.simTrigger:focus-visible {
+  outline: 2px solid var(--v-accent);
+  outline-offset: 2px;
+}
+
+.simError {
+  color: #fca5a5;
+  font-size: 13px;
+}
+
+.simTrigger:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.tagline {
+  max-width: 22ch;
+  color: #f4f4f5;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+.note {
+  margin-top: 8px;
+  color: var(--v-muted);
+  font-size: 12px;
+}
+
+/* ── Panel form (theo theme admin) ────────────────────────────────────────────────────────────────────── */
+
+.formPanel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 48px 24px;
 }
 
 .container {
-  position: relative;
-  z-index: 0;
   width: 100%;
   max-width: 400px;
-  border: 1px solid var(--primary);
-  border-radius: 12px;
-  padding: 40px 30px;
-  background-color: var(--secondary);
-  box-shadow: var(--shadow);
 }
 
-.container::before {
-  content: "";
-  position: absolute;
-  inset: 6px -6px -6px 6px;
-  z-index: -1;
-  border: 1px solid var(--primary);
-  border-radius: 12px;
+.container a:not([class]) {
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.header {
+  margin-bottom: 28px;
 }
 
 .title {
-  margin-bottom: 30px;
-  font-size: 28px;
-  font-weight: 700;
-  text-align: center;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.subtitle {
+  margin-top: 6px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .inputGroup {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .label {
   display: block;
-  margin-bottom: 8px;
-  font-weight: bold;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .input {
   width: 100%;
-  border: 2px solid var(--primary);
-  padding: 12px 15px;
-  background-color: var(--secondary);
-  font-size: 16px;
+  height: var(--auth-control-h);
+  /* --input mặc định quá nhạt trên nền trắng (<3:1) — trộn với chữ để viền ô nhập nhìn thấy được. */
+  border: 1px solid color-mix(in oklab, var(--foreground) 22%, var(--background));
+  border-radius: var(--auth-radius);
+  padding: 0 12px;
+  background-color: transparent;
+  color: var(--foreground);
+  font-size: 15px;
   outline: none;
-  transition: all 0.3s;
 }
 
-.input:focus {
-  box-shadow: 4px 4px 0px var(--primary);
+.input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.input:focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 45%, transparent);
 }
 
 .input[aria-invalid="true"] {
-  border-color: var(--accent);
+  border-color: var(--destructive);
+}
+
+.input[aria-invalid="true"]:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--destructive) 25%, transparent);
 }
 
 .fieldError {
   margin-top: 6px;
-  color: var(--accent);
+  color: var(--destructive);
   font-size: 13px;
-  font-weight: bold;
 }
 
 .serverError {
-  margin-bottom: 10px;
-  border: 2px solid var(--primary);
-  padding: 8px 12px;
-  background-color: #ffe3e2;
+  margin-bottom: 12px;
+  border: 1px solid color-mix(in oklab, var(--destructive) 40%, transparent);
+  border-radius: var(--auth-radius);
+  padding: 10px 12px;
+  background-color: color-mix(in oklab, var(--destructive) 8%, transparent);
+  color: var(--destructive);
   font-size: 14px;
-  font-weight: bold;
+  line-height: 1.45;
 }
 
 .button {
+  display: inline-flex;
   width: 100%;
-  margin-top: 10px;
-  border: 2px solid var(--primary);
-  padding: 12px;
-  background-color: var(--accent);
-  color: var(--secondary);
-  font-size: 16px;
-  font-weight: bold;
+  min-height: var(--auth-control-h);
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--auth-radius);
+  padding: 0 16px;
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s;
 }
 
-.button:hover:not(:disabled),
-.socialBtn:hover {
-  box-shadow: 4px 4px 0px var(--primary);
-  transform: translate(-2px, -2px);
+.button:hover:not(:disabled) {
+  background-color: color-mix(in oklab, var(--primary) 88%, var(--background));
 }
 
 .button:disabled {
   cursor: progress;
-  opacity: 0.7;
+  opacity: 0.85;
 }
+
+.button:focus-visible,
+.container a:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ── Dải sự kiện trên nút đăng nhập: gửi · xác thực · phiên · 200 ─────────────────────────────────────── */
+
+.steps {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 8px;
+  font-family: var(--auth-mono);
+  font-size: 13px;
+}
+
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.65;
+}
+
+.step + .step::before {
+  content: "·";
+  opacity: 0.6;
+}
+
+.step[data-state="done"],
+.step[data-state="active"] {
+  opacity: 1;
+}
+
+.step[data-state="failed"] {
+  color: var(--destructive);
+  font-weight: 600;
+  opacity: 1;
+}
+
+/* Dải nằm dưới nút khi thất bại (nút đã trở lại nhãn thường để thử lại). */
+.stepsFailed {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+  color: var(--foreground);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Hoặc + đăng nhập mạng xã hội ─────────────────────────────────────────────────────────────────────── */
 
 .divider {
   display: flex;
   align-items: center;
-  margin: 25px 0;
-  font-weight: bold;
+  gap: 12px;
+  margin: 24px 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
 }
 
 .divider::before,
 .divider::after {
   content: "";
   flex: 1;
-  margin: 0 10px;
-  border-bottom: 2px solid var(--primary);
+  border-top: 1px solid var(--border);
 }
 
 .socialLogin {
-  display: flex;
-  justify-content: center;
-  gap: 15px;
+  display: grid;
+  gap: 10px;
 }
 
-.socialBtn {
+.container .socialBtn {
   display: flex;
-  width: 50px;
-  height: 50px;
+  min-height: var(--auth-control-h);
   align-items: center;
   justify-content: center;
-  border: 2px solid var(--primary);
-  background-color: var(--secondary);
-  font-size: 16px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.3s;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--auth-radius);
+  padding: 0 16px;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.container .socialBtn:hover {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .footer {
-  margin-top: 20px;
+  margin-top: 24px;
+  color: var(--muted-foreground);
+  font-size: 14px;
   text-align: center;
 }
 
+/* Vùng bấm ≥40px cho link trong footer ("Quên mật khẩu?", "Đăng ký"); margin âm giữ nguyên chiều cao dòng. */
 .footer a {
-  font-weight: bold;
-  text-decoration: underline;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  margin-block: -10px;
+}
+
+/* ── Chế độ mô phỏng: form thu lại (inert, vẫn mount), panel chiếm toàn viewport ─────────────────────── */
+.page[data-sim="on"] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+}
+
+.page[data-sim="on"] .formPanel {
+  overflow: hidden;
+  padding-inline: 0;
+  opacity: 0;
+}
+
+.visual[data-sim="on"] {
+  justify-content: flex-start;
+  gap: 20px;
+  height: 100dvh;
+  padding: 28px 40px;
+}
+
+.simTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* ── Màn hẹp: panel thu thành dải mỏng phía trên (thương hiệu + câu khẩu hiệu) ────────────────────────── */
+
+@media (max-width: 899.98px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  .visual {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    max-height: 120px;
+    border-right: 0;
+    border-bottom: 1px solid rgb(255 255 255 / 0.08);
+    padding: 20px 16px;
+  }
+
+  .visualBody,
+  .note {
+    display: none;
+  }
+
+  .tagline {
+    max-width: none;
+    font-family: var(--auth-mono);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .formPanel {
+    align-items: flex-start;
+    padding: 32px 16px 48px;
+  }
+
+  /* Mô phỏng tự thoát khi < 900px (simulator.tsx); khung hình chuyển tiếp không được vỡ layout. */
+  .page[data-sim="on"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .visual[data-sim="on"] {
+    max-height: none;
+  }
+}
+
+/* ── Chuyển động (chỉ khi người dùng không yêu cầu giảm) ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  /*
+   * Chu kỳ 4.8s mỗi luồng: gói tin chạy 0→85% (vào hub ≈1.0–1.2s, ra ≈2.9–3.1s), tới service ở 85%.
+   * Ba luồng lệch đúng 1.6s nên cứ 1.6s lại có một gói đi qua hub → ba bước verify/commit/2xx chạy chu kỳ 1.6s,
+   * khớp từng gói (không cần biết gói nào).
+   */
+  .packet {
+    animation: packet-travel 4.8s linear infinite;
+    animation-delay: var(--flow-delay);
+  }
+
+  .chipSource rect {
+    animation: chip-depart 4.8s linear infinite;
+    animation-delay: var(--flow-delay);
+  }
+
+  .chipTarget rect {
+    animation: chip-hit 4.8s linear infinite;
+    animation-delay: var(--flow-delay);
+  }
+
+  .stage circle {
+    animation: stage-on 1.6s linear infinite;
+  }
+
+  /* Delay âm tương đương 1.3s / 1.75s / 2.2s (mod 1.6s) → hub có nhịp ngay từ khung đầu. */
+  .stage[data-stage="0"] circle {
+    animation-delay: -0.3s;
+  }
+
+  .stage[data-stage="1"] circle {
+    animation-delay: -1.45s;
+  }
+
+  .stage[data-stage="2"] circle {
+    animation-delay: -1s;
+  }
+
+  .log li {
+    animation: log-in 0.5s ease-out both;
+  }
+
+  .log li:nth-child(2) {
+    animation-delay: 0.6s;
+  }
+
+  .log li:nth-child(3) {
+    animation-delay: 1.2s;
+  }
+
+  .log li:nth-child(4) {
+    animation-delay: 1.8s;
+  }
+
+  .log li:nth-child(5) {
+    animation-delay: 2.4s;
+  }
+
+  .step[data-state="active"] {
+    animation: step-pulse 1s ease-in-out infinite;
+  }
+
+  .page {
+    transition: grid-template-columns 0.45s ease;
+  }
+
+  .formPanel {
+    transition:
+      opacity 0.3s ease,
+      padding 0.45s ease;
+  }
+
+  .button,
+  .input,
+  .container .socialBtn {
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+}
+
+@keyframes packet-travel {
+  0% {
+    stroke-dashoffset: 3;
+    opacity: 1;
+  }
+  85% {
+    stroke-dashoffset: -100;
+    opacity: 1;
+  }
+  86%,
+  100% {
+    stroke-dashoffset: -100;
+    opacity: 0;
+  }
+}
+
+@keyframes stage-on {
+  0%,
+  34%,
+  100% {
+    fill: var(--v-bg);
+  }
+  4%,
+  26% {
+    fill: var(--v-accent);
+  }
+}
+
+@keyframes chip-depart {
+  0%,
+  10%,
+  100% {
+    stroke: color-mix(in srgb, var(--flow) 30%, transparent);
+  }
+  2% {
+    stroke: var(--flow);
+  }
+}
+
+@keyframes chip-hit {
+  0%,
+  82%,
+  100% {
+    stroke: color-mix(in srgb, var(--flow) 45%, transparent);
+  }
+  86%,
+  94% {
+    stroke: var(--flow);
+  }
+}
+
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes step-pulse {
+  50% {
+    opacity: 0.6;
+  }
 }
