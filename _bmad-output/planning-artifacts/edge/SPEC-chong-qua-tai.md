@@ -11,6 +11,46 @@
 >
 > Vẫn phải grep lại số ADR trước khi ghi.
 
+## ĐÍNH CHÍNH SAU KHI CODE (2026-10-12): **phần này thắng phần thân khi mâu thuẫn**
+
+> Nguồn: góp ý của phiên webhook-hub-02, phiên giữ `feat/edge` (EG2–EG5) và `feat/edge-nginx` (EG1), sau hai lượt review. Admin chốt Q7, Q8 và cho ghi toàn bộ (Q9).
+> Agent dev đọc phần thân trước, rồi đọc mục này.
+
+| # | Phần thân ghi | Đính chính | Lý do |
+|---|---|---|---|
+| D1 | §0: "Không có Cloudflare đứng trước bản deployed" | Render đã bảo vệ **L3/L4** (dồn lưu lượng ở tầng mạng) bằng hạ tầng Cloudflare, tự động, mọi gói ([Render docs](https://render.com/docs/ddos-protection)). Render cũng nói rõ **lạm dụng tầng ứng dụng là việc của người dùng** ([bài viết](https://render.com/articles/how-render-handles-ddos-attacks)). EG lo đúng phần đó: flood L7 hợp lệ vào `*.onrender.com`. | Sai một nửa. Lớp bảo vệ có thật, nhưng không chặn L7. |
+| D2 | §2–§3: nginx là lớp chắn | nginx **chung container** nên request vẫn chạm máy mình, ăn chung CPU, RAM và băng thông. nginx là **cửa từ chối rẻ** (C, ở phase header, trước khi đọc body), không phải tường. Muốn request rác *không chạm máy* thì cần Cloudflare riêng đứng trước (P2, D13). | Admin hỏi: "host nginx cùng backend thì vẫn chọc vào backend?" Đúng. |
+| D3 | §4.1: hộp phạt kiểm trong `ingest.service` | **Thêm gate trước body parser:** `app.use('/hooks', penaltyGate)` đặt **ngay trước** `configureBodyParsers` (`main.ts`, sau `trust proxy`, helmet, `installErrorHandling`, CORS). Gate chỉ **kiểm** (`checkIp`, `checkPair`). Phần **chấm điểm** (`recordUnknownSource`, `recordBadSignature`, `markGood`) giữ trong ingest. Danh sách route của gate **cấu hình được** (mảng), không viết cứng. Bốn bẫy phải xử lý ở D4. **Một commit riêng**, giao sau khi lượt review hiện tại của `feat/edge` đạt. | Hiện IP đã bị cấm vẫn khiến Node đọc và parse body tới 1MB. |
+| D4 | — | Bốn bẫy của gate: **(1)** PenaltyBox là **một instance dùng chung** cho gate và ingest. Tách thành provider, lấy qua `app.get(...)`; hai instance thì trạng thái bị tách đôi. **(2)** Trả 429 khi chưa đọc body thì đặt `Connection: close` (`res.shouldKeepAlive = false`), để không phải nhận nốt body rác. **(3)** sourceKey lấy từ path phải **decode giống param của Nest**. Dùng regex của nginx `^/([a-z0-9-]+)/([A-Za-z0-9_-]{1,64})$` trên path sau `/hooks`. Không khớp thì gate **cho đi** (fail-open), để ingest trả lỗi như cũ. **(4)** Body 429 theo khuôn `docs/ERRORS.md`, có `Retry-After` và `requestId`, **dùng chung hàm dựng lỗi** với ingest. Metric `BLOCKED` và trace phải giữ nguyên (§7), không được câm. | Góp ý a) của 02. |
+| D5 | Đề xuất của phòng: chặn theo Content-Length trong Node | **Bỏ.** `raw-body` của body-parser đã từ chối ngay khi `Content-Length` vượt giới hạn, chưa đọc byte nào. Chỉ request chunked mới bị đọc tới đủ giới hạn, và nginx đã lo (`client_max_body_size` + `proxy_request_buffering`). | Thừa. |
+| D6 | Gate cho `/v1/p/*` | **Không làm.** 401 của API key nằm ở `ApiKeyGuard`, luật (b) chưa áp cho `/v1/p` (ADR-177), nên gate không có gì để kiểm. Mở rộng chấm điểm sang guard thì để P2. | Góp ý a) của 02. |
+| D7 | §4.2 luật (a): ≥20 lần 404 thì **cấm cả IP** | **Lỗ chặn chéo tenant.** Kẻ xấu tạo repo GitHub trỏ webhook vào key không tồn tại, IP của GitHub bị cấm, **mọi tenant** mất webhook GitHub. Sửa theo mô hình của 02 (Admin chốt, Q8): cache **"cặp tốt"** (ip, sourceKey) đã verify thành công, giữ **LRU riêng cho từng sourceKey** (≤ 64 IP) để kẻ xấu không xả cache bằng dải /48 IPv6. `markGood` chỉ chạy **sau khi qua rate limit**. Cặp tốt được **nâng ngưỡng 401 ×10**, không miễn hẳn. §4.2 phải ghi mô hình đe doạ này. Test T17, T18 trên nhánh. | Phòng viết luật (a) mà không nghĩ tới IP dùng chung của provider. |
+| D8 | — | Hộp phạt **tự dọn lệnh cấm hết hạn** và có **trần riêng cho số lệnh cấm**. | Không có thì đầy rồi câm vĩnh viễn. |
+| D9 | — | **IP private/loopback không chấm điểm** (cloudflared, NAT Docker, nginx khi chưa tin proxy). Bắt buộc có metric `hub_ingest_penalty_skipped_private_total`, để không bị câm mà không ai biết trên production. | Không thì cả hệ thống chung một IP, một lần cấm là sập hết. |
+| D10 | §3.1: SIGQUIT nginx và SIGTERM hub-api "đồng thời" | **Tuần tự:** SIGQUIT nginx, đợi drain **tối đa 16s**, rồi mới SIGTERM hub-api. Tổng vẫn trong 22s của con / 25s của supervisor. | Làm đồng thời thì T9 đỏ, vì `shutdown.ts` không drain kết nối của nginx. |
+| D11 | §3.2: `set_real_ip_from <dải Render>` + `real_ip_recursive on` | Mặc định `set_real_ip_from 0.0.0.0/0` (+ `::/0`) với **`real_ip_recursive off`**, tương đương `trust proxy 1` (lấy phần tử **cuối** của XFF, do Render nối vào). Đo xong (D12) mới thu hẹp dải. **Từ chối khởi động** khi: `EDGE_NGINX=1` mà `EDGE_TRUSTED_PROXIES` trống; hoặc dải `/0` đi kèm `recursive on`, vì như vậy là tin IP giả ở đầu chuỗi. location `/socket.io/` mà tự đặt `proxy_set_header` thì phải **đặt lại đủ** các header kế thừa (kể cả XFF ghi đè), vì nginx không kế thừa khi location có `proxy_set_header` riêng. | Render **nối thêm** vào XFF chứ không xoá XFF client gửi lên ([phản hồi cộng đồng Render](https://feedback.render.com/features/p/send-the-correct-xforwardedfor)), nên phần tử đầu tiên giả được. |
+| D12 | §3.3, Q2: cầu chì IP "bật ngay" | **Công tắc riêng `EDGE_IP_FUSE`, mặc định `0` (tắt)** cho tới khi đo xong IP thật trên Render (Admin chốt, Q7). Cách đo ghi ở §3.2-bis bên dưới. | Chưa đo mà bật thì mọi người chung một IP, hoặc tin IP giả. Cả hai đều là tự đánh sập mình. |
+| D13 | — | Phía ghi phải **kiểm định dạng sourceKey**: `POST /api/v1/sources` và các đường tạo source khác từ chối key không khớp `^[A-Za-z0-9_-]{1,64}$`. | Không kiểm thì nginx trả 404 lặng lẽ cho key hợp lệ trong DB. 02 đang sửa. |
+| D14 | §6.2: khối "Lưu lượng" trên trang **Source detail** | Repo **không có** trang chi tiết Source. Khối Lưu lượng là **Sheet mở từ trang Nguồn** (ADR-181). | Spec viết theo trí tưởng tượng. |
+| D15 | §9 P2 | Thêm: **(a)** Cloudflare riêng đứng trước, cần custom domain. nginx trả 403 cho request thiếu **header bí mật** do Cloudflare gắn (Transform Rule), để khoá đường vòng `*.onrender.com`. Chưa ai kiểm Render có cho tắt subdomain `onrender.com` hay không, nên **không hứa trước**. **(b)** Đưa `/auth/email-check` (ADR-180) qua gate (gợi ý của webhook-hub-5b): hiện endpoint này đếm rate limit sau body parser, nhưng body ≤100KB nên không gấp. **(c)** Kịch bản k6 bắn qua `edge` (:18080) so với bắn thẳng, kèm đo CPU/RAM, để có số liệu thật cho câu "nginx rẻ hơn bao nhiêu". | Hiện chưa có số đo tài nguyên nào, chỉ có test hành vi (T10, T9). |
+
+### §3.2-bis. Đo IP thật trên Render (điều kiện để bật `EDGE_IP_FUSE`)
+
+Dễ, khoảng **20–30 phút**, làm một lần. **Không cần biết dải IP của Render.** Chỉ cần xác nhận **Render nối thêm đúng mấy chặng** vào XFF.
+
+1. Deploy với `EDGE_NGINX=1`, `EDGE_IP_FUSE=0`. Thêm tạm vào log format của nginx: `$remote_addr`, `$realip_remote_addr`, `$http_x_forwarded_for`, `$http_cf_connecting_ip`, `$http_true_client_ip`.
+2. Lấy IP thật của máy: `curl -s https://ifconfig.me`.
+3. Gửi ba request:
+   - `curl https://<hub>.onrender.com/health`
+   - `curl -H 'X-Forwarded-For: 1.2.3.4' …`
+   - `curl -H 'CF-Connecting-IP: 5.6.7.8' …`
+4. Lặp lại từ **mạng thứ hai** (4G điện thoại) để chắc không trùng NAT.
+5. **Đạt** khi ở cả hai mạng: `$remote_addr` (sau realip) = IP thật; **không** phải `1.2.3.4`, `5.6.7.8`, IP private, hay IP của Render.
+   - Nếu XFF có **hai** chặng do Render và Cloudflare nối vào thì đổi sang tin 2 chặng. Ghi lại.
+   - Nếu `CF-Connecting-IP` **không** giả được, tức Render ghi đè nó, thì có thể dùng nó làm `real_ip_header`. **Chỉ dùng khi đã thử giả mà thất bại.**
+6. Ghi kết quả (log mẫu đã che IP, kết luận số chặng) vào `DEPLOYMENT.md` §3.6, rồi đặt `EDGE_IP_FUSE=1`.
+7. **Canh chừng Render đổi hạ tầng:** thêm metric hoặc cảnh báo khi >90% request trong 5 phút đến từ **một** IP, hoặc khi `skipped_private` tăng. Đó là dấu hiệu đếm sai IP. Khi đó tự tắt cầu chì là chuyện của P2; P1 chỉ cảnh báo.
+
 ## 0. Bối cảnh và các quyết định của Admin
 
 **Vấn đề:** ingest nạp source từ Postgres **trước** khi rate limit (`ingest.service.ts:264` rồi mới tới `:276`). Rate limit đặt sau là có lý do: khoá rate limit cần `source.id`. Nhưng hệ quả là request mang `sourceKey` ngẫu nhiên **không bị lớp nào chặn trước khi chạm DB**. Trên Neon, `connection_limit` của từng tiến trình rất nhỏ (`DEPLOYMENT.md:85`, `:159`). Vài nghìn request rác là đủ để webhook thật phải xếp hàng sau.
@@ -22,11 +62,14 @@
 | # | Quyết định của Admin |
 |---|---|
 | Q1 | nginx chạy **chung container với hub-api** trên Render, tức tiến trình con thứ ba của supervisor `docker/hub-all.js`. **Không** đặt nginx trong service Shop: hub-api vẫn có URL `*.onrender.com` công khai nên kẻ tấn công đi vòng được, và cửa vào của hub không được phụ thuộc vào client của nó (BB-1). |
-| Q2 | Cầu chì theo IP ở nginx **bật ngay và ghi log** (phương án của Amelia), không chạy chế độ chỉ ghi log. |
+| Q2 | Cầu chì theo IP ở nginx **bật ngay và ghi log** (phương án của Amelia), không chạy chế độ chỉ ghi log. **→ Đã thay bằng Q7 (D12).** |
 | Q3 | **Không dùng Lua.** Dùng nginx bản thường. Việc phạt IP dựa trên mã phản hồi (404/401) đặt trong hub-api, lưu trong bộ nhớ, không tốn lệnh Redis nào. |
 | Q4 | Người xem được lưu lượng là **tài khoản trên hub đang nắm project**, cộng với người vận hành hub. Chi tiết ở §6.1. |
 | Q5 | **EG3: ĐỒNG Ý.** Rate limit theo source chạy **sau** `adapter.verify` (§4.3). |
 | Q6 | **§6.1: operator + `owner` của project** xem được lưu lượng theo source. `developer`/`viewer` thì không. |
+| Q7 | Cầu chì IP **tắt** (`EDGE_IP_FUSE=0`) cho tới khi đo xong IP thật trên Render (§3.2-bis), đo xong mới bật. |
+| Q8 | Luật (a) theo mô hình "cặp tốt" của phiên 02 (D7). |
+| Q9 | Ghi toàn bộ góp ý của 02 thành mục Đính chính (D1–D15). |
 
 **Ngoài phạm vi:**
 - Chống DDoS ở tầng mạng (L3/L4).
