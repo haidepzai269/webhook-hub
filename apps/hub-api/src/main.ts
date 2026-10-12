@@ -10,6 +10,7 @@ import { authSecretProblems } from './modules/auth/auth-config';
 import { installErrorHandling } from './modules/errors/install';
 import { configureBodyParsers } from './body-parsers';
 import { IngestService } from './modules/ingest/ingest.service';
+import { installPenaltyGate } from './modules/ingest/penalty-gate';
 import { installShutdown } from './shutdown';
 
 function assertMasterKeyConfigured(): void {
@@ -72,6 +73,10 @@ async function bootstrap() {
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
   app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials
+
+  // D3 (ADR-177): gate hộp phạt NGAY TRƯỚC body parser — IP/cặp đang bị phạt nhận 429 + Connection: close, Node không đọc
+  // body (tới 1MB). Chỉ kiểm; chấm điểm vẫn ở ingest. Cùng instance PenaltyBox với IngestService (DI).
+  installPenaltyGate(app);
 
   // ADR-162: body parser theo route (/hooks/* 1MB, còn lại 100KB), giữ rawBody. Đặt SAU helmet/requestId/CORS để lỗi
   // 400/413 của parser vẫn mang header CORS + bảo mật.

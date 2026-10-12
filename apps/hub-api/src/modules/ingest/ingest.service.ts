@@ -12,8 +12,6 @@ import {
   OutboxPayload,
   TraceIngestedNotice,
   MAX_INGEST_PAYLOAD_BYTES,
-  ERROR_CATALOG,
-  docsUrlFor,
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
@@ -21,9 +19,6 @@ import { redactHeaders } from './redact-headers';
 import {
   ingestDuration,
   ingestRequests,
-  penaltyBans,
-  penaltyBansSkipped,
-  penaltyBlocked,
   penaltyEntries,
   penaltyGoodEntries,
   penaltySkippedPrivate,
@@ -31,12 +26,13 @@ import {
   unknownSourceTotal,
 } from '../metrics/metrics';
 import { DuplicateCounter } from './duplicate-counter';
-import { PenaltyBox, PenaltyVerdict, isLocalOrPrivateIp, logBan, resolvePenaltyConfig } from './penalty-box';
+import { PenaltyBox, PenaltyVerdict, isLocalOrPrivateIp, resolvePenaltyConfig } from './penalty-box';
+import { createPenaltyBox } from './penalty-provider';
+import { IngestResponse, blockedAck, providerMetricLabel } from './blocked-ack';
 import { TrafficOutcome, TrafficRecorder } from './traffic-recorder';
 import { onShutdownFlush } from '../../shutdown';
 
-/** Phản hồi của lõi ingest. `headers` chỉ dùng cho 429 của hộp phạt (`Retry-After`). */
-export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string> };
+export type { IngestResponse } from './blocked-ack';
 
 /**
  * S2-2 (ADR-049): chặng ①–④ (nhận, verify, COMMIT, ACK) chạy trong hub-api -> phát `trace.ingested`
@@ -60,31 +56,6 @@ interface TraceState {
 
 /** EG4: outcome của trace -> outcome của bảng lưu lượng (ERROR không lưu — đã có metric + log). */
 const TRAFFIC_OUTCOMES = new Set<string>(['ACCEPTED', 'DUPLICATE', 'REJECTED', 'RATE_LIMITED']);
-
-const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
-
-/**
- * EG2: 429 `ip_temporarily_blocked` theo khuôn ERRORS.md + `Retry-After` (giây phạt còn lại). `requestId` = `x-request-id`
- * hợp lệ (nginx gắn, EG1) hoặc correlationId — nối được log hai bên.
- */
-function blockedAck(retryAfter: number, req: RawWebhookRequest, trace: TraceState): IngestResponse {
-  const code = 'ip_temporarily_blocked';
-  const def = ERROR_CATALOG[code];
-  const given = req.headers?.['x-request-id'];
-  const rid = Array.isArray(given) ? given[0] : given;
-  return {
-    status: 429,
-    headers: { 'Retry-After': String(retryAfter) },
-    body: {
-      error: 'ip_temporarily_blocked',
-      message: def.message,
-      fix: def.fix({ retryAfter }),
-      docsUrl: docsUrlFor(code),
-      requestId: typeof rid === 'string' && REQUEST_ID_RE.test(rid) ? rid : trace.correlationId,
-      retryAfter,
-    },
-  };
-}
 
 /**
  * ADR-139 (Q1 = a): ack TỪ CHỐI (401 chữ ký / 422 thiếu khoá chống trùng) theo định dạng của CHÍNH provider
@@ -117,24 +88,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   readonly duplicates = new DuplicateCounter((tenantId, rows) => this.prisma.forTenant(tenantId).addIngestDuplicates(rows));
   /**
    * EG2 (ADR-177): hộp phạt IP trong bộ nhớ — 0 lệnh Redis, 0 truy vấn DB. Mọi lời gọi đi qua `penaltySafe` (fail-open).
-   * Gán lại được (test).
+   * D3: cùng MỘT instance với gate trước body parser (provider `PenaltyBox`, `penalty-provider.ts`); không có DI (test
+   * `new IngestService(...)`) thì tự tạo. Gán lại được (test).
    */
-  penalty = new PenaltyBox(resolvePenaltyConfig(), {
-    onBan: (reason, ip, sourceKey, banSeconds) => {
-      penaltyBans.inc({ reason });
-      logBan(reason, ip, sourceKey, banSeconds);
-    },
-    onBlocked: (reason) => penaltyBlocked.inc({ reason }),
-    onBanSkipped: (reason, cause) => {
-      penaltyBansSkipped.inc({ reason, cause });
-      // `capacity` = hộp đầy ban -> không phạt (fail-open có tiếng). Log tối đa một lần mỗi phút.
-      if (cause === 'capacity' && Date.now() - this.lastCapacityLog > 60_000) {
-        this.lastCapacityLog = Date.now();
-        logger.warn({ reason }, 'Hộp phạt: số ban đã chạm trần -> KHÔNG phạt thêm (cho đi qua)');
-      }
-    },
-  });
-  private lastCapacityLog = 0;
+  penalty: PenaltyBox;
   private lastPrivateLog = 0;
   private readonly penaltyEnabled = resolvePenaltyConfig().enabled !== false;
   /**
@@ -150,7 +107,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     @Optional() @Inject(TRACE_NOTIFIER) private readonly notifier?: TraceNotifier,
-  ) {}
+    @Optional() penalty?: PenaltyBox,
+  ) {
+    this.penalty = penalty ?? createPenaltyBox();
+  }
 
   /**
    * `app.close()` (test, Nest): ghi nốt bộ đếm bản trùng. Tín hiệu SIGTERM/SIGINT thật KHÔNG đi qua đây — `main.ts`
@@ -324,12 +284,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
    */
   private recordMetrics(provider: string, trace: TraceState, status: number, startedAt: number) {
     try {
-      let label = 'unknown';
-      try {
-        label = ProviderRegistry.get(provider as ProviderType).provider;
-      } catch {
-        /* provider lạ -> 'unknown' */
-      }
+      const label = providerMetricLabel(provider);
       const outcome = trace.outcome ?? (trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
       ingestRequests.inc({ provider: label, outcome });
       ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
@@ -352,7 +307,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const ipVerdict = this.penaltySafe(() => this.penalty.checkIp(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
     if (ipVerdict.blocked) {
       trace.blocked = true;
-      return blockedAck(ipVerdict.retryAfterSec, req, trace);
+      return blockedAck(ipVerdict.retryAfterSec, req.headers, trace.correlationId);
     }
 
     // 1. Kiểm tra kích thước payload <= 1MB
@@ -399,7 +354,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const pairVerdict = this.penaltySafe(() => this.penalty.checkPair(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
     if (pairVerdict.blocked) {
       trace.blocked = true;
-      return blockedAck(pairVerdict.retryAfterSec, req, trace);
+      return blockedAck(pairVerdict.retryAfterSec, req.headers, trace.correlationId);
     }
 
     // Giải mã danh sách secrets còn hiệu lực

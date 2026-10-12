@@ -112,6 +112,9 @@ Tách ra mua được ba thứ:
 ```
 0.  Hộp phạt theo IP (bộ nhớ, 0 Redis, 0 DB — §7.5, ADR-177): IP đang bị phạt vì dò sourceKey -> 429 -> DỪNG
     (trừ cặp (IP, sourceKey) đã verify đúng trong 24h gần nhất — IP chung của provider không cắt source đang chạy)
+    Kiểm HAI chỗ, cùng một instance PenaltyBox (D3): gate TRƯỚC body parser (`penalty-gate.ts`, path khớp
+    `/hooks/:provider/:sourceKey` -> checkIp + checkPair; chặn -> 429 + Connection: close, KHÔNG đọc body) rồi ingest
+    kiểm lại sau body parser (path lạ / gate lỗi -> gate cho qua, fail-open). Chấm điểm chỉ ở ingest.
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
 2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant)
        không tìm thấy -> 404 (+1 điểm phạt cho IP) -> DỪNG · tắt / đã lưu trữ -> 404 (không tính điểm) -> DỪNG
@@ -602,7 +605,8 @@ chạm trần thì loại key cũ nhất của tenant giữ nhiều key/mục nh
 fe80::/10) không chấm điểm — đếm một lần mỗi request ở `hub_ingest_penalty_skipped_private_total` (D9;
 `EDGE_PENALTY_ENABLED=0` tắt hẳn). Ban có trần riêng ≤ 50% `EDGE_PENALTY_MAX_ENTRIES`; đầy thì không phạt thêm (log + `hub_ingest_penalty_bans_skipped_total`).
 
-Bị chặn → `429 ip_temporarily_blocked` + `Retry-After` (giây còn lại). Log `warn` một lần lúc bắt đầu phạt. Metric
+Bị chặn → `429 ip_temporarily_blocked` + `Retry-After` (giây còn lại); chặn ở gate trước body parser (D3) thì thêm
+`Connection: close` và body không được đọc. Log `warn` một lần lúc bắt đầu phạt. Metric
 `hub_ingest_penalty_bans_total{reason}`, `hub_ingest_penalty_blocked_total{reason}`, `hub_ingest_penalty_entries`,
 `hub_ingest_unknown_source_total`. Trần `EDGE_PENALTY_MAX_ENTRIES` khoá (LRU; khoá đang bị phạt giữ lâu hơn khoá đang đếm).
 Ngưỡng thực tế nhân theo số instance hub-api (mỗi instance đếm riêng).

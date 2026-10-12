@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { CoreModule } from './modules/core/core.module';
 import { IngestController } from './modules/ingest/ingest.controller';
 import { IngestService, TRACE_NOTIFIER } from './modules/ingest/ingest.service';
+import { PENALTY_BOX_PROVIDER } from './modules/ingest/penalty-provider';
 import { HealthController } from './modules/health/health.controller';
 import { RealtimeGateway } from './modules/realtime/realtime.gateway';
 import { ApiController } from './modules/api/api.controller';
@@ -52,6 +53,8 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
   controllers: hubApiControllers(),
   providers: [
     IngestService,
+    // D3: hộp phạt dùng chung một instance cho gate trước body parser (main.ts) và IngestService
+    PENALTY_BOX_PROVIDER,
     RealtimeGateway,
     ProjectScopeGuard,
     OperatorGuard,

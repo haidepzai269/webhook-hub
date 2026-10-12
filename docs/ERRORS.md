@@ -352,6 +352,7 @@ for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/v
 **không tồn tại** từ cùng một IP (mặc định ≥ 20 lần/60s) -> chặn mọi `/hooks/*` từ IP đó; hoặc (b) quá nhiều request
 **sai chữ ký** vào cùng một source từ cùng một IP (mặc định ≥ 30 lần/60s) -> chỉ chặn cặp (IP, source) đó. Mặc định chặn
 10 phút. Tham số: `retryAfter` (giây còn lại, cũng có ở header `Retry-After`). Source tắt/đã lưu trữ không tính điểm.
+Chặn ở cửa trước khi đọc body (D3) thì kèm `Connection: close` — client mở kết nối mới cho lần thử sau.
 **Sửa:** kiểm URL webhook (đúng `sourceKey`) và secret đã cấu hình ở provider, rồi đợi hết `retryAfter`.
 ```bash
 for i in $(seq 1 21); do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/hooks/github/khong_ton_tai -d '{}'; done

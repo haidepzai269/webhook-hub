@@ -327,6 +327,7 @@ Quyền xem dùng scope mới `traffic:read`, thêm vào `ROLE_SCOPES` cho `owne
 | `[EG:T16]` | L1 | `EDGE_NGINX=0` thì hub-api nghe như cũ, không có tiến trình nginx, mọi test ingest hiện có vẫn xanh |
 | `[EG:T17]` | L0 | (D7) Luật (a) không chặn cặp tốt của IP đang bị phạt; key lạ từ IP đó vẫn 429 trước DB |
 | `[EG:T18]` | L0 | (D7) Luật (b) với cặp tốt nâng ngưỡng ×10: đúng/sai xen kẽ không bị ban oan, flood 401 vô hạn cuối cùng vẫn bị ban |
+| `[EG:T19]` | L0 | (D3/D4) Gate trước body parser: body 1MB từ IP bị ban nhận 429 + `Connection: close` mà body **không** bị đọc, ingest không chạy, `BLOCKED` đếm đúng 1; `PenaltyBox` là một instance dùng chung (gate + ingest); gate lỗi thì cho qua (fail-open); path lạ cho qua; percent-encoding decode như `@Param` |
 
 ## 9. P2 (ghi lại, chưa làm)
 

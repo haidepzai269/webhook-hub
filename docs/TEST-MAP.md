@@ -4,7 +4,7 @@
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 341 mã khai báo · 270 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 342 mã khai báo · 271 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -189,6 +189,7 @@ Tổng: 341 mã khai báo · 270 mã có test · 0 mồ côi · 24 mồ côi có
 | `EG:T15` | SPEC-chong-qua-tai.md · EG5 | L0 | libs/common/test/traffic-insight.spec.ts:8 | ✅ pass |
 | `EG:T17` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:159 | ✅ pass |
 | `EG:T18` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:182 | ✅ pass |
+| `EG:T19` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-gate.spec.ts:110 | chưa chạy |
 | `KN:T1` | SPEC-ket-noi.md · KN1 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv — VF đang chạy chaos). Logic phủ ở L1 [KN:U1]-[KN:U4] (console-endpoints-db.spec.ts). |
 | `KN:T2` | SPEC-ket-noi.md · KN3 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + PAYOS_FAKE_BASE_URL/CONNECTOR_INGEST_BASE_URL trong .env.verify). Luồng tương đương chạy ở L1 với fake PayOS của sink trong tiến trình: payos-connect-db.spec.ts [KN:U8] (phần b). |
 | `KN:T3` | SPEC-ket-noi.md · KN4 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + STRIPE_FAKE_BASE_URL trong .env.verify). Tương đương ở L1 với fake Stripe của sink trong tiến trình: stripe-connect-db.spec.ts [KN:U14][KN:U15] + [KN4] status/ngắt (DELETE tới đúng we_). |
@@ -303,6 +304,6 @@ Tổng: 341 mã khai báo · 270 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (194 file, 1258 khai báo it/test)
+## File test (195 file, 1265 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.
