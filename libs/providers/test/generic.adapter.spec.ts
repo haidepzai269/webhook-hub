@@ -157,7 +157,7 @@ describe('GenericAdapter — normalize (S8, S14 mapping)', () => {
     });
   });
 
-  it('[DX:UX6] DX1 §2.1: lỗi của nguồn tuỳ chỉnh kèm `fix` cho dev (401 chữ ký, 422 idempotency) — không chứa secret', () => {
+  it('[DX:UX6] (phần d) DX1 §2.1: lỗi của nguồn tuỳ chỉnh kèm `fix` cho dev (401 chữ ký, 422 idempotency) — không chứa secret', () => {
     const r401 = a.buildAck({ accepted: false, status: 401, message: 'x' } as any) as any;
     expect(r401.body.fix).toMatch(/raw body bytes/);
     const r422 = a.buildAck({ accepted: false, status: 422, message: 'missing_idempotency_key' } as any) as any;

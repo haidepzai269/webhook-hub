@@ -8,7 +8,7 @@ import { IngestService } from '../src/modules/ingest/ingest.service';
  * `adapter.buildAck` — định dạng ack của TỪNG provider, STATUS GIỮ NGUYÊN, GenericAdapter kèm `fix` cho dev.
  * Ack không bao giờ chứa secret hay phản chiếu body request.
  */
-describe('[DX:UX6] ingest — ack từ chối đi qua adapter.buildAck (ADR-139)', () => {
+describe('[DX:UX6] (phần a) ingest — ack từ chối đi qua adapter.buildAck (ADR-139)', () => {
   const MASTER = 'test-master-key-at-least-32-characters!!';
   const SECRET = 'bank_secret_SUPERSECRET_123';
   const MARKER = 'BODY_MARKER_ZXQ';

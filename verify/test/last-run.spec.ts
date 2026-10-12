@@ -2,7 +2,9 @@ import { bbLayerCell, LastRun, recordRun } from '../lib/last-run';
 
 /** M-R2-1 (REVIEW-VF-R2): commit + thời điểm gắn với TỪNG tầng trong `.last-run.json`, không một commit cho cả file. */
 describe('verify/.last-run.json — commit theo tầng (M-R2-1)', () => {
-  const layer = (pass: number, name = 'x [BB:2] y') => ({ pass, fail: 0, skip: 0, ms: 1, tests: [{ name, file: 'f', status: 'passed' as const }] });
+  // Tag ghép chuỗi để verify:map không coi dòng fixture này là một test mang mã bất biến.
+  const BB2 = '[' + 'BB:2]';
+  const layer = (pass: number, name = `x ${BB2} y`) => ({ pass, fail: 0, skip: 0, ms: 1, tests: [{ name, file: 'f', status: 'passed' as const }] });
 
   it('VF6 (M-R2-1): chaos ở commit A, rồi verify:unit ở B -> L3 vẫn mang commit A; verify:bb cảnh báo KHÁC HEAD', () => {
     let last: LastRun = { layers: {} };
@@ -24,7 +26,7 @@ describe('verify/.last-run.json — commit theo tầng (M-R2-1)', () => {
     expect(cell).toMatch(/commit không rõ/);
   });
 
-  it('VF6 (M-R2-1): tầng chưa chạy hoặc không có test mang [BB:n] -> null', () => {
+  it('VF6 (M-R2-1): tầng chưa chạy hoặc không có test mang tag bất biến n -> null', () => {
     const last = recordRun({ layers: {} }, { L2: layer(1) }, 'a', 't');
     expect(bbLayerCell('L3', last, '2', 'a')).toBeNull();
     expect(bbLayerCell('L2', last, '4', 'a')).toBeNull();

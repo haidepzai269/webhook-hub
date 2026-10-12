@@ -12,7 +12,8 @@ describeDb('Seed trên DB rỗng (MS-P2-2)', () => {
   const ROOT = path.resolve(__dirname, '../../..');
   const owner = newTestPrisma('owner');
   const dbName = `seedfresh_${randomUUID().slice(0, 8)}`;
-  const base = new URL(testDbUrl('owner')!);
+  // describe.skip (không có DB) vẫn chạy thân describe -> URL giữ chỗ để `npx jest` trần không vỡ suite.
+  const base = new URL(testDbUrl('owner') ?? 'postgresql://skipped@localhost/skipped');
   const freshUrl = (() => {
     const u = new URL(base.toString());
     u.pathname = `/${dbName}`;

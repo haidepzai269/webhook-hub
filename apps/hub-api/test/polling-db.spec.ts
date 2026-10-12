@@ -58,7 +58,7 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     expect((await repo().pollEvents({ after: seqOf(c.id), limit: 100 })).map((r) => r.id)).not.toContain(c.id);
   });
 
-  it('[DX:UX11] latestPollCursor = cursor lớn nhất sau khi cấp cho event đã commit; poll từ đó chỉ thấy event MỚI', async () => {
+  it('[DX:UX11] (phần a) latestPollCursor = cursor lớn nhất sau khi cấp cho event đã commit; poll từ đó chỉ thấy event MỚI', async () => {
     const old = await mk('order.before_latest', ago(10));
     const latest = await repo().latestPollCursor();
     const all = await repo().pollEvents({ after: 0n, limit: 1000 });
@@ -69,7 +69,7 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     expect(await new TenantScopedRepository(appDb, randomUUID()).latestPollCursor()).toBe(0n); // project trống
   });
 
-  it('[DX:UX11] M-1: latestPollCursor có TRẦN số lô — backlog lớn hơn trần -> null (chưa xong, không vòng vô hạn); gọi lại thì tiến tiếp và xong', async () => {
+  it('[DX:UX11] (phần b) M-1: latestPollCursor có TRẦN số lô — backlog lớn hơn trần -> null (chưa xong, không vòng vô hạn); gọi lại thì tiến tiếp và xong', async () => {
     const t2 = randomUUID();
     const r2 = () => new TenantScopedRepository(appDb, t2);
     for (let i = 0; i < 5; i++) await mk(`order.backlog_${i}`, ago(10), t2);
@@ -82,7 +82,7 @@ describeDb('Polling (A) — GET /v1/p/:project/events (S7)', () => {
     await raw.event.deleteMany({ where: { tenantId: t2 } });
   });
 
-  it('[DX:UX11] R2-M1: mỗi lô của latestPollCursor COMMIT riêng — kết nối khác thấy tiến độ giữa hai lô (không một tx dài giữ lock)', async () => {
+  it('[DX:UX11] (phần c) R2-M1: mỗi lô của latestPollCursor COMMIT riêng — kết nối khác thấy tiến độ giữa hai lô (không một tx dài giữ lock)', async () => {
     const t3 = randomUUID();
     for (let i = 0; i < 5; i++) await mk(`order.batch_${i}`, ago(10), t3);
     const nulls = () => raw.event.count({ where: { tenantId: t3, pollSeq: null } as any });

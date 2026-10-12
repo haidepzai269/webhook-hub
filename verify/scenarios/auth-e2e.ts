@@ -316,7 +316,12 @@ async function main() {
     const pb = B.body.memberships[0];
     const cross = await B.s.get(`/api/v1/events?projectId=${pa.projectId}`);
     const random = await B.s.get(`/api/v1/events?projectId=${randomUUID()}`);
-    expect(cross.status === 404 && cross.text === random.text, `chéo → ${cross.status} ${cross.text} vs ngẫu nhiên ${random.text}`);
+    // Khuôn lỗi DX (ADR-136): requestId khác nhau theo từng request — "giống hệt" là mọi trường TRỪ requestId (SPEC-dev-experience UX2).
+    const sansRequestId = (text: string) => {
+      const { requestId: _r, ...rest } = JSON.parse(text);
+      return JSON.stringify(rest);
+    };
+    expect(cross.status === 404 && random.status === 404 && sansRequestId(cross.text) === sansRequestId(random.text), `chéo → ${cross.status} ${cross.text} vs ngẫu nhiên ${random.text}`);
     const ticketCross = await B.s.get(`/auth/socket-ticket?projectId=${pa.projectId}`);
     expect(ticketCross.status === 404, `vé socket cho project người khác → ${ticketCross.status}`);
     const connect = async (sess: HttpSession, projectId: string) => {

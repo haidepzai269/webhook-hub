@@ -17,6 +17,8 @@
   "expect": {
     "status": 200,
     "type": "github.ping",
-    "normalized": false
+    "normalized": false,
+    "probe": true,
+    "why": "ADR-162: ping là request kiểm tra kết nối của GitHub (giống PayOS confirm probe, ADR-159) — event lưu với probe=true, 0 delivery, không có ở polling."
   }
 }

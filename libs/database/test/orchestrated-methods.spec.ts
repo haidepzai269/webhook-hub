@@ -66,7 +66,7 @@ function fakeClient(backlog: number) {
   return { root, txs, left: () => unassigned };
 }
 
-describe('[DX:UX11] R3-M1 ORCHESTRATED_METHODS — latestPollCursor không chạm client gốc chưa scope', () => {
+describe('[DX:UX11] (phần f) R3-M1 ORCHESTRATED_METHODS — latestPollCursor không chạm client gốc chưa scope', () => {
   it('(a) client gốc ném nếu truy vấn ngoài tx: latestPollCursor KHÔNG ném; mỗi lời gọi repo bên trong mở đúng MỘT tx có set_config', async () => {
     const f = fakeClient(5);
     const repo = new TenantScopedRepository(f.root, T);

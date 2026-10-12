@@ -40,7 +40,7 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
     expect(r.body.message).not.toMatch(/\bseq\b/);
   });
 
-  it('[DX:UX11] after=latest -> {events: [], nextCursor: cursor cuối đã cấp} (không poll); after rác -> 400 invalid_cursor', async () => {
+  it('[DX:UX11] (phần d) after=latest -> {events: [], nextCursor: cursor cuối đã cấp} (không poll); after rác -> 400 invalid_cursor', async () => {
     const { call, pollEvents, latestPollCursor } = setup([{ id: 'e', cursor: 9n }]);
     expect(await call({ after: 'latest', wait: '20' })).toEqual({ status: 200, body: { events: [], nextCursor: '4' } });
     expect(latestPollCursor).toHaveBeenCalledTimes(1);
@@ -51,7 +51,7 @@ describe('GET /v1/p/:project/events — tham số (S7)', () => {
     }
   });
 
-  it('[DX:UX11] M-1: backlog cấp cursor chưa xong (repo trả null) -> 503 service_unavailable kèm retryAfter (client thử lại)', async () => {
+  it('[DX:UX11] (phần e) M-1: backlog cấp cursor chưa xong (repo trả null) -> 503 service_unavailable kèm retryAfter (client thử lại)', async () => {
     const { call, latestPollCursor } = setup();
     latestPollCursor.mockResolvedValueOnce(null);
     const r = await call({ after: 'latest' });

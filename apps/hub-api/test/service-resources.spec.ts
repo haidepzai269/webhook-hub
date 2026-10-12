@@ -346,7 +346,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
       const { controller, req, verdict, destinations, audits } = build();
       const before = destinations.find((d) => d.id === EA).signingSecretEncrypted;
       verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
-      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'ssrf_blocked', verificationFix: expect.stringMatching(/hub listen/), secretRotated: false }); // [DX:UX6]
+      expect(await controller.verifyEndpoint(req(PA), EA, { signingSecret: NEW })).toEqual({ verification: 'FAILED', verificationError: 'ssrf_blocked', verificationFix: expect.stringMatching(/hub listen/), secretRotated: false }); // [DX:UX6] (phần b)
       expect(destinations.find((d) => d.id === EA)).toMatchObject({ signingSecretEncrypted: before, verification: 'VERIFIED' });
       expect(failedAudits(audits)).toHaveLength(1);
       expect(failedAudits(audits)[0]).toMatchObject({

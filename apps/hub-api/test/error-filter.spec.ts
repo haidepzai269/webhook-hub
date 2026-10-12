@@ -98,7 +98,7 @@ describe('[DX] ServiceExceptionFilter + x-request-id (DX1)', () => {
   });
   afterAll(() => app.close());
 
-  it('[DX:UX1] mỗi mã trong catalog: body đủ error/message/fix/docsUrl/requestId, status khớp catalog, header x-request-id = requestId', async () => {
+  it('[DX:UX1] (phần a) mỗi mã trong catalog: body đủ error/message/fix/docsUrl/requestId, status khớp catalog, header x-request-id = requestId', async () => {
     for (const code of Object.keys(ERROR_CATALOG) as HubErrorCode[]) {
       const r = await get(`/v1/p/cafe/throw/${code}?required=publish:events&field=type&limit=1MB&retryAfter=30`, KEY_A);
       const def = ERROR_CATALOG[code];
@@ -114,7 +114,7 @@ describe('[DX] ServiceExceptionFilter + x-request-id (DX1)', () => {
     }
   });
 
-  it('[DX:UX1] missing_scope thật từ ApiKeyGuard: 403, required, fix nhắc scope; 2xx cũng có x-request-id; id client gửi đúng khuôn được giữ', async () => {
+  it('[DX:UX1] (phần b) missing_scope thật từ ApiKeyGuard: 403, required, fix nhắc scope; 2xx cũng có x-request-id; id client gửi đúng khuôn được giữ', async () => {
     const r = await get('/v1/p/cafe/events', KEY_RO, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(r.status).toBe(403);
     expect(r.body).toMatchObject({ error: 'missing_scope', required: 'publish:events' });

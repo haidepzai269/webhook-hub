@@ -17,7 +17,7 @@ const OUT_OF_SCOPE = new Set([
 ]);
 
 describe('[DX] catalog lỗi (DX1)', () => {
-  it('[DX:UX4] mỗi mã có `## <mã>` trong docs/ERRORS.md; message + fix() là chuỗi không rỗng (cả khi thiếu tham số)', () => {
+  it('[DX:UX4] (phần a) mỗi mã có `## <mã>` trong docs/ERRORS.md; message + fix() là chuỗi không rỗng (cả khi thiếu tham số)', () => {
     const doc = read('docs/ERRORS.md');
     for (const [code, def] of Object.entries(ERROR_CATALOG)) {
       expect([code, new RegExp(`^## ${code}\\s*$`, 'm').test(doc)]).toEqual([code, true]);
@@ -28,7 +28,7 @@ describe('[DX] catalog lỗi (DX1)', () => {
     }
   });
 
-  it('[DX:UX4] mọi mã lỗi hub-api ném ở route /v1/p + /api/v1 đều có trong catalog (thêm mã mới mà quên catalog -> đỏ)', () => {
+  it('[DX:UX4] (phần b) mọi mã lỗi hub-api ném ở route /v1/p + /api/v1 đều có trong catalog (thêm mã mới mà quên catalog -> đỏ)', () => {
     const src = walk(path.join(ROOT, 'apps', 'hub-api', 'src'));
     const found = new Set<string>();
     for (const f of src) {
@@ -42,7 +42,7 @@ describe('[DX] catalog lỗi (DX1)', () => {
     expect(missing).toEqual([]);
   });
 
-  it('[DX:UX4] fix chỉ dựng từ tham số khai báo; tham số lạ (key/secret) không lọt vào fix', () => {
+  it('[DX:UX4] (phần c) fix chỉ dựng từ tham số khai báo; tham số lạ (key/secret) không lọt vào fix', () => {
     for (const [code, def] of Object.entries(ERROR_CATALOG)) {
       const fix = (def.fix as (p: Record<string, unknown>) => string)({ apiKey: 'hk_test_SECRETKEY', secret: 's3cr3t', body: '{"a":1}' });
       expect([code, fix.includes('SECRETKEY') || fix.includes('s3cr3t') || fix.includes('"a":1')]).toEqual([code, false]);
@@ -56,7 +56,7 @@ describe('[DX] catalog lỗi (DX1)', () => {
     ]);
   });
 
-  it('[DX:UX6] verificationFix cho từng verificationError của challenge; ssrf_blocked nêu CẢ URL công khai (deployed) lẫn hub listen (local)', () => {
+  it('[DX:UX6] (phần c) verificationFix cho từng verificationError của challenge; ssrf_blocked nêu CẢ URL công khai (deployed) lẫn hub listen (local)', () => {
     expect(verificationFix(null)).toBeNull();
     for (const c of ['timeout', 'http_500', 'http_404', 'challenge_mismatch', 'invalid_json', 'ssrf_blocked', 'unreachable', 'invalid_url', 'no_signing_secret', 'la_lung']) {
       expect([c, typeof verificationFix(c)]).toEqual([c, 'string']);

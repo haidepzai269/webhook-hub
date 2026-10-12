@@ -14,7 +14,8 @@ describeDb('Migration poll_seq trên DB có dữ liệu (R2-4)', () => {
   const owner = newTestPrisma('owner');
   const dbName = `pollseq_${randomUUID().slice(0, 8)}`;
   const url = (() => {
-    const u = new URL(testDbUrl('owner')!);
+    // describe.skip (không có DB) vẫn chạy thân describe -> URL giữ chỗ để `npx jest` trần không vỡ suite.
+    const u = new URL(testDbUrl('owner') ?? 'postgresql://skipped@localhost/skipped');
     u.pathname = `/${dbName}`;
     return u.toString();
   })();

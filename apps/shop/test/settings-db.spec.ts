@@ -38,7 +38,7 @@ describeDb('shop.settings (Postgres, SK2)', () => {
     await expect(db.$executeRaw`INSERT INTO shop.settings (id, updated_at) VALUES (2, now())`).rejects.toThrow(); // CHECK id = 1
   });
 
-  it('[SK:U3] H-1: prepare() chưa commit KHÔNG ghi DB; commit() mới ghi; dòng giải mã lỗi (khoá khác) -> ghi đè cả dòng, không lai (M-3)', async () => {
+  it('[SK:U3] (phần e) H-1: prepare() chưa commit KHÔNG ghi DB; commit() mới ghi; dòng giải mã lỗi (khoá khác) -> ghi đè cả dòng, không lai (M-3)', async () => {
     const s = new ShopSettings(prismaStore(db), env, log);
     await s.save(parseInput({ hubConnectionUrl: conn, paymentSourceKeys: ['src_payos_q'] }) as any);
     const before1 = await db.shopSetting.findUniqueOrThrow({ where: { id: 1 } });

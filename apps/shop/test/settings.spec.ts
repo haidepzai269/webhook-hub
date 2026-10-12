@@ -131,7 +131,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect(wrong.sources.payosApiKey).toBe('env');
   });
 
-  it('[SK:U1] GET /settings không trả bí mật (chỉ configured + 4 ký tự cuối); token sai -> 401; thiếu SHOP_ADMIN_TOKEN -> 404; sai 5 lần/phút -> 429', async () => {
+  it('[SK:U1] (phần a) GET /settings không trả bí mật (chỉ configured + 4 ký tự cuối); token sai -> 401; thiếu SHOP_ADMIN_TOKEN -> 404; sai 5 lần/phút -> 429', async () => {
     const { settings, link } = setup();
     await settings.save(parseInput({ hubConnectionUrl: CS_B, ...SECRETS }) as any);
     const srv = await serve(settingsRouter({ settings, link, env: ENV, log }));
@@ -249,7 +249,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U1] M-2: SHOP_ADMIN_TOKEN < 24 ký tự -> coi như chưa đặt (404) + log cảnh báo', async () => {
+  it('[SK:U1] (phần b) M-2: SHOP_ADMIN_TOKEN < 24 ký tự -> coi như chưa đặt (404) + log cảnh báo', async () => {
     const { settings, link } = setup();
     const warn = jest.fn();
     const short = E({ ...ENV, SHOP_ADMIN_TOKEN: 'short-token' });
@@ -263,7 +263,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U5] M-2: host hub chỉ được là host của HUB_URL env hoặc SHOP_ALLOWED_HUB_HOSTS; host lạ -> 422 kèm fix, KHÔNG gửi HUB_SIGNING_SECRET (không ensure)', async () => {
+  it('[SK:U5] (phần a) M-2: host hub chỉ được là host của HUB_URL env hoặc SHOP_ALLOWED_HUB_HOSTS; host lạ -> 422 kèm fix, KHÔNG gửi HUB_SIGNING_SECRET (không ensure)', async () => {
     const EVIL = `hubs://${KEY_B}@evil.example/proj-b`;
     expect(hubHostAllowed(CS_A, ENV)).toBe(true); // host của HUB_URL env
     expect(hubHostAllowed(CS_B, ENV)).toBe(true); // allowlist
@@ -295,7 +295,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect(ensure).not.toHaveBeenCalled();
   });
 
-  it('[SK:U2] M-3: dòng có mà KHÔNG giải mã được -> env cho MỌI trường (kể cả payment_source_keys không mã hoá), không lai; log lỗi một lần', async () => {
+  it('[SK:U2] (phần c) M-3: dòng có mà KHÔNG giải mã được -> env cho MỌI trường (kể cả payment_source_keys không mã hoá), không lai; log lỗi một lần', async () => {
     const other = randomBytes(32).toString('base64');
     const row = { hubConnectionUrl: aesGcmEncrypt(CS_B, other), paymentSourceKeys: ['src_payos_b'], payosClientId: null, payosApiKey: aesGcmEncrypt('x-SECRET-xxxx', other), payosChecksumKey: null, bankCode: 'VCB', bankAccount: null, bankAccountName: null, updatedAt: new Date() } as SettingsRow;
     const r = resolveSettings(row, ENV, SETTINGS_KEY);
@@ -313,7 +313,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect([ok.env.HUB_URL, sourceKeysOf(ok.env), ok.env.SHOP_BANK_CODE, ok.env.PAYOS_API_KEY]).toEqual([CS_B, ['src_payos_b'], 'VCB', ENV.PAYOS_API_KEY]);
   });
 
-  it('[SK:U2] L-1/M-3: DB lỗi khi đọc -> env (degraded), cache tạm (không truy vấn lỗi mỗi request); DB hồi -> reload + sync link về cấu hình DB', async () => {
+  it('[SK:U2] (phần d) L-1/M-3: DB lỗi khi đọc -> env (degraded), cache tạm (không truy vấn lỗi mỗi request); DB hồi -> reload + sync link về cấu hình DB', async () => {
     const { mem } = setup();
     let down = true;
     let loads = 0;
@@ -372,7 +372,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U5] test-hub: key thiếu manage:endpoints -> 422 kèm fix; key thu hồi -> 401 kèm fix; thiếu manage:sources -> vẫn OK, sources=null + gợi ý', async () => {
+  it('[SK:U5] (phần b) test-hub: key thiếu manage:endpoints -> 422 kèm fix; key thu hồi -> 401 kèm fix; thiếu manage:sources -> vẫn OK, sources=null + gợi ý', async () => {
     const noScope = await testHub(CS_B, fakeHub({ scopes: ['read:events'] }).make);
     expect(noScope).toMatchObject({ status: 422, body: { error: expect.stringContaining('manage:endpoints'), fix: expect.any(String) } });
     const revoked = await testHub(CS_B, fakeHub({ status: 401 }).make);
@@ -386,7 +386,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     expect(JSON.stringify([noScope, revoked, ok, no403])).not.toContain(KEY_B);
   });
 
-  it('[SK:U3] N-5: vòng đồng bộ 60s (resync) lỗi -> bắt + log, KHÔNG để promise reject không ai bắt (tiến trình Shop không chết); khoá vẫn chạy tiếp', async () => {
+  it('[SK:U3] (phần f) N-5: vòng đồng bộ 60s (resync) lỗi -> bắt + log, KHÔNG để promise reject không ai bắt (tiến trình Shop không chết); khoá vẫn chạy tiếp', async () => {
     const error = jest.fn();
     const link = new HubLink(jest.fn(), { ...log, error }, ENV, () => { throw new Error('HUB_URL sai dạng'); });
     const unhandled = jest.fn();
@@ -404,7 +404,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U3] N-1: ensure cấu hình mới VERIFIED nhưng ghi DB lỗi -> ensure lại NGAY trên link cũ (hub bật lại sub cũ), 500 kèm fix, Shop giữ cấu hình cũ', async () => {
+  it('[SK:U3] (phần g) N-1: ensure cấu hình mới VERIFIED nhưng ghi DB lỗi -> ensure lại NGAY trên link cũ (hub bật lại sub cũ), 500 kèm fix, Shop giữ cấu hình cũ', async () => {
     const { settings, mem, link, ensure } = setup();
     mem.store.save = async () => { throw new Error('db down'); };
     link.apply((await settings.get()).env);
@@ -426,7 +426,7 @@ describe('Shop — cài đặt kết nối (SK2)', () => {
     }
   });
 
-  it('[SK:U5] N-3: production -> connection string hub:// (http thường) bị từ chối 422 + fix "dùng hubs://"; HUB_URL env http chỉ cảnh báo', async () => {
+  it('[SK:U5] (phần c) N-3: production -> connection string hub:// (http thường) bị từ chối 422 + fix "dùng hubs://"; HUB_URL env http chỉ cảnh báo', async () => {
     const PROD = E({ ...ENV, NODE_ENV: 'production' });
     const HTTP_B = `hub://${KEY_B}@hub-b.example/proj-b`;
     const { settings, mem, link, ensure, hub } = setup(PROD);
