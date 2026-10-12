@@ -2,15 +2,9 @@
 
 import type { ReactNode } from "react";
 
+import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useT } from "@/lib/i18n/use-t";
 
 /** Khung Dialog chung cho các form "Tạo mới" — form thật (RHF + Zod) do từng trang truyền vào. */
@@ -36,7 +30,7 @@ export function FormDialog({
   const t = useT();
   return (
     <Dialog open={open} onOpenChange={(o) => !submitting && onOpenChange(o)}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -50,7 +44,7 @@ export function FormDialog({
             {submitting ? t("common.saving") : (submitLabel ?? t("common.create"))}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </AdminDialogContent>
     </Dialog>
   );
 }

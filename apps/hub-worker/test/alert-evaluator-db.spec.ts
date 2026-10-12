@@ -101,7 +101,8 @@ describeDb('CB2 AlertEvaluator (Postgres, hub_app)', () => {
     await ev.evaluateProject(P1, new Date(t0.getTime() + MIN), recipients);
     rows = await alertsOf(P1, 'destination.auth_rejected');
     expect(rows[0]).toMatchObject({ state: 'RESOLVED' });
-    expect(rows[0].facts).toMatchObject({ httpStatus: 200 });
+    // Mã từ chối gốc giữ nguyên (câu "… (401)"), mã 2xx đã làm đóng nằm riêng.
+    expect(rows[0].facts).toMatchObject({ httpStatus: 401, closedByStatus: 200 });
     emails = await owner.alertEmail.findMany({ where: { tenantId: P1 }, orderBy: { createdAt: 'asc' } });
     expect(emails.map((e) => e.kind)).toEqual(['OPEN', 'RESOLVED']);
 

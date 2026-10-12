@@ -49,6 +49,7 @@ export const alerts = defineMessages("alerts", {
     // ---- số liệu (facts) dạng bảng đọc được
     "alerts.fact.count": "Số lần",
     "alerts.fact.http-status": "Mã HTTP",
+    "alerts.fact.closed-by-status": "Mã HTTP lúc ổn trở lại",
     "alerts.fact.since-at": "Từ lúc",
     "alerts.fact.last-attempt-at": "Lần thử cuối đã xét",
     "alerts.fact.last-match-at": "Lần lỗi cùng loại cuối",
@@ -111,6 +112,7 @@ export const alerts = defineMessages("alerts", {
 
     "alerts.fact.count": "Count",
     "alerts.fact.http-status": "HTTP status",
+    "alerts.fact.closed-by-status": "HTTP status on recovery",
     "alerts.fact.since-at": "Since",
     "alerts.fact.last-attempt-at": "Last attempt checked",
     "alerts.fact.last-match-at": "Last same-kind failure",

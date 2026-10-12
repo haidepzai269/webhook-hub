@@ -5,6 +5,7 @@ import { Suspense, useMemo, useState } from "react";
 import { Eye, ListRestart, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
@@ -19,14 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -152,7 +146,7 @@ function BulkReplayDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("page.dlq.bulk")}</DialogTitle>
           <DialogDescription>{t("page.dlq.bulk.description")}</DialogDescription>
@@ -210,7 +204,7 @@ function BulkReplayDialog({
             {bulk.isPending ? t("page.dlq.bulk.running") : t("page.dlq.bulk.run", { count: preview?.count ?? "N" })}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </AdminDialogContent>
     </Dialog>
   );
 }

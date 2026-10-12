@@ -151,6 +151,16 @@ describe("facts -> bảng: ẩn sổ sách nội bộ, mốc giờ cùng khuôn 
     for (const k of HIDDEN_FACT_KEYS) expect(k in facts).toBe(true);
   });
 
+  it("cảnh báo đã đóng nhờ 2xx: tiêu đề vẫn mã từ chối gốc (401), mã 2xx ở dòng riêng", () => {
+    const closed = { httpStatus: 401, count: 4, closedByStatus: 200 };
+    expect(buildAlertText(mk("destination.auth_rejected", closed), createT("en"), ctx("en")).title).toBe("Receiver rejected authentication (401)");
+    const rows = factRows(closed, createT("vi"), { locale: "vi", now: NOW });
+    expect(rows.slice(0, 2).map((r) => [r.label, r.value])).toEqual([
+      ["Mã HTTP", "401"],
+      ["Mã HTTP lúc ổn trở lại", "200"],
+    ]);
+  });
+
   it("mốc giờ: 'dd/MM HH:mm' 24 giờ, vi và en giống hệt (không '12-10' / 'PM')", () => {
     const vi = factRows(facts, createT("vi"), { locale: "vi", now: NOW }).find((r) => r.key === "sinceAt")?.value;
     const en = factRows(facts, createT("en"), { locale: "en", now: NOW }).find((r) => r.key === "sinceAt")?.value;

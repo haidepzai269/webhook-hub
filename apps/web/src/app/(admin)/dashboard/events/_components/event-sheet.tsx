@@ -3,11 +3,12 @@
 import { Route } from "lucide-react";
 import Link from "next/link";
 
+import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime } from "@/lib/hub/format";
 import { useEventDetail } from "@/lib/hub/queries";
@@ -36,7 +37,7 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
 
   return (
     <Sheet open={open && Boolean(eventId)} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
+      <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle className="font-mono text-base">{ev?.type ?? t("page.events.sheet.title")}</SheetTitle>
           <SheetDescription>
@@ -102,7 +103,7 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
             </>
           )}
         </div>
-      </SheetContent>
+      </AdminSheetContent>
     </Sheet>
   );
 }

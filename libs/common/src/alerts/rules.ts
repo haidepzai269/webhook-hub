@@ -200,6 +200,8 @@ export interface StreakFacts extends AlertFacts {
   /** Attempt CÙNG loại (401/403 hoặc 4xx khác) gần nhất — đóng "im" tính theo mốc này. */
   lastMatchAt?: string;
   dead?: number;
+  /** Mã 2xx của attempt đã làm cảnh báo ĐÓNG — để riêng, `httpStatus` giữ mã từ chối gốc (câu "… (401)" sau khi đóng). */
+  closedByStatus?: number;
 }
 
 function streakRule(
@@ -244,7 +246,8 @@ function streakRule(
   //    đang đúng trở lại -> KHÔNG đóng (đóng rồi mở lại lượt sau = flapping + email trùng).
   const success = streak >= minStreak ? undefined : newer.find((a) => classifyHttpOutcome(a.status) === 'success');
   const watermark = latest ? { lastAttemptAt: iso(new Date(Math.max(latest.at.getTime(), Number.isNaN(seen) ? 0 : seen))) } : {};
-  if (success) return { open: false, facts: { ...prev, ...facts, ...watermark, httpStatus: success.status } };
+  // Không ghi đè `httpStatus` (cảnh báo đã đóng vẫn phải đọc "Bên nhận từ chối xác thực (401)", không phải "(200)").
+  if (success) return { open: false, facts: { ...prev, ...facts, ...watermark, closedByStatus: success.status } };
   // 2) Đóng "im" khi 30 phút không có attempt CÙNG LOẠI (không phải "không có attempt nào": 500 liên tục không che 401 cũ).
   //    Mốc lấy max(input, facts) — input có LIMIT, attempt cùng loại có thể đã trôi khỏi danh sách.
   const lastMatch = Math.max(match ? match.at.getTime() : -Infinity, factTime(prev, 'lastMatchAt') || -Infinity);

@@ -7,17 +7,11 @@ import Link from "next/link";
 import { KeyRound, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -134,7 +128,7 @@ export default function ProjectsPage() {
       </Table>
 
       <Dialog open={open} onOpenChange={close}>
-        <DialogContent className="sm:max-w-lg">
+        <AdminDialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("page.projects.create")}</DialogTitle>
             <DialogDescription>
@@ -190,7 +184,7 @@ export default function ProjectsPage() {
               {create.isPending ? t("common.creating") : t("common.create")}
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </AdminDialogContent>
       </Dialog>
     </>
   );

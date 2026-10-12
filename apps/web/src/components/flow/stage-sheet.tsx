@@ -5,7 +5,8 @@ import { useState } from "react";
 import type { FlowBranch, StageView } from "@hub/flow";
 
 import { useT } from "@/lib/i18n/use-t";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { AdminSheetContent } from "@/components/admin/overlay-content";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 import { HeadersCard } from "./detail-cards";
 import { JsonViewer } from "./json-viewer";
@@ -28,7 +29,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
 
   return (
     <Sheet open={Boolean(stage)} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
+      <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
         {stage && (
           <>
             <SheetHeader>
@@ -103,7 +104,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
             </div>
           </>
         )}
-      </SheetContent>
+      </AdminSheetContent>
     </Sheet>
   );
 }

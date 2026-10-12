@@ -26,6 +26,7 @@ export const HIDDEN_FACT_KEYS: ReadonlySet<string> = new Set(["lastAttemptAt", "
 /** Thứ tự hiển thị + cách định dạng của khoá đã biết (rules.ts). Khoá nội bộ của hysteresis để cuối (và bị ẩn). */
 const KNOWN: [key: string, kind: Kind][] = [
   ["httpStatus", "text"],
+  ["closedByStatus", "text"],
   ["count", "count"],
   ["failed", "count"],
   ["total", "count"],

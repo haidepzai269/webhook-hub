@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Ban, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CopyButton } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
 import {
@@ -19,14 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -170,7 +164,7 @@ export default function ApiKeysPage() {
       </Table>
 
       <Dialog open={open} onOpenChange={close}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("page.api-keys.create")}</DialogTitle>
             <DialogDescription>{t("page.api-keys.dialog.description")}</DialogDescription>
@@ -219,7 +213,7 @@ export default function ApiKeysPage() {
               </Button>
             )}
           </DialogFooter>
-        </DialogContent>
+        </AdminDialogContent>
       </Dialog>
 
       <AlertDialog open={Boolean(target)} onOpenChange={(o) => !o && !revoke.isPending && setTarget(null)}>

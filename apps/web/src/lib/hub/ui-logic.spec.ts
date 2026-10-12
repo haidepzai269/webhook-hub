@@ -180,6 +180,22 @@ describe("socket -> invalidate: nhận định (insights) theo kịp KPI", () =>
   });
 });
 
+describe("nút đóng Dialog/Sheet của admin có nhãn đã dịch (không 'Close' trong giao diện tiếng Việt)", () => {
+  it("primitive nhận `closeLabel` (mặc định giữ cho Shop); admin chỉ dùng AdminDialogContent/AdminSheetContent", () => {
+    const root = path.join(__dirname, "..", "..");
+    for (const f of ["components/ui/dialog.tsx", "components/ui/sheet.tsx"]) {
+      const src = fs.readFileSync(path.join(root, f), "utf8");
+      expect(src).toContain("{closeLabel}");
+      expect(src).not.toContain(">Close<");
+    }
+    const walk = (d: string): string[] =>
+      fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith(".tsx") ? [path.join(d, e.name)] : []));
+    const admin = [...walk(path.join(root, "app", "(admin)")), ...walk(path.join(root, "components")).filter((f) => !f.includes(`${path.sep}ui${path.sep}`) && !f.endsWith("overlay-content.tsx"))];
+    const raw = admin.filter((f) => /<(Dialog|Sheet)Content[\s>]/.test(fs.readFileSync(f, "utf8")));
+    expect(raw).toEqual([]);
+  });
+});
+
 describe("L-6: đổi project thì xoá trace cũ (TraceFeed không hiện trace của project trước)", () => {
   it("socket.ts: unsubscribeProject đặt lại traces + toastCursor", () => {
     const src = fs.readFileSync(path.join(__dirname, "socket.ts"), "utf8");

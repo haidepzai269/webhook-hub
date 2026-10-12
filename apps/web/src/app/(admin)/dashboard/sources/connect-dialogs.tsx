@@ -5,15 +5,9 @@ import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
@@ -172,7 +166,7 @@ export function ConnectSourceDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
           <DialogDescription>{t("page.sources.connect.description")}</DialogDescription>
@@ -323,7 +317,7 @@ export function ConnectSourceDialog({
             </Button>
           )}
         </DialogFooter>
-      </DialogContent>
+      </AdminDialogContent>
     </Dialog>
   );
 }
@@ -381,7 +375,7 @@ export function ConnectionDialog({
   }, [mode, source, onClose, onConnect]);
   return (
     <Dialog open={Boolean(sourceId)} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <AdminDialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
           <DialogDescription className="font-mono text-xs">{c?.ingestUrl ?? ""}</DialogDescription>
@@ -434,7 +428,7 @@ export function ConnectionDialog({
             </div>
           </div>
         )}
-      </DialogContent>
+      </AdminDialogContent>
     </Dialog>
   );
 }

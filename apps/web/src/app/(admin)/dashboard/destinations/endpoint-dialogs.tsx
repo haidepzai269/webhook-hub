@@ -5,17 +5,11 @@ import { useState } from "react";
 import { Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { deliveryStatusKey } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -148,7 +142,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("page.destinations.endpoint.create-title")}</DialogTitle>
           <DialogDescription>{t("page.destinations.endpoint.create-description")}</DialogDescription>
@@ -240,7 +234,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
             </>
           )}
         </DialogFooter>
-      </DialogContent>
+      </AdminDialogContent>
     </Dialog>
   );
 }
@@ -260,7 +254,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
   };
   return (
     <Dialog open={Boolean(id)} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{ep?.name ?? t("page.destinations.endpoint.fallback-title")}</DialogTitle>
           <DialogDescription className="font-mono text-xs">{ep?.url ?? ""}</DialogDescription>
@@ -321,7 +315,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
             </div>
           </div>
         )}
-      </DialogContent>
+      </AdminDialogContent>
     </Dialog>
   );
 }

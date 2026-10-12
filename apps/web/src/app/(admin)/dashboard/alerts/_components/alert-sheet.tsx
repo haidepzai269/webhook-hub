@@ -2,11 +2,12 @@
 
 import { ArrowRight } from "lucide-react";
 
+import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { ProjectChip, SeverityIcon, useAlertText, useOpenAlertTarget } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { factRows } from "@/lib/alerts/facts";
 import { alertActions } from "@/lib/alerts/links";
 import type { AlertView } from "@/lib/alerts/types";
@@ -22,7 +23,7 @@ import { useLocale, useT } from "@/lib/i18n/use-t";
 export function AlertSheet({ alert, subjectName, onClose }: { alert: AlertView | null; subjectName: string | null; onClose: () => void }) {
   return (
     <Sheet open={Boolean(alert)} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-lg">{alert && <Body alert={alert} subjectName={subjectName} onClose={onClose} />}</SheetContent>
+      <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-lg">{alert && <Body alert={alert} subjectName={subjectName} onClose={onClose} />}</AdminSheetContent>
     </Sheet>
   );
 }
