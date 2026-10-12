@@ -70,6 +70,9 @@ function world() {
       Object.assign(cur, { state: 'RESOLVED', resolvedAt: now, facts: { ...cur.facts, ...patch } });
       return cur;
     },
+    async findOpenAlertsForSubjects(rule: string, ids: string[]) {
+      return alerts.filter((a) => a.state === 'OPEN' && a.rule === rule && ids.includes(a.subjectId));
+    },
     async resolveAlertById(id: string, now: Date, patch: any) {
       const cur = alerts.find((a) => a.id === id && a.state === 'OPEN');
       if (!cur) return null;
@@ -321,5 +324,24 @@ describe('CB2 AlertEvaluator (đi dây, repo giả)', () => {
     w2.data.destinations[0].isActive = false;
     await ev2.evaluateOnce(at(2 * MIN));
     expect(auth(w2).map((a) => a.state)).toEqual(['RESOLVED', 'OPEN']);
+  });
+
+  it('ảnh chụp OPEN bị cắt + circuit HALF_OPEN -> đọc bù dòng OPEN thật, cảnh báo circuit_open GIỮ MỞ (không đóng nhầm, không email/publish)', async () => {
+    const w = world();
+    const redis = fakeRedis();
+    const ev = new AlertEvaluator(w.prisma, redis as any);
+    w.data.destinations[0].circuitState = 'OPEN';
+    await ev.evaluateOnce(NOW);
+    const circuit = () => w.alerts.filter((a) => a.rule === 'destination.circuit_open');
+    expect(circuit().map((a) => a.state)).toEqual(['OPEN']);
+    w.data.openTruncated = true;
+    w.data.destinations[0].circuitState = 'HALF_OPEN';
+    const r = await ev.evaluateOnce(at(MIN));
+    expect(r.transitions).toBe(0);
+    expect(circuit().map((a) => a.state)).toEqual(['OPEN']);
+    expect(redis.publish).toHaveBeenCalledTimes(1);
+    w.data.destinations[0].circuitState = 'CLOSED';
+    await ev.evaluateOnce(at(2 * MIN));
+    expect(circuit().map((a) => a.state)).toEqual(['RESOLVED']);
   });
 });

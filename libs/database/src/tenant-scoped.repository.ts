@@ -1093,6 +1093,15 @@ export class TenantScopedRepository {
     return row ?? null;
   }
 
+  /**
+   * CB2: cảnh báo OPEN của MỘT luật cho các đối tượng cho trước — evaluator đọc bù khi ảnh chụp `findOpenAlerts` chạm
+   * trần, để quyết định với đúng `current` (hysteresis / HALF_OPEN / PENDING giữ mở) thay vì coi là "chưa mở".
+   */
+  async findOpenAlertsForSubjects(rule: string, subjectIds: string[]) {
+    if (subjectIds.length === 0) return [];
+    return this.prisma.alert.findMany({ where: { tenantId: this.tenantId, state: 'OPEN', rule, subjectId: { in: subjectIds } } });
+  }
+
   /** Cảnh báo đang OPEN của project (evaluator đọc để áp hysteresis / đóng). Dùng index (tenant_id, state, opened_at DESC). */
   async findOpenAlerts(limit = 500) {
     return this.prisma.alert.findMany({

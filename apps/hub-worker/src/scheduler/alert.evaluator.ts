@@ -322,9 +322,18 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
         for (const a of open.values()) {
           if (a.rule === rule && !covered.has(a.subjectId) && !truncated) candidates.push({ subjectId: a.subjectId, decide: () => ({ open: false, facts: { reason: 'archived' } }) });
         }
+        // Ảnh chụp OPEN bị cắt: đọc bù dòng OPEN thật của luật này cho đối tượng ngoài ảnh chụp — quyết định với current
+        // = null sẽ đóng nhầm cảnh báo đang giữ mở (HALF_OPEN, PENDING, vùng giữa của hysteresis).
+        const extra = new Map<string, OpenAlert>();
+        if (lap.openTruncated) {
+          const missing = candidates.map((c) => c.subjectId).filter((id) => !open.has(key(rule, id)));
+          for (const a of await repo.findOpenAlertsForSubjects(rule, missing)) {
+            extra.set(a.subjectId, { id: a.id, rule: a.rule, subjectId: a.subjectId, severity: a.severity as AlertSeverity, openedAt: a.openedAt, facts: (a.facts ?? {}) as AlertFacts });
+          }
+        }
         for (const c of candidates) {
           if (this.stopping) break; // shutdown: không ghi thêm, dừng ngay giữa luật (phần đã ghi là trạng thái hợp lệ)
-          const current = open.get(key(rule, c.subjectId)) ?? null;
+          const current = open.get(key(rule, c.subjectId)) ?? extra.get(c.subjectId) ?? null;
           const decision = c.decide({ now, current: current ? { openedAt: current.openedAt, facts: current.facts } : null });
           const changed = await this.apply(lap, rule, c.subjectId, decision, current, recipients);
           if (changed) out.transitions++;
@@ -449,12 +458,12 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
       this.transitioned(alert, rule, 'OPEN');
       return true;
     }
-    // Không có trong ảnh chụp: chưa mở -> thôi; NHƯNG ảnh chụp bị cắt thì có thể đang mở -> đóng theo (rule, subject).
-    if (!current && !lap.openTruncated) return false;
+    // Không có trong ảnh chụp (kể cả đọc bù khi ảnh chụp bị cắt) = chưa mở -> thôi.
+    if (!current) return false;
     const resolved = await this.prisma.tenantTx(tenantId, async (tx) => {
       const repo = this.prisma.forTenant(tenantId, tx);
       // Đóng ĐÚNG dòng trong ảnh chụp (theo id, còn OPEN) — không đóng nhầm dòng OPEN mới evaluator khác vừa mở.
-      const row = current ? await repo.resolveAlertById(current.id, now, decision.facts) : await repo.resolveAlert(rule, subjectId, now, decision.facts);
+      const row = await repo.resolveAlertById(current.id, now, decision.facts);
       if (row) await this.enqueueResolvedEmails(repo, row, recipients);
       return row;
     });
