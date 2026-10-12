@@ -8,6 +8,11 @@ module.exports = {
   collectCoverageFrom: ['**/*.(t|j)s'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
+  // Máy dev 16GB sập khi `npx jest` trơn mở 11 worker (mặc định = số lõi − 1). Khoá 2 ngay trong config; cờ CLI
+  // `--maxWorkers` vẫn thắng (verify/cli/run.ts truyền VERIFY_JEST_WORKERS=4 trên CI). Ghi đè không cần cờ:
+  // JEST_MAX_WORKERS (hoặc VERIFY_JEST_WORKERS). Worker vượt 512MB khi rảnh thì bị thay (ts-jest rò bộ nhớ qua nhiều suite).
+  maxWorkers: process.env.JEST_MAX_WORKERS || process.env.VERIFY_JEST_WORKERS || 2,
+  workerIdleMemoryLimit: '512MB',
   // VF7: worktree của agent (.claude/worktrees/*) và của probe (VF6) nằm DƯỚI thư mục repo → haste map thấy hai
   // bản @hub/* và mọi suite import @hub chết ("several different files … provide a module"). Bỏ qua chúng.
   modulePathIgnorePatterns: ['<rootDir>/.claude/', '<rootDir>/dist/'],
