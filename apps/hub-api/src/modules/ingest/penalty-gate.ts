@@ -5,13 +5,15 @@ import { ingestDuration, ingestRequests } from '../metrics/metrics';
 import { blockedAck, providerMetricLabel } from './blocked-ack';
 import { PenaltyBox, PenaltyVerdict } from './penalty-box';
 import { IngestService } from './ingest.service';
+import { HookRouteMatch, hooksPathOf, matchHookRoute, pathnameOfUrl } from './hooks-path';
 
 /**
  * D3 (SPEC-chong-qua-tai ĐÍNH CHÍNH D3/D4, ADR-177 bổ sung): gate hộp phạt TRƯỚC body parser. IP/cặp đang bị phạt nhận 429
  * ngay ở phase header — Node không đọc, không parse body (tới 1MB) của kẻ đang bị chặn.
  *
  * - Chỉ KIỂM (`checkIp`, `checkPair`). Chấm điểm (`recordUnknownSource`, `recordBadSignature`, `markGood`) vẫn ở ingest.
- * - Path không khớp khuôn -> `next()` (fail-open): ingest trả lỗi như cũ và vẫn tự kiểm hộp phạt sau body parser.
+ * - Path tách bằng `hooksPathOf` (parseurl, đúng như router) — không né được gate bằng `#`, absolute-form, provider viết
+ *   hoa. Không khớp `<route>/:a/:b` -> `next()`: router cũng không giao cho ingest.
  * - Chặn: `Connection: close` (`shouldKeepAlive=false`) để không phải nhận nốt body rác; 429 dựng bằng `blockedAck` dùng
  *   chung với ingest; metric `BLOCKED` ghi đúng MỘT lần ở đây (ingest không chạy); cặp có chủ -> lưu lượng `BLOCKED`
  *   như ingest. Gate ném lỗi -> log + `next()`.
@@ -20,9 +22,6 @@ import { IngestService } from './ingest.service';
 
 /** Route mặc định của gate. `/v1/p/*` KHÔNG có (D6: 401 API key ở ApiKeyGuard, luật (b) chưa áp cho /v1/p). */
 export const DEFAULT_PENALTY_GATE_ROUTES: readonly string[] = ['/hooks'];
-
-/** Khuôn của nginx (§3.4) trên phần path SAU route: `/:provider/:sourceKey`. */
-const HOOK_PATH_RE = /^\/([a-z0-9-]+)\/([A-Za-z0-9_-]{1,64})$/;
 
 export interface PenaltyGateDeps {
   penalty: PenaltyBox;
@@ -35,43 +34,25 @@ export interface PenaltyGateDeps {
 type GateReq = IncomingMessage & { ip?: string; originalUrl?: string; path?: string };
 
 /**
- * Tách `{provider, sourceKey}` từ path GIỐNG Express/Nest: so tiền tố không phân biệt hoa thường, bỏ query, chấp nhận MỘT
- * `/` cuối (routing không strict), mỗi đoạn `decodeURIComponent` một lần như `@Param()` — `/hooks/github/src%5Fx` là
- * `src_x` ở cả gate lẫn ingest (không né gate bằng percent-encoding). Không khớp -> null.
+ * Tách `{provider, sourceKey}` từ request-target GIỐNG router của Nest: pathname qua `parseurl` (bỏ query, `#frag`, chấp
+ * nhận absolute-form), rồi `matchHookRoute` (tiền tố không phân biệt hoa thường, một `/` cuối, decode từng đoạn như
+ * `@Param()`). KHÔNG lọc provider/khuôn sourceKey (review EG lượt 6, TB-1): mọi path router giao cho ingest thì gate cũng
+ * kiểm — `checkIp`/`checkPair` chỉ cần sourceKey; key lạ không thể là cặp tốt hay cặp bị ban nên chỉ luật (a) áp, đúng
+ * như ingest bước 0. Không khớp -> null.
  */
-export function parseHookPath(url: string | undefined, routes: readonly string[] = DEFAULT_PENALTY_GATE_ROUTES): { provider: string; sourceKey: string } | null {
-  if (!url) return null;
-  let path = url.split('?')[0];
-  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-  const lower = path.toLowerCase();
-  for (const route of routes) {
-    const r = route.toLowerCase();
-    if (!lower.startsWith(r + '/')) continue;
-    const segs = path.slice(r.length + 1).split('/');
-    if (segs.length !== 2) return null;
-    let provider: string;
-    let sourceKey: string;
-    try {
-      provider = decodeURIComponent(segs[0]);
-      sourceKey = decodeURIComponent(segs[1]);
-    } catch {
-      return null; // %xx hỏng: Express trả 400 — không phải việc của gate
-    }
-    const m = HOOK_PATH_RE.exec(`/${provider}/${sourceKey}`);
-    return m ? { provider: m[1], sourceKey: m[2] } : null;
-  }
-  return null;
+export function parseHookPath(url: string | undefined, routes: readonly string[] = DEFAULT_PENALTY_GATE_ROUTES): HookRouteMatch | null {
+  return matchHookRoute(pathnameOfUrl(url), routes);
 }
 
 export function createPenaltyGate(deps: PenaltyGateDeps): (req: GateReq, res: ServerResponse, next: (err?: unknown) => void) => void {
   const routes = deps.routes ?? DEFAULT_PENALTY_GATE_ROUTES;
   return function penaltyGate(req, res, next) {
     const startedAt = Date.now();
-    let hit: { provider: string; sourceKey: string } | null;
+    let hit: HookRouteMatch | null;
     let verdict: PenaltyVerdict;
     try {
       if (req.method !== 'POST') return next();
-      hit = parseHookPath(req.originalUrl ?? req.url, routes);
+      hit = matchHookRoute(hooksPathOf(req), routes); // app.use ở gốc: req.url = originalUrl
       if (!hit) return next();
       verdict = deps.penalty.checkIp(req.ip, hit.sourceKey);
       if (!verdict.blocked) verdict = deps.penalty.checkPair(req.ip, hit.sourceKey);

@@ -387,6 +387,34 @@ describe('EG2 hộp phạt — review lượt 5 (cache cặp tốt)', () => {
     expect(checkGoodInvariants(box)).toEqual([]);
   });
 
+  it('THẤP-1 (R6): tenant bị GIẢM do hết hạn không thành "vừa hoạt động" — đứng trước tenant đang gửi cùng mức', () => {
+    let now = 0;
+    const box = new PenaltyBox(cfg({ maxGoodKeys: 2, goodTtlMs: 1_000 }), {}, () => now);
+    box.markGood(gh, 'q1', 'tenant-quiet'); // hết hạn lúc 1000
+    now = 500;
+    box.markGood(gh, 'q2', 'tenant-quiet'); // tenant-quiet: 2 key, nằm im từ đây
+    now = 900;
+    box.markGood('140.82.115.71', 'a1', 'tenant-active'); // ĐANG gửi
+    now = 1_001;
+    box.recordBadSignature(gh, 'q1', { tenantId: 'tenant-quiet', sourceId: 's-q1' }); // isGood thấy q1 hết hạn -> giảm về 1 key
+    expect(present(box, 'q1')).toBe(false);
+    box.markGood('140.82.115.72', 'n1', 'tenant-new'); // vượt trần key: bucket 1 = {quiet (nguội), active, new}
+    expect(present(box, 'a1')).toBe(true); // trước fix: quiet về CUỐI bucket như vừa hoạt động -> a1 bị loại
+    expect(present(box, 'q2')).toBe(false);
+    expect(checkGoodInvariants(box)).toEqual([]);
+  });
+
+  it('THẤP-1 (R6): tenant đang gọi bị đẩy IP (goodIpsPerKey) vẫn là "vừa hoạt động"', () => {
+    const box = new PenaltyBox(cfg({ goodMaxEntries: 8, goodIpsPerKey: 4, maxGoodKeys: 100 }));
+    for (let i = 0; i < 4; i++) box.markGood(`2001:db8:1:${i}::1`, 'old', 'tenant-old'); // 4 mục, nằm im
+    for (let i = 0; i < 4; i++) box.markGood(`2001:db8:2:${i}::1`, 'cur', 'tenant-cur'); // 4 mục
+    box.markGood('2001:db8:2:9::1', 'cur', 'tenant-cur'); // đẩy 1 IP của chính nó: +1 -1, vẫn 4 mục, vẫn nóng
+    box.markGood('2001:db8:3::1', 'n', 'tenant-n'); // vượt trần mục: bucket 4 = {old, cur} -> loại old
+    expect(present(box, 'cur')).toBe(true);
+    expect(present(box, 'old')).toBe(false);
+    expect(checkGoodInvariants(box)).toEqual([]);
+  });
+
   it('NÊN-1: chạm trần MỤC thì loại theo số mục của tenant — tenant 3 key × 1 IP không bị 130 tenant × 16 IP đẩy', () => {
     const box = new PenaltyBox(cfg({ goodMaxEntries: 2_000, goodIpsPerKey: 16, maxGoodKeys: 10_000 }));
     for (const k of ['v1', 'v2', 'v3']) box.markGood(gh, k, 'tenant-victim');

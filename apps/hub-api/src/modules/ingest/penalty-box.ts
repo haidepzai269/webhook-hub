@@ -25,6 +25,11 @@ import { logger } from '@hub/common';
  *   RAM đo (review lượt 5, heapUsed, trường hợp xấu: mỗi tenant 1 key): ~850 B/key kèm IP đầu + ~120 B/IP thêm -> mặc định ≈ 17MB.
  * - Ban hết hạn được quét ở đầu Map `banned` (banMs cố định -> thứ tự chèn = thứ tự hết hạn); `banned` có trần riêng
  *   (≤ 50% `maxEntries`) — đầy thì không tạo ban mới (fail-open, có log + metric); khoá vừa chèn không bao giờ bị loại.
+ * - Độ phức tạp (review lượt 6, NÊN-1 — đính chính "O(1)"): LRU ở đây là `Map`/`Set` (`delete` + `set`, đọc phần tử đầu).
+ *   OrderedHashTable của V8 không xoá vật lý phần tử bị `delete` tới lần rehash kế tiếp, nên đọc phần tử đầu phải bước qua
+ *   các "lỗ" dồn ở đầu bảng: mỗi thao tác là O(dung lượng bảng) XẤU NHẤT, bị chặn trên bởi các trần. Đo (review R6, ts-node):
+ *   `markGood` key mới khi bảng đầy ~3µs ở 1k key, ~19µs ở 10k (mặc định), ~41µs ở 50k (kẹp trên); `recordUnknownSource`
+ *   IP mới khi hộp đầy ~3µs ở 1k, ~24µs ở 10k, ~31µs ở 50k (mặc định). Vẫn nhỏ hơn một truy vấn DB; chấp nhận (ADR-177 lần 7).
  * - IP loopback/private/dùng chung (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, ::1, fc00::/7, fe80::/10,
  *   IPv4-mapped của chúng) không chấm điểm, không
  *   chặn — sau NAT/proxy chưa cấu hình, mọi người trông như một IP. `EDGE_PENALTY_ENABLED=0` tắt hẳn hộp phạt.
@@ -312,9 +317,9 @@ export class PenaltyBox {
     while (e.ips.size > this.goodIpsPerKey) {
       e.ips.delete(e.ips.keys().next().value as string);
       this.goodEntries--;
-      this.entryTally.add(t, -1);
+      this.entryTally.add(t, -1, true); // tenant đang gọi: giảm nhưng VẪN vừa hoạt động
     }
-    while (tk.size > this.goodKeysPerTenant) this.removeGoodKey(tk.values().next().value as string);
+    while (tk.size > this.goodKeysPerTenant) this.removeGoodKey(tk.values().next().value as string, true);
     // Mỗi lần chỉ thêm ≤ 1 key và ≤ 1 mục; mỗi lần loại bớt ≥ 1 key và ≥ 1 mục -> vòng chạy ≤ 2 lần.
     for (;;) {
       const overKeys = this.good.size > this.maxGoodKeys;
@@ -336,7 +341,8 @@ export class PenaltyBox {
 
   /**
    * Key cũ nhất của tenant đứng đầu `tally` (đếm cao nhất; cùng mức thì nằm im lâu nhất); không bao giờ là `keep`.
-   * Thường trả ngay ở bucket cao nhất; chỉ bỏ qua tenant đang gọi khi nó chỉ còn `keep` (≤ goodIpsPerKey bậc) -> O(1).
+   * Thường trả ngay ở bucket cao nhất; chỉ bỏ qua tenant đang gọi khi nó chỉ còn `keep` (≤ goodIpsPerKey bậc). Số bước
+   * thuật toán O(1), nhưng đọc phần tử đầu Set/Map của V8 phải bước qua "lỗ" do `delete` -> xem NÊN-1 ở `PenaltyBox`.
    */
   private fairVictim(tally: TenantTally, keep: string): string | undefined {
     for (let n = tally.max; n > 0; n--) {
@@ -397,20 +403,24 @@ export class PenaltyBox {
     return true;
   }
 
-  private removeGoodKey(sourceKey: string): void {
+  /** `active`: tenant của key đang gọi `markGood` (giảm nhưng vẫn vừa hoạt động); mặc định — hết hạn/bị loại — là nguội. */
+  private removeGoodKey(sourceKey: string, active = false): void {
     const e = this.good.get(sourceKey);
     if (!e) return;
     this.goodEntries -= e.ips.size;
-    this.entryTally.add(e.tenantId, -e.ips.size);
+    this.entryTally.add(e.tenantId, -e.ips.size, active);
     this.good.delete(sourceKey);
     const tk = this.tenantKeys.get(e.tenantId);
     if (tk && tk.delete(sourceKey)) {
-      this.keyTally.add(e.tenantId, -1);
+      this.keyTally.add(e.tenantId, -1, active);
       if (tk.size === 0) this.tenantKeys.delete(e.tenantId);
     }
   }
 
-  /** Key ở đầu bảng là key hoạt động cũ nhất; `lastExp` = hạn muộn nhất của nó -> hết hạn thì cả key hết hạn. O(1) khấu hao. */
+  /**
+   * Key ở đầu bảng là key hoạt động cũ nhất; `lastExp` = hạn muộn nhất của nó -> hết hạn thì cả key hết hạn. Số key bị xoá
+   * O(1) khấu hao, nhưng lấy phần tử đầu Map là O(số lỗ) trên V8 (xem NÊN-1 ở `PenaltyBox`).
+   */
   private sweepExpiredGood(now: number): void {
     for (const [key, e] of this.good) {
       if (e.lastExp > now) break;
@@ -455,7 +465,7 @@ export class PenaltyBox {
     this.evict(key);
   }
 
-  /** Ban hết hạn nằm ở đầu Map (banMs cố định) — dừng ở ban đầu tiên còn hiệu lực: O(1) khấu hao. */
+  /** Ban hết hạn nằm ở đầu Map (banMs cố định) — dừng ở ban đầu tiên còn hiệu lực (số ban xoá O(1) khấu hao; NÊN-1). */
   private sweepExpiredBans(now: number): void {
     for (const [k, b] of this.banned) {
       if (b.until > now) break;
@@ -482,16 +492,35 @@ export class PenaltyBox {
 }
 
 /**
- * Đếm theo tenant + bucket theo giá trị đếm (`đếm -> tập tenant`). Mỗi bucket là Set giữ thứ tự CHẠM: tenant vừa hoạt động ở
- * cuối (review lượt 5, TB-1). Chuyển bucket O(1) dù đếm đổi bao nhiêu. `max` = bucket cao nhất khác rỗng: chỉ tăng ≤ 1 mỗi
- * `markGood` (thêm ≤ 1 key / ≤ 1 mục), nên tổng số bậc vòng lùi ≤ tổng số lần tăng -> O(1) khấu hao.
+ * Đếm theo tenant + bucket theo giá trị đếm (`đếm -> tập tenant`). Thứ tự trong bucket: nhóm NGUỘI (vào bucket do bị giảm
+ * vì hết hạn/bị loại — review lượt 6, THẤP-1) trước, rồi nhóm NÓNG theo thứ tự CHẠM (tenant vừa hoạt động ở cuối, review
+ * lượt 5, TB-1). Chuyển bucket O(1) bước dù đếm đổi bao nhiêu. `max` = bucket cao nhất khác rỗng: chỉ tăng ≤ 1 mỗi
+ * `markGood` (thêm ≤ 1 key / ≤ 1 mục), nên tổng số bậc vòng lùi ≤ tổng số lần tăng -> O(1) bước khấu hao (chi phí "lỗ" của
+ * Set V8: NÊN-1 ở `PenaltyBox`).
  */
+class TallyBucket {
+  /** Bị giảm khi KHÔNG hoạt động (hết hạn / bị loại) — đứng trước mọi tenant vừa hoạt động cùng mức. */
+  readonly cold = new Set<string>();
+  readonly hot = new Set<string>();
+  get size(): number {
+    return this.cold.size + this.hot.size;
+  }
+  delete(t: string): boolean {
+    return this.cold.delete(t) || this.hot.delete(t);
+  }
+  *[Symbol.iterator](): IterableIterator<string> {
+    yield* this.cold;
+    yield* this.hot;
+  }
+}
+
 class TenantTally {
   readonly counts = new Map<string, number>();
-  readonly buckets = new Map<number, Set<string>>();
+  readonly buckets = new Map<number, TallyBucket>();
   max = 0;
 
-  add(tenantId: string, delta: number): void {
+  /** `active` (mặc định = tăng): tenant vừa hoạt động -> cuối nhóm nóng; giảm do hết hạn/bị loại -> nhóm nguội (THẤP-1). */
+  add(tenantId: string, delta: number, active = delta > 0): void {
     if (delta === 0) return;
     const from = this.counts.get(tenantId) ?? 0;
     const to = Math.max(0, from + delta);
@@ -504,10 +533,10 @@ class TenantTally {
       this.counts.set(tenantId, to);
       let b = this.buckets.get(to);
       if (!b) {
-        b = new Set();
+        b = new TallyBucket();
         this.buckets.set(to, b);
       }
-      b.add(tenantId);
+      (active ? b.hot : b.cold).add(tenantId);
     } else this.counts.delete(tenantId);
     if (to > this.max) this.max = to;
     while (this.max > 0 && !this.buckets.has(this.max)) this.max--;
@@ -519,7 +548,7 @@ class TenantTally {
     const b = n ? this.buckets.get(n) : undefined;
     if (!b) return;
     b.delete(tenantId);
-    b.add(tenantId);
+    b.hot.add(tenantId);
   }
 }
 

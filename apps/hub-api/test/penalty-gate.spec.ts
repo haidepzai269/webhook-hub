@@ -172,27 +172,53 @@ describe('[EG:T19] D3 gate hộp phạt trước body parser', () => {
     expect(ingestSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('path lạ cho qua (ingest tự xử lý); percent-encoding decode như @Param — không né được gate', async () => {
-    const r = await rawPost(port, '/hooks/github/bad.key', BANNED, 2, 2); // không khớp khuôn -> gate cho qua
-    expect(r.status).toBe(429); // ...ingest vẫn tự chặn sau body parser
-    expect(ingestSpy).toHaveBeenCalledTimes(1);
-    ingestSpy.mockClear();
+  it('path router không giao cho ingest thì gate cho qua; sourceKey lạ vẫn bị gate chặn (luật a); percent-encoding decode như @Param', async () => {
+    const odd = await rawPost(port, '/hooks/github/bad.key', BANNED, 1024 * 1024, 1024); // R6: không lọc khuôn sourceKey
+    expect(odd.status).toBe(429);
+    expect(ingestSpy).not.toHaveBeenCalled();
+    const r = await rawPost(port, '/hooks/github/a/b', BANNED, 2, 2); // 3 đoạn: router không khớp route -> 404 của Nest
+    expect(r.status).toBe(404);
+    expect(ingestSpy).not.toHaveBeenCalled();
     const enc = await rawPost(port, '/hooks/github/src%5Fgate', BANNED, 1024 * 1024, 1024); // = src_gate
     expect(enc.status).toBe(429);
     expect(enc.headers.connection).toBe('close');
     expect(ingestSpy).not.toHaveBeenCalled();
   });
 
+  // Review lượt 6, TB-1: gate phải thấy path GIỐNG router (parseurl().pathname) — không né được bằng #fragment,
+  // absolute-form hay provider viết hoa (router Express 5 không phân biệt hoa thường).
+  for (const [name, path] of [
+    ['#fragment', '/hooks/github/src_gate#x'],
+    ['absolute-form', 'http://hub.test/hooks/github/src_gate'],
+    ['provider viết hoa', '/hooks/GitHub/src_gate'],
+  ] as const) {
+    it(`TB-1 (R6): ${name} — IP bị ban vẫn 429 ở gate khi mới gửi 16KB / 1MB, ingest không chạy`, async () => {
+      const r = await rawPost(port, path, BANNED, 1024 * 1024, 16 * 1024);
+      expect(r.status).toBe(429);
+      expect(r.headers.connection).toBe('close');
+      expect(r.body).toMatchObject({ error: 'ip_temporarily_blocked' });
+      expect(ingestSpy).not.toHaveBeenCalled();
+    });
+  }
+
   it('parseHookPath khớp như Express/Nest; route cấu hình được', () => {
     expect(parseHookPath('/hooks/github/src_x')).toEqual({ provider: 'github', sourceKey: 'src_x' });
     expect(parseHookPath('/hooks/github/src_x?a=1')).toEqual({ provider: 'github', sourceKey: 'src_x' });
     expect(parseHookPath('/HOOKS/payos/k-1/')).toEqual({ provider: 'payos', sourceKey: 'k-1' });
     expect(parseHookPath('/hooks/github/src%5Fx')).toEqual({ provider: 'github', sourceKey: 'src_x' });
-    for (const p of ['/hooksx/github/k', '/hooks/github', '/hooks/github/a/b', '/hooks/github/' + 'a'.repeat(65), '/hooks/GitHub/k', '/hooks/github/%E0%A4%A', '/v1/p/x/events', '/hooks/github/a%2Fb']) {
+    // R6 TB-1: cùng pathname với router (parseurl) — #frag, absolute-form; không lọc provider / khuôn sourceKey
+    expect(parseHookPath('/hooks/github/src_x#frag')).toEqual({ provider: 'github', sourceKey: 'src_x' });
+    expect(parseHookPath('http://h/hooks/github/src_x?a=1')).toEqual({ provider: 'github', sourceKey: 'src_x' });
+    expect(parseHookPath('/hooks/GitHub/k')).toEqual({ provider: 'GitHub', sourceKey: 'k' });
+    expect(parseHookPath('/hooks/github/a%2Fb')).toEqual({ provider: 'github', sourceKey: 'a/b' });
+    expect(parseHookPath('/hooks/github/' + 'a'.repeat(65))).toEqual({ provider: 'github', sourceKey: 'a'.repeat(65) });
+    for (const p of ['/hooksx/github/k', '/hooks/github', '/hooks/github/a/b', '/hooks/github/%E0%A4%A', '/v1/p/x/events', '//hooks/github/k', '/hooks//github/k', '/hooks/github//k', '/hooks%2Fgithub/k']) {
       expect([p, parseHookPath(p)]).toEqual([p, null]);
     }
     expect(parseHookPath('/in/github/k', ['/in'])).toEqual({ provider: 'github', sourceKey: 'k' });
     expect(parseHookPath('/hooks/github/k', ['/in'])).toBeNull();
+    // route lồng nhau: route đầu sai số đoạn -> thử route sau (THẤP-3)
+    expect(parseHookPath('/in/x/github/k', ['/in', '/in/x'])).toEqual({ provider: 'github', sourceKey: 'k' });
   });
 
   it('gate không gọi tới Redis/DB và GET / route khác đi thẳng qua', () => {

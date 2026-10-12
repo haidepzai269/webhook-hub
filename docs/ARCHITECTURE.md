@@ -112,9 +112,10 @@ Tách ra mua được ba thứ:
 ```
 0.  Hộp phạt theo IP (bộ nhớ, 0 Redis, 0 DB — §7.5, ADR-177): IP đang bị phạt vì dò sourceKey -> 429 -> DỪNG
     (trừ cặp (IP, sourceKey) đã verify đúng trong 24h gần nhất — IP chung của provider không cắt source đang chạy)
-    Kiểm HAI chỗ, cùng một instance PenaltyBox (D3): gate TRƯỚC body parser (`penalty-gate.ts`, path khớp
-    `/hooks/:provider/:sourceKey` -> checkIp + checkPair; chặn -> 429 + Connection: close, KHÔNG đọc body) rồi ingest
-    kiểm lại sau body parser (path lạ / gate lỗi -> gate cho qua, fail-open). Chấm điểm chỉ ở ingest.
+    Kiểm HAI chỗ, cùng một instance PenaltyBox (D3): gate TRƯỚC body parser (`penalty-gate.ts`, path tách bằng
+    `hooksPathOf` = parseurl như router, khớp `/hooks/:provider/:sourceKey` không lọc provider -> checkIp + checkPair;
+    chặn -> 429 + Connection: close, KHÔNG đọc body) rồi ingest kiểm lại sau body parser (gate lỗi -> cho qua,
+    fail-open). Chấm điểm chỉ ở ingest.
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
 2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant)
        không tìm thấy -> 404 (+1 điểm phạt cho IP) -> DỪNG · tắt / đã lưu trữ -> 404 (không tính điểm) -> DỪNG
