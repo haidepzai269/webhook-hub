@@ -346,6 +346,17 @@ curl -si -X POST $API/v1/p/cafe/endpoints -H "Authorization: Bearer $KEY_MOI" -d
 for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/v1/p/cafe/endpoints/$EID/verify -H "Authorization: Bearer $KEY"; done
 ```
 
+## ip_temporarily_blocked
+
+**429 (`/hooks/*`).** Hộp phạt của hub-api (ADR-177) đang tạm chặn IP của bạn: (a) quá nhiều request vào `sourceKey`
+**không tồn tại** từ cùng một IP (mặc định ≥ 20 lần/60s) -> chặn mọi `/hooks/*` từ IP đó; hoặc (b) quá nhiều request
+**sai chữ ký** vào cùng một source từ cùng một IP (mặc định ≥ 30 lần/60s) -> chỉ chặn cặp (IP, source) đó. Mặc định chặn
+10 phút. Tham số: `retryAfter` (giây còn lại, cũng có ở header `Retry-After`). Source tắt/đã lưu trữ không tính điểm.
+**Sửa:** kiểm URL webhook (đúng `sourceKey`) và secret đã cấu hình ở provider, rồi đợi hết `retryAfter`.
+```bash
+for i in $(seq 1 21); do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/hooks/github/khong_ton_tai -d '{}'; done
+```
+
 ## use_endpoints_route
 
 **422.** `POST /api/v1/destinations` với `type:"webhook"`. Endpoint webhook tạo ở route riêng để hub sinh `whsec_`,

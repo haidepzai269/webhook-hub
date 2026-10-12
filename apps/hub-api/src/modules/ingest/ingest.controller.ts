@@ -30,6 +30,7 @@ export class IngestController {
     };
 
     const result = await this.ingestService.ingestWebhook(rawReq);
+    if (result.headers) res.set(result.headers); // EG2: Retry-After của hộp phạt
     return res.status(result.status).json(result.body);
   }
 }

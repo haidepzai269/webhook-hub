@@ -1814,3 +1814,16 @@ Gói `cuckoo-filter@1.1.4` thì `require` lỗi ngay (thiếu `cbor-js`). Bloom 
 - **Stripe — giao SDK đã kiểm:** `stripe` **22.6.2**, `constructEvent` → `NodePlatformFunctions.secureCompare` (`cjs/platform/NodePlatformFunctions.js`) so độ dài rồi gọi `crypto.timingSafeEqual`.
 CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
 **Đánh đổi:** Tin vào triển khai của SDK. Version được ghim bởi `package-lock.json`, nhưng `libs/providers/package.json` khai `^4.1.0` / `^22.6.2` nên `npm install` có thể kéo bản minor mới → **mọi lần lockfile đổi version octokit hoặc stripe phải kiểm lại** hàm so còn gọi `timingSafeEqual`.
+
+---
+
+## ADR-177 — Hộp phạt IP của `/hooks/*` nằm trong hub-api, trạng thái trong bộ nhớ, không Lua, không Redis; 401 phạt theo cặp (IP, sourceKey), 404 của source đã lưu trữ không tính điểm (EG2, 2026-10-12)
+
+**Vấn đề:** ingest nạp source từ Postgres trước mọi lớp chặn — `sourceKey` ngẫu nhiên chạm DB không giới hạn (pool Neon rất nhỏ), còn ai biết một `sourceKey` thật thì bắn chữ ký sai bao nhiêu cũng được. nginx bản thường (không Lua, Q3) không biết request vừa rồi ra 404 hay 401.
+**Chọn:** `apps/hub-api/src/modules/ingest/penalty-box.ts`, trạng thái trong bộ nhớ từng instance, **0 lệnh Redis, 0 truy vấn DB** (`redis-budget.spec.ts` không đổi). Luật (a): ≥ 20 lần 404 do **không tìm thấy** source trong 60s → chặn mọi `/hooks/*` của IP đó 10 phút, kiểm **trước** khi nạp source. Luật (b): ≥ 30 lần 401 trong 60s → chặn **chỉ cặp (IP, sourceKey)** 10 phút. IPv6 gộp theo /64. 429 `ip_temporarily_blocked` + `Retry-After`, log `warn` một lần khi bắt đầu phạt, metric `hub_ingest_penalty_{bans,blocked}_total{reason}`, `hub_ingest_penalty_entries`, `hub_ingest_unknown_source_total`. Tham số `EDGE_PENALTY_*` kẹp khoảng như `resolveSendTimeoutMs`. Lỗi trong hộp phạt → cho đi qua (fail-open).
+**Đánh đổi:**
+- **Mỗi instance đếm riêng** → ngưỡng thực tế nhân theo số instance hub-api; phạt không lan sang instance khác. Chấp nhận: mục tiêu là bịt lỗ 404→DB rẻ nhất có thể, không phải bộ đếm chính xác toàn cụm.
+- **404 của source tắt/đã lưu trữ không tính điểm:** provider thật vẫn gửi vào source đã "Xoá" (ADR-161); đếm nó là khoá IP của GitHub/PayOS cho mọi tenant.
+- **401 phạt theo cặp, không phạt cả IP:** một tenant cấu hình sai secret GitHub làm IP GitHub ra 401 hàng loạt; phạt cả IP là tenant khác dùng chung GitHub mất webhook. Cái giá: kẻ đổi `sourceKey` liên tục không bị luật (b) bắt — nhưng `sourceKey` lạ thì rơi vào luật (a).
+- **Bộ nhớ có trần** `EDGE_PENALTY_MAX_ENTRIES` (50.000), LRU, khoá đang bị phạt giữ lâu hơn khoá đang đếm → nhiều IP chỉ làm hộp đầy, không cạn RAM; khi đầy thì có thể quên bớt bộ đếm của IP chưa bị phạt.
+- `/v1/p/*` (`publishFromService`) **chưa** áp luật (b): 401 API key nằm ở `ApiKeyGuard`, không đi qua ingest; để P2 nếu có số đo cần.

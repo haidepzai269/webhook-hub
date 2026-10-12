@@ -39,3 +39,33 @@ export const emailFilterSize = new Gauge({
   help: 'Số email đã nạp vào Bloom filter của instance này',
   registers: [apiRegistry],
 });
+
+/**
+ * EG2 (SPEC-chong-qua-tai §4.2, ADR-177): hộp phạt IP trong bộ nhớ của `/hooks/*`. `reason` chỉ có hai giá trị cố định
+ * (không gắn IP/sourceKey vào nhãn — tránh nổ cardinality).
+ */
+export const penaltyBans = new Counter({
+  name: 'hub_ingest_penalty_bans_total',
+  help: 'Số lần hộp phạt bắt đầu tạm chặn (unknown_source = IP; bad_signature = cặp IP + sourceKey)',
+  labelNames: ['reason'] as const,
+  registers: [apiRegistry],
+});
+
+export const penaltyBlocked = new Counter({
+  name: 'hub_ingest_penalty_blocked_total',
+  help: 'Số request /hooks bị hộp phạt chặn (429 ip_temporarily_blocked)',
+  labelNames: ['reason'] as const,
+  registers: [apiRegistry],
+});
+
+export const penaltyEntries = new Gauge({
+  name: 'hub_ingest_penalty_entries',
+  help: 'Số khoá hộp phạt đang giữ trong bộ nhớ của instance này (có trần EDGE_PENALTY_MAX_ENTRIES)',
+  registers: [apiRegistry],
+});
+
+export const unknownSourceTotal = new Counter({
+  name: 'hub_ingest_unknown_source_total',
+  help: 'Số request /hooks có sourceKey không tồn tại (404, không thuộc tenant nào — không lưu vào DB)',
+  registers: [apiRegistry],
+});

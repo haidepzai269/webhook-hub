@@ -519,7 +519,7 @@ Cập nhật dùng optimistic locking: `UPDATE ... WHERE id = ? AND version = ?`
 | Raw body | `NestFactory.create(AppModule, { rawBody: true })` — **cấu hình NGÀY 1** |
 | So sánh | **Không bao giờ** so bằng `!==`/`===`. Tự so bằng `crypto.timingSafeEqual` (kể cả khi so API key), hoặc dùng SDK đã kiểm là gọi `timingSafeEqual` (ADR-174) |
 | URL khó đoán | `/hooks/:provider/:sourceKey`, `sourceKey` ngẫu nhiên 32 ký tự |
-| Giới hạn | payload ≤ 1MB · rate limit cửa sổ cố định 60s theo source (mặc định 100/phút) |
+| Giới hạn | payload ≤ 1MB · rate limit cửa sổ cố định 60s theo source (mặc định 100/phút) · hộp phạt IP cho `sourceKey` lạ / chữ ký sai liên tục (§7.5, ADR-177) |
 | Lưu cả request hỏng | chữ ký sai vẫn INSERT `status=REJECTED` để điều tra — chỉ 4KB đầu, ≤ 20 bản/phút/source; header nhạy cảm đã che (ADR-045, ADR-051) |
 | Nguồn tuỳ chỉnh (GenericAdapter) | `hmac-sha256` (hex/base64, prefix, trên raw body) · `static-token` · `standard-webhooks`, cấu hình ở `sources.verification_config`; thiếu khoá chống trùng → REJECTED + 422, không fallback ulid; header token do adapter khai được che trước khi lưu (ADR-079) |
 | API cho service | `Authorization: Bearer hk_<env>_…` → `ApiKeyGuard`: 401 → 404 (project khác = không tồn tại, cùng body) → 403 thiếu scope; DB chỉ giữ sha256 (ADR-073) |
@@ -575,6 +575,25 @@ Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong m�
 - Mask trong log: token, số tài khoản, chữ ký.
 
 ---
+
+### 7.5. Chống quá tải ở cửa vào (SPEC-chong-qua-tai)
+
+Mỗi lớp được phép sai theo hướng **cho đi qua** (fail-open); không lớp nào được chặn oan **lặng lẽ** — mọi lần chặn có
+log có cấu trúc, lần chặn ở hub-api có thêm metric. Không lớp nào tham gia quyết định trùng/không trùng (BB-2).
+
+**Hộp phạt IP trong hub-api (EG2, ADR-177)** — `apps/hub-api/src/modules/ingest/penalty-box.ts`, chỉ áp `/hooks/*`.
+Trạng thái trong bộ nhớ từng instance: **0 lệnh Redis, 0 truy vấn DB**.
+
+| Sự kiện | Khoá | Ngưỡng mặc định | Phạt |
+|---|---|---|---|
+| (a) 404 vì **không tìm thấy** source | IP (IPv6 gộp /64) | ≥ 20 / 60s | chặn mọi `/hooks/*` của IP 10 phút — kiểm **trước** khi nạp source |
+| (b) 401 sai chữ ký | (IP, sourceKey) | ≥ 30 / 60s | chặn chỉ cặp đó 10 phút |
+| 404 vì source tắt/đã lưu trữ · 2xx · trùng · 429 | — | không tính điểm | — |
+
+Bị chặn → `429 ip_temporarily_blocked` + `Retry-After` (giây còn lại). Log `warn` một lần lúc bắt đầu phạt. Metric
+`hub_ingest_penalty_bans_total{reason}`, `hub_ingest_penalty_blocked_total{reason}`, `hub_ingest_penalty_entries`,
+`hub_ingest_unknown_source_total`. Trần `EDGE_PENALTY_MAX_ENTRIES` khoá (LRU; khoá đang bị phạt giữ lâu hơn khoá đang đếm).
+Ngưỡng thực tế nhân theo số instance hub-api (mỗi instance đếm riêng).
 
 ## 8. Quan sát (Observability)
 

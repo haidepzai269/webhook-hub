@@ -433,6 +433,11 @@ METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub
                          # (Prometheus không tự đọc env trong file cấu hình). Local: để trống.
 WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
 INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
+EDGE_PENALTY_404_THRESHOLD=20  # hub-api, hộp phạt (EG2, ADR-177): số 404 do sourceKey KHÔNG tồn tại / 60s / IP thì chặn
+                         # mọi /hooks/* của IP đó. Kẹp 5–1000. Mỗi instance đếm riêng (ngưỡng thực tế × số instance)
+EDGE_PENALTY_401_THRESHOLD=30  # số 401 sai chữ ký / 60s / cặp (IP, sourceKey) thì chặn CHỈ cặp đó. Kẹp 5–1000
+EDGE_PENALTY_BAN_SECONDS=600   # thời gian phạt, kẹp 30–86400
+EDGE_PENALTY_MAX_ENTRIES=50000 # trần số khoá trong bộ nhớ (LRU, khoá đang phạt giữ lâu hơn). Kẹp 1000–1000000
 DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078); đổi phải restart worker
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần
                          # WEB_PUBLIC_URL (gốc deep link trong thư) + MAIL_DRIVER/MAIL_FROM/GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN

@@ -220,6 +220,14 @@ export const ERROR_CATALOG = {
     params: ['retryAfter'],
     fix: (p) => (Number.isFinite(p.retryAfter) ? `Wait ${p.retryAfter} seconds and retry.` : 'Slow down and retry later (see "detail" for the limit).'),
   },
+  // EG2 (SPEC-chong-qua-tai §4.2, ADR-177): hộp phạt của `/hooks/*` — IP gửi nhiều request vào sourceKey không tồn tại,
+  // hoặc cặp (IP, sourceKey) ký sai liên tục, bị tạm chặn. `retryAfter` = số giây phạt còn lại (cũng nằm ở header Retry-After).
+  ip_temporarily_blocked: {
+    status: 429,
+    message: 'This IP is temporarily blocked from sending webhooks (too many unknown-source or bad-signature requests).',
+    params: ['retryAfter'],
+    fix: (p) => `Check the webhook URL (sourceKey) and the signing secret configured at the provider, then retry${Number.isFinite(p.retryAfter) ? ` after ${p.retryAfter} seconds` : ' later'}.`,
+  },
   // ---- kết nối hai đầu (SPEC-ket-noi, ADR-138) ----
   use_endpoints_route: {
     status: 422,

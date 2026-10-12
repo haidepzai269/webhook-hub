@@ -236,6 +236,22 @@
         }
       },
       "note": "DINH-CHINH D9: CB:T17 (lưu trữ đích có ≥10 delivery chờ -> không mở dead_spike). Checklist đọc từ chính file này: dòng `- [x] CB2` cuối file."
+    },
+    {
+      "ns": "EG",
+      "file": "_bmad-output/planning-artifacts/edge/SPEC-chong-qua-tai.md",
+      "pattern": "^\\|\\s*`\\[EG:(T\\d+)\\]`\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (EG\\d+)",
+        "groups": {
+          "EG1": "T2,T3,T9,T10,T11,T16",
+          "EG2": "T1,T4-T7",
+          "EG3": "T8,T12",
+          "EG4": "T13",
+          "EG5": "T14,T15"
+        }
+      },
+      "note": "SPEC-chong-qua-tai §8. EG1 (nginx) ở nhánh feat/edge-nginx; EG2–EG5 ở nhánh feat/edge."
     }
   ],
   "inline": [

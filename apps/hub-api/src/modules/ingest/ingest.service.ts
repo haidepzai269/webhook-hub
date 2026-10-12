@@ -12,12 +12,18 @@ import {
   OutboxPayload,
   TraceIngestedNotice,
   MAX_INGEST_PAYLOAD_BYTES,
+  ERROR_CATALOG,
+  docsUrlFor,
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
 import { redactHeaders } from './redact-headers';
-import { ingestDuration, ingestRequests } from '../metrics/metrics';
+import { ingestDuration, ingestRequests, penaltyBans, penaltyBlocked, penaltyEntries, unknownSourceTotal } from '../metrics/metrics';
 import { DuplicateCounter } from './duplicate-counter';
+import { PenaltyBox, PenaltyVerdict, logBan, resolvePenaltyConfig } from './penalty-box';
+
+/** Phản hồi của lõi ingest. `headers` chỉ dùng cho 429 của hộp phạt (`Retry-After`). */
+export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string> };
 
 /**
  * S2-2 (ADR-049): chặng ①–④ (nhận, verify, COMMIT, ACK) chạy trong hub-api -> phát `trace.ingested`
@@ -33,6 +39,33 @@ interface TraceState {
   tenantId?: string;
   outcome?: TraceIngestedNotice['outcome'];
   rawEventId?: string;
+  /** EG2: cặp (ip, sourceKey) đang bị hộp phạt chặn — tenant đã biết, không có `outcome` (không phát trace). */
+  blocked?: boolean;
+}
+
+const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
+
+/**
+ * EG2: 429 `ip_temporarily_blocked` theo khuôn ERRORS.md + `Retry-After` (giây phạt còn lại). `requestId` = `x-request-id`
+ * hợp lệ (nginx gắn, EG1) hoặc correlationId — nối được log hai bên.
+ */
+function blockedAck(retryAfter: number, req: RawWebhookRequest, trace: TraceState): IngestResponse {
+  const code = 'ip_temporarily_blocked';
+  const def = ERROR_CATALOG[code];
+  const given = req.headers?.['x-request-id'];
+  const rid = Array.isArray(given) ? given[0] : given;
+  return {
+    status: 429,
+    headers: { 'Retry-After': String(retryAfter) },
+    body: {
+      error: 'ip_temporarily_blocked',
+      message: def.message,
+      fix: def.fix({ retryAfter }),
+      docsUrl: docsUrlFor(code),
+      requestId: typeof rid === 'string' && REQUEST_ID_RE.test(rid) ? rid : trace.correlationId,
+      retryAfter,
+    },
+  };
 }
 
 /**
@@ -64,6 +97,17 @@ export class IngestService implements OnModuleDestroy {
    * `record()` không I/O: ACK trùng không chậm thêm, ngân sách Redis không đổi.
    */
   readonly duplicates = new DuplicateCounter((tenantId, rows) => this.prisma.forTenant(tenantId).addIngestDuplicates(rows));
+  /**
+   * EG2 (ADR-177): hộp phạt IP trong bộ nhớ — 0 lệnh Redis, 0 truy vấn DB. Mọi lời gọi đi qua `penaltySafe` (fail-open).
+   * Gán lại được (test).
+   */
+  penalty = new PenaltyBox(resolvePenaltyConfig(), {
+    onBan: (reason, ip, sourceKey, banSeconds) => {
+      penaltyBans.inc({ reason });
+      logBan(reason, ip, sourceKey, banSeconds);
+    },
+    onBlocked: (reason) => penaltyBlocked.inc({ reason }),
+  });
 
   constructor(
     private readonly prisma: PrismaService,
@@ -79,7 +123,7 @@ export class IngestService implements OnModuleDestroy {
     await this.duplicates.close();
   }
 
-  async ingestWebhook(req: RawWebhookRequest): Promise<{ status: number; body: unknown }> {
+  async ingestWebhook(req: RawWebhookRequest): Promise<IngestResponse> {
     return this.traced(req, (trace) => this.ingestCore(req, trace));
   }
 
@@ -117,8 +161,8 @@ export class IngestService implements OnModuleDestroy {
   /** Bọc chung cho /hooks và /events: metric trong bộ nhớ + `trace.ingested` in-process (0 lệnh Redis). */
   private async traced(
     req: RawWebhookRequest,
-    run: (trace: TraceState) => Promise<{ status: number; body: unknown }>,
-  ): Promise<{ status: number; body: unknown }> {
+    run: (trace: TraceState) => Promise<IngestResponse>,
+  ): Promise<IngestResponse> {
     const startedAt = Date.now();
     const trace: TraceState = { correlationId: generateCorrelationId() };
     const result = await run(trace);
@@ -249,13 +293,17 @@ export class IngestService implements OnModuleDestroy {
     }
   }
 
-  private async ingestCore(req: RawWebhookRequest, trace: TraceState): Promise<{ status: number; body: unknown }> {
+  private async ingestCore(req: RawWebhookRequest, trace: TraceState): Promise<IngestResponse> {
     const correlationId = trace.correlationId;
     const log = logger.child({
       correlationId,
       provider: req.provider,
       sourceKey: req.sourceKey,
     });
+
+    // 0. EG2 luật (a): IP đang bị phạt vì dò sourceKey -> chặn TRƯỚC khi chạm Postgres (0 Redis, 0 DB).
+    const ipVerdict = this.penaltySafe(() => this.penalty.checkIp(req.ip), { blocked: false } as PenaltyVerdict);
+    if (ipVerdict.blocked) return blockedAck(ipVerdict.retryAfterSec, req, trace);
 
     // 1. Kiểm tra kích thước payload <= 1MB
     if (req.rawBody.length > MAX_INGEST_PAYLOAD_BYTES) {
@@ -282,9 +330,26 @@ export class IngestService implements OnModuleDestroy {
     // ADR-161: source đã lưu trữ bị từ chối y như source tắt — cùng 404, không lộ khác biệt.
     if (!source || !source.isActive || source.archivedAt) {
       log.warn('Source không tồn tại hoặc đã bị vô hiệu hóa');
+      // EG2 luật (a): CHỈ 404 do không tìm thấy source mới tính điểm. Source tắt/đã lưu trữ thì không (provider thật
+      // vẫn gửi vào source đã "Xoá" — đếm nó là khoá IP của GitHub/PayOS cho mọi tenant).
+      if (!source) {
+        try {
+          unknownSourceTotal.inc();
+        } catch {
+          /* metric không làm hỏng ingest */
+        }
+        this.penaltySafe(() => this.penalty.recordUnknownSource(req.ip), undefined);
+      }
       return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
     }
     trace.tenantId = source.tenantId;
+
+    // 2a. EG2 luật (b): cặp (IP, sourceKey) đang bị phạt vì ký sai liên tục -> chặn trước verify/rate limit.
+    const pairVerdict = this.penaltySafe(() => this.penalty.checkPair(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
+    if (pairVerdict.blocked) {
+      trace.blocked = true;
+      return blockedAck(pairVerdict.retryAfterSec, req, trace);
+    }
 
     // 2b. Rate limit theo source (cửa sổ cố định 60s, INCR+EXPIRE)
     const rateLimitKey = `rate:source:${source.id}`;
@@ -325,6 +390,8 @@ export class IngestService implements OnModuleDestroy {
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
       await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
       trace.outcome = 'REJECTED';
+      // EG2 luật (b): phạt theo CẶP (ip, sourceKey) — tenant khác dùng chung IP của provider không bị vạ lây.
+      this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
       return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log);
     }
 
@@ -347,6 +414,18 @@ export class IngestService implements OnModuleDestroy {
     });
     // 8. ACK theo định dạng của provider
     return this.ackFor(adapter, persisted, idempotencyKey, trace);
+  }
+
+  /** EG2: hộp phạt lỗi thì cho request đi qua như chưa có hộp phạt (fail-open) — chỉ log. */
+  private penaltySafe<T>(fn: () => T, fallback: T): T {
+    try {
+      const r = fn();
+      penaltyEntries.set(this.penalty.size());
+      return r;
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, 'Hộp phạt lỗi -> cho request đi qua (fail-open)');
+      return fallback;
+    }
   }
 
   /** Mẫu request bị từ chối (§7.1, S1-4): ≤4KB body, ≤20 bản ghi/phút/source; vượt trần chỉ log. */
