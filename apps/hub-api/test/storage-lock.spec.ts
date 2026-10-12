@@ -99,7 +99,7 @@ describe('QT3 — khoá chiều ghi (507 project_storage_full)', () => {
     expect(traffic.mock.calls[0][0]).toEqual([expect.objectContaining({ outcome: 'STORAGE_FULL', count: 1, bytes: 0 })]);
   });
 
-  it('[QT:T3] LOCKED: publish /v1/p trả 507; qua exception filter ra khuôn {error, message, fix, docsUrl, requestId} giữ status 507', async () => {
+  it('[QT:T3] (phần a) LOCKED: publish /v1/p trả 507; qua exception filter ra khuôn {error, message, fix, docsUrl, requestId} giữ status 507', async () => {
     const { svc, tx, redisCalls } = setup({ full: { level: 'LOCKED' } });
     const r = await publish(svc, 'full');
     expect(r).toEqual({ status: 507, body: { error: 'project_storage_full' } });
@@ -112,6 +112,27 @@ describe('QT3 — khoá chiều ghi (507 project_storage_full)', () => {
     expect(body.fix).toEqual(expect.any(String));
     // 5xx khác vẫn bị che như cũ
     expect(toErrorBody(new HttpException({ error: 'project_storage_full' }, 500), 'rid-2').body.error).toBe('internal_error');
+  });
+
+  it('[QT:T3] (phần b) chỉ 507 project_storage_full được giữ; internal_error/service_unavailable của catalog vẫn che message/detail như trước QT (review M1)', async () => {
+    // internal_error mang message nội bộ -> 500, KHÔNG detail, không lộ chuỗi; `original` chỉ để log
+    const ie = toErrorBody(new HttpException({ error: 'internal_error', message: 'db at 10.0.0.5' }, 500), 'r1');
+    expect(ie.status).toBe(500);
+    expect(ie.body.error).toBe('internal_error');
+    expect(ie.body).not.toHaveProperty('detail');
+    expect(JSON.stringify(ie.body)).not.toContain('10.0.0.5');
+    expect(ie.original).toEqual({ error: 'internal_error', message: 'db at 10.0.0.5' });
+    // service_unavailable (hubError kèm câu tiếng Việt) -> 503, không detail, original giữ cho log
+    const su = toErrorBody(new HttpException({ error: 'service_unavailable', message: 'Không gửi được email thử' }, 503), 'r2');
+    expect(su.status).toBe(503);
+    expect(su.body.error).toBe('service_unavailable');
+    expect(su.body).not.toHaveProperty('detail');
+    expect(su.original).toEqual({ error: 'service_unavailable', message: 'Không gửi được email thử' });
+    // 507 vẫn 507, có detail, không original
+    const full = toErrorBody(new HttpException({ error: 'project_storage_full', message: 'Project hết dung lượng' }, 507), 'r3');
+    expect(full.status).toBe(507);
+    expect(full.body).toMatchObject({ error: 'project_storage_full', detail: 'Project hết dung lượng' });
+    expect(full.original).toBeUndefined();
   });
 
   it('[QT:T5] project A LOCKED thì project B cùng hub vẫn nhận 200 (/hooks và publish)', async () => {

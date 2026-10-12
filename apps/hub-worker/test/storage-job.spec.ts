@@ -1,5 +1,13 @@
-import { STORAGE_CALIBRATE_LOCK_KEY, STORAGE_LEVEL_LOCK_KEY, StorageJob } from '../src/scheduler/storage.job';
-import { workerRegistry } from '../src/metrics';
+import { logger } from '@hub/common';
+import {
+  STORAGE_CALIBRATE_LOCK_KEY,
+  STORAGE_LEVEL_LOCK_KEY,
+  STORAGE_MEASURE_STATEMENT_TIMEOUT_MS,
+  STORAGE_MEASURE_TX_TIMEOUT_MS,
+  StorageJob,
+  isStorageMeasureTimeout,
+} from '../src/scheduler/storage.job';
+import { storageCalibrations, workerRegistry } from '../src/metrics';
 
 const MB = 1024 * 1024;
 
@@ -26,6 +34,7 @@ function tickRow(o: Partial<Record<string, unknown>> = {}) {
     level: 'OK',
     calibratedBytes: 0,
     calibratedAt: new Date(),
+    calibratedAtToken: '2026-10-12 08:00:00.123456+00',
     freedSinceCalibration: 0,
     bloatFactor: 2,
     quotaMb: 1,
@@ -35,8 +44,10 @@ function tickRow(o: Partial<Record<string, unknown>> = {}) {
 }
 
 function fakePrisma(rows: any[], extra: Record<string, unknown> = {}) {
-  const updates: { tenantId: string; usedBytes: number; level: string }[] = [];
+  const updates: { tenantId: string; usedBytes: number; level: string; calibratedAtToken?: string | null }[] = [];
   const prisma: any = {
+    // tenantTx thật mở transaction tương tác; ở đây chỉ chuyển `tx` giả vào fn (đủ để kiểm options truyền xuống)
+    tenantTx: jest.fn(async (tenantId: string, fn: (tx: any) => Promise<unknown>, _opts?: unknown) => fn({ __tx: tenantId })),
     storageLevelTickAcrossTenants: jest.fn(async () => rows),
     storageProjectsDueForCalibrationAcrossTenants: jest.fn(async () => []),
     databaseSizeBytes: jest.fn(async () => 100 * MB),
@@ -61,7 +72,7 @@ describe('QT2 StorageJob (E2, §6)', () => {
     process.env = env;
   });
 
-  it('[QT:T12] hai worker đo song song chỉ một lượt chạy (khoá SET NX EX ~0,9 chu kỳ, không nhả); Redis lỗi -> bỏ lượt, không đọc DB', async () => {
+  it('[QT:T12] (phần a) hai worker đo song song chỉ một lượt chạy (khoá SET NX EX ~0,9 chu kỳ, không nhả); Redis lỗi -> bỏ lượt, không đọc DB', async () => {
     const redis = sharedRedis();
     const a = fakePrisma([tickRow()]);
     const b = fakePrisma([tickRow()]);
@@ -153,5 +164,110 @@ describe('QT2 StorageJob (E2, §6)', () => {
     prisma.databaseSizeBytes.mockResolvedValue(10 * MB);
     expect((await job.levelTick()).disk).toEqual({ sizeBytes: 10 * MB, nearFull: false });
     expect(await workerRegistry.getSingleMetricAsString('hub_storage_near_full')).toMatch(/hub_storage_near_full 0/);
+  });
+
+  it('[QT:T32] (phần e) quét thật chạy trong tenantTx có hạn rõ ràng (60s, không phải 5s mặc định) + statement_timeout cục bộ; quá hạn -> metric result="timeout", log, job không chết (review M2)', async () => {
+    const measureOpts: unknown[] = [];
+    const clients: unknown[] = [];
+    const warn = jest.spyOn(logger, 'warn').mockImplementation((() => undefined) as any);
+    const { prisma } = fakePrisma([], {
+      storageProjectsDueForCalibrationAcrossTenants: jest.fn(async () => ['big', 'small']),
+      findProjectById: jest.fn(async (id: string) => ({ id, storageQuotaMb: 1 })),
+      forTenant: (tenantId: string, client?: unknown) => ({
+        findProjectUsage: jest.fn(async () => null),
+        measureStorage: jest.fn(async (o: unknown) => {
+          measureOpts.push(o);
+          clients.push(client);
+          if (tenantId === 'big') throw Object.assign(new Error('canceling statement due to statement timeout'), { code: 'P2010', meta: { code: '57014' } });
+          return { totalBytes: 10, bodyRawBytes: 10, bySource: {} };
+        }),
+        saveStorageCalibration: jest.fn(async () => 1),
+      }),
+    });
+    const count = async (result: string) => (await storageCalibrations.get()).values.find((v) => v.labels.result === result)?.value ?? 0;
+    const [timeout0, error0] = [await count('timeout'), await count('error')];
+    try {
+      const r = await new StorageJob(prisma, sharedRedis()).calibrateTick(['big', 'small']);
+      expect(r).toEqual({ skipped: false, calibrated: ['small'], failed: ['big'] });
+      // tenantTx(tenantId, fn, { timeout: 60s, maxWait }) — repo dựng trên tx của chính transaction đó
+      expect(prisma.tenantTx).toHaveBeenCalledWith('big', expect.any(Function), expect.objectContaining({ timeout: STORAGE_MEASURE_TX_TIMEOUT_MS, maxWait: expect.any(Number) }));
+      expect(STORAGE_MEASURE_TX_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+      expect(STORAGE_MEASURE_STATEMENT_TIMEOUT_MS).toBeLessThan(STORAGE_MEASURE_TX_TIMEOUT_MS);
+      expect(measureOpts).toEqual([{ statementTimeoutMs: STORAGE_MEASURE_STATEMENT_TIMEOUT_MS }, { statementTimeoutMs: STORAGE_MEASURE_STATEMENT_TIMEOUT_MS }]);
+      expect(clients).toEqual([{ __tx: 'big' }, { __tx: 'small' }]);
+      expect((await count('timeout')) - timeout0).toBe(1);
+      expect((await count('error')) - error0).toBe(0);
+      expect(warn).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'big', timeout: true }), expect.stringMatching(/quá hạn/));
+    } finally {
+      warn.mockRestore();
+    }
+    expect(isStorageMeasureTimeout({ code: 'P2028', message: 'Transaction API error' })).toBe(true);
+    expect(isStorageMeasureTimeout(new Error('Transaction already closed: A query cannot be executed on an expired transaction'))).toBe(true);
+    expect(isStorageMeasureTimeout(new Error('relation "hub.x" does not exist'))).toBe(false);
+    expect(isStorageMeasureTimeout(null)).toBe(false);
+  });
+
+  it('[QT:T32] (phần f) ghi nấc là compare-and-set theo mốc ĐÃ ĐỌC: hiệu chỉnh xen giữa (0 dòng) -> không đếm updated, không báo đổi nấc (review L1)', async () => {
+    const tokenRead = '2026-10-12 08:00:00.123456+00';
+    let calibratedMeanwhile = true;
+    const sent: any[] = [];
+    const { prisma } = fakePrisma([tickRow({ tenantId: 't-race', calibratedBytes: 1.2 * MB, level: 'OK', calibratedAtToken: tokenRead })]);
+    prisma.forTenant = () => ({
+      // DB giả: hiệu chỉnh vừa ghi mốc mới -> `calibrated_at IS NOT DISTINCT FROM <token đã đọc>` không khớp -> 0 dòng
+      updateStorageUsage: jest.fn(async (m: any) => {
+        sent.push(m);
+        return calibratedMeanwhile ? 0 : 1;
+      }),
+    });
+    const job = new StorageJob(prisma, sharedRedis());
+    const seen: string[] = [];
+    job.onLevelChange.push((c) => void seen.push(`${c.from}->${c.to}`));
+    const lost = await job.levelTick();
+    expect(sent[0]).toMatchObject({ calibratedAtToken: tokenRead, level: 'HARD_LOCKED' });
+    expect(lost).toMatchObject({ updated: 0, changes: [] });
+    expect(seen).toEqual([]);
+    calibratedMeanwhile = false; // không có hiệu chỉnh xen giữa -> ghi như thường
+    const ok = await job.levelTick();
+    expect(ok.updated).toBe(1);
+    expect(seen).toEqual(['OK->HARD_LOCKED']);
+  });
+
+  it('[QT:T12] (phần b) stop() khi đang có lượt chạy dở: trả về ngay (không chờ lượt bay), không hẹn lượt mới, vòng hiệu chỉnh dừng trước project kế (review L5)', async () => {
+    jest.useFakeTimers();
+    try {
+      let releaseLevel: () => void = () => undefined;
+      let releaseMeasure: () => void = () => undefined;
+      const measured: string[] = [];
+      const { prisma } = fakePrisma([], {
+        storageLevelTickAcrossTenants: jest.fn(() => new Promise((res) => (releaseLevel = () => res([])))),
+        storageProjectsDueForCalibrationAcrossTenants: jest.fn(async () => ['p1', 'p2', 'p3']),
+        findProjectById: jest.fn(async (id: string) => ({ id, storageQuotaMb: 1 })),
+        forTenant: (tenantId: string) => ({
+          findProjectUsage: jest.fn(async () => null),
+          measureStorage: jest.fn(() => {
+            measured.push(tenantId);
+            return new Promise((res) => (releaseMeasure = () => res({ totalBytes: 1, bodyRawBytes: 1, bySource: {} })));
+          }),
+          saveStorageCalibration: jest.fn(async () => 1),
+        }),
+      });
+      const job = new StorageJob(prisma, sharedRedis());
+      job.start();
+      await jest.advanceTimersByTimeAsync(91_000); // cả hai timer khởi động (≤ 15s và ≤ 90s) đã nổ, hai lượt đang treo
+      expect(prisma.storageLevelTickAcrossTenants).toHaveBeenCalledTimes(1);
+      expect(measured).toEqual(['p1']);
+      const t0 = performance.now();
+      job.stop(); // đồng bộ: không await lượt bay -> không thể kéo dài quá SHUTDOWN_TIMEOUT_MS (25s)
+      expect(performance.now() - t0).toBeLessThan(1_000);
+      expect(jest.getTimerCount()).toBe(0);
+      releaseLevel();
+      releaseMeasure();
+      await jest.advanceTimersByTimeAsync(10 * 3_600_000);
+      expect(measured).toEqual(['p1']); // p2, p3 để lượt sau (instance khác / lần khởi động sau)
+      expect(prisma.storageLevelTickAcrossTenants).toHaveBeenCalledTimes(1); // không hẹn lượt mới sau khi tắt
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

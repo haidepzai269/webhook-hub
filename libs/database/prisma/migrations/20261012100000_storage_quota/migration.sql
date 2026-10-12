@@ -4,6 +4,10 @@
 -- -> đặt app.rls_system ngay đầu (gate data-migration-rls, ADR-111/125). Dùng set_config(…, false) (mức phiên) thay vì
 -- SET LOCAL: đúng cả khi công cụ migrate không bọc file trong transaction; trả lại '' ở cuối file.
 SELECT set_config('app.rls_system', 'on', false);
+-- Review QT-S1 L2: ALTER chỉ ghi metadata nhưng vẫn XẾP HÀNG chờ ACCESS EXCLUSIVE — kẹt sau một truy vấn dài thì mọi INSERT
+-- của ingest kẹt theo. Chờ khoá tối đa 5s rồi thất bại thay vì treo đường nóng (migrate deploy báo lỗi -> `prisma migrate
+-- resolve --rolled-back 20261012100000_storage_quota` rồi deploy lại lúc vắng).
+SELECT set_config('lock_timeout', '5s', false);
 
 -- E2: request bị 507 hiện trong khối "Lưu lượng" (bytes = 0). Giá trị enum mới KHÔNG dùng trong chính migration này.
 ALTER TYPE "hub"."TrafficOutcome" ADD VALUE IF NOT EXISTS 'STORAGE_FULL';
@@ -101,3 +105,4 @@ SELECT p.id, 'storage.policies.seeded', 'project', p.id::text, 'system:migration
 FROM "hub"."projects" p;
 
 SELECT set_config('app.rls_system', '', false);
+SELECT set_config('lock_timeout', '0', false);

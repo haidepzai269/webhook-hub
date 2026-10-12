@@ -155,7 +155,7 @@ export const storageLevelTransitions = new Counter({
 
 export const storageCalibrations = new Counter({
   name: 'hub_project_storage_calibrations_total',
-  help: 'Số lần hiệu chỉnh (quét thật) dung lượng project',
+  help: 'Số lần hiệu chỉnh (quét thật) dung lượng project — result: ok | error | timeout',
   labelNames: ['result'] as const,
   registers: [workerRegistry],
 });

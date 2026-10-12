@@ -69,4 +69,25 @@ describeDb('QT2: đo cộng dồn + hiệu chỉnh (Postgres)', () => {
     expect(await svc1.storageProjectsDueForCalibrationAcrossTenants(new Date(Date.now() + 60_000), 10, [A])).toEqual([A]);
     expect(await svc1.storageProjectsDueForCalibrationAcrossTenants(new Date(Date.now() - 3_600_000), 10, [A])).toEqual([]);
   });
+
+  it('[QT:T32] (phần g) ghi nấc compare-and-set theo mốc đã đọc (đủ µs): hiệu chỉnh xen giữa -> 0 dòng, số quét giữ nguyên; measureStorage chạy được trong tenantTx có statement_timeout (review L1+M2)', async () => {
+    const repo = svc1.forTenant(A);
+    const [before] = await svc1.storageLevelTickAcrossTenants([A]);
+    expect(before.calibratedAtToken).toEqual(expect.any(String));
+    // không ai xen giữa -> token đọc ra khớp lại đúng (text -> timestamptz không mất µs)
+    expect(await repo.updateStorageUsage({ usedBytes: before.usedBytes, level: before.level, calibratedAtToken: before.calibratedAtToken })).toBe(1);
+    // hiệu chỉnh ghi mốc mới giữa lúc job nấc đọc và ghi
+    const m = await svc2.tenantTx(A, (tx) => svc2.forTenant(A, tx).measureStorage({ statementTimeoutMs: 30_000 }), { timeout: 60_000 });
+    await new Promise((r) => setTimeout(r, 5)); // now() chắc chắn khác mốc cũ
+    await svc2.forTenant(A).saveStorageCalibration({ calibratedBytes: m.totalBytes, bloatFactor: 2, bySource: m.bySource, level: 'OK' });
+    expect(await repo.updateStorageUsage({ usedBytes: 1, level: 'HARD_LOCKED', calibratedAtToken: before.calibratedAtToken })).toBe(0);
+    const u = await repo.findProjectUsage();
+    expect({ used: Number(u!.usedBytes), level: u!.level }).toEqual({ used: m.totalBytes, level: 'OK' });
+    // statement_timeout cục bộ chỉ sống trong transaction đó: phiên khác không bị ảnh hưởng
+    await svc2.tenantTx(A, async (tx) => {
+      await svc2.forTenant(A, tx).measureStorage({ statementTimeoutMs: 1234 });
+      const [{ v }] = await tx.$queryRaw<{ v: string }[]>`SELECT current_setting('statement_timeout') AS v`;
+      expect(v).toBe('1234ms');
+    });
+  });
 });

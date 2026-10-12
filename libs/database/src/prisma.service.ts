@@ -457,10 +457,10 @@ export class PrismaService {
     const scope = tenantIds ? Prisma.sql`WHERE pu.tenant_id = ANY(${tenantIds}::uuid[])` : Prisma.empty;
     return this.systemTx('storage: level tick', async (tx) => {
       const rows = await tx.$queryRaw<
-        { tenantId: string; usedBytes: bigint; level: string; calibratedBytes: bigint; calibratedAt: Date | null; freed: bigint; bloatFactor: number; quotaMb: number | null; trafficBytes: bigint }[]
+        { tenantId: string; usedBytes: bigint; level: string; calibratedBytes: bigint; calibratedAt: Date | null; calibratedAtToken: string | null; freed: bigint; bloatFactor: number; quotaMb: number | null; trafficBytes: bigint }[]
       >(Prisma.sql`
         SELECT pu.tenant_id AS "tenantId", pu.used_bytes AS "usedBytes", pu.level, pu.calibrated_bytes AS "calibratedBytes",
-               pu.calibrated_at AS "calibratedAt", pu.freed_since_calibration AS freed, pu.bloat_factor::float8 AS "bloatFactor",
+               pu.calibrated_at AS "calibratedAt", pu.calibrated_at::text AS "calibratedAtToken", pu.freed_since_calibration AS freed, pu.bloat_factor::float8 AS "bloatFactor",
                p.storage_quota_mb AS "quotaMb",
                COALESCE((SELECT sum(t.bytes) FROM hub.source_traffic_minutely t
                          WHERE t.tenant_id = pu.tenant_id
@@ -474,6 +474,7 @@ export class PrismaService {
         level: r.level,
         calibratedBytes: Number(r.calibratedBytes),
         calibratedAt: r.calibratedAt,
+        calibratedAtToken: r.calibratedAtToken,
         freedSinceCalibration: Number(r.freed),
         bloatFactor: Number(r.bloatFactor),
         quotaMb: r.quotaMb,
@@ -665,6 +666,8 @@ export interface StorageTickRow {
   level: string;
   calibratedBytes: number;
   calibratedAt: Date | null;
+  /** `calibrated_at::text` (đủ µs) — khoá compare-and-set khi ghi nấc (review QT-S1 L1). */
+  calibratedAtToken: string | null;
   freedSinceCalibration: number;
   bloatFactor: number;
   quotaMb: number | null;

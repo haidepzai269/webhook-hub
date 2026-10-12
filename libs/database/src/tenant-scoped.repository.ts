@@ -1371,8 +1371,14 @@ export class TenantScopedRepository {
    * error) qua pg_column_size, `audit_logs` (metadata + reason). Không tính index/TOAST overhead — số liệu ƯỚC TÍNH.
    * `bodyRawBytes` = mẫu số của hệ số phình. Khoá `bySource`: id source; `_none` = event không còn source; `_audit`.
    */
-  async measureStorage(): Promise<{ totalBytes: number; bodyRawBytes: number; bySource: Record<string, number> }> {
+  async measureStorage(opts: { statementTimeoutMs?: number } = {}): Promise<{ totalBytes: number; bodyRawBytes: number; bySource: Record<string, number> }> {
     const t = this.tenantId;
+    // Review QT-S1 M2: = `SET LOCAL statement_timeout` (is_local = true -> chỉ sống trong transaction đang chạy, an toàn với
+    // pgbouncer). Postgres tự huỷ câu quét quá lâu (57014) TRƯỚC khi transaction tương tác của Prisma hết hạn.
+    const ms = opts.statementTimeoutMs;
+    if (ms !== undefined && Number.isFinite(ms) && ms > 0) {
+      await this.prisma.$executeRaw`SELECT set_config('statement_timeout', ${String(Math.floor(ms))}, true)`;
+    }
     const rows = await this.prisma.$queryRaw<{ k: string; raw: bigint; other: bigint }[]>(Prisma.sql`
       WITH r AS (
         SELECT r.source_id::text AS k, sum(octet_length(r.body_raw))::bigint AS raw
@@ -1424,11 +1430,16 @@ export class TenantScopedRepository {
         level = EXCLUDED.level, measured_at = EXCLUDED.measured_at`);
   }
 
-  /** QT2 (E2): job cập nhật nấc ghi lại số cộng dồn + nấc (chỉ gọi khi có đổi). */
-  async updateStorageUsage(m: { usedBytes: number; level: string }): Promise<number> {
+  /**
+   * QT2 (E2): job cập nhật nấc ghi lại số cộng dồn + nấc (chỉ gọi khi có đổi). Review QT-S1 L1: compare-and-set theo mốc
+   * hiệu chỉnh ĐÃ ĐỌC (`calibratedAtToken` = `calibrated_at::text`, đủ µs — Date của JS chỉ tới ms). Hiệu chỉnh ghi mốc
+   * mới xen giữa lúc đọc và lúc ghi -> 0 dòng: số quét thật thắng, lượt nấc sau tính lại từ mốc mới.
+   */
+  async updateStorageUsage(m: { usedBytes: number; level: string; calibratedAtToken: string | null }): Promise<number> {
     return this.prisma.$executeRaw(Prisma.sql`
       UPDATE hub.project_usage SET used_bytes = ${m.usedBytes}::bigint, level = ${m.level}, measured_at = now()
-      WHERE tenant_id = ${this.tenantId}::uuid`);
+      WHERE tenant_id = ${this.tenantId}::uuid
+        AND calibrated_at IS NOT DISTINCT FROM ${m.calibratedAtToken}::timestamptz`);
   }
 
   async addIngestDuplicates(rows:{ sourceId: string; bucket: Date; n: number }[]): Promise<number> {

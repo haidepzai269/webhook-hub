@@ -47,7 +47,22 @@ export const STORAGE_LEVEL_LOCK_KEY = 'storage:level:lock';
 export const STORAGE_CALIBRATE_LOCK_KEY = 'storage:calibrate:lock';
 /** Số project tối đa hiệu chỉnh mỗi lượt (mỗi project một truy vấn) — phần còn lại sang lượt sau (cũ nhất trước). */
 export const STORAGE_CALIBRATE_BATCH = 50;
+/**
+ * Review QT-S1 M2: quét thật của project lớn (Neon vừa thức dậy) có thể quá 5s — mặc định transaction tương tác của Prisma.
+ * Chạy trong `tenantTx` có hạn rõ ràng + `statement_timeout` cục bộ NGẮN HƠN hạn đó (Postgres huỷ câu sạch sẽ trước).
+ */
+export const STORAGE_MEASURE_TX_TIMEOUT_MS = 60_000;
+export const STORAGE_MEASURE_TX_MAX_WAIT_MS = 10_000;
+export const STORAGE_MEASURE_STATEMENT_TIMEOUT_MS = 55_000;
 const HOUR_MS = 3_600_000;
+
+/** Lỗi hết thời gian khi quét: Postgres huỷ câu (57014) hoặc transaction tương tác Prisma hết hạn (P2028). */
+export function isStorageMeasureTimeout(err: unknown): boolean {
+  const e = err as { code?: unknown; meta?: { code?: unknown }; message?: unknown } | null;
+  if (!e) return false;
+  if (e.code === 'P2028' || e.code === '57014' || e.meta?.code === '57014') return true;
+  return typeof e.message === 'string' && /statement timeout|canceling statement|transaction already closed|expired transaction|timeout for this transaction/i.test(e.message);
+}
 const LOCKED_LEVELS = new Set<StorageLevel>(['LOCKED', 'HARD_LOCKED']);
 
 export interface LevelChange {
@@ -175,7 +190,12 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       }
       if (usedBytes === r.usedBytes && level === r.level) continue;
       try {
-        await this.prisma.forTenant(r.tenantId).updateStorageUsage({ usedBytes, level });
+        // L1: compare-and-set theo mốc đã đọc — hiệu chỉnh vừa ghi mốc mới thì số quét thật thắng, lượt sau tính lại.
+        const n = await this.prisma.forTenant(r.tenantId).updateStorageUsage({ usedBytes, level, calibratedAtToken: r.calibratedAtToken ?? null });
+        if (n === 0) {
+          logger.debug({ tenantId: r.tenantId }, 'Storage: mốc hiệu chỉnh vừa đổi giữa lúc đọc và ghi -> bỏ ghi nấc lượt này');
+          continue;
+        }
         updated++;
       } catch (err: any) {
         logger.warn({ err: err?.message, tenantId: r.tenantId }, 'Storage: không ghi được nấc của project (bỏ qua, lượt sau thử lại)');
@@ -257,8 +277,12 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
         storageCalibrations.inc({ result: 'ok' });
       } catch (err: any) {
         failed.push(id);
-        storageCalibrations.inc({ result: 'error' });
-        logger.warn({ err: err?.message, tenantId: id }, 'Storage: hiệu chỉnh project lỗi (bỏ qua, lượt sau thử lại)');
+        const timeout = isStorageMeasureTimeout(err);
+        storageCalibrations.inc({ result: timeout ? 'timeout' : 'error' });
+        logger.warn(
+          { err: err?.message, tenantId: id, timeout, ...(timeout ? { txTimeoutMs: STORAGE_MEASURE_TX_TIMEOUT_MS, statementTimeoutMs: STORAGE_MEASURE_STATEMENT_TIMEOUT_MS } : {}) },
+          timeout ? 'Storage: quét thật project quá hạn thời gian (bỏ qua, lượt sau thử lại)' : 'Storage: hiệu chỉnh project lỗi (bỏ qua, lượt sau thử lại)',
+        );
       }
     }
     if (ids.length > 0) logger.info({ calibrated: calibrated.length, failed: failed.length }, 'Storage: xong một lượt hiệu chỉnh');
@@ -271,7 +295,12 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
     if (!project) return;
     const repo = this.prisma.forTenant(tenantId);
     const prev = await repo.findProjectUsage();
-    const m = await repo.measureStorage();
+    // M2: quét trong transaction có hạn rõ ràng (không phải 5s mặc định của proxy) + statement_timeout cục bộ.
+    const m = await this.prisma.tenantTx(
+      tenantId,
+      (tx) => this.prisma.forTenant(tenantId, tx).measureStorage({ statementTimeoutMs: STORAGE_MEASURE_STATEMENT_TIMEOUT_MS }),
+      { timeout: STORAGE_MEASURE_TX_TIMEOUT_MS, maxWait: STORAGE_MEASURE_TX_MAX_WAIT_MS },
+    );
     const bloatFactor = bloatFactorFrom(m.totalBytes, m.bodyRawBytes);
     const prevLevel = parseStorageLevel(prev?.level);
     const quotaBytes = quotaBytesFor((project as { storageQuotaMb?: number | null }).storageQuotaMb, this.defaultQuotaMb);

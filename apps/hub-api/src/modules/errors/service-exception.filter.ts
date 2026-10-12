@@ -24,7 +24,8 @@ export class ServiceExceptionFilter extends BaseExceptionFilter {
     const requestId = ensureRequestId(req, res);
     const { status, body, original } = toErrorBody(exception, requestId);
     const where = { requestId, method: req.method, path: (req.originalUrl ?? req.url ?? '').split('?')[0], status, error: body.error };
-    if (status >= 500 && status !== 503 && status !== 507) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
+    if (isKept5xx(body.error, status)) logger.warn(where, `Từ chối có chủ đích (${status} ${body.error})`);
+    else if (status >= 500 && status !== 503) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
     else if (status >= 500) logger.warn({ ...where, original }, 'Tạm thời không phục vụ được (503)');
     else logger.info(where, 'Trả lỗi cho client');
     if (res.headersSent) return;
@@ -42,6 +43,16 @@ export interface ErrorBody {
   requestId: string;
   detail?: string;
   [param: string]: unknown;
+}
+
+/**
+ * QT (ADR-182) + review QT-S1 M1: WHITELIST tường minh các mã 5xx giữ nguyên status + detail — đây là từ chối có chủ đích
+ * (507 project hết dung lượng), không phải lỗi máy chủ. Mọi 5xx khác (kể cả `internal_error`/`service_unavailable` có
+ * trong catalog) đi đường cũ: 500 `internal_error` / 503 `service_unavailable`, KHÔNG lộ message/detail, `original` chỉ ở log.
+ */
+const KEPT_5XX: ReadonlySet<HubErrorCode> = new Set<HubErrorCode>(['project_storage_full']);
+function isKept5xx(code: unknown, status: number): boolean {
+  return status >= 500 && isHubErrorCode(code) && KEPT_5XX.has(code) && ERROR_CATALOG[code].status === status;
 }
 
 /** Lỗi http-errors (body-parser: JSON hỏng, body quá lớn…) — có `status` 4xx và `expose`. */
@@ -67,8 +78,7 @@ export function toErrorBody(exception: unknown, requestId: string): { status: nu
   }
 
   let code: HubErrorCode;
-  // QT (ADR-182): mã 5xx CÓ TRONG catalog với đúng status đó (507 project_storage_full) giữ nguyên — không phải lỗi máy chủ.
-  const catalog5xx = status >= 500 && isHubErrorCode(raw.error) && ERROR_CATALOG[raw.error].status === status;
+  const catalog5xx = isKept5xx(raw.error, status);
   if (catalog5xx) {
     code = raw.error as HubErrorCode;
   } else if (status >= 500) {

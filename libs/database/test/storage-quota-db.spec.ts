@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { DEFAULT_STORAGE_POLICIES } from '@hub/common';
 import { PrismaService } from '../src/prisma.service';
 import { describeDb, newTestPrisma } from './support/test-db';
@@ -73,9 +75,54 @@ describeDb('QT1: project_usage + storage_policies (RLS, seed mặc định)', ()
     );
     const usage = await svc.forTenant(A).findProjectUsage();
     expect(usage).toMatchObject({ level: 'OK', calibratedAt: null });
-    // migration QT1 seed project CÓ SẴN kèm audit system:migration — kiểm trên project default (có trước migration trên hubv)
-    const migrated = await owner.auditLog.count({ where: { actor: 'system:migration', action: 'storage.policies.seeded' } });
-    const projectsWithPolicy = await owner.storagePolicy.groupBy({ by: ['tenantId'] });
-    expect(projectsWithPolicy.length).toBeGreaterThanOrEqual(migrated);
+  });
+
+  it('[QT:T26] (phần c) phần SEED của migration QT1 chạy trên project CÓ SẴN (tạo trước, chưa có policy): đủ 3 policy mặc định + project_usage + đúng 1 audit system:migration; chạy lại không nhân đôi (review L2)', async () => {
+    // CI áp migration lên DB trống -> nhánh seed chưa từng chạy với dữ liệu. Ở đây: lấy NGUYÊN VĂN đoạn seed của
+    // migration.sql, thu phạm vi về đúng project C (DB kiểm chứng dùng chung — không ghi audit cho project khác), chạy
+    // như migration (rls_system on) trên project đã tồn tại TRƯỚC khi seed.
+    const C = randomUUID();
+    await owner.project.create({ data: { id: C, slug: `qt-c-${run}`, name: 'qt-c' } });
+    try {
+      expect(await svc.forTenant(C).findStoragePolicies()).toEqual([]); // trước seed: chưa có gì -> assertion dưới không tầm thường
+      expect(await svc.forTenant(C).findProjectUsage()).toBeNull();
+      const sql = readFileSync(join(__dirname, '../prisma/migrations/20261012100000_storage_quota/migration.sql'), 'utf8');
+      const start = sql.indexOf('-- Q10 / QT:T26');
+      const end = sql.indexOf("SELECT set_config('app.rls_system', '', false);");
+      expect(start).toBeGreaterThan(0);
+      expect(end).toBeGreaterThan(start);
+      let scoped = 0;
+      const seed = sql
+        .slice(start, end)
+        .replace(/"hub"\."projects"( p\b)?/g, (_m, alias?: string) => {
+          scoped++;
+          return `(SELECT * FROM "hub"."projects" WHERE id = '${C}'::uuid) AS ${alias ? alias.trim() : 'scoped'}`;
+        });
+      expect(scoped).toBe(3); // policies + project_usage + audit — migration đổi số câu thì test phải được xem lại
+      const statements = seed
+        .split(/;\s*\n/)
+        .map((st) => st.replace(/^\s*--.*$/gm, '').trim())
+        .filter((st) => st.length > 0);
+      expect(statements).toHaveLength(3);
+      const runSeed = (only?: number) =>
+        owner.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.rls_system', 'on', true)`;
+          for (const [i, st] of statements.entries()) if (only === undefined || i < only) await tx.$executeRawUnsafe(st);
+        });
+      await runSeed();
+      const policies = await svc.forTenant(C).findStoragePolicies();
+      const norm = (xs: { importance: string; action: string; afterDays: number; trigger: string }[]) =>
+        xs.map((r) => ({ importance: r.importance, action: r.action, afterDays: r.afterDays, trigger: r.trigger })).sort((a, b) => a.importance.localeCompare(b.importance));
+      expect(norm(policies)).toEqual(norm([...DEFAULT_STORAGE_POLICIES]));
+      expect(policies.every((p) => p.updatedBy === 'system:migration')).toBe(true);
+      expect(await svc.forTenant(C).findProjectUsage()).toMatchObject({ level: 'OK', calibratedAt: null });
+      expect(await owner.auditLog.count({ where: { tenantId: C, actor: 'system:migration', action: 'storage.policies.seeded' } })).toBe(1);
+      // ON CONFLICT DO NOTHING: chạy lại hai câu policy + usage không nhân đôi
+      await runSeed(2);
+      expect(await svc.forTenant(C).findStoragePolicies()).toHaveLength(3);
+    } finally {
+      await owner.auditLog.deleteMany({ where: { tenantId: C } });
+      await owner.project.deleteMany({ where: { id: C } });
+    }
   });
 });
