@@ -1692,6 +1692,12 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - **Câu chữ ở web** (`lib/alerts/message.ts` + `messages/alerts.ts`): khoá `alerts.rule.<mã luật, '_'→'-'>.<phần>` (khoá từ điển chỉ chữ thường/`.`/`-`; `titleKey` của server không dùng thẳng). `destination.failing` chọn câu "cách sửa" theo loại lỗi trội của `byClass`; tên provider từ `facts.providerLabel` qua bảng tên hiển thị (D5). `facts` hiện dạng bảng đã dịch, không bao giờ JSON thô.
 - **`GET /auth/me` trả thêm `user.isOperator`**; console ẩn chuông/banner/mục "Cảnh báo" và tắt mọi query `/alerts*` khi false. `scopeToProject` không gắn `?projectId=` cho `/api/v1/alerts*` và `/api/v1/me/*` (route `@NoProjectScope`). Tên đối tượng lấy từ `GET /destinations|/sources?projectId=` của các project có cảnh báo (cache 5 phút) vì API cảnh báo chỉ trả `subjectId`.
 **Đánh đổi:** Mỗi operator thêm 2 request/30s (summary + danh sách OPEN); cảnh báo của project khác trễ tối đa 30s và ra toast thay vì banner. Tên đối tượng tốn 2 request mỗi project có cảnh báo (lần đầu) và rơi về "Đích 3fa2c1d0" khi đối tượng đã xoá. Một critical của project đang mở mà poll thấy trước tin socket (cửa sổ rất hẹp) sẽ ra toast dính thay vì banner.
+**Bổ sung (review CB4, 2026-10-12, append):**
+- `asOf` của "đã xem tất cả" = cảnh báo mới nhất đang hiện trong chuông (+1ms vì `opened_at` có µs), chốt lại mỗi lần chuông chuyển đóng→mở (kể cả mở bằng "+k" của banner) — không dùng đồng hồ máy người xem.
+- Summary trả thêm `unackedBySeverity` (cùng lượt quét, `FILTER`): badge đỏ chỉ khi còn critical CHƯA XEM.
+- Banner xanh thu theo hạn sớm nhất và hẹn lại sau mỗi lần thu; `aria-live` nằm ở một nút ẩn riêng, ghi một lần cho mỗi (cảnh báo, mở/đã ổn) — poll không làm trình đọc màn hình đọc lại.
+- Toast: bỏ cảnh báo mở trước mốc phiên mà lần đầu không thấy (danh sách bị cắt); gỡ toast khi cảnh báo được "Đã xem" hoặc rời danh sách OPEN đầy đủ. "Đã xem" ở banner lỗi -> báo lỗi + trả banner về.
+- `lastError`/`lastFix` của kết nối là chữ một ngôn ngữ của server: chỉ hiện nguyên văn ở bảng số liệu, câu "cách sửa" luôn lấy từ từ điển.
 
 ---
 

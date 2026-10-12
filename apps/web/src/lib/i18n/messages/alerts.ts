@@ -72,7 +72,6 @@ export const alerts = defineMessages("alerts", {
     "alerts.rule.source.connection-broken.message.failed": "Hub không đăng ký được webhook với {provider}.",
     "alerts.rule.source.connection-broken.message.drifted": "Hub sẽ không nhận được sự kiện từ {provider} cho tới khi kết nối lại.",
     "alerts.rule.source.connection-broken.message.pending": "Lần kết nối bắt đầu từ {since} vẫn chưa xong.",
-    "alerts.rule.source.connection-broken.last-error": "Lỗi gần nhất: {error}",
     "alerts.rule.source.connection-broken.fix": "Mở trang Nguồn và bấm Kết nối lại.",
 
     "alerts.rule.source.silent.name": "Nguồn im lặng",
@@ -226,7 +225,6 @@ export const alerts = defineMessages("alerts", {
     "alerts.rule.source.connection-broken.message.failed": "The hub could not register its webhook with {provider}.",
     "alerts.rule.source.connection-broken.message.drifted": "The hub will not receive events from {provider} until you reconnect.",
     "alerts.rule.source.connection-broken.message.pending": "The connection attempt started at {since} has not finished.",
-    "alerts.rule.source.connection-broken.last-error": "Last error: {error}",
     "alerts.rule.source.connection-broken.fix": "Open Sources and click Reconnect.",
 
     "alerts.rule.source.silent.name": "Silent source",

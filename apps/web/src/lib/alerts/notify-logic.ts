@@ -25,11 +25,29 @@ export interface BellBadge {
   tone: "critical" | "warning";
 }
 
-/** Badge = số cảnh báo OPEN chưa xem; màu theo mức cao nhất đang mở (đỏ nếu có critical, không thì hổ phách). 0 -> không badge. */
+/**
+ * Badge = số cảnh báo OPEN chưa xem; màu theo mức cao nhất CHƯA XEM (review L1: critical đã "Đã xem" không còn tô đỏ).
+ * 0 -> không badge.
+ */
 export function bellBadge(summary: AlertSummary | null | undefined): BellBadge | null {
   const n = summary?.unacked ?? 0;
-  if (n <= 0) return null;
-  return { count: n, label: n > 99 ? "99+" : String(n), tone: (summary?.openBySeverity.critical ?? 0) > 0 ? "critical" : "warning" };
+  if (n <= 0 || !summary) return null;
+  const critical = (summary.unackedBySeverity ?? summary.openBySeverity).critical;
+  return { count: n, label: n > 99 ? "99+" : String(n), tone: critical > 0 ? "critical" : "warning" };
+}
+
+/**
+ * Mốc `asOf` cho "Đánh dấu đã xem tất cả" lấy từ dữ liệu SERVER (review L2 — không dùng đồng hồ máy người xem): cảnh
+ * báo mới nhất đang hiện trong chuông, +1ms vì `opened_at` có µs còn JSON chỉ có ms (không thì chính dòng mới nhất bị
+ * loại). Không có dòng nào -> null (không có gì để đánh dấu).
+ */
+export function ackAllAsOf(rows: readonly Pick<AlertView, "openedAt">[]): string | null {
+  let max = Number.NEGATIVE_INFINITY;
+  for (const r of rows) {
+    const at = Date.parse(r.openedAt);
+    if (at > max) max = at;
+  }
+  return Number.isFinite(max) ? new Date(max + 1).toISOString() : null;
 }
 
 const RANK: Record<AlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
@@ -82,10 +100,14 @@ export interface FeedMemory {
   seen: Set<string>;
   /** id nhận qua `alert.changed` (state OPEN) trong phiên — chỉ những cảnh báo này được bật banner. */
   socketOpened: Set<string>;
+  /** Lúc lấy mốc (ms). Review L3: cảnh báo mở TRƯỚC mốc mà lần đầu không thấy (danh sách bị cắt) không phải "vừa đến". */
+  baselineAt: number;
+  /** id đang có toast — review L4: rời danh sách OPEN đầy đủ hoặc được "Đã xem" thì gỡ toast (toast dính không treo mãi). */
+  toasted: Set<string>;
 }
 
 export function createFeedMemory(): FeedMemory {
-  return { primed: false, seen: new Set(), socketOpened: new Set() };
+  return { primed: false, seen: new Set(), socketOpened: new Set(), baselineAt: 0, toasted: new Set() };
 }
 
 /** Ghi nhận tin socket. OPEN -> nhớ id (để banner); trả về true = cần gọi lại API (luôn đúng — tin không có facts). */
@@ -98,14 +120,18 @@ export function noteSocketNotice(mem: FeedMemory, n: Pick<AlertChangedNotice, "i
  * Cảnh báo vừa đến kể từ lần trước. Lần đầu (mốc): nhớ hết, trả [] — KHÔNG banner/toast cho cảnh báo cũ lúc tải trang
  * (CB:T15). Sau đó: dòng OPEN chưa thấy, chưa được ai "Đã xem".
  */
-export function takeArrivals(mem: FeedMemory, rows: readonly AlertView[]): AlertView[] {
+export function takeArrivals(mem: FeedMemory, rows: readonly AlertView[], now = Date.now()): AlertView[] {
   const open = rows.filter((r) => r.state === "OPEN");
   if (!mem.primed) {
     for (const r of open) mem.seen.add(r.id);
     mem.primed = true;
+    mem.baselineAt = now;
     return [];
   }
-  const fresh = open.filter((r) => !mem.seen.has(r.id) && !r.acknowledgedAt);
+  // Review L3: mở trước mốc mà chưa từng thấy (lần đầu bị cắt ở 100 dòng) = cảnh báo CŨ — trừ khi có alert.changed của nó.
+  const fresh = open.filter(
+    (r) => !mem.seen.has(r.id) && !r.acknowledgedAt && (mem.socketOpened.has(r.id) || Date.parse(r.openedAt) >= mem.baselineAt),
+  );
   for (const r of open) mem.seen.add(r.id);
   return fresh;
 }
@@ -121,6 +147,21 @@ export function routeArrival(a: Pick<AlertView, "id" | "severity" | "state" | "a
   }
   if (a.severity === "warning") return { kind: "toast", durationMs: WARNING_TOAST_MS };
   return { kind: "none" };
+}
+
+/**
+ * Review L4: toast nào phải gỡ — cảnh báo đã được "Đã xem", hoặc vắng khỏi danh sách OPEN ĐẦY ĐỦ (đã đóng). Danh sách
+ * bị cắt thì chỉ gỡ theo "Đã xem". Trả id và quên chúng khỏi `mem.toasted`.
+ */
+export function toastsToDismiss(mem: Pick<FeedMemory, "toasted">, rows: readonly AlertView[], complete: boolean): string[] {
+  const byId = new Map(rows.filter((r) => r.state === "OPEN").map((r) => [r.id, r]));
+  const out: string[] = [];
+  for (const id of mem.toasted) {
+    const row = byId.get(id);
+    if (row ? row.acknowledgedAt : complete) out.push(id);
+  }
+  for (const id of out) mem.toasted.delete(id);
+  return out;
 }
 
 // ------------------------------------------------------------------ banner
@@ -158,6 +199,25 @@ export function bannerResolve(s: BannerState, id: string, now: number): BannerSt
 /** "Đã xem" (ack) -> bỏ khỏi banner ngay (cảnh báo vẫn OPEN trong chuông). */
 export function bannerAck(s: BannerState, id: string): BannerState {
   return s.entries.some((e) => e.alert.id === id) ? { entries: s.entries.filter((e) => e.alert.id !== id) } : s;
+}
+
+/**
+ * Review TB2: hạn sớm nhất của các banner xanh còn chờ thu (ms) — hẹn giờ theo MỐC này và hẹn lại sau mỗi lần thu, để
+ * banner xanh thứ hai (A đóng -> C đến rồi đóng) không bị bỏ quên. Không có -> null.
+ */
+export function bannerNextExpiry(s: BannerState, holdMs = BANNER_RESOLVED_HOLD_MS): number | null {
+  let next: number | null = null;
+  for (const e of s.entries) {
+    if (e.phase !== "resolved") continue;
+    const at = (e.resolvedAt ?? 0) + holdMs;
+    if (next === null || at < next) next = at;
+  }
+  return next;
+}
+
+/** Review TB3: khoá thông báo cho trình đọc màn hình — đổi đúng MỘT lần khi cảnh báo mới hiện hoặc khi nó đã ổn. */
+export function bannerAnnounceKey(e: BannerEntry | null): string | null {
+  return e ? `${e.alert.id}:${e.phase}` : null;
 }
 
 /** Bỏ banner xanh đã giữ đủ 4s. */

@@ -60,14 +60,22 @@ describe("buildAlertText — mỗi luật, cả vi lẫn en", () => {
     expect(failingFixKey(undefined)).toBe("alerts.rule.destination.failing.fix.server-error");
   });
 
-  it("source.connection_broken: tên nhà cung cấp lấy từ facts (D5), không viết cứng; lastFix của server được dùng lại", () => {
+  it("source.connection_broken: tên nhà cung cấp lấy từ facts (D5), không viết cứng; lastError/lastFix của server chỉ là dữ liệu thô (review L8)", () => {
     const t = createT("vi");
     const drifted = buildAlertText(mk("source.connection_broken", { status: "DRIFTED", providerLabel: "payos" }, "source"), t, ctx("vi"));
     expect(drifted.title).toBe("Webhook phía PayOS đã bị đổi hoặc gỡ");
     const other = buildAlertText(mk("source.connection_broken", { status: "FAILED", providerLabel: "acme", lastError: "HTTP 500", lastFix: "Kiểm tra khoá" }, "source"), t, ctx("vi"));
     expect(other.title).toBe("Kết nối Acme bị lỗi");
-    expect(other.message).toBe("Hub không đăng ký được webhook với Acme. Lỗi gần nhất: HTTP 500");
-    expect(other.fix).toBe("Kiểm tra khoá");
+    expect(other.message).toBe("Hub không đăng ký được webhook với Acme.");
+    expect(other.fix).toBe("Mở trang Nguồn và bấm Kết nối lại.");
+    const enFailed = buildAlertText(mk("source.connection_broken", { status: "FAILED", providerLabel: "acme", lastError: "Lỗi xác thực", lastFix: "Kiểm tra khoá" }, "source"), createT("en"), ctx("en"));
+    expect(`${enFailed.message} ${enFailed.fix}`).toBe("The hub could not register its webhook with Acme. Open Sources and click Reconnect.");
+    // …nhưng vẫn hiện nguyên văn ở bảng số liệu.
+    const raw = factRows({ lastError: "Lỗi xác thực", lastFix: "Kiểm tra khoá" }, createT("en"), { locale: "en", now: NOW });
+    expect(raw.map((r) => [r.label, r.value])).toEqual([
+      ["Last error", "Lỗi xác thực"],
+      ["Suggested fix", "Kiểm tra khoá"],
+    ]);
     const en = buildAlertText(mk("source.connection_broken", { status: "DRIFTED", providerLabel: "github" }, "source"), createT("en"), ctx("en"));
     expect(en.title).toBe("The webhook on GitHub's side was changed or removed");
   });

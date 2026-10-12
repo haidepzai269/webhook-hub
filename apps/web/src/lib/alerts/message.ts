@@ -197,15 +197,11 @@ export function buildAlertText(a: AlertLike, t: TranslateFn, ctx: MessageContext
       const variant = (typeof f.status === "string" && VARIANT[f.status]) || "failed";
       title = t(ruleKey(a.rule, `title.${variant}`), { provider });
       const since = clock(f.stuckSince);
-      const lastError = str(f.lastError);
-      let head: string | null = t(ruleKey(a.rule, `message.${variant}`), { provider });
-      if (variant === "pending") head = since ? t("alerts.rule.source.connection-broken.message.pending", { since }) : null;
-      message = join(
-        head,
-        lastError ? t("alerts.rule.source.connection-broken.last-error", { error: lastError }) : null,
-      );
-      // Spec §4: dùng lại `lastFix` có sẵn của kết nối (dữ liệu từ server) nếu có.
-      fix = str(f.lastFix) ?? t("alerts.rule.source.connection-broken.fix");
+      message = t(ruleKey(a.rule, `message.${variant}`), { provider });
+      if (variant === "pending") message = since ? t("alerts.rule.source.connection-broken.message.pending", { since }) : "";
+      // Review L8: `lastError`/`lastFix` của server là chữ một ngôn ngữ (không dịch được) -> KHÔNG ghép vào câu; chỉ hiện
+      // nguyên văn ở bảng số liệu (facts.ts). Câu "cách sửa" luôn từ từ điển, đúng ngôn ngữ đang chọn.
+      fix = t("alerts.rule.source.connection-broken.fix");
       break;
     }
     case "source.silent": {

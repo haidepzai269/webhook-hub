@@ -92,6 +92,8 @@ export async function alertSummary(store: AlertStore) {
   return {
     openBySeverity: { critical: totals.critical, warning: totals.warning, info: totals.info },
     unacked: totals.unacked,
+    // CB4 review L1: badge chuông tô màu theo mức cao nhất CHƯA XEM (không phải mọi cảnh báo đang mở).
+    unackedBySeverity: totals.unackedBySeverity,
     perProject,
   };
 }

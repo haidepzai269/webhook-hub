@@ -2,7 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import {
+  ackAllAsOf,
   BANNER_RESOLVED_HOLD_MS,
+  bannerAnnounceKey,
+  bannerNextExpiry,
   bannerAck,
   bannerAdd,
   bannerExpire,
@@ -17,6 +20,7 @@ import {
   routeArrival,
   selectBanner,
   takeArrivals,
+  toastsToDismiss,
   WARNING_TOAST_MS,
 } from "./notify-logic";
 import type { AlertSeverity, AlertSummary, AlertView } from "./types";
@@ -47,6 +51,7 @@ function alert(id: string, severity: AlertSeverity, over: Partial<AlertView> = {
 const summary = (unacked: number, critical: number, warning: number, perProject: AlertSummary["perProject"] = []): AlertSummary => ({
   openBySeverity: { critical, warning, info: 0 },
   unacked,
+  unackedBySeverity: { critical: Math.min(critical, unacked), warning: Math.max(0, unacked - critical), info: 0 },
   perProject,
 });
 
@@ -57,6 +62,17 @@ describe("chuông: badge từ summary", () => {
     expect(bellBadge(summary(3, 1, 2))).toEqual({ count: 3, label: "3", tone: "critical" });
     expect(bellBadge(summary(2, 0, 2))).toEqual({ count: 2, label: "2", tone: "warning" });
     expect(bellBadge(summary(150, 0, 150))?.label).toBe("99+");
+  });
+
+  it("review L1: màu theo mức CHƯA XEM — critical đã 'Đã xem' không tô đỏ; server cũ (thiếu unackedBySeverity) rơi về openBySeverity", () => {
+    const s: AlertSummary = { openBySeverity: { critical: 1, warning: 2, info: 0 }, unacked: 2, unackedBySeverity: { critical: 0, warning: 2, info: 0 }, perProject: [] };
+    expect(bellBadge(s)?.tone).toBe("warning");
+    expect(bellBadge({ ...s, unackedBySeverity: undefined })?.tone).toBe("critical");
+  });
+
+  it("review L2: asOf của 'đã xem tất cả' = cảnh báo mới nhất đang hiện (+1ms vì opened_at có µs), không phải đồng hồ máy", () => {
+    expect(ackAllAsOf([])).toBeNull();
+    expect(ackAllAsOf([{ openedAt: "2026-10-12T10:00:00.000Z" }, { openedAt: "2026-10-12T11:00:00.500Z" }])).toBe("2026-10-12T11:00:00.501Z");
   });
 });
 
@@ -115,6 +131,27 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
     expect(takeArrivals(mem, fresh)).toEqual([]);
   });
 
+  it("review L3: id lạ mở TRƯỚC mốc (lần đầu bị cắt ở 100 dòng) không phải 'vừa đến' — trừ khi có alert.changed của nó", () => {
+    const mem = createFeedMemory();
+    takeArrivals(mem, [alert("seen", "warning")], Date.parse("2026-10-12T12:00:00Z"));
+    noteSocketNotice(mem, { id: "old-but-socket", state: "OPEN" });
+    const fresh = takeArrivals(mem, [
+      alert("old-truncated", "warning", { openedAt: "2026-10-12T09:00:00Z" }),
+      alert("old-but-socket", "critical", { openedAt: "2026-10-12T09:00:00Z" }),
+      alert("new", "warning", { openedAt: "2026-10-12T12:00:05Z" }),
+    ]);
+    expect(fresh.map((a) => a.id)).toEqual(["old-but-socket", "new"]);
+  });
+
+  it("review L4: toast gỡ khi cảnh báo được 'Đã xem' hoặc rời danh sách OPEN đầy đủ; danh sách bị cắt chỉ gỡ theo 'Đã xem'", () => {
+    const mem = createFeedMemory();
+    mem.toasted = new Set(["acked", "gone", "still"]);
+    const rows = [alert("acked", "critical", { acknowledgedAt: "2026-10-12T10:01:00Z" }), alert("still", "critical")];
+    expect(toastsToDismiss(mem, rows, false)).toEqual(["acked"]);
+    expect(toastsToDismiss(mem, rows, true)).toEqual(["gone"]);
+    expect([...mem.toasted]).toEqual(["still"]);
+  });
+
   it("alert.changed RESOLVED không bao giờ ra toast và không mở banner", () => {
     const mem = createFeedMemory();
     noteSocketNotice(mem, { id: "x", state: "RESOLVED" });
@@ -149,6 +186,35 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
     expect(selectBanner(b).primary?.phase).toBe("open");
     b = bannerExpire(bannerResolve(b, "c1", 9_000), 9_000 + BANNER_RESOLVED_HOLD_MS);
     expect(selectBanner(b)).toEqual({ primary: null, more: 0 });
+  });
+
+  it("review TB2: A đóng -> C đến rồi đóng: mỗi banner xanh thu đúng hạn của nó, không cái nào treo mãi", () => {
+    let b = bannerAdd(emptyBanner(), alert("A", "critical"));
+    b = bannerResolve(b, "A", 0);
+    expect(bannerNextExpiry(b)).toBe(BANNER_RESOLVED_HOLD_MS);
+    b = bannerAdd(b, alert("C", "critical")); // C đè lên banner xanh của A
+    b = bannerResolve(b, "C", 1_000);
+    expect(b.entries.map((e) => [e.alert.id, e.phase])).toEqual([
+      ["C", "resolved"],
+      ["A", "resolved"],
+    ]);
+    // Hẹn theo hạn sớm nhất (A), thu xong thì hạn mới là của C — hẹn lại.
+    expect(bannerNextExpiry(b)).toBe(BANNER_RESOLVED_HOLD_MS);
+    b = bannerExpire(b, BANNER_RESOLVED_HOLD_MS);
+    expect(b.entries.map((e) => e.alert.id)).toEqual(["C"]);
+    expect(bannerNextExpiry(b)).toBe(1_000 + BANNER_RESOLVED_HOLD_MS);
+    b = bannerExpire(b, 1_000 + BANNER_RESOLVED_HOLD_MS);
+    expect(selectBanner(b)).toEqual({ primary: null, more: 0 });
+    expect(bannerNextExpiry(b)).toBeNull();
+  });
+
+  it("review TB3: khoá thông báo đọc màn hình chỉ đổi khi cảnh báo mới hiện hoặc khi đã ổn — poll cập nhật số liệu không đổi khoá", () => {
+    const b = bannerAdd(emptyBanner(), alert("c1", "critical"));
+    const k1 = bannerAnnounceKey(selectBanner(b).primary);
+    const polled = bannerSync(b, [alert("c1", "critical", { facts: { count: 9 }, lastSeenAt: "2026-10-12T10:02:00Z" })], true, 5);
+    expect(bannerAnnounceKey(selectBanner(polled).primary)).toBe(k1);
+    expect(bannerAnnounceKey(selectBanner(bannerResolve(b, "c1", 5)).primary)).toBe("c1:resolved");
+    expect(bannerAnnounceKey(null)).toBeNull();
   });
 
   it("đối chiếu danh sách OPEN: đã xem ở nơi khác -> bỏ; vắng mặt khi danh sách ĐẦY ĐỦ -> đã ổn; bị cắt thì không đoán", () => {

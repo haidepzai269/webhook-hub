@@ -108,6 +108,9 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     expect(sum.openBySeverity.warning).toBeGreaterThanOrEqual(10);
     // tổng tính trên toàn bảng: không nhỏ hơn tổng các project được liệt kê
     expect(sum.unacked).toBeGreaterThanOrEqual(sum.perProject.reduce((n, p) => n + p.unacked, 0));
+    // CB4 review L1: chưa xem theo mức cộng lại đúng bằng tổng chưa xem (cùng một lượt quét).
+    const u = sum.unackedBySeverity;
+    expect(u.critical + u.warning + u.info).toBe(sum.unacked);
 
     const repoB = svc.forTenant(B);
     expect(await repoB.findAlertById(aId)).toBeNull();

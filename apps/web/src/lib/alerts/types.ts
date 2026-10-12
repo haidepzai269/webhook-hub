@@ -62,6 +62,8 @@ export interface AlertPage {
 export interface AlertSummary {
   openBySeverity: { critical: number; warning: number; info: number };
   unacked: number;
+  /** CB4 review L1: chưa xem theo mức (màu badge). Vắng ở server cũ -> rơi về openBySeverity. */
+  unackedBySeverity?: { critical: number; warning: number; info: number };
   perProject: { project: AlertProject; critical: number; warning: number; info: number; unacked: number }[];
 }
 

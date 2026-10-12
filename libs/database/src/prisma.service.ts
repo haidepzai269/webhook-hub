@@ -224,11 +224,17 @@ export class PrismaService {
    */
   public operatorAlertSummaryAcrossTenants(limit = 500): Promise<OperatorAlertSummary> {
     return this.systemTx('operator: tóm tắt alerts xuyên project', async (tx) => {
-      const [t] = await tx.$queryRaw<{ critical: bigint; warning: bigint; info: bigint; unacked: bigint }[]>(Prisma.sql`
+      // CB4 review L1: chưa xem TÁCH theo mức (cùng một lượt quét) — màu badge chuông theo mức cao nhất CHƯA XEM.
+      const [t] = await tx.$queryRaw<
+        { critical: bigint; warning: bigint; info: bigint; unacked: bigint; unackedCritical: bigint; unackedWarning: bigint; unackedInfo: bigint }[]
+      >(Prisma.sql`
         SELECT count(*) FILTER (WHERE severity = 'critical') AS critical,
                count(*) FILTER (WHERE severity = 'warning')  AS warning,
                count(*) FILTER (WHERE severity = 'info')     AS info,
-               count(*) FILTER (WHERE acknowledged_at IS NULL) AS unacked
+               count(*) FILTER (WHERE acknowledged_at IS NULL) AS unacked,
+               count(*) FILTER (WHERE acknowledged_at IS NULL AND severity = 'critical') AS "unackedCritical",
+               count(*) FILTER (WHERE acknowledged_at IS NULL AND severity = 'warning')  AS "unackedWarning",
+               count(*) FILTER (WHERE acknowledged_at IS NULL AND severity = 'info')     AS "unackedInfo"
         FROM hub.alerts WHERE state = 'OPEN'`);
       const rows = await tx.$queryRaw<{ id: string; slug: string; name: string; critical: bigint; warning: bigint; info: bigint; unacked: bigint }[]>(Prisma.sql`
         SELECT p.id, p.slug, p.name,
@@ -242,7 +248,13 @@ export class PrismaService {
         ORDER BY critical DESC, warning DESC, p.slug ASC
         LIMIT ${limit}`);
       return {
-        totals: { critical: Number(t?.critical ?? 0), warning: Number(t?.warning ?? 0), info: Number(t?.info ?? 0), unacked: Number(t?.unacked ?? 0) },
+        totals: {
+          critical: Number(t?.critical ?? 0),
+          warning: Number(t?.warning ?? 0),
+          info: Number(t?.info ?? 0),
+          unacked: Number(t?.unacked ?? 0),
+          unackedBySeverity: { critical: Number(t?.unackedCritical ?? 0), warning: Number(t?.unackedWarning ?? 0), info: Number(t?.unackedInfo ?? 0) },
+        },
         perProject: rows.map((r) => ({
           project: { id: r.id, slug: r.slug, name: r.name },
           critical: Number(r.critical),
@@ -339,7 +351,14 @@ export interface OperatorAlertRow extends AlertRow {
 }
 
 export interface OperatorAlertSummary {
-  totals: { critical: number; warning: number; info: number; unacked: number };
+  totals: {
+    critical: number;
+    warning: number;
+    info: number;
+    unacked: number;
+    /** CB4 review L1: chưa xem theo mức — màu badge chuông. */
+    unackedBySeverity: { critical: number; warning: number; info: number };
+  };
   perProject: OperatorAlertProjectSummary[];
 }
 

@@ -89,7 +89,7 @@ export function useSubjectNames(alerts: readonly Pick<AlertView, "project" | "su
   const operator = useIsOperator();
   const projects = [...new Set((alerts ?? []).filter((a) => a.subjectType !== "project").map((a) => a.project.id))].sort();
   const on = operator && enabled;
-  const results = useQueries({
+  return useQueries({
     queries: projects.flatMap((p) => [
       {
         queryKey: ["destinations", p],
@@ -104,10 +104,18 @@ export function useSubjectNames(alerts: readonly Pick<AlertView, "project" | "su
         staleTime: 5 * 60_000,
       },
     ]),
+    combine: combineNames,
   });
+}
+
+/**
+ * Review L7: `combine` ở mức module (danh tính ổn định) — TanStack chỉ chạy lại khi dữ liệu đổi, nên hàm tra tên giữ
+ * nguyên danh tính giữa các lần vẽ (useMemo/useEffect phía dùng không chạy lại vô ích).
+ */
+function combineNames(results: { data?: unknown }[]): (subjectId: string) => string | null {
   const names = new Map<string, string>();
   for (const r of results) {
     for (const x of (r.data as { id: string; name: string }[] | undefined) ?? []) names.set(x.id, x.name);
   }
-  return (subjectId: string): string | null => names.get(subjectId) ?? null;
+  return (subjectId) => names.get(subjectId) ?? null;
 }

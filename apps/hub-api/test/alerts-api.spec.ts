@@ -97,7 +97,7 @@ function fakeStore(opts: { rows?: any[]; tenantOf?: Record<string, string>; ackR
     },
     // tổng (totals) tính riêng, không cộng từ perProject (có trần) — review L1
     operatorAlertSummaryAcrossTenants: async () => ({
-      totals: { critical: 7, warning: 9, info: 1, unacked: 12 },
+      totals: { critical: 7, warning: 9, info: 1, unacked: 12, unackedBySeverity: { critical: 3, warning: 8, info: 1 } },
       perProject: [
         { project: { id: A, slug: 'a', name: 'A' }, critical: 2, warning: 1, info: 0, unacked: 2 },
         { project: { id: B, slug: 'b', name: 'B' }, critical: 0, warning: 3, info: 1, unacked: 0 },
@@ -156,6 +156,7 @@ describe('GET /api/v1/alerts/summary', () => {
     expect(await alertSummary(fakeStore().store)).toEqual({
       openBySeverity: { critical: 7, warning: 9, info: 1 },
       unacked: 12,
+      unackedBySeverity: { critical: 3, warning: 8, info: 1 },
       perProject: [expect.objectContaining({ project: { id: A, slug: 'a', name: 'A' }, critical: 2, warning: 1 }), expect.objectContaining({ project: expect.objectContaining({ id: B }) })],
     });
   });

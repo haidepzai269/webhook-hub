@@ -2,16 +2,19 @@
 
 import { useEffect, useRef } from "react";
 
+import { toast } from "sonner";
+
 import { primaryHref } from "@/lib/alerts/links";
 import {
-  BANNER_RESOLVED_HOLD_MS,
   bannerAdd,
   bannerExpire,
+  bannerNextExpiry,
   bannerResolve,
   bannerSync,
   noteSocketNotice,
   routeArrival,
   takeArrivals,
+  toastsToDismiss,
 } from "@/lib/alerts/notify-logic";
 import { useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
 import { useIsOperator } from "@/lib/hub/me-store";
@@ -33,7 +36,7 @@ export function AlertNotifier() {
   const operator = useIsOperator();
   const feed = useOpenAlertFeed();
   const setBanner = useAlertUiStore((s) => s.setBanner);
-  const hasResolved = useAlertUiStore((s) => s.banner.entries.some((e) => e.phase === "resolved"));
+  const nextExpiry = useAlertUiStore((s) => bannerNextExpiry(s.banner));
   const text = useAlertText();
   const t = useT();
   const open = useOpenAlertTarget();
@@ -56,14 +59,18 @@ export function AlertNotifier() {
     if (!operator || !data) return;
     const { mem } = useAlertUiStore.getState();
     const now = Date.now();
-    setBanner((b) => bannerSync(b, data.items, data.next === null, now));
-    for (const a of takeArrivals(mem, data.items)) {
+    const complete = data.next === null;
+    setBanner((b) => bannerSync(b, data.items, complete, now));
+    // Review L4: toast của cảnh báo đã "Đã xem" hoặc đã đóng thì gỡ (toast critical dính không treo mãi).
+    for (const id of toastsToDismiss(mem, data.items, complete)) toast.dismiss(`alert-${id}`);
+    for (const a of takeArrivals(mem, data.items, now)) {
       const route = routeArrival(a, mem);
       if (route.kind === "banner") {
         setBanner((b) => bannerAdd(b, a));
       } else if (route.kind === "toast") {
         const { text: build, t: tr, open: go, nameOf: names } = deps.current;
         const msg = build(a, names(a.subjectId));
+        mem.toasted.add(a.id);
         showAlertToast(a.id, route.durationMs, {
           severity: a.severity,
           severityLabel: tr(`alerts.severity.${a.severity}`),
@@ -78,12 +85,12 @@ export function AlertNotifier() {
     }
   }, [operator, data, setBanner]);
 
-  // Banner xanh "Đã ổn trở lại" giữ 4s rồi thu lại.
+  // Banner xanh "Đã ổn trở lại" giữ 4s rồi thu lại. Review TB2: hẹn theo HẠN SỚM NHẤT; thu xong hạn đổi -> hẹn lại.
   useEffect(() => {
-    if (!hasResolved) return;
-    const id = setTimeout(() => setBanner((b) => bannerExpire(b, Date.now())), BANNER_RESOLVED_HOLD_MS + 50);
+    if (nextExpiry === null) return;
+    const id = setTimeout(() => setBanner((b) => bannerExpire(b, Date.now())), Math.max(0, nextExpiry - Date.now()) + 20);
     return () => clearTimeout(id);
-  }, [hasResolved, setBanner]);
+  }, [nextExpiry, setBanner]);
 
   return null;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import Link from "next/link";
 
@@ -12,7 +12,7 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { primaryHref } from "@/lib/alerts/links";
-import { bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
+import { ackAllAsOf, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
 import type { AlertView } from "@/lib/alerts/types";
 import { useAckAllAlerts, useAlertSummary, useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
 import { formatRelative } from "@/lib/hub/format";
@@ -23,7 +23,7 @@ import { ProjectChip, SeverityDot, useAlertText, useAlertUiStore, useMinuteClock
 
 /**
  * CB4 §8.1: chuông ở header, cạnh nút Ngôn ngữ / sáng-tối — CHỈ operator (người khác không thấy, không gọi `/alerts*`).
- * Badge = số OPEN chưa xem, đỏ nếu đang có critical, hổ phách nếu chỉ warning, không badge khi 0. Popover ~380px nhóm
+ * Badge = số OPEN chưa xem, đỏ nếu có critical CHƯA XEM, hổ phách nếu chỉ warning, không badge khi 0. Popover ~380px nhóm
  * theo project (critical trước rồi mới nhất). Tổng gọi lại khi có `alert.changed` + poll 30s (alert-queries).
  */
 export function AlertBell() {
@@ -40,19 +40,28 @@ function OperatorBell() {
   const setOpen = useAlertUiStore((s) => s.setBellOpen);
   const badge = bellBadge(summary.data);
   // "Đánh dấu đã xem tất cả" chỉ đánh dấu cảnh báo mở TRƯỚC lúc mở chuông (asOf) — cái mới đến sau vẫn chưa xem.
-  const openedAt = useRef<string>(new Date().toISOString());
+  // Review TB1: chốt lại MỖI LẦN chuông chuyển đóng -> mở, kể cả khi mở bằng code ("+k" của banner), không chỉ khi bấm.
+  // Review L2: mốc lấy từ dữ liệu server (cảnh báo mới nhất đang hiện, sau khi gọi lại), không từ đồng hồ máy người xem.
+  const [asOf, setAsOf] = useState<string | null>(null);
+  const items = useRef(feed.data?.items);
+  items.current = feed.data?.items;
+  const wasOpen = useRef(false);
+  const refetch = feed.refetch;
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setAsOf(ackAllAsOf(items.current ?? []));
+      void refetch().then((r) => {
+        if (r.data) setAsOf(ackAllAsOf(r.data.items));
+      });
+    }
+    wasOpen.current = open;
+  }, [open, refetch]);
 
   const label = badge ? t("alerts.bell.aria", { count: badge.count }) : t("alerts.bell.aria-none");
   return (
     <Popover
       open={open}
-      onOpenChange={(o) => {
-        if (o) {
-          openedAt.current = new Date().toISOString();
-          void feed.refetch();
-        }
-        setOpen(o);
-      }}
+      onOpenChange={setOpen}
     >
       <PopoverTrigger asChild>
         <Button size="icon" variant="outline" aria-label={label} title={label} className="relative">
@@ -76,7 +85,7 @@ function OperatorBell() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-[380px] max-w-[calc(100vw-1rem)] gap-0 p-0">
-        <BellPanel asOf={openedAt} onNavigate={() => setOpen(false)} />
+        <BellPanel asOf={asOf} onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
@@ -84,7 +93,7 @@ function OperatorBell() {
 
 const STATUS_TEXT = { error: "alerts.bell.error", loading: "common.loading" } as const;
 
-function BellPanel({ asOf, onNavigate }: { asOf: React.RefObject<string>; onNavigate: () => void }) {
+function BellPanel({ asOf, onNavigate }: { asOf: string | null; onNavigate: () => void }) {
   const t = useT();
   const locale = useLocale();
   const now = useMinuteClock();
@@ -173,10 +182,11 @@ function BellPanel({ asOf, onNavigate }: { asOf: React.RefObject<string>; onNavi
         <Button
           size="sm"
           variant="ghost"
-          disabled={unacked === 0 || ackAll.isPending}
+          disabled={unacked === 0 || !asOf || ackAll.isPending}
           onClick={() =>
+            asOf &&
             ackAll.mutate(
-              { asOf: asOf.current },
+              { asOf },
               { onSuccess: (r) => toast.success(t("alerts.bell.ack-all-done", { count: r.acknowledged })) },
             )
           }

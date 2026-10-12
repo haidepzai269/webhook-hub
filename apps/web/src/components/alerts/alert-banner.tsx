@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { toast } from "sonner";
 
 import { cn } from "cn";
 
 import { Button } from "@/components/ui/button";
 import { alertActions } from "@/lib/alerts/links";
-import { type BannerEntry, bannerAck, bannerMotion, selectBanner } from "@/lib/alerts/notify-logic";
+import { type BannerEntry, bannerAck, bannerAdd, bannerAnnounceKey, bannerMotion, selectBanner } from "@/lib/alerts/notify-logic";
 import { useAckAlert, useSubjectNames } from "@/lib/hub/alert-queries";
 import { useIsOperator } from "@/lib/hub/me-store";
 import { useT } from "@/lib/i18n/use-t";
@@ -43,14 +45,45 @@ export function AlertBanner() {
     return () => clearTimeout(id);
   }, [primary, more, motion.durationMs]);
 
-  if (!operator || !shown) return null;
+  if (!operator) return null;
   return (
-    <div
-      className="sticky top-2 z-30 mb-4 [html[data-navbar-style=sticky]_&]:top-14"
-      style={{ animation: `${leaving ? motion.exit : motion.enter} ${motion.durationMs}ms ease-out both` }}
-      key={shown.entry.alert.id}
-    >
-      <BannerBody entry={shown.entry} more={shown.more} />
+    <>
+      <Announcer entry={primary} />
+      {shown && (
+        <div
+          className="sticky top-2 z-30 mb-4 [html[data-navbar-style=sticky]_&]:top-14"
+          style={{ animation: `${leaving ? motion.exit : motion.enter} ${motion.durationMs}ms ease-out both` }}
+          key={shown.entry.alert.id}
+        >
+          <BannerBody entry={shown.entry} more={shown.more} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Review TB3: vùng `aria-live` RIÊNG, ẩn, luôn có mặt — chỉ ghi MỘT lần cho mỗi cảnh báo (lúc hiện) và một lần lúc đã
+ * ổn. Poll 30s vẽ lại banner (số liệu, "+k") nhưng không làm trình đọc màn hình đọc lại; số đếm/câu fix ở ngoài vùng này.
+ */
+function Announcer({ entry }: { entry: BannerEntry | null }) {
+  const t = useT();
+  const text = useAlertText();
+  const nameOf = useSubjectNames(entry ? [entry.alert] : []);
+  const [message, setMessage] = useState("");
+  const last = useRef<string | null>(null);
+  const key = bannerAnnounceKey(entry);
+  // Chỉ chạy khi KHOÁ đổi — câu được chốt lúc đó; đổi ngôn ngữ/tên đối tượng sau không đọc lại.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cố ý chỉ theo `key`
+  useEffect(() => {
+    if (!entry || key === null || key === last.current) return;
+    last.current = key;
+    const headline = text(entry.alert, nameOf(entry.alert.subjectId)).headline;
+    setMessage(entry.phase === "resolved" ? `${t("alerts.banner.resolved")}: ${headline}` : headline);
+  }, [key]);
+  return (
+    <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">
+      {message}
     </div>
   );
 }
@@ -71,8 +104,6 @@ function BannerBody({ entry, more }: { entry: BannerEntry; more: number }) {
 
   return (
     <section
-      role="alert"
-      aria-live="assertive"
       aria-label={t("alerts.banner.region")}
       className={cn("flex gap-3 rounded-md border border-border border-l-4 px-4 py-3 shadow-sm transition-colors duration-200")}
       style={{ backgroundColor: `var(--${tone}-subtle)`, color: `var(--${tone}-fg)`, borderLeftColor: `var(--${tone})` }}
@@ -107,7 +138,13 @@ function BannerBody({ entry, more }: { entry: BannerEntry; more: number }) {
                 disabled={ack.isPending}
                 onClick={() => {
                   setBanner((b) => bannerAck(b, a.id));
-                  ack.mutate(a.id);
+                  // Review L5: ack lỗi -> báo lỗi và trả banner về (không được im lặng mất cảnh báo critical).
+                  ack.mutate(a.id, {
+                    onError: (err) => {
+                      toast.error(err instanceof Error ? err.message : String(err));
+                      setBanner((b) => bannerAdd(b, a));
+                    },
+                  });
                 }}
               >
                 {t("alerts.banner.ack")}
