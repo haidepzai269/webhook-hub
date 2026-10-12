@@ -1,5 +1,11 @@
 FROM node:22-slim
 
+# EG1 (ADR-175): nginx (gói Debian, bản thường — không Lua) + envsubst (gettext-base) cho cửa vào `edge`.
+# Chỉ chạy khi EDGE_NGINX=1 (hub-all) hoặc service `edge` (compose); không bật thì không tiến trình nào dùng.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx gettext-base \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy dependency manifests

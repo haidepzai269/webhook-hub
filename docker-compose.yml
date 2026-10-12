@@ -296,6 +296,35 @@ services:
       hub-api:
         condition: service_started
 
+  # EG1 (SPEC-chong-qua-tai §3.1, ADR-175): cửa vào nginx đứng trước hub-api — CÙNG template với hub-all trên Render
+  # (docker/nginx/nginx.conf.template). Cổng 4000 của hub-api VẪN mở để k6 bắn thẳng ("bắn vào localhost"); báo cáo số
+  # đo phải ghi rõ bắn qua edge (:8080) hay bắn thẳng (:4000). Ở local không có proxy phía trước: $remote_addr là IP thật
+  # -> cầu chì IP bật được (EDGE_IP_FUSE mặc định 1 ở đây; mặc định của image/hub-all là TẮT, ADR-176).
+  # hub-api ở compose giữ TRUST_PROXY=0 (cổng 4000 mở thẳng, tin XFF là cho giả IP) -> qua edge, req.ip = IP container edge.
+  edge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webhook-hub-edge
+    restart: unless-stopped
+    command: ["edge"]
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - EDGE_UPSTREAM=hub-api:4000
+      - EDGE_IP_FUSE=${EDGE_IP_FUSE:-1}
+      - EDGE_IP_RATE=${EDGE_IP_RATE:-50}
+      - EDGE_IP_BURST=${EDGE_IP_BURST:-500}
+      - EDGE_CONN_PER_IP=${EDGE_CONN_PER_IP:-50}
+      - EDGE_TRUSTED_PROXIES=${EDGE_TRUSTED_PROXIES:-}
+    # nginx: SIGQUIT = tắt êm (trả nốt request đang proxy); SIGTERM của nginx là tắt NHANH.
+    stop_signal: SIGQUIT
+    stop_grace_period: 25s
+    depends_on:
+      hub-api:
+        condition: service_started
+
   web:
     build:
       context: .

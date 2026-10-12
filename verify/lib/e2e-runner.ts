@@ -16,7 +16,7 @@ import { runScenarioFiles, ScenarioFile } from './scenario';
 export const EXTERNAL_SUITES: { file: string; tags: string[] }[] = [{ file: 'verify/scenarios/auth-e2e.ts', tags: ['auth', 'AU1', 'AU2', 'AU3', 'AU4', 'AU5', 'AU6'] }];
 
 /** File kịch bản module — thêm file mới vào đây (mỗi spec tự thêm kịch bản của mình). */
-export const SCENARIO_MODULES = ['verify/scenarios/ingest-e2e.ts'];
+export const SCENARIO_MODULES = ['verify/scenarios/ingest-e2e.ts', 'verify/scenarios/edge-e2e.ts'];
 /** VF5: L3 chaos — kill/restart/pause container hubv. Không bao giờ trong verify:deployed. */
 export const CHAOS_MODULES = ['verify/scenarios/chaos-l3.ts'];
 

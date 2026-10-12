@@ -1,0 +1,152 @@
+# =====================================================================================================================
+# EG1 (SPEC-chong-qua-tai §3, ADR-175/176): cửa vào của hub-api. FILE CẤU HÌNH DUY NHẤT — dùng chung cho:
+#   - deployed: tiến trình con thứ ba của docker/hub-all.js khi EDGE_NGINX=1 (upstream 127.0.0.1:4000)
+#   - local:    service `edge` của docker-compose.yml (upstream hub-api:4000)
+# Dựng ra file thật bằng docker/nginx/edge.js -> `envsubst` với DANH SÁCH BIẾN CỐ ĐỊNH (EDGE_ENVSUBST_VARS), nên
+# biến của nginx ($remote_addr, $request_id…) không bị thay. Giá trị được kiểm/kẹp trong edge.js trước khi chèn.
+#
+# Luật của file này:
+#   - KHÔNG sửa body (không gzip/sub_filter cho request, không đổi Content-Type): HMAC tính trên bytes gốc [EG:T2].
+#   - nginx KHÔNG BAO GIỜ trả 2xx thay hub-api (BB-3): mọi 2xx đến từ upstream.
+#   - Cầu chì IP chỉ ở /hooks/* và /v1/p/*. /api/*, /auth/*, /socket.io/*, /health KHÔNG có cầu chì.
+#   - Không có `if provider = …`: một regex sourceKey cho mọi provider.
+# =====================================================================================================================
+
+worker_processes 1;
+pid ${EDGE_PREFIX}/nginx.pid;
+error_log stderr warn;
+# Tắt máy bằng SIGQUIT (graceful): request đang proxy được chờ tối đa chừng này rồi mới bị cắt. Supervisor chờ nginx
+# thoát rồi mới SIGTERM hub-api; 15 s + phần của hub-api (≤ 5 s) nằm trong ngân sách 25 s (ADR-175).
+worker_shutdown_timeout 15s;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    server_tokens off;
+    client_body_temp_path ${EDGE_PREFIX}/client_body;
+    proxy_temp_path ${EDGE_PREFIX}/proxy;
+    fastcgi_temp_path ${EDGE_PREFIX}/fastcgi;
+    uwsgi_temp_path ${EDGE_PREFIX}/uwsgi;
+    scgi_temp_path ${EDGE_PREFIX}/scgi;
+
+    # ---- IP thật (§3.2). Do edge.js sinh từ EDGE_TRUSTED_PROXIES + EDGE_REAL_IP_RECURSIVE; trống = tin kết nối TCP.
+${EDGE_REAL_IP}
+
+    # ---- Log JSON có cấu trúc ra stdout (supervisor chuyển lên log Render, thêm "proc":"edge").
+    # uri_path = $uri (đã bỏ query). peer = địa chỉ TCP trước khi thay IP thật; xff = header gốc (để ĐO IP thật, §3.2).
+    log_format edge_json escape=json '{"ts":"$time_iso8601","ip":"$remote_addr","peer":"$realip_remote_addr",'
+        '"xff":"$http_x_forwarded_for","method":"$request_method","uri_path":"$uri","status":$status,'
+        '"limit_req_status":"$limit_req_status","limit_conn_status":"$limit_conn_status",'
+        '"request_id":"$edge_request_id","bytes":$bytes_sent,"rt":$request_time}';
+    # EDGE_ACCESS_LOG: /dev/stdout (service `edge`, nginx là PID 1) hoặc syslog UDP 127.0.0.1 về supervisor hub-all —
+    # stdout của con do Node spawn là socket, nginx không open() được "/dev/stdout" (ENXIO). Mất gói UDP chỉ mất dòng
+    # access log; lần cầu chì chặn vẫn có dòng "limiting requests" ở error_log (stderr, luôn tới supervisor).
+    access_log ${EDGE_ACCESS_LOG} edge_json;
+
+    # ---- x-request-id: giữ id client gửi nếu ĐÚNG khuôn của hub-api (errors/request-id.ts), không thì dùng id của nginx.
+    map $http_x_request_id $edge_request_id {
+        "~^[A-Za-z0-9._-]{8,128}$" $http_x_request_id;
+        default $request_id;
+    }
+
+    map $http_upgrade $edge_connection_upgrade {
+        default upgrade;
+        "" close;
+    }
+
+    # ---- Cầu chì IP (§3.3). Công tắc EDGE_IP_FUSE: khoá rỗng = nginx không đếm request đó (cầu chì tắt).
+    map "${EDGE_IP_FUSE}" $edge_fuse_key {
+        "1" $binary_remote_addr;
+        default "";
+    }
+    limit_req_zone $edge_fuse_key zone=hooks_ip:10m rate=${EDGE_IP_RATE}r/s;
+    limit_req_status 429;
+    limit_req_log_level warn;
+    limit_conn_zone $binary_remote_addr zone=hooks_conn:10m;
+    limit_conn_status 429;
+    limit_conn_log_level warn;
+
+    # ---- Slowloris (§3.4): Node không còn phải giữ kết nối nhả từng byte.
+    client_header_timeout 10s;
+    client_body_timeout 10s;
+    send_timeout 10s;
+    keepalive_timeout 15s;
+
+    # Trần body mặc định = MAX_API_BODY_BYTES (100 KB, ADR-162). /hooks/* nâng lên 1 MB ở location riêng.
+    client_max_body_size 100k;
+
+    upstream hub_api {
+        server ${EDGE_UPSTREAM};
+    }
+
+    server {
+        listen ${EDGE_LISTEN} default_server;
+
+        # Header gửi lên hub-api: GHI ĐÈ (không nối chuỗi cũ) -> `trust proxy 1` của hub-api ra đúng IP nginx đã đếm.
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Request-Id $edge_request_id;
+        # Không đặt X-Forwarded-Proto: header của proxy phía trước (Render) đi qua nguyên vẹn như hôm nay.
+        proxy_request_buffering on;
+        proxy_connect_timeout 5s;
+
+        error_page 429 = @edge_rate_limited;
+        error_page 413 = @edge_payload_too_large;
+
+        # Health check của Render đi qua nginx — không cầu chì.
+        location = /health {
+            proxy_pass http://hub_api;
+        }
+
+        # EG:SOURCE_KEY_RE — [EG:T3] đọc regex của dòng dưới, đừng tách ra nhiều dòng.
+        location ~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$" {
+            limit_req zone=hooks_ip burst=${EDGE_IP_BURST} nodelay;
+            limit_conn hooks_conn ${EDGE_CONN_PER_IP};
+            client_max_body_size 1m;
+            proxy_read_timeout 30s;
+            proxy_pass http://hub_api;
+        }
+
+        # /hooks/* sai khuôn (path traversal, key quá dài, ký tự lạ) -> 404 tĩnh, không chạm hub-api.
+        location /hooks/ {
+            default_type application/json;
+            add_header X-Request-Id $edge_request_id always;
+            return 404 '{"error":"not_found","message":"The resource was not found.","fix":"Check the webhook URL: /hooks/<provider>/<sourceKey> as shown in the console.","docsUrl":"${HUB_DOCS_URL}#not_found","requestId":"$edge_request_id"}';
+        }
+
+        location /v1/p/ {
+            limit_req zone=hooks_ip burst=${EDGE_IP_BURST} nodelay;
+            proxy_pass http://hub_api;
+        }
+
+        # Realtime console: WebSocket, không cầu chì.
+        location /socket.io/ {
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $edge_connection_upgrade;
+            proxy_read_timeout 1h;
+            proxy_pass http://hub_api;
+        }
+
+        # /api/*, /auth/*, /metrics… — không cầu chì (console đi qua proxy Vercel: mọi người cùng một IP ở đây).
+        location / {
+            proxy_pass http://hub_api;
+        }
+
+        location @edge_rate_limited {
+            default_type application/json;
+            add_header Retry-After 1 always;
+            add_header X-Request-Id $edge_request_id always;
+            return 429 '{"error":"edge_rate_limited","message":"Too many requests from this IP address.","fix":"Slow down and retry after the number of seconds in Retry-After. Providers retry on 429 by themselves.","docsUrl":"${HUB_DOCS_URL}#edge_rate_limited","requestId":"$edge_request_id","retryAfter":1}';
+        }
+
+        location @edge_payload_too_large {
+            default_type application/json;
+            add_header X-Request-Id $edge_request_id always;
+            return 413 '{"error":"payload_too_large","message":"The request body is too large.","fix":"Send at most 1MB per webhook and 100KB per API request.","docsUrl":"${HUB_DOCS_URL}#payload_too_large","requestId":"$edge_request_id"}';
+        }
+    }
+}

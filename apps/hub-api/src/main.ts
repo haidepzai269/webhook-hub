@@ -83,8 +83,12 @@ async function bootstrap() {
   configureBodyParsers(app);
 
   const port = process.env.PORT || 4000;
-  await app.listen(port);
-  logger.info(`🚀 Webhook Hub API đang chạy trên cổng ${port}`);
+  // EG1 (ADR-175): HOST chỉ đặt khi nginx đứng trước trong cùng container (hub-all, EDGE_NGINX=1) -> 127.0.0.1, không ai
+  // ngoài nginx gọi thẳng được. Không đặt -> nghe mọi interface như trước.
+  const host = process.env.HOST?.trim();
+  if (host) await app.listen(port, host);
+  else await app.listen(port);
+  logger.info(`🚀 Webhook Hub API đang chạy trên ${host ? `${host}:` : 'cổng '}${port}`);
 
   // Review CB6 (Thấp 3, ADR-171): SIGTERM/SIGINT -> ghi nốt bộ đếm bản trùng (trần trong SHUTDOWN_TIMEOUT_MS) rồi thoát.
   const ingest = app.get(IngestService);

@@ -228,6 +228,14 @@ export const ERROR_CATALOG = {
     params: ['retryAfter'],
     fix: (p) => `Check the webhook URL (sourceKey) and the signing secret configured at the provider, then retry${Number.isFinite(p.retryAfter) ? ` after ${p.retryAfter} seconds` : ' later'}.`,
   },
+  // EG1 (ADR-176): KHÔNG do Node trả — body tĩnh của nginx (docker/nginx/nginx.conf.template) khi cầu chì IP chặn
+  // /hooks/* hoặc /v1/p/*. Khai ở đây để mã ổn định + có mục trong ERRORS.md; test [EG:T10] so message với template.
+  edge_rate_limited: {
+    status: 429,
+    message: 'Too many requests from this IP address.',
+    params: ['retryAfter'],
+    fix: () => 'Slow down and retry after the number of seconds in Retry-After. Providers retry on 429 by themselves.',
+  },
   // ---- kết nối hai đầu (SPEC-ket-noi, ADR-138) ----
   use_endpoints_route: {
     status: 422,

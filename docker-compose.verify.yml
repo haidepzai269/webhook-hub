@@ -83,6 +83,39 @@ services:
     ports: !override
       - "13000:3000"
 
+  # EG1 (ADR-175): cửa vào nginx của hubv (:18080 -> hub-api). Trần THẤP để [EG:T10] chạm cầu chì bằng vài chục request
+  # (mặc định thật 50 r/s burst 500 kiểm ở L0). Không đổi service cũ: request không qua :18080 chạy như trước.
+  edge:
+    container_name: !reset null
+    ports: !override
+      - "18080:8080"
+    environment:
+      - PORT=8080
+      - EDGE_UPSTREAM=hub-api:4000
+      - EDGE_IP_FUSE=1
+      - EDGE_IP_RATE=5
+      - EDGE_IP_BURST=10
+      - EDGE_CONN_PER_IP=50
+      - EDGE_TRUSTED_PROXIES=
+
+  # Chỉ hubv: cùng image + template nhưng upstream là sink -> [EG:T11]/[EG:T2] đọc lại ĐÚNG header/bytes nginx gửi lên.
+  edge-sink:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["edge"]
+    ports:
+      - "18090:8080"
+    environment:
+      - PORT=8080
+      - EDGE_UPSTREAM=sink:4100
+      - EDGE_IP_FUSE=0
+    stop_signal: SIGQUIT
+    depends_on:
+      sink:
+        condition: service_started
+
   # Chỉ có ở hubv: "service của dev" ở đầu nhận (DINH-CHINH-AUTH §8 #6). hub-worker gọi http://sink:4100/<path>.
   # Đọc lại request: GET http://localhost:14100/_requests. Không import code hub (tools/verify-sink/sink.js).
   sink:

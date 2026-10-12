@@ -358,6 +358,16 @@ Chặn ở cửa trước khi đọc body (D3) thì kèm `Connection: close` —
 for i in $(seq 1 21); do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/hooks/github/khong_ton_tai -d '{}'; done
 ```
 
+## edge_rate_limited
+
+**429**, kèm `Retry-After: 1`. Do **nginx ở cửa vào** trả (cầu chì theo IP, chỉ `/hooks/*` và `/v1/p/*`; ADR-176), không
+phải hub-api — request chưa tới hub. Một IP vượt `EDGE_IP_RATE` request/giây (mặc định 50, burst `EDGE_IP_BURST` = 500).
+Tham số: `retryAfter` (giây). Provider (GitHub, PayOS…) tự gửi lại khi gặp 429.
+**Sửa:** giảm tốc độ gửi từ một IP; cần trần cao hơn thì người vận hành chỉnh `EDGE_IP_RATE`/`EDGE_IP_BURST` (không cần build lại).
+```bash
+for i in $(seq 1 600); do curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/hooks/github/$SOURCE_KEY & done | sort | uniq -c
+```
+
 ## use_endpoints_route
 
 **422.** `POST /api/v1/destinations` với `type:"webhook"`. Endpoint webhook tạo ở route riêng để hub sinh `whsec_`,

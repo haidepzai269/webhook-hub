@@ -251,7 +251,7 @@
           "EG5": "T14,T15"
         }
       },
-      "note": "SPEC-chong-qua-tai §8. EG1 (nginx) ở nhánh feat/edge-nginx; EG2–EG5 ở nhánh feat/edge."
+      "note": "SPEC-chong-qua-tai §8 (ADR-175..179, 181). L0/L1 + L2 trên hubv (service edge/edge-sink). EG1 (nginx) từ feat/edge-nginx; EG2–EG5 từ feat/edge."
     }
   ],
   "inline": [
