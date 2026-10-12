@@ -56,6 +56,8 @@ export function useAlertsPage(query: string) {
     queryFn: () => hubFetch<AlertPage>(`/api/v1/alerts${query ? `?${query}` : ""}`),
     enabled: operator,
     placeholderData: keepPreviousData,
+    // Như chuông: poll để cảnh báo project KHÁC (không có alert.changed) cũng hiện mà không cần tải lại trang.
+    refetchInterval: ALERT_POLL_MS,
   });
 }
 

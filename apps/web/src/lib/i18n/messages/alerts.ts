@@ -45,6 +45,7 @@ export const alerts = defineMessages("alerts", {
     // ---- toast (§8.3)
     "alerts.toast.view": "Xem",
     "alerts.toast.dismiss": "Đóng thông báo",
+    "alerts.toast.region": "Cảnh báo",
 
     // ---- số liệu (facts) dạng bảng đọc được
     "alerts.fact.count": "Số lần",
@@ -109,6 +110,7 @@ export const alerts = defineMessages("alerts", {
 
     "alerts.toast.view": "View",
     "alerts.toast.dismiss": "Dismiss notification",
+    "alerts.toast.region": "Alerts",
 
     "alerts.fact.count": "Count",
     "alerts.fact.http-status": "HTTP status",

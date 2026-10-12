@@ -100,6 +100,13 @@
   .alert-toaster [data-sonner-toast] {
     transition: opacity 0.2s ease !important;
   }
+  /* Khi đóng: giữ nguyên chỗ đang đứng, chỉ mờ (sonner đẩy lên một chiều cao — không có transition thì "giật"). */
+  .alert-toaster [data-sonner-toast][data-removed="true"][data-front="true"] {
+    --y: translateY(0) !important;
+  }
+  .alert-toaster [data-sonner-toast][data-removed="true"][data-front="false"][data-expanded="true"] {
+    --y: translateY(calc(var(--lift) * var(--offset))) !important;
+  }
 }
 
 /* Chấm nhịp nhẹ ở badge chuông khi có critical chưa xem — một lần lan ra, không nhấp nháy liên tục. */

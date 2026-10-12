@@ -114,7 +114,8 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
 
   it("critical mới có alert.changed trong phiên -> banner; critical chỉ thấy qua poll (project khác) -> toast dính; warning -> toast 6s; info/đã xem -> không", () => {
     const mem = createFeedMemory();
-    takeArrivals(mem, [alert("c-old", "critical")]);
+    // Mốc tường minh trước openedAt của fixture (10:00Z) — không dùng Date.now() (test hẹn giờ).
+    takeArrivals(mem, [alert("c-old", "critical")], Date.parse("2026-10-12T09:59:00Z"));
     noteSocketNotice(mem, { id: "c-new", state: "OPEN" });
     const fresh = takeArrivals(mem, [
       alert("c-old", "critical"),

@@ -20,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // ADR-025: root layout của admin (Tailwind v4 + shadcn). Storefront có root layout riêng ở (shop).
-export default function AdminRootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function AdminRootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const {
     theme_mode,
     theme_preset,
@@ -31,6 +31,7 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
     font,
     language,
   } = PREFERENCE_DEFAULTS;
+  const t = await getT();
   return (
     <html
       lang={language}
@@ -72,6 +73,9 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
               visibleToasts={3}
               offset={{ top: 60 }}
               mobileOffset={{ top: 56, right: 16, left: 16 }}
+              // Vùng aria-live + phím tắt riêng — không trùng "Notifications alt+T" của Toaster thường.
+              containerAriaLabel={t("alerts.toast.region")}
+              hotkey={["altKey", "shiftKey", "KeyT"]}
             />
           </PreferencesStoreProvider>
         </TooltipProvider>

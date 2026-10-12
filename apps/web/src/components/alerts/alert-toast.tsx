@@ -14,6 +14,9 @@ import { ProjectChip, SEVERITY_COLOR, SEVERITY_TONE, SeverityIcon } from "./aler
  * tối đa 3 toast cùng lúc (`visibleToasts` của Toaster). Chữ đã dịch sẵn lúc tạo — component không cần context React.
  * Viền bao quanh + icon + nhãn mức cùng tông theo mức (critical đỏ, warning hổ phách, info xanh dương). Hiện ở Toaster
  * riêng `ALERT_TOASTER_ID` (giữa phía trên, dưới header) để toast thao tác thường vẫn ở góc phải.
+ * Bề rộng `var(--width)` (356px, biến sonner đặt trên <ol>): `toast.custom` không được sonner đặt width cho <li>, và
+ * top-center không có left/right:0 ⇒ `w-full` co theo nội dung, lệch trái. `max-w-full`: màn ≤600px <li> đã rộng
+ * `100% - 2×gutter` nên toast vừa khung.
  */
 export const ALERT_TOASTER_ID = "alerts";
 export interface AlertToastProps {
@@ -33,7 +36,7 @@ function AlertToast(p: AlertToastProps) {
   return (
     <div
       role="status"
-      className="flex w-full gap-3 rounded-lg border-[1.5px] bg-popover p-3 pr-2 text-popover-foreground shadow-lg"
+      className="flex w-[var(--width)] max-w-full gap-3 rounded-lg border-[1.5px] bg-popover p-3 pr-2 text-popover-foreground shadow-lg"
       style={{ borderColor: SEVERITY_COLOR[p.severity] }}
     >
       <SeverityIcon severity={p.severity} className="mt-0.5" />
