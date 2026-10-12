@@ -32,6 +32,8 @@
 
 **Đánh đổi:** Mất khả năng scale riêng bước route — nhưng bước đó không phải nút thắt (nó là tra cache + insert). Đổi lại bớt một chỗ phải lo idempotency, ack, DLQ, và bớt một độ trễ hop. Vẫn còn 2 hop để chứng minh luận điểm "tách *nhận* khỏi *xử lý*".
 
+**Đính chính (DS5, 2026-10-12, append):** không có cache subscription — trong Redis hay trong bộ nhớ. Route tìm `subscriptions` bằng truy vấn Postgres trong cùng transaction với INSERT `events`/`deliveries` (ARCHITECTURE §3.2 bước 5). Lý do gộp 2 hop vẫn giữ: route là hàm thuần trên `(event, subscriptions)` và không phải nút thắt.
+
 ---
 
 ## ADR-003 — PostgreSQL là trọng tài idempotency, Redis chỉ là đường tắt (2026-09-17)
@@ -1803,8 +1805,12 @@ Gói `cuckoo-filter@1.1.4` thì `require` lỗi ngay (thiếu `cbor-js`). Bloom 
 
 ---
 
-## ADR-174 — GitHub giao việc so chữ ký cho `@octokit/webhooks-methods`; quy tắc thật là "không bao giờ so bằng `!==`/`===`" (DS4, 2026-10-12)
+## ADR-174 — Giao việc so chữ ký cho SDK chỉ khi đã kiểm SDK gọi `timingSafeEqual`: GitHub (octokit) và Stripe; PayOS tự so (DS4, 2026-10-12)
 
-**Vấn đề:** CLAUDE.md và ARCHITECTURE §7.1 ghi "luôn `crypto.timingSafeEqual`, kể cả khi SDK có hàm verify riêng", nhưng `GithubAdapter.verify` (`libs/providers/src/github.adapter.ts`) giao cho `verifyWithFallback` của SDK, còn PayOS thì tự so (ADR-058). Hai provider làm hai kiểu, trông như mâu thuẫn.
-**Chọn:** Quy tắc thật là **không bao giờ so chữ ký bằng `!==`/`===`**. SDK nào so constant-time thì được dùng: octokit so độ dài rồi gọi `crypto.timingSafeEqual` (`dist-node/index.js` hàm `verify`), và `verifyWithFallback` lo sẵn xoay secret. SDK nào so bằng `!==` thì tự so bằng `timingSafeEqual` (PayOS, ADR-058). CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
-**Đánh đổi:** Tin vào triển khai của SDK — đang dùng `@octokit/webhooks-methods` **4.1.0** (`libs/providers/package.json` `^4.1.0`). Nâng version phải kiểm lại hàm `verify` còn dùng `timingSafeEqual`.
+**Vấn đề:** CLAUDE.md và ARCHITECTURE §7.1 ghi "luôn `crypto.timingSafeEqual`, kể cả khi SDK có hàm verify riêng". Nhưng ba provider có ký làm ba kiểu: PayOS tự so (ADR-058), `GithubAdapter.verify` (`libs/providers/src/github.adapter.ts`) giao cho `verifyWithFallback` của `@octokit/webhooks-methods`, `StripeAdapter.verify` (`libs/providers/src/stripe.adapter.ts`) giao cho `stripe.webhooks.constructEvent`. Trông như mâu thuẫn.
+**Chọn:** Quy tắc thật là **so chữ ký/khoá chỉ bằng `crypto.timingSafeEqual`, không bao giờ `!==`/`===`/`Buffer.equals`** — do ta gọi, hoặc do SDK gọi mà ta **đã đọc mã nguồn để xác nhận**:
+- **PayOS — tự so:** SDK so bằng `!==` (ADR-058).
+- **GitHub — giao SDK đã kiểm:** `@octokit/webhooks-methods` **4.1.0**, hàm `verify` (`dist-node/index.js`) so độ dài rồi gọi `crypto.timingSafeEqual`; `verifyWithFallback` lo sẵn xoay secret.
+- **Stripe — giao SDK đã kiểm:** `stripe` **22.6.2**, `constructEvent` → `NodePlatformFunctions.secureCompare` (`cjs/platform/NodePlatformFunctions.js`) so độ dài rồi gọi `crypto.timingSafeEqual`.
+CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
+**Đánh đổi:** Tin vào triển khai của SDK. Version được ghim bởi `package-lock.json`, nhưng `libs/providers/package.json` khai `^4.1.0` / `^22.6.2` nên `npm install` có thể kéo bản minor mới → **mọi lần lockfile đổi version octokit hoặc stripe phải kiểm lại** hàm so còn gọi `timingSafeEqual`.

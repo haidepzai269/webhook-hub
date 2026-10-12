@@ -28,7 +28,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 - **Topology RabbitMQ khai báo ở MỘT chỗ duy nhất:** `libs/messaging/topology.ts`. Rải rác → `PRECONDITION_FAILED`, app không lên.
 - **`apps/shop/src` trần cứng ~600 dòng** (ADR-141 link PayOS thật; ADR-156 trang Cài đặt kết nối — cách B). Vượt = đang lạc đề, dừng lại. Giỏ hàng chỉ ở client, server tự tính tổng (ADR-024). Không đăng nhập, không kho.
 - **Thêm provider = viết một class `ProviderAdapter` + đăng ký registry.** Không sửa ingest/worker/DB. Đây là luận điểm chính của đề tài — đừng phá nó bằng một cái `if (provider === 'x')` trong lõi.
-- **Không bao giờ so chữ ký bằng `!==`/`===`.** Tự so bằng `crypto.timingSafeEqual` — kể cả khi SDK provider có hàm verify riêng mà so bằng `!==` (PayOS, ADR-058). Chỉ được giao cho SDK đã so constant-time (GitHub/octokit `verifyWithFallback`, ADR-174).
+- **So chữ ký/khoá chỉ bằng `crypto.timingSafeEqual`** — không bao giờ `!==`/`===`/`Buffer.equals`. SDK provider có hàm verify riêng mà so không constant-time thì tự so (PayOS so bằng `!==`, ADR-058). Chỉ được giao cho SDK **đã đọc mã nguồn, xác nhận gọi `timingSafeEqual`, và ghi ADR kèm version**: hiện chỉ có GitHub (`@octokit/webhooks-methods` `verifyWithFallback`) và Stripe (`constructEvent`), ADR-174.
 - **Khoá chống trùng không bao giờ ngẫu nhiên** — thiếu id của provider thì `bodyHashKey(rawBody)`.
 - **Adapter ra kiểu chuẩn** theo `docs/EVENT-CATALOG.md`; `payment.*`/`repo.*` sai khuôn là lỗi normalize vĩnh viễn, không hạ cấp âm thầm.
 - **HMAC tính trên `body_raw` (bytes), không phải trên JSON đã parse.**

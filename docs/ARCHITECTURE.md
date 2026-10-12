@@ -115,8 +115,8 @@ Tách ra mua được ba thứ:
        không có / tắt / đã lưu trữ -> 404 -> DỪNG
 3.  Rate limit theo source (cửa sổ CỐ ĐỊNH 60s, 1 lệnh EVAL INCR+EXPIRE, trần INGEST_RATE_LIMIT_PER_MIN;
     Redis chết -> fail-OPEN + log cảnh báo) -> vượt trần: 429 -> DỪNG
-    Sau bước 2 vì khoá `rate:source:{source.id}` cần source.id; sourceKey rác bị 404 trước, không tốn EVAL Redis
-    adapter.verify(rawBytes, headers, secrets[])
+    (sau bước 2 vì khoá rate:source:{source.id} cần source.id; sourceKey rác bị 404 trước, không tốn EVAL Redis)
+3b. Giải mã secrets · adapter.verify(rawBytes, headers, secrets[])
        sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) -> 401 -> DỪNG
     Header nhạy cảm che trước khi lưu (ADR-051); signature_header = adapter.extractSignature(req) (S3-1)
 4.  key = adapter.extractIdempotencyKey(req)
@@ -515,9 +515,9 @@ Cập nhật dùng optimistic locking: `UPDATE ... WHERE id = ? AND version = ?`
 
 | Biện pháp | Chi tiết |
 |---|---|
-| Xác thực | PayOS: checksum HMAC-SHA256 trên `data` đã sort key (tính bằng SDK, **so bằng `timingSafeEqual` của ta**, S3-1) · SePay: **không ký nội dung** — chỉ là **API key dùng chung** trong `Authorization: Apikey <key>` (bắt buộc tiền tố) · GitHub: `X-Hub-Signature-256` HMAC-SHA256 trên **raw body**, verify bằng `@octokit/webhooks-methods` `verifyWithFallback` (constant-time, xoay secret; ADR-174) · Stripe: `Stripe-Signature` (SDK, raw body) |
+| Xác thực | PayOS: checksum HMAC-SHA256 trên `data` đã sort key (tính bằng SDK, **so bằng `timingSafeEqual` của ta**, S3-1) · SePay: **không ký nội dung** — chỉ là **API key dùng chung** trong `Authorization: Apikey <key>` (bắt buộc tiền tố) · GitHub: `X-Hub-Signature-256` HMAC-SHA256 trên **raw body**, verify bằng `@octokit/webhooks-methods` `verifyWithFallback` (constant-time, xoay secret; ADR-174) · Stripe: `Stripe-Signature` (SDK `constructEvent`, raw body; ADR-174) |
 | Raw body | `NestFactory.create(AppModule, { rawBody: true })` — **cấu hình NGÀY 1** |
-| So sánh | **Không bao giờ** so bằng `!==`/`===`. Tự so bằng `crypto.timingSafeEqual` (kể cả khi so API key), hoặc dùng SDK đã so constant-time (ADR-174) |
+| So sánh | **Không bao giờ** so bằng `!==`/`===`. Tự so bằng `crypto.timingSafeEqual` (kể cả khi so API key), hoặc dùng SDK đã kiểm là gọi `timingSafeEqual` (ADR-174) |
 | URL khó đoán | `/hooks/:provider/:sourceKey`, `sourceKey` ngẫu nhiên 32 ký tự |
 | Giới hạn | payload ≤ 1MB · rate limit cửa sổ cố định 60s theo source (mặc định 100/phút) |
 | Lưu cả request hỏng | chữ ký sai vẫn INSERT `status=REJECTED` để điều tra — chỉ 4KB đầu, ≤ 20 bản/phút/source; header nhạy cảm đã che (ADR-045, ADR-051) |
@@ -800,7 +800,7 @@ export interface ProviderAdapter {
 Provider yêu cầu phản hồi nhanh (GitHub ~10s). Gọi Telegram ngay trong request mà đích chậm → provider timeout → gửi lại → trùng. Hàng đợi tách *nhận* khỏi *xử lý*: ingest luôn nhanh, và hai phần scale độc lập.
 
 **Q: Tại sao dùng cả Redis lẫn RabbitMQ?**
-RabbitMQ = giao message tin cậy (ack, retry có độ trễ, DLQ, routing). Redis = bộ nhớ nhanh độ trễ thấp (đường tắt chống trùng, rate limit nguồn, circuit breaker, throttle chiều ra, pub/sub cho Socket.IO). Bổ trợ, không thay thế.
+RabbitMQ = giao message tin cậy (ack, retry có độ trễ, DLQ, routing). Redis = bộ nhớ nhanh độ trễ thấp (đường tắt chống trùng, rate limit nguồn + đăng nhập, circuit breaker + probe HALF_OPEN, throttle chiều ra, khoá cleanup, pub/sub cho Socket.IO + đồng bộ Bloom filter email). Bổ trợ, không thay thế.
 
 **Q: Làm sao đảm bảo không mất sự kiện?**
 Transactional Outbox + publisher confirms + manual ack + đối soát PayOS. Và: **không bao giờ ACK trước khi COMMIT** (BB-3).
