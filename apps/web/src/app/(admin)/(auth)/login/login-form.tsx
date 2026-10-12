@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -50,10 +50,20 @@ export function LoginForm() {
   const t = useT();
   const [serverError, setServerError] = useState<string | null>(null);
   const schema = useMemo(() => makeSchema(t), [t]);
+  // Resolver đọc schema qua ref: đổi ngôn ngữ → schema mới có hiệu lực ngay, không phụ thuộc useForm có nhận resolver mới.
+  const schemaRef = useRef(schema);
+  schemaRef.current = schema;
   const form = useForm<LoginValues>({
-    resolver: zodResolver(schema),
+    resolver: (values, context, options) => zodResolver(schemaRef.current)(values, context, options),
     defaultValues: { email: "", password: "" },
   });
+
+  // Đổi ngôn ngữ khi đang hiện lỗi → kiểm tra lại các ô đó để câu lỗi theo ngôn ngữ mới.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `schema` là tín hiệu đổi ngôn ngữ, không đọc trong thân effect.
+  useEffect(() => {
+    const names = Object.keys(form.formState.errors) as (keyof LoginValues)[];
+    if (names.length) void form.trigger(names);
+  }, [schema, form]);
 
   // Đã đăng nhập (cookie còn sống) → về dashboard. Không đọc token: cookie phiên là HttpOnly (SPEC-auth §4).
   useEffect(() => {

@@ -116,22 +116,32 @@ describe("describeDeleteConflict — thông báo 409 dễ hiểu", () => {
   });
 });
 
-describe("errorMessageOf — DX1: console giữ câu tiếng Việt (ADR-136)", () => {
+const vi = createT("vi");
+
+describe("errorMessageOf — DX1: câu console theo mã lỗi, theo ngôn ngữ (ADR-136)", () => {
   it("ưu tiên detail; thiếu detail -> câu Việt theo mã; mã lạ -> message; 5xx kèm requestId", () => {
     expect(
-      errorMessageOf({
-        error: "bad_request",
-        message: "The request is invalid.",
-        detail: "range phải là '24h' hoặc '7d'",
-      }),
+      errorMessageOf(
+        {
+          error: "bad_request",
+          message: "The request is invalid.",
+          detail: "range phải là '24h' hoặc '7d'",
+        },
+        vi,
+      ),
     ).toBe("range phải là '24h' hoặc '7d'");
-    expect(errorMessageOf({ error: "not_found", message: "The resource was not found." })).toMatch(/Không tìm thấy/);
-    expect(errorMessageOf({ error: "internal_error", message: "Internal error.", requestId: "r-123" })).toMatch(
+    expect(errorMessageOf({ error: "not_found", message: "The resource was not found." }, vi)).toMatch(/Không tìm thấy/);
+    expect(errorMessageOf({ error: "internal_error", message: "Internal error.", requestId: "r-123" }, vi)).toMatch(
       /r-123/,
     );
-    expect(errorMessageOf({ error: "zzz", message: "Plain" })).toBe("Plain");
-    expect(errorMessageOf({ message: ["a", "b"] })).toBe("a, b");
-    expect(errorMessageOf(null)).toBe("");
+    expect(errorMessageOf({ error: "zzz", message: "Plain" }, vi)).toBe("Plain");
+    expect(errorMessageOf({ message: ["a", "b"] }, vi)).toBe("a, b");
+    expect(errorMessageOf(null, vi)).toBe("");
+    const en = createT("en");
+    expect(errorMessageOf({ error: "not_found", message: "x" }, en)).toBe("Not found (or not part of this project).");
+    expect(errorMessageOf({ error: "internal_error", message: "x", requestId: "r-9" }, en)).toBe(
+      "Hub server error — try again later. (request ID r-9)",
+    );
   });
 });
 
@@ -177,8 +187,9 @@ describe("connectionDialogMode — nút Kết nối trên dòng Nguồn", () => 
 
 describe("errorMessageOf — 422 public_url_required", () => {
   it("nói đúng biến HUB_PUBLIC_URL, đặt ở service hub-api trên Render (thắng detail tiếng Anh của hub)", () => {
-    const m = errorMessageOf({ error: "public_url_required", detail: "HUB_PUBLIC_URL là localhost/IP nội bộ" });
+    const m = errorMessageOf({ error: "public_url_required", detail: "HUB_PUBLIC_URL là localhost/IP nội bộ" }, vi);
     expect(m).toContain("HUB_PUBLIC_URL=");
     expect(m).toContain("hub-api trên Render");
+    expect(errorMessageOf({ error: "public_url_required" }, createT("en"))).toContain("hub-api service on Render");
   });
 });

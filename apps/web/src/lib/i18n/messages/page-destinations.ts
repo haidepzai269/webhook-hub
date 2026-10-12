@@ -61,7 +61,7 @@ export const pageDestinations = defineMessages("page.destinations", {
     "page.destinations.endpoint.name-placeholder": "VD: shop-backend",
     "page.destinations.endpoint.url-hint": "URL công khai. Chạy cục bộ thì dùng `npx hub listen` thay cho localhost.",
     "page.destinations.endpoint.types": "Kiểu sự kiện trong danh mục",
-    "page.destinations.endpoint.extra-placeholder": "Kiểu riêng, cách nhau dấu phẩy (vd order.*)",
+    "page.destinations.endpoint.extra-placeholder": "Kiểu riêng, cách nhau dấu phẩy (vd invoice.*)",
     "page.destinations.endpoint.sources": "Nguồn (bỏ trống = mọi nguồn của dự án)",
     "page.destinations.endpoint.saved-close": "Đã lưu khoá ký, đóng",
     "page.destinations.endpoint.creating": "Đang tạo và xác minh…",
@@ -136,7 +136,7 @@ export const pageDestinations = defineMessages("page.destinations", {
     "page.destinations.endpoint.url-hint":
       "Public URL. When running locally, use `npx hub listen` instead of localhost.",
     "page.destinations.endpoint.types": "Event types (catalog)",
-    "page.destinations.endpoint.extra-placeholder": "Custom types, comma-separated (e.g. order.*)",
+    "page.destinations.endpoint.extra-placeholder": "Custom types, comma-separated (e.g. invoice.*)",
     "page.destinations.endpoint.sources": "Sources (empty = all sources of the project)",
     "page.destinations.endpoint.saved-close": "Secret saved, close",
     "page.destinations.endpoint.creating": "Creating + challenge…",

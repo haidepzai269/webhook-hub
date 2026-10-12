@@ -53,6 +53,15 @@ export function signPayosData(data: Record<string, unknown>, checksumKey: string
   return hmacSha256Hex(checksumKey, payosCanonicalString(data));
 }
 
+/** Body PayOS thiếu `data` dạng object — nơi gọi (Thử nghiệm) dịch bằng khoá `errors.payos.data-not-object`. */
+export class PayosDataError extends Error {
+  readonly key = "errors.payos.data-not-object" as const;
+  constructor() {
+    super("PayOS body must have a `data` field that is an object");
+    this.name = "PayosDataError";
+  }
+}
+
 /**
  * Nhận body PayOS (object có `data`), trả body MỚI với `signature` đã ký lại. Dựng lại body sau khi
  * ký — byte gửi đi là JSON của object này.
@@ -63,7 +72,7 @@ export async function signPayosBody(
 ): Promise<Record<string, unknown>> {
   const data = body.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("Body PayOS phải có trường `data` là object");
+    throw new PayosDataError();
   }
   const signature = await signPayosData(data as Record<string, unknown>, checksumKey);
   return { ...body, signature };

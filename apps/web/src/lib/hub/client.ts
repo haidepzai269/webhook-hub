@@ -1,3 +1,4 @@
+import { createT, DEFAULT_LOCALE, isLocale, type TranslateFn } from "../i18n/dictionary";
 import { clearProjectSelection, currentProjectId } from "./project-store";
 import { errorMessageOf } from "./ui-logic";
 
@@ -10,6 +11,15 @@ export class HubApiError extends Error {
     super(message);
     this.name = "HubApiError";
   }
+}
+
+/**
+ * `t` theo ngôn ngữ giao diện ĐANG hiển thị: <html lang> do boot script đặt và LanguageSwitcher cập nhật
+ * (preference-runtime) — hubFetch không nằm trong cây React nên không dùng được useT().
+ */
+function uiT(): TranslateFn {
+  const lang = typeof document === "undefined" ? null : document.documentElement.lang;
+  return createT(isLocale(lang) ? lang : DEFAULT_LOCALE);
 }
 
 /** SPEC-auth §9: trang đăng nhập ở `/login` (đường `/auth/*` của web là proxy sang hub-api). */
@@ -97,10 +107,10 @@ export async function hubFetch<T>(path: string, init: RequestInit = {}, retried 
   if (res.status === 401) {
     if (!retried && (await refreshSession())) return hubFetch<T>(path, init, true);
     redirectToLogin();
-    throw new HubApiError(401, "Phiên đăng nhập đã hết hạn hoặc không hợp lệ.", body);
+    throw new HubApiError(401, uiT()("errors.api.session-invalid"), body);
   }
   if (!res.ok) {
-    throw new HubApiError(res.status, errorMessageOf(body) || `HTTP ${res.status}`, body);
+    throw new HubApiError(res.status, errorMessageOf(body, uiT()) || `HTTP ${res.status}`, body);
   }
   return body as T;
 }

@@ -106,6 +106,15 @@ describe("i18n dictionary", () => {
     }
   });
 
+  it("BB-1: không giá trị nào (mọi locale) nói tới đơn hàng — hub không biết nghiệp vụ của Shop", () => {
+    for (const locale of LOCALES) {
+      for (const [key, value] of Object.entries(DICTIONARIES[locale])) {
+        const hit = /đơn hàng|\borders?\b|\border[-_.]?(code|id)\b/i.test(value);
+        expect({ locale, key, value, hit }).toMatchObject({ hit: false });
+      }
+    }
+  });
+
   it("translate thay {biến}, giữ nguyên biến lạ; nextLocale xoay vòng vi ⇄ en", () => {
     expect(translate("en", "header.theme.aria", { mode: "Dark" })).toBe("Theme: Dark. Click to change");
     expect(translate("vi", "header.theme.aria")).toBe("Giao diện: {mode}. Bấm để đổi");

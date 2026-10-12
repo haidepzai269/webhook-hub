@@ -1,4 +1,4 @@
-import { hmacSha256Hex, signPayosBody } from "@/lib/hub/payos-sign";
+import { hmacSha256Hex, PayosDataError, signPayosBody } from "@/lib/hub/payos-sign";
 import type { Provider } from "@/lib/hub/types";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
 
@@ -122,7 +122,9 @@ export async function buildRequest(
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         throw new Error(t("page.playground.error.payos-object"));
       }
-      const signed = await signPayosBody(parsed as Record<string, unknown>, secret);
+      const signed = await signPayosBody(parsed as Record<string, unknown>, secret).catch((e: unknown) => {
+        throw e instanceof PayosDataError ? new Error(t(e.key)) : e;
+      });
       return { headers, body: JSON.stringify(signed, null, 2) };
     }
   }

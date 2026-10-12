@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { MailCheck } from "lucide-react";
 
@@ -62,10 +62,20 @@ export function RegisterForm() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const schema = useMemo(() => makeSchema(t), [t]);
+  // Resolver đọc schema qua ref: đổi ngôn ngữ → schema mới có hiệu lực ngay, không phụ thuộc useForm có nhận resolver mới.
+  const schemaRef = useRef(schema);
+  schemaRef.current = schema;
   const form = useForm<RegisterValues>({
-    resolver: zodResolver(schema),
+    resolver: (values, context, options) => zodResolver(schemaRef.current)(values, context, options),
     defaultValues: { email: "", name: "", password: "", confirmPassword: "" },
   });
+
+  // Đổi ngôn ngữ khi đang hiện lỗi → kiểm tra lại các ô đó để câu lỗi theo ngôn ngữ mới.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `schema` là tín hiệu đổi ngôn ngữ, không đọc trong thân effect.
+  useEffect(() => {
+    const names = Object.keys(form.formState.errors) as (keyof RegisterValues)[];
+    if (names.length) void form.trigger(names);
+  }, [schema, form]);
 
   const onSubmit = async ({ email, name, password }: RegisterValues) => {
     setServerError(null);

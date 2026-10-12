@@ -32,9 +32,9 @@ export function fmtMs(ms: number | null | undefined): string {
 
 /**
  * Đếm ngược mm:ss tới một mốc do SERVER trả (next_attempt_at) — chỉ là hiển thị, không suy trạng thái.
- * Đã tới hạn → `dueLabel` (component truyền `t("journey.due")`; mặc định giữ chữ vi cũ cho caller chưa dịch).
+ * Đã tới hạn → `dueLabel` (bắt buộc — component truyền `t("journey.due")`, hàm thuần không tự chọn ngôn ngữ).
  */
-export function countdown(targetIso: string | null | undefined, now: number, dueLabel = "đến hạn"): string | null {
+export function countdown(targetIso: string | null | undefined, now: number, dueLabel: string): string | null {
   if (!targetIso) return null;
   const left = Math.round((Date.parse(targetIso) - now) / 1000);
   if (left <= 0) return dueLabel;

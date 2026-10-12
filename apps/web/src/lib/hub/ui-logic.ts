@@ -119,38 +119,43 @@ export function describeDeleteConflict(e: unknown, t: TranslateFn = VI_T): strin
 
 /**
  * DX1 (ADR-136): lỗi hub-api có khuôn `{error, message (tiếng Anh), fix, docsUrl, requestId, detail?}`. Console hiển thị
- * `detail` (câu tiếng Việt do hub viết cho đúng chỗ lỗi); thiếu `detail` thì tra câu Việt theo MÃ `error`; mã lạ thì
+ * `detail` (câu tiếng Việt do hub viết cho đúng chỗ lỗi); thiếu `detail` thì tra câu console (vi/en) theo MÃ `error`; mã lạ thì
  * `message`. Không bao giờ hiển thị `fix` (viết cho dev dùng API) thay cho câu của console.
  */
-const VI_BY_CODE: Record<string, string> = {
-  not_found: "Không tìm thấy (hoặc không thuộc project này).",
-  internal_error: "Lỗi máy chủ hub — thử lại sau.",
-  service_unavailable: "Hub tạm thời không phục vụ được — thử lại sau.",
-  // Admin gặp 422 vì HUB_PUBLIC_URL chưa đặt trên Render: nói ĐÚNG biến nào, đặt ở đâu.
-  public_url_required:
-    "Hub chưa có địa chỉ công khai nên provider không gọi vào được. Đặt biến HUB_PUBLIC_URL=https://<hub-api>.onrender.com cho service hub-api trên Render (Environment → Add Environment Variable) rồi deploy lại. Local: dùng named cloudflared tunnel và đặt HUB_PUBLIC_URL là URL https của tunnel.",
-  invalid_api_key: "API key không hợp lệ hoặc đã bị thu hồi.",
-  unauthenticated: "Chưa đăng nhập.",
-  session_expired: "Phiên đăng nhập đã hết hạn.",
-  csrf_failed: "Thiếu hoặc sai CSRF token — tải lại trang.",
-  forbidden: "Không có quyền thực hiện thao tác này.",
-  rate_limited: "Thao tác quá nhanh — đợi rồi thử lại.",
-  payload_too_large: "Dữ liệu quá lớn.",
-  slug_taken: "Slug đã có project.",
-};
+/** Mã lỗi hub-api có câu console riêng trong `errors.api.<mã, '_' → '-'>`; mã khác → `detail`/`message` của hub. */
+const API_ERROR_CODES = [
+  "not_found",
+  "internal_error",
+  "service_unavailable",
+  "public_url_required",
+  "invalid_api_key",
+  "unauthenticated",
+  "session_expired",
+  "csrf_failed",
+  "forbidden",
+  "rate_limited",
+  "payload_too_large",
+  "slug_taken",
+] as const;
 
-export function errorMessageOf(body: unknown): string {
+const apiErrorKey = (code: string): MessageKey | null =>
+  (API_ERROR_CODES as readonly string[]).includes(code) ? (`errors.api.${code.replace(/_/g, "-")}` as MessageKey) : null;
+
+/** `t` = ngôn ngữ giao diện lúc lỗi xảy ra (hubFetch dựng từ <html lang>). `detail`/`message` của hub giữ nguyên văn. */
+export function errorMessageOf(body: unknown, t: TranslateFn): string {
   if (body === null || typeof body !== "object") return typeof body === "string" ? body.slice(0, 300) : "";
   const b = body as { detail?: unknown; message?: unknown; error?: unknown; requestId?: unknown };
+  const key = typeof b.error === "string" ? apiErrorKey(b.error) : null;
   let text = "";
-  if (b.error === "public_url_required") text = VI_BY_CODE.public_url_required;
+  // Admin gặp 422 vì HUB_PUBLIC_URL chưa đặt trên Render: nói ĐÚNG biến nào, đặt ở đâu (thắng detail của hub).
+  if (b.error === "public_url_required") text = t("errors.api.public-url-required");
   else if (typeof b.detail === "string" && b.detail) text = b.detail;
-  else if (typeof b.error === "string" && VI_BY_CODE[b.error]) text = VI_BY_CODE[b.error];
+  else if (key) text = t(key);
   else if (Array.isArray(b.message)) text = b.message.join(", ");
   else if (typeof b.message === "string") text = b.message;
   // 5xx: kèm mã yêu cầu để báo admin tra log.
   if (text && (b.error === "internal_error" || b.error === "service_unavailable") && typeof b.requestId === "string") {
-    text += ` (mã yêu cầu ${b.requestId})`;
+    text = t("errors.api.with-request-id", { text, requestId: b.requestId });
   }
   return text;
 }
