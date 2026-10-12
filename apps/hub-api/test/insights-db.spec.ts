@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { DESTINATION_ARCHIVED_ERROR_PREFIX } from '@hub/common';
 import { PrismaService } from '@hub/database';
 import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
-import { DuplicateCounter } from '../src/modules/ingest/duplicate-counter';
+import { DuplicateCounter, isForeignKeyViolation } from '../src/modules/ingest/duplicate-counter';
 import { getInsights } from '../src/modules/insights/insights-api';
 
 /**
@@ -81,7 +81,14 @@ describeDb('CB6 nhận định (Postgres, hub_app)', () => {
     expect((await getInsights(svc, B, { codes: 'I-dup' }))[0].facts).toMatchObject({ total: 7 });
 
     // project A ghi số cho source của B: FK ghép (source_id, tenant_id) từ chối — không bao giờ "mượn" source chéo
-    await expect(svc.forTenant(A).addIngestDuplicates([{ sourceId: bPay.id, bucket: new Date(), n: 1 }])).rejects.toThrow();
+    const err = await svc.forTenant(A).addIngestDuplicates([{ sourceId: bPay.id, bucket: new Date(), n: 1 }]).then(() => null, (e) => e);
+    expect(isForeignKeyViolation(err)).toBe(true); // lỗi THẬT của Prisma được nhận ra là 23503 (review Thấp 4)
+    // bộ đếm: dòng hỏng bị bỏ, dòng tốt cùng lô vẫn được ghi, không treo lại mãi
+    counter.record(A, bPay.id);
+    counter.record(A, aGh.id);
+    await counter.flush();
+    expect(counter.pendingCount()).toBe(0);
+    expect((await getInsights(svc, A, { codes: 'I-dup' }))[0].facts).toMatchObject({ total: 6 });
     // và hub_app (RLS) đọc từ phạm vi A không thấy dòng của B
     const rows = await svc.tenantTx(A, (tx) => tx.ingestDuplicate.findMany({ select: { tenantId: true } }));
     expect(rows.length).toBeGreaterThan(0);
@@ -111,7 +118,7 @@ describeDb('CB6 nhận định (Postgres, hub_app)', () => {
     expect(ids).not.toContain(aGone.destId); // đích lưu trữ không có nhãn
 
     const dead = a.find((i) => i.code === 'I-dead')!;
-    expect(dead).toMatchObject({ subjectId: A, level: 'warning', facts: { total: 2, recent: 1, capped: false }, actions: [{ code: 'open_dlq' }] });
+    expect(dead).toMatchObject({ subjectId: A, level: 'warning', facts: { total: 2, recent: 1, excludedArchived: 1, capped: false }, actions: [{ code: 'open_dlq' }] });
 
     const byDest = new Map(a.filter((i) => i.code === 'I-dest').map((i) => [i.subjectId, i]));
     // aLive: 200 rồi 500 (mới nhất) -> "Lỗi/chậm phía nhận (đang retry)"; attempt không có (404 cũ, 502) không tính
@@ -120,7 +127,7 @@ describeDb('CB6 nhận định (Postgres, hub_app)', () => {
 
     const b = await getInsights(svc, B, { codes: 'I-dest,I-dead,I-silent' });
     expect(b.find((i) => i.subjectId === bAuth.destId)).toMatchObject({ level: 'critical', facts: { health: 'auth_rejected', total: 4 } });
-    expect(b.find((i) => i.code === 'I-dead')!.facts).toMatchObject({ total: 4 });
+    expect(b.find((i) => i.code === 'I-dead')!.facts).toMatchObject({ total: 4, excludedArchived: 0 });
     expect(b.find((i) => i.subjectId === bSrc.id)).toMatchObject({ code: 'I-silent', facts: { state: 'no_events' } });
     expect(b.map((i) => i.subjectId)).not.toContain(aLive.destId);
   });

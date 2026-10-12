@@ -46,11 +46,12 @@ export const insights = defineMessages("insights", {
       "Nhà cung cấp gửi lại khi không nhận được 2xx kịp lúc (mạng chập chờn, quá thời gian chờ) hoặc theo lịch thử lại của họ. Hub chỉ trả 2xx sau khi đã ghi vào PostgreSQL, và PostgreSQL quyết định bản nào là trùng — gửi lại bao nhiêu lần cũng chỉ xử lý một lần, kể cả khi Redis mất dữ liệu.",
 
     // ---- I-dead
-    "insights.dead.title": "{n} sự kiện đang nằm trong hàng đợi lỗi, {k} trong 24 giờ qua",
-    "insights.dead.title-capped": "Ít nhất {n} sự kiện đang nằm trong hàng đợi lỗi, {k} trong 24 giờ qua",
-    "insights.dead.none": "Hàng đợi lỗi đang trống",
-    "insights.dead.detail": "Hub đã ngừng thử các sự kiện này. Sửa nguyên nhân rồi phát lại từ hàng đợi lỗi.",
-    "insights.dead.none-detail": "Không có sự kiện nào đã ngừng thử.",
+    "insights.dead.title": "{n} lượt giao cần xử lý trong hàng đợi lỗi, {k} trong 24 giờ qua",
+    "insights.dead.title-capped": "Ít nhất {n} lượt giao cần xử lý trong hàng đợi lỗi, {k} trong 24 giờ qua",
+    "insights.dead.none": "Không có lượt giao nào cần xử lý trong hàng đợi lỗi",
+    "insights.dead.archived": "(+{m} thuộc đích đã lưu trữ)",
+    "insights.dead.detail": "Hub đã ngừng thử các lượt giao này. Sửa nguyên nhân rồi phát lại từ hàng đợi lỗi.",
+    "insights.dead.none-detail": "Không có lượt giao nào đã ngừng thử.",
   },
   en: {
     "insights.col.dest": "Last hour",
@@ -89,11 +90,13 @@ export const insights = defineMessages("insights", {
     "insights.dup.tooltip":
       "Providers resend when they do not get a 2xx in time (flaky network, timeout) or on their own retry schedule. The hub only answers 2xx after writing to PostgreSQL, and PostgreSQL decides what is a duplicate — however many times an event is resent it is processed once, even if Redis loses its data.",
 
-    "insights.dead.title": "{n} events in the dead-letter queue, {k} in the last 24 hours",
-    "insights.dead.title-capped": "At least {n} events in the dead-letter queue, {k} in the last 24 hours",
-    "insights.dead.none": "The dead-letter queue is empty",
+    "insights.dead.title": "{n} deliveries to handle in the dead-letter queue, {k} in the last 24 hours",
+    "insights.dead.title-capped":
+      "At least {n} deliveries to handle in the dead-letter queue, {k} in the last 24 hours",
+    "insights.dead.none": "No deliveries to handle in the dead-letter queue",
+    "insights.dead.archived": "(+{m} for archived destinations)",
     "insights.dead.detail":
-      "The hub stopped retrying these events. Fix the cause, then replay them from the dead-letter queue.",
-    "insights.dead.none-detail": "No events have stopped retrying.",
+      "The hub stopped retrying these deliveries. Fix the cause, then replay them from the dead-letter queue.",
+    "insights.dead.none-detail": "No deliveries have stopped retrying.",
   },
 });

@@ -71,7 +71,10 @@ export class IngestService implements OnModuleDestroy {
     @Optional() @Inject(TRACE_NOTIFIER) private readonly notifier?: TraceNotifier,
   ) {}
 
-  /** Tắt tiến trình: ghi nốt bộ đếm bản trùng (best-effort). */
+  /**
+   * `app.close()` (test, Nest): ghi nốt bộ đếm bản trùng. Tín hiệu SIGTERM/SIGINT thật KHÔNG đi qua đây — `main.ts`
+   * (`installShutdown`) gọi `duplicates.close()` có trần thời gian rồi thoát (review CB6 Thấp 3).
+   */
   async onModuleDestroy(): Promise<void> {
     await this.duplicates.close();
   }

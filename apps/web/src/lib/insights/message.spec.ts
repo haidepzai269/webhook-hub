@@ -139,16 +139,33 @@ describe("insightText — cả vi lẫn en", () => {
     expect(d.detail).toBe("Theo nhà cung cấp: PayOS 5 · GitHub 2");
     expect(d.tooltip).toContain("PostgreSQL");
     expect(insightText({ ...SAMPLES[SAMPLES.length - 2], facts: { total: 12, recent: 3 } }, t, ctx("vi"))!.label).toBe(
-      "12 sự kiện đang nằm trong hàng đợi lỗi, 3 trong 24 giờ qua",
+      "12 lượt giao cần xử lý trong hàng đợi lỗi, 3 trong 24 giờ qua",
     );
+    // TB1: phần D9 (đích đã lưu trữ) vẫn nằm trong bảng DLQ / KPI -> nói rõ để hai số khớp
+    expect(
+      insightText(
+        { ...SAMPLES[SAMPLES.length - 2], facts: { total: 12, recent: 3, excludedArchived: 4 } },
+        t,
+        ctx("vi"),
+      )!.label,
+    ).toBe("12 lượt giao cần xử lý trong hàng đợi lỗi, 3 trong 24 giờ qua (+4 thuộc đích đã lưu trữ)");
+    expect(
+      insightText(
+        { ...SAMPLES[SAMPLES.length - 1], facts: { total: 0, recent: 0, excludedArchived: 2 } },
+        createT("en"),
+        ctx("en"),
+      )!.label,
+    ).toBe("No deliveries to handle in the dead-letter queue (+2 for archived destinations)");
     expect(
       insightText(
         { ...SAMPLES[SAMPLES.length - 2], facts: { total: 10000, recent: 50, capped: true } },
         createT("en"),
         ctx("en"),
       )!.label,
-    ).toBe("At least 10000 events in the dead-letter queue, 50 in the last 24 hours");
-    expect(insightText(SAMPLES[SAMPLES.length - 1], t, ctx("vi"))!.label).toBe("Hàng đợi lỗi đang trống");
+    ).toBe("At least 10000 deliveries to handle in the dead-letter queue, 50 in the last 24 hours");
+    expect(insightText(SAMPLES[SAMPLES.length - 1], t, ctx("vi"))!.label).toBe(
+      "Không có lượt giao nào cần xử lý trong hàng đợi lỗi",
+    );
   });
 
   it("hành động -> link có bộ lọc, id lạ không ghép vào URL; mã nhận định lạ -> null", () => {

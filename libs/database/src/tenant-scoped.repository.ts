@@ -1358,25 +1358,38 @@ export class TenantScopedRepository {
   }
 
   /**
-   * `I-dead`: DLQ (DEAD + `notSuperseded`, ĐÚNG điều kiện bảng DLQ) loại D9 (DEAD vì đích lưu trữ / subscription hoặc đích
-   * có `archived_at` — như `countDeadForSpike`), dừng ở `cap`; `recent` = trong đó thành DEAD từ `recentSince`.
+   * `I-dead`: DLQ (DEAD + `notSuperseded`, ĐÚNG điều kiện bảng DLQ), dừng ở `cap`, tách hai phần (review CB6 TB1):
+   * `total` = cần xử lý (loại D9: DEAD vì đích lưu trữ / subscription hoặc đích có `archived_at` — như `countDeadForSpike`),
+   * `excludedArchived` = phần D9 (bảng DLQ vẫn liệt kê để đối soát), `recent` = trong `total`, thành DEAD từ `recentSince`.
    * Index một phần `deliveries(tenant_id, updated_at DESC) WHERE status='DEAD'`.
    */
-  async countDlqForInsight(recentSince: Date, archivedErrorPrefix: string, cap: number): Promise<{ total: number; recent: number; capped: boolean }> {
-    const [row] = await this.prisma.$queryRaw<{ total: bigint; recent: bigint }[]>(Prisma.sql`
-      SELECT count(*) AS total, count(*) FILTER (WHERE x.updated_at >= ${recentSince}) AS recent FROM (
-        SELECT d.updated_at FROM hub.deliveries d
+  async countDlqForInsight(
+    recentSince: Date,
+    archivedErrorPrefix: string,
+    cap: number,
+  ): Promise<{ total: number; recent: number; excludedArchived: number; capped: boolean }> {
+    const [row] = await this.prisma.$queryRaw<{ total: bigint; recent: bigint; archived: bigint; scanned: bigint }[]>(Prisma.sql`
+      SELECT count(*) FILTER (WHERE NOT x.archived) AS total,
+             count(*) FILTER (WHERE NOT x.archived AND x.updated_at >= ${recentSince}) AS recent,
+             count(*) FILTER (WHERE x.archived) AS archived,
+             count(*) AS scanned
+      FROM (
+        SELECT d.updated_at,
+               (s.archived_at IS NOT NULL OR dst.archived_at IS NOT NULL
+                OR (d.last_error IS NOT NULL AND left(d.last_error, ${archivedErrorPrefix.length}::int) = ${archivedErrorPrefix})) AS archived
+        FROM hub.deliveries d
         JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
         JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
-        WHERE d.tenant_id = ${this.tenantId}::uuid AND d.status = 'DEAD'
-          AND s.archived_at IS NULL AND dst.archived_at IS NULL
-          AND (d.last_error IS NULL OR left(d.last_error, ${archivedErrorPrefix.length}::int) <> ${archivedErrorPrefix})
-          AND ${notSuperseded}
+        WHERE d.tenant_id = ${this.tenantId}::uuid AND d.status = 'DEAD' AND ${notSuperseded}
         ORDER BY d.updated_at DESC
         LIMIT ${cap}
       ) x`);
-    const total = Number(row?.total ?? 0);
-    return { total, recent: Number(row?.recent ?? 0), capped: total >= cap };
+    return {
+      total: Number(row?.total ?? 0),
+      recent: Number(row?.recent ?? 0),
+      excludedArchived: Number(row?.archived ?? 0),
+      capped: Number(row?.scanned ?? 0) >= cap,
+    };
   }
 
   // --- Stats (dashboard) ---

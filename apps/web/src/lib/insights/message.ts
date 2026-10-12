@@ -109,10 +109,13 @@ function dupText(f: Record<string, unknown>, t: TranslateFn): Omit<InsightText, 
 
 function deadText(f: Record<string, unknown>, t: TranslateFn): Omit<InsightText, "level"> {
   const total = n0(f.total);
-  if (total === 0) return { label: t("insights.dead.none"), detail: t("insights.dead.none-detail") };
+  // Review CB6 TB1: phần thuộc đích đã lưu trữ (D9) vẫn nằm trong bảng DLQ / KPI — nói rõ để hai con số khớp nhau.
+  const archived = n0(f.excludedArchived);
+  const suffix = archived > 0 ? ` ${t("insights.dead.archived", { m: archived })}` : "";
+  if (total === 0) return { label: `${t("insights.dead.none")}${suffix}`, detail: t("insights.dead.none-detail") };
   const vars = { n: total, k: Math.min(n0(f.recent), total) };
   return {
-    label: t(f.capped === true ? "insights.dead.title-capped" : "insights.dead.title", vars),
+    label: `${t(f.capped === true ? "insights.dead.title-capped" : "insights.dead.title", vars)}${suffix}`,
     detail: t("insights.dead.detail"),
   };
 }

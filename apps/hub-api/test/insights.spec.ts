@@ -5,7 +5,8 @@ import { ProjectScopeGuard } from '../src/modules/console/project-scope.guard';
 import { SessionGuard } from '../src/modules/auth/session.guard';
 import { REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';
 import { InsightsController } from '../src/modules/insights/insights.controller';
-import { DuplicateCounter } from '../src/modules/ingest/duplicate-counter';
+import { DuplicateCounter, isForeignKeyViolation } from '../src/modules/ingest/duplicate-counter';
+import { DUPLICATE_SHUTDOWN_FLUSH_MS, flushThenExit } from '../src/shutdown';
 import { getInsights, parseInsightCodes } from '../src/modules/insights/insights-api';
 
 
@@ -66,6 +67,62 @@ describe('CB6 bộ đếm bản trùng (ADR-171) — trong bộ nhớ, ghi theo 
   });
 });
 
+describe('CB6 bộ đếm bản trùng — review (khoá ngoại, thứ tự khoá, tắt tiến trình)', () => {
+  const fk = () => Object.assign(new Error('Raw query failed. Code: `23503`. violates foreign key constraint'), { code: 'P2010', meta: { code: '23503' } });
+
+  it('Thấp 4: 23503 (source đã xoá) -> ghi lại từng dòng, BỎ dòng hỏng, giữ dòng tốt; không cộng trả mãi mãi', async () => {
+    expect(isForeignKeyViolation(fk())).toBe(true);
+    expect(isForeignKeyViolation(new Error('connection refused'))).toBe(false);
+    const written: string[] = [];
+    const sink = jest.fn(async (_t: string, rows: { sourceId: string; n: number }[]) => {
+      if (rows.some((r) => r.sourceId === 'gone')) throw fk();
+      for (const r of rows) written.push(`${r.sourceId}:${r.n}`);
+    });
+    const c = new DuplicateCounter(sink, 0, () => Date.parse('2026-10-12T08:10:00.000Z'));
+    c.record('A', 'gone');
+    c.record('A', 'live');
+    c.record('A', 'live');
+    await c.flush();
+    expect(written).toEqual(['live:2']);
+    expect(c.pendingCount()).toBe(0); // dòng hỏng đã bỏ
+    await c.flush();
+    expect(sink).toHaveBeenCalledTimes(3); // lô (lỗi) + từng dòng ×2, không thử lại lượt sau
+  });
+
+  it('Thấp 5: dòng trong một câu upsert xếp theo (sourceId, bucket) — nhiều instance khoá dòng cùng thứ tự', async () => {
+    const sink = jest.fn().mockResolvedValue(1);
+    let t = Date.parse('2026-10-12T09:30:00.000Z');
+    const c = new DuplicateCounter(sink, 0, () => t);
+    c.record('A', 's-b');
+    c.record('A', 's-a');
+    t -= 3_600_000; // giờ trước
+    c.record('A', 's-b');
+    c.record('A', 's-a');
+    await c.flush();
+    expect(sink.mock.calls[0][1].map((r: any) => `${r.sourceId}@${r.bucket.toISOString().slice(11, 13)}`)).toEqual(['s-a@08', 's-a@09', 's-b@08', 's-b@09']);
+  });
+
+  it('Thấp 3: SIGTERM -> ghi nốt (trần min(5s, SHUTDOWN_TIMEOUT_MS)) rồi thoát 0; ghi treo / lỗi vẫn thoát đúng hạn', async () => {
+    const exit = jest.fn();
+    expect(await flushThenExit(async () => undefined, { shutdownTimeoutMs: 25_000, exit })).toBe('flushed');
+    expect(exit).toHaveBeenLastCalledWith(0);
+    jest.useFakeTimers();
+    try {
+      const hung = flushThenExit(() => new Promise<void>(() => undefined), { shutdownTimeoutMs: 25_000, exit });
+      await jest.advanceTimersByTimeAsync(DUPLICATE_SHUTDOWN_FLUSH_MS);
+      expect(await hung).toBe('timeout');
+      const tight = flushThenExit(() => new Promise<void>(() => undefined), { shutdownTimeoutMs: 1_000, exit });
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(await tight).toBe('timeout');
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(await flushThenExit(async () => Promise.reject(new Error('db down')), { shutdownTimeoutMs: 25_000, exit })).toBe('error');
+    expect(exit).toHaveBeenCalledTimes(4);
+    expect(exit.mock.calls.every((c) => c[0] === 0)).toBe(true);
+  });
+});
+
 describe('CB6 GET /projects/:p/insights — logic (store giả)', () => {
   it('codes: mặc định cả bốn; lọc + bỏ trùng; mã lạ / mảng -> 400 khuôn lỗi', () => {
     expect(parseInsightCodes(undefined)).toEqual(['I-dest', 'I-dup', 'I-silent', 'I-dead']);
@@ -77,7 +134,7 @@ describe('CB6 GET /projects/:p/insights — logic (store giả)', () => {
   it('chỉ chạy truy vấn của mã được xin, mọi truy vấn qua forTenant(projectId của path); Ngắt/lưu trữ không có nhận định', async () => {
     const repo = {
       countIngestDuplicatesToday: jest.fn().mockResolvedValue({ since: new Date('2026-10-11T17:00:00Z'), byProvider: [{ provider: 'payos', n: 3 }] }),
-      countDlqForInsight: jest.fn().mockResolvedValue({ total: 5, recent: 2, capped: false }),
+      countDlqForInsight: jest.fn().mockResolvedValue({ total: 5, recent: 2, excludedArchived: 1, capped: false }),
       findAlertDestinations: jest.fn().mockResolvedValue([
         { id: 'd-live', isActive: true, archivedAt: null, circuitState: 'CLOSED' },
         { id: 'd-off', isActive: false, archivedAt: null, circuitState: 'CLOSED' },
@@ -93,7 +150,7 @@ describe('CB6 GET /projects/:p/insights — logic (store giả)', () => {
     const overview = await getInsights(store as any, P, { codes: 'I-dup,I-dead' });
     expect(store.forTenant).toHaveBeenCalledWith(P);
     expect(overview.map((i) => i.code)).toEqual(['I-dup', 'I-dead']);
-    expect(overview[1]).toMatchObject({ facts: { total: 5, recent: 2 }, actions: [{ code: 'open_dlq' }] });
+    expect(overview[1]).toMatchObject({ facts: { total: 5, recent: 2, excludedArchived: 1 }, actions: [{ code: 'open_dlq' }] });
     expect(repo.findAlertDestinations).not.toHaveBeenCalled();
 
     const dests = await getInsights(store as any, P, { codes: 'I-dest,I-silent' });

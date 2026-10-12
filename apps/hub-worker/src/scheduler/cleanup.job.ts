@@ -63,12 +63,16 @@ export interface CleanupResult {
   /** SPEC-auth §5.3 (AU2): phiên hết hạn quá 30 ngày, token mail hết hạn quá 7 ngày. */
   authSessions: number;
   emailTokens: number;
+  /** CB6 (ADR-171, review): bộ đếm bản trùng theo giờ quá `INGEST_DUPLICATES_KEEP_DAYS`. */
+  ingestDuplicates: number;
 }
 
 /** SPEC-auth §5.3: giữ phiên đã hết hạn thêm 30 ngày (điều tra reuse_detected), token mail thêm 7 ngày. */
 export const AUTH_SESSION_KEEP_DAYS = 30;
 export const EMAIL_TOKEN_KEEP_DAYS = 7;
-const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0 };
+/** CB6: nhận định `I-dup` chỉ đọc "hôm nay" — giữ 30 ngày bucket giờ để tra lại, hơn nữa là rác. */
+export const INGEST_DUPLICATES_KEEP_DAYS = 30;
+const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0 };
 
 
 @Injectable()
@@ -159,6 +163,12 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
         // Bảng danh tính chỉ qua IdentityRepository (SPEC-auth §5.1) — mở rộng job sẵn có, không job mới.
         authSessions: await this.loopBatches(() => this.prisma.identity().deleteExpiredSessionsBatch(AUTH_SESSION_KEEP_DAYS, CLEANUP_BATCH)),
         emailTokens: await this.loopBatches(() => this.prisma.identity().deleteExpiredEmailTokensBatch(EMAIL_TOKEN_KEEP_DAYS, CLEANUP_BATCH)),
+        // CB6 (ADR-171): bảng mang tenant_id + RLS -> xoá xuyên project qua systemTx như các bảng trên; khoá Redis ở đầu lượt.
+        ingestDuplicates: await this.deleteInBatches(Prisma.sql`
+          DELETE FROM hub.ingest_duplicates WHERE (tenant_id, source_id, bucket) IN (
+            SELECT tenant_id, source_id, bucket FROM hub.ingest_duplicates
+            WHERE bucket < now() - make_interval(days => ${INGEST_DUPLICATES_KEEP_DAYS}::int)
+            LIMIT ${CLEANUP_BATCH})`),
       };
       logger.info({ ...result, retentionDays: this.retentionDays }, 'Cleanup: hoàn tất một lượt');
       return result;

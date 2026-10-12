@@ -8,7 +8,7 @@
  *   retry / DEAD (`../http-outcome`, CB:T16) và ngưỡng tỉ lệ của luật `destination.failing`.
  * - `I-silent` dùng CHÍNH `evalSourceSilent` + `silenceThresholdMs` của luật `source.silent` (cùng baseline 7 ngày, cùng
  *   truy vấn `findSourceActivity`).
- * - `I-dead` đếm ĐÚNG tập DLQ (DEAD + chưa bị replay) trừ D9 (DEAD vì đích/subscription lưu trữ) — như `delivery.dead_spike`.
+ * - `I-dead` đếm ĐÚNG tập DLQ (DEAD + chưa bị replay), tách phần D9 (đích/subscription lưu trữ) — như `delivery.dead_spike`.
  * BB-1: không biết nghiệp vụ; không `if (provider === …)` — provider chỉ là nhãn dữ liệu trong `I-dup`.
  */
 import { classifyHttpOutcome, isRetryableFailure, type HttpOutcome } from '../http-outcome';
@@ -230,35 +230,42 @@ export function buildDupInsight(input: DupInsightInput): Insight<DupInsightFacts
 
 /** Cửa sổ "mới vào DLQ". */
 export const INSIGHT_DEAD_RECENT_MS = 24 * HOUR;
-/** Trần đếm DLQ cho nhận định (giữ truy vấn trang Tổng quan nhẹ); chạm trần -> `capped`, web viết "≥ {n}". */
+/** Trần số dòng DLQ quét cho nhận định (giữ truy vấn trang Tổng quan nhẹ); chạm trần -> `capped`, web viết "ít nhất {n}". */
 export const INSIGHT_DEAD_COUNT_CAP = 10_000;
 
 export interface DeadInsightInput {
   projectId: string;
-  /** DLQ (DEAD, chưa bị replay) đã loại D9, tối đa `INSIGHT_DEAD_COUNT_CAP`. */
+  /** Lượt giao trong DLQ (DEAD, chưa bị replay) CẦN XỬ LÝ — đã loại D9; tối đa `INSIGHT_DEAD_COUNT_CAP` (cùng phần D9). */
   total: number;
-  /** Trong đó thành DEAD trong `INSIGHT_DEAD_RECENT_MS`. */
+  /** Trong `total`, thành DEAD trong `INSIGHT_DEAD_RECENT_MS`. */
   recent: number;
+  /** Phần D9 (đích/subscription đã lưu trữ) — bảng DLQ vẫn liệt kê; web nói "(+m thuộc đích đã lưu trữ)" để hai số khớp. */
+  excludedArchived: number;
   capped: boolean;
 }
 
 export interface DeadInsightFacts extends Record<string, unknown> {
   total: number;
   recent: number;
+  excludedArchived: number;
   capped: boolean;
   windowHours: number;
 }
 
-/** "{n} sự kiện đang nằm DLQ, {k} trong 24 giờ qua" + nút sang DLQ. */
+/**
+ * "{n} lượt giao cần xử lý trong hàng đợi lỗi, {k} trong 24 giờ qua (+m thuộc đích đã lưu trữ)" + nút sang DLQ.
+ * Đơn vị là LƯỢT GIAO (một sự kiện × một đích), cùng đơn vị với KPI và bảng DLQ (review CB6 TB1).
+ */
 export function buildDeadInsight(input: DeadInsightInput): Insight<DeadInsightFacts> {
   const total = Math.max(0, input.total);
   const recent = Math.min(Math.max(0, input.recent), total);
+  const excludedArchived = Math.max(0, input.excludedArchived);
   return {
     code: 'I-dead',
     level: total === 0 ? 'ok' : recent > 0 ? 'warning' : 'info',
     subjectType: 'project',
     subjectId: input.projectId,
-    facts: { total, recent, capped: input.capped, windowHours: INSIGHT_DEAD_RECENT_MS / HOUR },
-    ...(total > 0 ? { actions: [{ code: 'open_dlq' as const }] } : {}),
+    facts: { total, recent, excludedArchived, capped: input.capped, windowHours: INSIGHT_DEAD_RECENT_MS / HOUR },
+    ...(total + excludedArchived > 0 ? { actions: [{ code: 'open_dlq' as const }] } : {}),
   };
 }

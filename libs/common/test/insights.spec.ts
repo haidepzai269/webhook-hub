@@ -117,20 +117,23 @@ describe('CB6 nhận định — hàm thuần', () => {
     expect(buildDupInsight({ projectId: 'p1', since, byProvider: [] })).toMatchObject({ level: 'ok', facts: { total: 0, byProvider: [] } });
   });
 
-  it('I-dead: n trong DLQ + k trong 24h, nút sang DLQ khi n > 0; k không vượt n; DLQ trống = ok, không nút', () => {
-    expect(buildDeadInsight({ projectId: 'p1', total: 12, recent: 3, capped: false })).toEqual({
+  it('I-dead: n lượt giao cần xử lý + k trong 24h + m thuộc đích lưu trữ, nút sang DLQ khi n + m > 0; k không vượt n; DLQ trống = ok, không nút', () => {
+    expect(buildDeadInsight({ projectId: 'p1', total: 12, recent: 3, excludedArchived: 0, capped: false })).toEqual({
       code: 'I-dead',
       level: 'warning',
       subjectType: 'project',
       subjectId: 'p1',
-      facts: { total: 12, recent: 3, capped: false, windowHours: 24 },
+      facts: { total: 12, recent: 3, excludedArchived: 0, capped: false, windowHours: 24 },
       actions: [{ code: 'open_dlq' }],
     });
-    expect(buildDeadInsight({ projectId: 'p1', total: 4, recent: 0, capped: false }).level).toBe('info');
-    expect(buildDeadInsight({ projectId: 'p1', total: 2, recent: 9, capped: false }).facts.recent).toBe(2);
-    const empty = buildDeadInsight({ projectId: 'p1', total: 0, recent: 0, capped: false });
+    expect(buildDeadInsight({ projectId: 'p1', total: 4, recent: 0, excludedArchived: 0, capped: false }).level).toBe('info');
+    expect(buildDeadInsight({ projectId: 'p1', total: 2, recent: 9, excludedArchived: 0, capped: false }).facts.recent).toBe(2);
+    const empty = buildDeadInsight({ projectId: 'p1', total: 0, recent: 0, excludedArchived: 0, capped: false });
     expect(empty.level).toBe('ok');
     expect(empty.actions).toBeUndefined();
+    // TB1: chỉ còn phần thuộc đích đã lưu trữ -> vẫn ok (không cần xử lý) nhưng có nút sang bảng DLQ (bảng liệt kê chúng)
+    const onlyArchived = buildDeadInsight({ projectId: 'p1', total: 0, recent: 0, excludedArchived: 3, capped: false });
+    expect(onlyArchived).toMatchObject({ level: 'ok', facts: { excludedArchived: 3 }, actions: [{ code: 'open_dlq' }] });
   });
 
   it('BB-1: nhận định không biết nghiệp vụ, không rẽ nhánh theo provider', () => {

@@ -9,6 +9,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { authSecretProblems } from './modules/auth/auth-config';
 import { installErrorHandling } from './modules/errors/install';
 import { configureBodyParsers } from './body-parsers';
+import { IngestService } from './modules/ingest/ingest.service';
+import { installShutdown } from './shutdown';
 
 function assertMasterKeyConfigured(): void {
   const masterKey = process.env.MASTER_KEY;
@@ -78,6 +80,10 @@ async function bootstrap() {
   const port = process.env.PORT || 4000;
   await app.listen(port);
   logger.info(`🚀 Webhook Hub API đang chạy trên cổng ${port}`);
+
+  // Review CB6 (Thấp 3, ADR-171): SIGTERM/SIGINT -> ghi nốt bộ đếm bản trùng (trần trong SHUTDOWN_TIMEOUT_MS) rồi thoát.
+  const ingest = app.get(IngestService);
+  installShutdown(() => ingest.duplicates.close());
 }
 
 bootstrap().catch((err) => {

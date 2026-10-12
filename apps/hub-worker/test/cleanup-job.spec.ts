@@ -4,6 +4,7 @@ import {
   CLEANUP_LOCK_KEY,
   TOTAL_RETRY_WINDOW_MS,
   DEFAULT_RETENTION_DAYS,
+  INGEST_DUPLICATES_KEEP_DAYS,
   assertRetentionSafe,
   resolveRetentionDays,
 } from '../src/scheduler/cleanup.job';
@@ -44,7 +45,7 @@ describe('CleanupJob (S1-4)', () => {
     const prisma: any = {
       // outbox: 5000 rồi 12 (2 lô) · processed: 3 · raw REJECTED: 0
       systemTx(_r: any, fn: any) { return fn(this); }, // AU6: cleanup đi qua systemTx
-      $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0),
+      $executeRaw: jest.fn().mockResolvedValueOnce(CLEANUP_BATCH).mockResolvedValueOnce(12).mockResolvedValueOnce(3).mockResolvedValueOnce(0).mockResolvedValueOnce(0),
       deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
       identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
     };
@@ -53,8 +54,8 @@ describe('CleanupJob (S1-4)', () => {
 
     // MS-P2-6: lock giữ ~90% chu kỳ (mặc định 1h -> 3240s) và KHÔNG nhả khi xong -> N worker = 1 lượt/chu kỳ
     expect(redis.set).toHaveBeenCalledWith(CLEANUP_LOCK_KEY, expect.any(String), 'EX', 3240, 'NX');
-    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0 });
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
+    expect(result).toEqual({ skipped: false, outbox: CLEANUP_BATCH + 12, processedMessages: 3, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0 });
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(5); // + ingest_duplicates (CB6)
     expect(redis.eval).not.toHaveBeenCalled();
   });
 
@@ -99,6 +100,26 @@ describe('CleanupJob (S1-4)', () => {
     expect(result).toMatchObject({ authSessions: CLEANUP_BATCH + 4, emailTokens: 2 });
     expect(sessions).toHaveBeenCalledWith(30, CLEANUP_BATCH);
     expect(tokens).toHaveBeenCalledWith(7, CLEANUP_BATCH);
+  });
+
+  it('CB6 (ADR-171): CÙNG job (cùng khoá Redis) dọn ingest_duplicates có bucket quá 30 ngày, theo lô, qua systemTx', async () => {
+    const prisma: any = {
+      systemTx: jest.fn(function (this: any, _r: any, fn: any) { return fn(prisma); }),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      deleteExpiredEventsBatch: jest.fn().mockResolvedValue(0),
+      identity: () => ({ deleteExpiredSessionsBatch: jest.fn().mockResolvedValue(0), deleteExpiredEmailTokensBatch: jest.fn().mockResolvedValue(0) }),
+    };
+    prisma.$executeRaw.mockImplementation(async (q: any) => (/ingest_duplicates/.test(q.strings.join('?')) ? (prisma.dupCalls = (prisma.dupCalls ?? 0) + 1) === 1 ? CLEANUP_BATCH : 9 : 0));
+    const result = await new CleanupJob(prisma, buildRedis('OK')).runOnce();
+    expect(result.ingestDuplicates).toBe(CLEANUP_BATCH + 9);
+    const dup = prisma.$executeRaw.mock.calls.map((c: any) => c[0]).filter((q: any) => /ingest_duplicates/.test(q.strings.join('?')));
+    expect(dup).toHaveLength(2);
+    expect(dup[0].strings.join('?')).toMatch(/bucket < now\(\) - make_interval\(days => \?::int\)/);
+    expect(dup[0].values).toEqual([INGEST_DUPLICATES_KEEP_DAYS, CLEANUP_BATCH]);
+    expect(INGEST_DUPLICATES_KEEP_DAYS).toBe(30);
+    // không có khoá -> không dọn gì (cùng nhánh SKIPPED như phần còn lại)
+    const skipped = await new CleanupJob(prisma, buildRedis(null)).runOnce();
+    expect(skipped).toMatchObject({ skipped: true, ingestDuplicates: 0 });
   });
 
   it('S7: EVENT_RETENTION_DAYS là tên chính, CLEANUP_RETENTION_DAYS là alias; giá trị không an toàn vẫn bị từ chối', () => {
