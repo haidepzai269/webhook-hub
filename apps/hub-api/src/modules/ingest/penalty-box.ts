@@ -20,7 +20,9 @@ import { logger } from '@hub/common';
  *   × `good401Multiplier` (mặc định ×10) — không miễn vô hạn.
  * - Cache tốt CHIA THEO sourceKey: mỗi key một LRU nhỏ (`goodIpsPerKey`, mặc định 16) -> một key không đẩy được cặp của key
  *   khác. Mỗi tenant tối đa `goodKeysPerTenant` key (LRU theo tenant -> một tenant chỉ đẩy được key của chính nó). Bảng
- *   ngoài có trần `maxGoodKeys` (10k) và trần TỔNG số mục `goodMaxEntries` (100k ≈ 11MB); vượt thì loại key hoạt động cũ nhất.
+ *   ngoài có trần `maxGoodKeys` (10k) và trần TỔNG số mục `goodMaxEntries` (100k); vượt thì loại key cũ nhất của tenant
+ *   đang giữ NHIỀU NHẤT theo đúng đại lượng của trần bị chạm (số key hoặc số mục), cùng mức thì tenant nằm im lâu nhất.
+ *   RAM đo (review lượt 5, heapUsed, trường hợp xấu: mỗi tenant 1 key): ~850 B/key kèm IP đầu + ~120 B/IP thêm -> mặc định ≈ 17MB.
  * - Ban hết hạn được quét ở đầu Map `banned` (banMs cố định -> thứ tự chèn = thứ tự hết hạn); `banned` có trần riêng
  *   (≤ 50% `maxEntries`) — đầy thì không tạo ban mới (fail-open, có log + metric); khoá vừa chèn không bao giờ bị loại.
  * - IP loopback/private/dùng chung (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, ::1, fc00::/7, fe80::/10,
@@ -45,7 +47,7 @@ export interface PenaltyConfig {
   maxGoodKeys?: number;
   /** Trần số IP tốt mỗi sourceKey (LRU riêng). Mặc định 16. */
   goodIpsPerKey?: number;
-  /** Trần TỔNG số cặp tốt (mọi key). Mặc định 100.000 (≈ 11MB). */
+  /** Trần TỔNG số cặp tốt (mọi key). Mặc định 100.000. */
   goodMaxEntries?: number;
   /** Trần số key tốt của MỘT tenant (LRU theo tenant). Mặc định 64. */
   goodKeysPerTenant?: number;
@@ -75,7 +77,7 @@ const WINDOW_MS = 60_000;
 
 /** Kẹp giá trị env vào khoảng hợp lý — giống `resolveSendTimeoutMs`: rỗng/không phải số -> mặc định. */
 export function clampEnvInt(v: string | undefined, def: number, min: number, max: number): number {
-  const n = v === undefined || v === '' ? NaN : Number(v);
+  const n = v === undefined || v.trim() === '' ? NaN : Number(v); // Number(' ') = 0 -> chuỗi trắng phải coi là rỗng
   if (!Number.isFinite(n)) return def;
   return Math.min(max, Math.max(min, Math.round(n)));
 }
@@ -90,7 +92,11 @@ export function resolvePenaltyConfig(env: Record<string, string | undefined> = p
     enabled: env.EDGE_PENALTY_ENABLED !== '0',
     goodTtlMs: clampEnvInt(env.EDGE_PENALTY_GOOD_TTL, 86_400, 300, 7 * 86_400) * 1000,
     goodIpsPerKey: clampEnvInt(env.EDGE_PENALTY_GOOD_IPS_PER_KEY, 16, 4, 1_024),
-    maxGoodKeys: clampEnvInt(env.EDGE_PENALTY_GOOD_MAX_KEYS, 10_000, 100, 1_000_000),
+    // Kẹp trên 50k (review lượt 5, TB-2). Đo heapUsed (sourceKey 24 ký tự, tenantId UUID, mỗi tenant 1 key — xấu nhất):
+    // ~850 B/key kèm IP đầu + ~120 B mỗi IP thêm -> RAM ≈ số key × 850 + (số mục − số key) × 120. Hai trần (50k key,
+    // 500k mục) đo được ≈ 79MB (~15% RAM Render free 512MB cho cả hub-all); mặc định (10k key, 100k mục) ≈ 17MB.
+    // Kẹp cũ 1.000.000 key -> 500k key × 1 IP ≈ 425MB = OOM.
+    maxGoodKeys: clampEnvInt(env.EDGE_PENALTY_GOOD_MAX_KEYS, 10_000, 100, 50_000),
     goodMaxEntries: clampEnvInt(env.EDGE_PENALTY_GOOD_MAX_ENTRIES, 100_000, 2_000, 500_000),
     goodKeysPerTenant: clampEnvInt(env.EDGE_PENALTY_GOOD_KEYS_PER_TENANT, 64, 1, 10_000),
     good401Multiplier: clampEnvInt(env.EDGE_PENALTY_401_GOOD_MULTIPLIER, 10, 2, 100),
@@ -195,12 +201,10 @@ export class PenaltyBox {
   private readonly good = new Map<string, GoodKey>();
   /** tenantId -> các sourceKey tốt của tenant đó (LRU theo hoạt động). */
   private readonly tenantKeys = new Map<string, Set<string>>();
-  /**
-   * Bucket theo số key: số key -> các tenant đang giữ đúng chừng ấy key. `maxTenantKeys` = bucket cao nhất khác rỗng. Số key
-   * của một tenant chỉ đổi ±1 mỗi lần nên giữ `maxTenantKeys` là O(1) — tìm "tenant nhiều key nhất" để loại công bằng.
-   */
-  private readonly keyCountBuckets = new Map<number, Set<string>>();
-  private maxTenantKeys = 0;
+  /** Số KEY tốt mỗi tenant, bucket theo số key — dùng khi chạm trần `maxGoodKeys`. */
+  private readonly keyTally = new TenantTally();
+  /** Số MỤC (IP) tốt mỗi tenant, bucket theo số mục — dùng khi chạm trần `goodMaxEntries` (review lượt 5, NÊN-1). */
+  private readonly entryTally = new TenantTally();
   private goodEntries = 0;
   private readonly goodMaxEntries: number;
   private readonly goodKeysPerTenant: number;
@@ -271,8 +275,9 @@ export class PenaltyBox {
   /**
    * Chữ ký ĐÚNG và đã qua rate limit -> nhớ cặp tốt `goodTtlMs`. Ba lớp trần: ≤ `goodIpsPerKey` IP mỗi key (key này không đẩy
    * được key khác), ≤ `goodKeysPerTenant` key mỗi tenant (tenant này không đẩy được tenant khác), và trần tổng
-   * `maxGoodKeys` / `goodMaxEntries` — chạm trần tổng thì loại key cũ nhất của TENANT ĐANG GIỮ NHIỀU KEY NHẤT (review lần 4):
-   * tenant chỉ có 1–2 key chỉ bị đụng khi mọi tenant đã xuống còn chừng ấy key.
+   * `maxGoodKeys` / `goodMaxEntries` — chạm trần tổng thì loại key cũ nhất của TENANT ĐANG GIỮ NHIỀU NHẤT (review lần 4) theo
+   * đúng đại lượng của trần bị chạm: trần key -> nhiều key nhất; trần mục -> nhiều mục (IP) nhất (review lượt 5, NÊN-1).
+   * Cùng mức thì tenant nằm im lâu nhất bị loại trước: mỗi lần chạm, tenant về cuối bucket (review lượt 5, TB-1).
    *
    * `tenantId` chỉ được ghi lúc key vào cache lần đầu; key đã có thì `tenantId` mới bị BỎ QUA (sourceKey là duy nhất toàn hub).
    * Nếu sau này có đường chuyển source giữa project thì phải xoá cache tốt của key đó (`forgetGoodKey`).
@@ -291,35 +296,51 @@ export class PenaltyBox {
       tk = new Set();
       this.tenantKeys.set(e.tenantId, tk);
     }
+    const t = e.tenantId;
     const isNew = !tk.delete(sourceKey);
     tk.add(sourceKey);
-    if (isNew) this.retally(e.tenantId, tk.size - 1, tk.size);
-    if (e.ips.delete(k)) this.goodEntries--;
+    if (isNew) this.keyTally.add(t, 1);
+    else this.keyTally.touch(t); // TB-1: tenant vừa hoạt động -> cuối bucket
+    if (e.ips.delete(k)) this.entryTally.touch(t);
+    else {
+      this.goodEntries++;
+      this.entryTally.add(t, 1);
+    }
     const exp = now + this.goodTtlMs;
     e.ips.set(k, exp);
     e.lastExp = exp;
-    this.goodEntries++;
     while (e.ips.size > this.goodIpsPerKey) {
       e.ips.delete(e.ips.keys().next().value as string);
       this.goodEntries--;
+      this.entryTally.add(t, -1);
     }
     while (tk.size > this.goodKeysPerTenant) this.removeGoodKey(tk.values().next().value as string);
-    while (this.good.size > this.maxGoodKeys || this.goodEntries > this.goodMaxEntries) {
-      const victim = this.fairVictim(sourceKey);
+    // Mỗi lần chỉ thêm ≤ 1 key và ≤ 1 mục; mỗi lần loại bớt ≥ 1 key và ≥ 1 mục -> vòng chạy ≤ 2 lần.
+    for (;;) {
+      const overKeys = this.good.size > this.maxGoodKeys;
+      if (!overKeys && this.goodEntries <= this.goodMaxEntries) break;
+      const victim = this.fairVictim(overKeys ? this.keyTally : this.entryTally, sourceKey);
       if (victim === undefined) break; // chỉ còn key vừa chạm (goodMaxEntries ≥ goodIpsPerKey)
       this.removeGoodKey(victim);
     }
   }
 
-  /** Xoá cặp tốt của một key (vd source đổi project / bị xoá). */
+  /**
+   * Xoá cặp tốt của một key. CHƯA AI GỌI (review lượt 5, THẤP-1): hôm nay không có đường chuyển source giữa project hay xoá
+   * cứng source (xoá = lưu trữ, ADR-161; sourceKey duy nhất, không đổi); xoay secret không cần gọi (IP provider không đổi).
+   * Nếu sau này có đường đó: hàm chỉ tác dụng trên INSTANCE HIỆN TẠI — instance khác phải chờ TTL (`goodTtlMs`) hoặc broadcast.
+   */
   forgetGoodKey(sourceKey: string): void {
     this.removeGoodKey(sourceKey);
   }
 
-  /** Key cũ nhất của tenant đang giữ nhiều key nhất; không bao giờ là `keep`. */
-  private fairVictim(keep: string): string | undefined {
-    for (let n = this.maxTenantKeys; n > 0; n--) {
-      const tenants = this.keyCountBuckets.get(n);
+  /**
+   * Key cũ nhất của tenant đứng đầu `tally` (đếm cao nhất; cùng mức thì nằm im lâu nhất); không bao giờ là `keep`.
+   * Thường trả ngay ở bucket cao nhất; chỉ bỏ qua tenant đang gọi khi nó chỉ còn `keep` (≤ goodIpsPerKey bậc) -> O(1).
+   */
+  private fairVictim(tally: TenantTally, keep: string): string | undefined {
+    for (let n = tally.max; n > 0; n--) {
+      const tenants = tally.buckets.get(n);
       if (!tenants) continue;
       for (const t of tenants) {
         const tk = this.tenantKeys.get(t);
@@ -328,25 +349,6 @@ export class PenaltyBox {
       }
     }
     return undefined;
-  }
-
-  /** Chuyển tenant giữa các bucket khi số key đổi `from` -> `to` (±1). */
-  private retally(tenantId: string, from: number, to: number): void {
-    if (from > 0) {
-      const b = this.keyCountBuckets.get(from);
-      b?.delete(tenantId);
-      if (b && b.size === 0) this.keyCountBuckets.delete(from);
-    }
-    if (to > 0) {
-      let b = this.keyCountBuckets.get(to);
-      if (!b) {
-        b = new Set();
-        this.keyCountBuckets.set(to, b);
-      }
-      b.add(tenantId);
-    }
-    if (to > this.maxTenantKeys) this.maxTenantKeys = to;
-    while (this.maxTenantKeys > 0 && !this.keyCountBuckets.has(this.maxTenantKeys)) this.maxTenantKeys--;
   }
 
   /** 404 do không tìm thấy source. */
@@ -388,6 +390,7 @@ export class PenaltyBox {
     if (until <= this.clock()) {
       e!.ips.delete(ip);
       this.goodEntries--;
+      this.entryTally.add(e!.tenantId, -1);
       if (e!.ips.size === 0) this.removeGoodKey(sourceKey);
       return false;
     }
@@ -398,10 +401,11 @@ export class PenaltyBox {
     const e = this.good.get(sourceKey);
     if (!e) return;
     this.goodEntries -= e.ips.size;
+    this.entryTally.add(e.tenantId, -e.ips.size);
     this.good.delete(sourceKey);
     const tk = this.tenantKeys.get(e.tenantId);
     if (tk && tk.delete(sourceKey)) {
-      this.retally(e.tenantId, tk.size + 1, tk.size);
+      this.keyTally.add(e.tenantId, -1);
       if (tk.size === 0) this.tenantKeys.delete(e.tenantId);
     }
   }
@@ -474,6 +478,48 @@ export class PenaltyBox {
     } catch {
       /* metric/log không bao giờ lật kết luận của hộp phạt */
     }
+  }
+}
+
+/**
+ * Đếm theo tenant + bucket theo giá trị đếm (`đếm -> tập tenant`). Mỗi bucket là Set giữ thứ tự CHẠM: tenant vừa hoạt động ở
+ * cuối (review lượt 5, TB-1). Chuyển bucket O(1) dù đếm đổi bao nhiêu. `max` = bucket cao nhất khác rỗng: chỉ tăng ≤ 1 mỗi
+ * `markGood` (thêm ≤ 1 key / ≤ 1 mục), nên tổng số bậc vòng lùi ≤ tổng số lần tăng -> O(1) khấu hao.
+ */
+class TenantTally {
+  readonly counts = new Map<string, number>();
+  readonly buckets = new Map<number, Set<string>>();
+  max = 0;
+
+  add(tenantId: string, delta: number): void {
+    if (delta === 0) return;
+    const from = this.counts.get(tenantId) ?? 0;
+    const to = Math.max(0, from + delta);
+    if (from > 0) {
+      const b = this.buckets.get(from);
+      b?.delete(tenantId);
+      if (b && b.size === 0) this.buckets.delete(from);
+    }
+    if (to > 0) {
+      this.counts.set(tenantId, to);
+      let b = this.buckets.get(to);
+      if (!b) {
+        b = new Set();
+        this.buckets.set(to, b);
+      }
+      b.add(tenantId);
+    } else this.counts.delete(tenantId);
+    if (to > this.max) this.max = to;
+    while (this.max > 0 && !this.buckets.has(this.max)) this.max--;
+  }
+
+  /** Tenant vừa hoạt động mà đếm không đổi -> về cuối bucket của nó. */
+  touch(tenantId: string): void {
+    const n = this.counts.get(tenantId);
+    const b = n ? this.buckets.get(n) : undefined;
+    if (!b) return;
+    b.delete(tenantId);
+    b.add(tenantId);
   }
 }
 

@@ -441,9 +441,11 @@ EDGE_PENALTY_ENABLED=1         # 0 = tắt hẳn hộp phạt (rollback). IP loo
 EDGE_PENALTY_GOOD_TTL=86400    # giây nhớ một cặp (IP, sourceKey) đã verify đúng: IP đang bị phạt vẫn thông cặp này. Kẹp 300–604800
 EDGE_PENALTY_GOOD_IPS_PER_KEY=16     # số IP "tốt" nhớ cho MỖI sourceKey (LRU riêng — key này không đẩy được key khác). Kẹp 4–1024
 EDGE_PENALTY_GOOD_KEYS_PER_TENANT=64 # số sourceKey tốt tối đa của MỘT project (LRU riêng — project này không đẩy được project khác). Kẹp 1–10000
-EDGE_PENALTY_GOOD_MAX_KEYS=10000     # trần số sourceKey trong cache tốt. Kẹp 100–1000000
+EDGE_PENALTY_GOOD_MAX_KEYS=10000     # trần số sourceKey trong cache tốt. Kẹp 100–50000 (quyết định RAM khi mỗi key 1 IP)
 EDGE_PENALTY_GOOD_MAX_ENTRIES=100000 # trần TỔNG số cặp tốt — RAM Render free 512MB cho cả hub-all. Kẹp 2000–500000
-                                     # Ước lượng ~110 byte/mục: 100k ≈ 11MB, 500k ≈ 55MB
+                                     # Đo heapUsed (review lượt 5, xấu nhất: mỗi project 1 key): ~850 byte/key kèm IP đầu
+                                     # + ~120 byte mỗi IP thêm -> RAM ≈ KEYS × 850 + (ENTRIES − KEYS) × 120.
+                                     # Mặc định (10k, 100k) ≈ 17MB; hai trần (50k, 500k) đo ≈ 79MB
                                      # Theo dõi gauge hub_ingest_penalty_good_entries
 EDGE_PENALTY_401_GOOD_MULTIPLIER=10  # cặp tốt bị ban ở ngưỡng 401 × hệ số này (không miễn vô hạn). Kẹp 2–100
                          # SAU DEPLOY: kiểm hub_ingest_penalty_skipped_private_total ≈ 0 (panel Grafana 10). Chiếm

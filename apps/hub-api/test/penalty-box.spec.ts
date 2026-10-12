@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { IngestService } from '../src/modules/ingest/ingest.service';
-import { PenaltyBox, PenaltyConfig, ipKey, isLocalOrPrivateIp, resolvePenaltyConfig } from '../src/modules/ingest/penalty-box';
+import { PenaltyBox, PenaltyConfig, clampEnvInt, ipKey, isLocalOrPrivateIp, resolvePenaltyConfig } from '../src/modules/ingest/penalty-box';
 import { apiRegistry } from '../src/modules/metrics/metrics';
 
 /**
@@ -198,7 +198,7 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     expect((await svc.ingestWebhook(req('srcA', '203.0.113.99'))).status).toBe(429);
   });
 
-  it('review lượt 2 CHẶN A: cache tốt chia theo sourceKey — 1 key × N IP (N > trần) không đẩy được cặp tốt của key khác; bảng ngoài loại key hoạt động cũ nhất', () => {
+  it('review lượt 2 CHẶN A: cache tốt chia theo sourceKey — 1 key × N IP (N > trần) không đẩy được cặp tốt của key khác; bảng ngoài có trần, loại theo tenant giữ nhiều nhất', () => {
     const box = new PenaltyBox(cfg({ threshold404: 2, maxEntries: 1000, goodIpsPerKey: 64, maxGoodKeys: 3 }));
     const gh = '140.82.115.40';
     box.markGood(gh, 'key-nan-nhan', 'tenant-Y');
@@ -273,7 +273,7 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     expect(await apiRegistry.metrics()).toMatch(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED"\} [1-9]/);
   });
 
-  it('review lượt 3 CHẶN 1: trần TỔNG số cặp tốt được tôn trọng (50k key × 64 IP không làm phình RAM), loại key hoạt động cũ nhất', () => {
+  it('review lượt 3 CHẶN 1: trần TỔNG số cặp tốt được tôn trọng (50k key × 64 IP không làm phình RAM), loại key cũ nhất của tenant giữ nhiều nhất', () => {
     const box = new PenaltyBox(cfg({ goodIpsPerKey: 16, maxGoodKeys: 10_000, goodMaxEntries: 2_000, goodKeysPerTenant: 1_000_000 }));
     for (let key = 0; key < 500; key++) {
       for (let i = 0; i < 64; i++) box.markGood(`198.${key >> 8}.${key & 255}.${i}`, `k${key}`, `t${key % 7}`);
@@ -328,5 +328,135 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     small.markGood(gh, 'b2', 'B');
     small.markGood(gh, 'c1', 'C'); // B giữ nhiều nhất -> b1 bị loại, không phải a1 (cũ nhất toàn cục)
     expect([...['a1', 'b1', 'b2', 'c1']].map((k) => (small as any).good.has(k))).toEqual([true, false, true, true]);
+  });
+});
+
+/** Review lượt 5 (R5): bất biến đếm/bucket của cache cặp tốt — đọc trạng thái riêng của PenaltyBox. */
+function checkGoodInvariants(box: PenaltyBox): string[] {
+  const b = box as any;
+  const errs: string[] = [];
+  let entries = 0;
+  const perTenantKeys = new Map<string, number>();
+  const perTenantEntries = new Map<string, number>();
+  for (const [key, e] of b.good as Map<string, { tenantId: string; ips: Map<string, number> }>) {
+    entries += e.ips.size;
+    if (e.ips.size === 0) errs.push(`key ${key} rỗng IP`);
+    if (!b.tenantKeys.get(e.tenantId)?.has(key)) errs.push(`key ${key} thiếu trong tenantKeys`);
+    perTenantKeys.set(e.tenantId, (perTenantKeys.get(e.tenantId) ?? 0) + 1);
+    perTenantEntries.set(e.tenantId, (perTenantEntries.get(e.tenantId) ?? 0) + e.ips.size);
+  }
+  if (entries !== b.goodEntries) errs.push(`goodEntries ${b.goodEntries} != Σ ${entries}`);
+  for (const [t, tk] of b.tenantKeys as Map<string, Set<string>>) {
+    if (tk.size === 0) errs.push(`tenant ${t} Set rỗng`);
+    if (tk.size !== perTenantKeys.get(t)) errs.push(`tenant ${t} tk.size lệch`);
+  }
+  if (b.tenantKeys.size !== perTenantKeys.size) errs.push('số tenant lệch');
+  const tally = (name: string, want: Map<string, number>) => {
+    const tl = b[name];
+    let inBuckets = 0;
+    let top = 0;
+    for (const [n, set] of tl.buckets as Map<number, Set<string>>) {
+      if (set.size === 0) errs.push(`${name} bucket ${n} rỗng`);
+      for (const t of set) if (tl.counts.get(t) !== n) errs.push(`${name} tenant ${t} sai bucket ${n}`);
+      inBuckets += set.size;
+      if (n > top) top = n;
+    }
+    if (tl.max !== top) errs.push(`${name} max ${tl.max} != ${top}`);
+    if (inBuckets !== tl.counts.size || tl.counts.size !== want.size) errs.push(`${name} số tenant lệch`);
+    for (const [t, n] of want) if (tl.counts.get(t) !== n) errs.push(`${name} ${t} đếm ${tl.counts.get(t)} != ${n}`);
+  };
+  tally('keyTally', perTenantKeys);
+  tally('entryTally', perTenantEntries);
+  if (b.good.size > b.maxGoodKeys) errs.push('vượt maxGoodKeys');
+  if (b.goodEntries > b.goodMaxEntries) errs.push('vượt goodMaxEntries');
+  return errs;
+}
+
+describe('EG2 hộp phạt — review lượt 5 (cache cặp tốt)', () => {
+  const gh = '140.82.115.70';
+  const present = (box: PenaltyBox, k: string) => (box as any).good.has(k) as boolean;
+
+  it('TB-1: cùng bucket thì tenant VỪA HOẠT ĐỘNG bị loại sau tenant nằm im (bucket là LRU theo hoạt động)', () => {
+    const box = new PenaltyBox(cfg({ maxGoodKeys: 100 }));
+    box.markGood(gh, 'victim', 'tenant-victim'); // vào bucket 1 sớm nhất
+    for (let i = 0; i < 99; i++) box.markGood(gh, `a${i}`, `atk-${i}`);
+    box.markGood(gh, 'victim', 'tenant-victim'); // nạn nhân vừa gửi request đúng
+    box.markGood(gh, 'a99', 'atk-99'); // vượt trần
+    expect(present(box, 'victim')).toBe(true);
+    expect(present(box, 'a0')).toBe(false); // nằm im lâu nhất -> bị loại
+    expect(checkGoodInvariants(box)).toEqual([]);
+  });
+
+  it('NÊN-1: chạm trần MỤC thì loại theo số mục của tenant — tenant 3 key × 1 IP không bị 130 tenant × 16 IP đẩy', () => {
+    const box = new PenaltyBox(cfg({ goodMaxEntries: 2_000, goodIpsPerKey: 16, maxGoodKeys: 10_000 }));
+    for (const k of ['v1', 'v2', 'v3']) box.markGood(gh, k, 'tenant-victim');
+    for (let t = 0; t < 130; t++) for (let i = 0; i < 16; i++) box.markGood(`2001:db8:${t.toString(16)}:${i.toString(16)}::1`, `x${t}`, `atk-${t}`);
+    expect(box.goodSize()).toBeLessThanOrEqual(2_000);
+    expect(['v1', 'v2', 'v3'].map((k) => present(box, k))).toEqual([true, true, true]);
+    expect(checkGoodInvariants(box)).toEqual([]);
+  });
+
+  it('NÊN-1: chạm trần KEY vẫn loại theo số key — đường trần mục không làm hỏng tính chất lần 4', () => {
+    const small = new PenaltyBox(cfg({ maxGoodKeys: 3, goodKeysPerTenant: 64 }));
+    small.markGood(gh, 'a1', 'A');
+    small.markGood(gh, 'b1', 'B');
+    small.markGood(gh, 'b2', 'B');
+    small.markGood(gh, 'c1', 'C');
+    expect(['a1', 'b1', 'b2', 'c1'].map((k) => present(small, k))).toEqual([true, false, true, true]);
+    expect(checkGoodInvariants(small)).toEqual([]);
+  });
+
+  it('NÊN-2/TB-2/THẤP-3: kẹp env — GOOD_MAX_ENTRIES ≤ 500k, GOOD_MAX_KEYS ≤ 50k, chuỗi trắng -> mặc định', () => {
+    expect(resolvePenaltyConfig({ EDGE_PENALTY_GOOD_MAX_ENTRIES: '2000000' }).goodMaxEntries).toBe(500_000);
+    expect(resolvePenaltyConfig({ EDGE_PENALTY_GOOD_MAX_ENTRIES: '0' }).goodMaxEntries).toBe(2_000);
+    expect(resolvePenaltyConfig({ EDGE_PENALTY_GOOD_MAX_KEYS: '1000000' }).maxGoodKeys).toBe(50_000);
+    expect(resolvePenaltyConfig({ EDGE_PENALTY_GOOD_MAX_KEYS: '1' }).maxGoodKeys).toBe(100);
+    const blank = resolvePenaltyConfig({ EDGE_PENALTY_GOOD_MAX_ENTRIES: ' ', EDGE_PENALTY_GOOD_MAX_KEYS: '\t', EDGE_PENALTY_404_THRESHOLD: '  ' });
+    expect(blank).toMatchObject({ goodMaxEntries: 100_000, maxGoodKeys: 10_000, threshold404: 20 });
+    expect(clampEnvInt('abc', 7, 1, 10)).toBe(7);
+  });
+
+  it('NÊN-2: forgetGoodKey đưa đếm về 0, bucket sạch, gọi hai lần không lỗi', () => {
+    const box = new PenaltyBox(cfg());
+    box.markGood(gh, 'k1', 'T');
+    box.markGood('203.0.113.9', 'k1', 'T');
+    box.markGood(gh, 'k2', 'T');
+    box.forgetGoodKey('k1');
+    expect([box.goodKeyCount(), box.goodSize()]).toEqual([1, 1]);
+    expect(checkGoodInvariants(box)).toEqual([]);
+    box.forgetGoodKey('k2');
+    box.forgetGoodKey('k2');
+    box.forgetGoodKey('khong-co');
+    expect([box.goodKeyCount(), box.goodSize()]).toEqual([0, 0]);
+    expect((box as any).tenantKeys.size).toBe(0);
+    expect(checkGoodInvariants(box)).toEqual([]);
+  });
+
+  it('NÊN-2: bất biến đếm/bucket giữ đúng sau mọi đường, kể cả hết hạn (fuzz nhỏ, đồng hồ giả)', () => {
+    let seed = 12345;
+    const rnd = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    for (let round = 0; round < 8; round++) {
+      let now = 1_000_000;
+      const box = new PenaltyBox(
+        cfg({ threshold404: 3, threshold401: 3, goodTtlMs: 5_000, maxGoodKeys: 5 + rnd(20), goodIpsPerKey: 2 + rnd(4), goodMaxEntries: 8 + rnd(40), goodKeysPerTenant: 1 + rnd(6) }),
+        {},
+        () => now,
+      );
+      for (let op = 0; op < 1_500; op++) {
+        const ip = `198.51.100.${rnd(12)}`;
+        const key = `k${rnd(30)}`;
+        const r = rnd(10);
+        if (r < 5) box.markGood(ip, key, `t${rnd(6)}`);
+        else if (r < 6) box.forgetGoodKey(key);
+        else if (r < 8) box.checkIp(ip, key);
+        else box.recordBadSignature(ip, key, { tenantId: 't', sourceId: 's' });
+        if (rnd(5) === 0) now += rnd(2_000);
+        const errs = checkGoodInvariants(box);
+        if (errs.length) throw new Error(`round ${round} op ${op}: ${errs.join('; ')}`);
+      }
+    }
   });
 });
