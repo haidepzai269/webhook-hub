@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { ALERT_RULE_CODES, ALERT_RULES, AlertRuleCode, alertTitleKey, DEFAULT_EMAIL_RULES } from '@hub/common';
 import { AlertPreferencesInput, OperatorAlertRow, PrismaService } from '@hub/database';
 import { hubError } from '../errors/hub-error';
-import { assertFlatQuery, badParam, isUuid, parseEnumParam, parsePageCursor, parseTimeParam, parseUuidParam } from '../api/list-params';
+import { assertFlatQuery, badParam, isUuid, parseEnumParam, parsePageCursor, parseUuidParam } from '../api/list-params';
 import { parseLimit, runPage } from '../api/console-lists';
 
 /**
@@ -18,10 +18,9 @@ export type AlertStore = Pick<
   | 'operatorAlertsAcrossTenants'
   | 'operatorAlertSummaryAcrossTenants'
   | 'operatorFindAlertTenant'
-  | 'operatorAlertsUnackedTenants'
+  | 'operatorFindAlertTenants'
   | 'tenantTx'
   | 'forTenant'
-  | 'findProjectById'
   | 'findExistingProjectIds'
   | 'identity'
   | '$transaction'
@@ -116,39 +115,55 @@ export async function ackAlert(store: AlertStore, rawId: string, actor: string, 
   });
 }
 
+/** Trần số id mỗi lần "Đã xem tất cả" (chuông hiện tối đa 100 dòng). */
+export const ACK_ALL_MAX_IDS = 200;
+
+/** Body `{ ids: uuid[] }` (1..200, chỉ khoá `ids`) -> id chữ thường, bỏ trùng. Sai hình -> 400 `bad_request` kèm field. */
+export function parseAckAllIds(body: unknown): string[] {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw badParam('body', 'Body là {"ids": ["<uuid>", …]}');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (k !== 'ids') throw badParam(k, `Không nhận trường ${k} — chỉ: ids`);
+  const v = b.ids;
+  if (!Array.isArray(v) || v.length === 0 || v.length > ACK_ALL_MAX_IDS) {
+    throw badParam('ids', `ids phải là mảng 1–${ACK_ALL_MAX_IDS} id cảnh báo`);
+  }
+  if (v.some((x) => typeof x !== 'string' || !isUuid(x))) throw badParam('ids', 'ids chỉ chứa UUID của cảnh báo');
+  return [...new Set((v as string[]).map((x) => x.toLowerCase()))];
+}
+
 /**
- * "Đã xem tất cả": `?project=<uuid>` -> một project (không tồn tại -> 404); không có -> mọi project còn cảnh báo OPEN chưa
- * xem (truy vấn riêng, không trần). `?asOf=<ISO>` (review L2): chỉ cảnh báo mở TỪ TRƯỚC mốc này — web gửi lúc mở chuông,
- * cảnh báo mới đến sau đó không bị đánh dấu "đã xem" oan. Mỗi project MỘT transaction (ack + audit khi ghi được ≥ 1 dòng).
+ * "Đã xem tất cả" (re-review CB4): body `{ids}` = ĐÚNG các cảnh báo chưa xem đang hiện trong chuông. Không theo mốc
+ * thời gian: `opened_at` là `now` của lượt đánh giá (chung mọi project) nên một cảnh báo commit muộn hơn cùng lượt có
+ * cùng mốc mà chưa ai thấy — `asOf` sẽ đánh dấu oan nó (và nuốt banner/toast của nó). Tra tenant từng id qua escape
+ * hatch có tên, rồi mỗi tenant MỘT transaction: chỉ ghi dòng còn OPEN + chưa xem; audit kèm danh sách id khi ghi được.
+ * Query (`?project=`, `?asOf=` cũ) không còn nhận -> 400.
  */
-export async function ackAllAlerts(store: AlertStore, q: { project?: unknown; asOf?: unknown }, actor: string, now = new Date()) {
+export async function ackAllAlerts(store: AlertStore, body: unknown, q: Record<string, unknown> | undefined, actor: string, now = new Date()) {
   assertFlatQuery(q);
-  const projectId = parseUuidParam(q.project, 'project');
-  const asOf = parseTimeParam(q.asOf, 'asOf');
-  let tenants: string[];
-  if (projectId) {
-    if (!(await store.findProjectById(projectId))) throw hubError('not_found');
-    tenants = [projectId];
-  } else {
-    tenants = await store.operatorAlertsUnackedTenants(asOf);
+  const extra = Object.keys(q ?? {}).find((k) => (q as Record<string, unknown>)[k] !== undefined);
+  if (extra) throw badParam(extra, 'ack-all nhận danh sách id trong body {"ids": […]}, không nhận tham số query');
+  const ids = parseAckAllIds(body);
+  const byTenant = new Map<string, string[]>();
+  for (const { id, tenantId } of await store.operatorFindAlertTenants(ids)) {
+    byTenant.set(tenantId, [...(byTenant.get(tenantId) ?? []), id]);
   }
   const projects: { id: string; acknowledged: number }[] = [];
-  for (const tenantId of tenants) {
-    const n = await store.tenantTx(tenantId, async (tx) => {
+  for (const tenantId of [...byTenant.keys()].sort()) {
+    const acked = await store.tenantTx(tenantId, async (tx) => {
       const repo = store.forTenant(tenantId, tx);
-      const count = await repo.ackAllOpenAlerts(actor, now, asOf);
-      if (count > 0) {
+      const hit = await repo.ackAlertsByIds(byTenant.get(tenantId) ?? [], actor, now);
+      if (hit.length > 0) {
         await repo.createAuditLog({
           action: 'alert.acknowledged_all',
           entityType: 'project',
           entityId: tenantId,
           actor,
-          metadata: { count, ...(asOf ? { asOf: asOf.toISOString() } : {}) },
+          metadata: { count: hit.length, ids: hit },
         });
       }
-      return count;
+      return hit.length;
     });
-    projects.push({ id: tenantId, acknowledged: n });
+    projects.push({ id: tenantId, acknowledged: acked });
   }
   return { acknowledged: projects.reduce((s, p) => s + p.acknowledged, 0), projects };
 }

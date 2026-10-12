@@ -1129,14 +1129,18 @@ export class TenantScopedRepository {
     return { found: exists === 1, changed: false };
   }
 
-  /** "Đánh dấu đã xem tất cả" của project: mọi cảnh báo OPEN chưa xem. Trả số dòng vừa ghi. */
-  async ackAllOpenAlerts(userId: string, now: Date, asOf?: Date): Promise<number> {
-    // CB3 (review L2): `asOf` = lúc người dùng mở chuông — cảnh báo mở SAU mốc này (chưa ai thấy) không bị đánh dấu theo.
-    const r = await this.prisma.alert.updateMany({
-      where: { tenantId: this.tenantId, state: 'OPEN', acknowledgedAt: null, ...(asOf ? { openedAt: { lte: asOf } } : {}) },
-      data: { acknowledgedAt: now, acknowledgedBy: userId },
-    });
-    return r.count;
+  /**
+   * "Đánh dấu đã xem tất cả" theo DANH SÁCH id người dùng đã thấy trong chuông (re-review CB4): chỉ dòng của project này,
+   * còn OPEN, chưa ai xem. Không theo mốc thời gian — `opened_at` là `now` của lượt đánh giá (chung mọi project), một
+   * cảnh báo commit muộn hơn trong cùng lượt có cùng mốc mà chưa ai thấy. Trả id đã ghi (gọi trong `tenantTx`).
+   */
+  async ackAlertsByIds(ids: string[], userId: string, now: Date): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const where = { tenantId: this.tenantId, id: { in: ids }, state: 'OPEN' as const, acknowledgedAt: null };
+    const hit = (await this.prisma.alert.findMany({ where, select: { id: true }, orderBy: { id: 'asc' } })).map((r) => r.id);
+    if (hit.length === 0) return [];
+    await this.prisma.alert.updateMany({ where: { ...where, id: { in: hit } }, data: { acknowledgedAt: now, acknowledgedBy: userId } });
+    return hit;
   }
 
   /**

@@ -1698,6 +1698,7 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Banner xanh thu theo hạn sớm nhất và hẹn lại sau mỗi lần thu; `aria-live` nằm ở một nút ẩn riêng, ghi một lần cho mỗi (cảnh báo, mở/đã ổn) — poll không làm trình đọc màn hình đọc lại.
 - Toast: bỏ cảnh báo mở trước mốc phiên mà lần đầu không thấy (danh sách bị cắt); gỡ toast khi cảnh báo được "Đã xem" hoặc rời danh sách OPEN đầy đủ. "Đã xem" ở banner lỗi -> báo lỗi + trả banner về.
 - `lastError`/`lastFix` của kết nối là chữ một ngôn ngữ của server: chỉ hiện nguyên văn ở bảng số liệu, câu "cách sửa" luôn lấy từ từ điển.
+**Đính chính (re-review CB4, 2026-10-12, append — sửa ADR-169 mục "asOf cho ack-all" và bổ sung ADR-170 ở trên):** `POST /api/v1/alerts/ack-all` không còn nhận `?project=`/`?asOf=` (400). Body bắt buộc `{ids: uuid[]}` (1–200, bỏ trùng) = đúng các cảnh báo CHƯA XEM đang hiện trong chuông. Lý do: `opened_at` là `now` của lượt đánh giá (chung mọi project), không phải lúc commit — một cảnh báo commit muộn hơn trong cùng lượt có cùng mốc mà chưa ai thấy, `asOf` sẽ đánh dấu oan nó và nuốt banner/toast của nó. Server tra tenant từng id qua escape hatch `operatorFindAlertTenants` (thay `operatorAlertsUnackedTenants`), mỗi tenant một `tenantTx` + `ackAlertsByIds` (chỉ dòng còn OPEN + chưa xem; thay `ackAllOpenAlerts`), audit `alert.acknowledged_all` kèm `{count, ids}`. Đánh đổi: "đã xem tất cả" chỉ chạm dòng đang hiện (tối đa 5 mỗi project trong popover) — phần "+N khác" vẫn chưa xem, đúng nghĩa "đã thấy".
 
 ---
 

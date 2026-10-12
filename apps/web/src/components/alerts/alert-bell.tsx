@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import Link from "next/link";
 
@@ -12,7 +12,7 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { primaryHref } from "@/lib/alerts/links";
-import { ackAllAsOf, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
+import { ackAllIds, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
 import type { AlertView } from "@/lib/alerts/types";
 import { useAckAllAlerts, useAlertSummary, useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
 import { formatRelative } from "@/lib/hub/format";
@@ -39,21 +39,11 @@ function OperatorBell() {
   const open = useAlertUiStore((s) => s.bellOpen);
   const setOpen = useAlertUiStore((s) => s.setBellOpen);
   const badge = bellBadge(summary.data);
-  // "Đánh dấu đã xem tất cả" chỉ đánh dấu cảnh báo mở TRƯỚC lúc mở chuông (asOf) — cái mới đến sau vẫn chưa xem.
-  // Review TB1: chốt lại MỖI LẦN chuông chuyển đóng -> mở, kể cả khi mở bằng code ("+k" của banner), không chỉ khi bấm.
-  // Review L2: mốc lấy từ dữ liệu server (cảnh báo mới nhất đang hiện, sau khi gọi lại), không từ đồng hồ máy người xem.
-  const [asOf, setAsOf] = useState<string | null>(null);
-  const items = useRef(feed.data?.items);
-  items.current = feed.data?.items;
+  // Review TB1: mỗi lần chuông chuyển đóng -> mở (kể cả mở bằng code — "+k" của banner) thì gọi lại danh sách.
   const wasOpen = useRef(false);
   const refetch = feed.refetch;
   useEffect(() => {
-    if (open && !wasOpen.current) {
-      setAsOf(ackAllAsOf(items.current ?? []));
-      void refetch().then((r) => {
-        if (r.data) setAsOf(ackAllAsOf(r.data.items));
-      });
-    }
+    if (open && !wasOpen.current) void refetch();
     wasOpen.current = open;
   }, [open, refetch]);
 
@@ -85,7 +75,7 @@ function OperatorBell() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-[380px] max-w-[calc(100vw-1rem)] gap-0 p-0">
-        <BellPanel asOf={asOf} onNavigate={() => setOpen(false)} />
+        <BellPanel onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
@@ -93,7 +83,7 @@ function OperatorBell() {
 
 const STATUS_TEXT = { error: "alerts.bell.error", loading: "common.loading" } as const;
 
-function BellPanel({ asOf, onNavigate }: { asOf: string | null; onNavigate: () => void }) {
+function BellPanel({ onNavigate }: { onNavigate: () => void }) {
   const t = useT();
   const locale = useLocale();
   const now = useMinuteClock();
@@ -106,7 +96,8 @@ function BellPanel({ asOf, onNavigate }: { asOf: string | null; onNavigate: () =
   const nameOf = useSubjectNames(items);
   const groups = groupForBell(items, summary.data);
   const openCount = summary.data ? summary.data.openBySeverity.critical + summary.data.openBySeverity.warning + summary.data.openBySeverity.info : items.length;
-  const unacked = summary.data?.unacked ?? 0;
+  // Re-review CB4: đúng các cảnh báo chưa xem ĐANG HIỆN — nút bật khi có ≥ 1 dòng như vậy.
+  const toAck = ackAllIds(groups);
   let status: "error" | "loading" | "ready" = "ready";
   if (feed.isError && !feed.data) status = "error";
   else if (feed.isLoading) status = "loading";
@@ -182,11 +173,10 @@ function BellPanel({ asOf, onNavigate }: { asOf: string | null; onNavigate: () =
         <Button
           size="sm"
           variant="ghost"
-          disabled={unacked === 0 || !asOf || ackAll.isPending}
+          disabled={toAck.length === 0 || ackAll.isPending}
           onClick={() =>
-            asOf &&
             ackAll.mutate(
-              { asOf },
+              toAck,
               { onSuccess: (r) => toast.success(t("alerts.bell.ack-all-done", { count: r.acknowledged })) },
             )
           }

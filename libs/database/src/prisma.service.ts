@@ -266,14 +266,16 @@ export class PrismaService {
     });
   }
 
-  /** ack-all không chỉ định project: MỌI tenant còn cảnh báo OPEN chưa xem (mở trước `asOf` nếu có) — không trần. */
-  public async operatorAlertsUnackedTenants(asOf?: Date): Promise<string[]> {
-    const rows = await this.systemTx('operator: tenant còn alert chưa xem', (tx) =>
-      tx.$queryRaw<{ tenantId: string }[]>(Prisma.sql`
-        SELECT DISTINCT tenant_id AS "tenantId" FROM hub.alerts
-        WHERE state = 'OPEN' AND acknowledged_at IS NULL ${asOf ? Prisma.sql`AND opened_at <= ${asOf}` : Prisma.empty}`),
+  /**
+   * ack-all theo id (re-review CB4): tra tenant của TỪNG id trong một truy vấn — id không tồn tại thì vắng mặt. Chỉ ĐỌC;
+   * ghi đi `tenantTx` + `forTenant` theo từng tenant như ack một dòng.
+   */
+  public async operatorFindAlertTenants(ids: string[]): Promise<{ id: string; tenantId: string }[]> {
+    if (ids.length === 0) return [];
+    return this.systemTx('operator: tra tenant của nhiều alert', (tx) =>
+      tx.$queryRaw<{ id: string; tenantId: string }[]>(Prisma.sql`
+        SELECT id, tenant_id AS "tenantId" FROM hub.alerts WHERE id = ANY(${ids}::uuid[]) ORDER BY id`),
     );
-    return rows.map((r) => r.tenantId);
   }
 
   /** Bước XÁC ĐỊNH tenant của một cảnh báo (ack theo id từ chuông xuyên project). Không có -> null (route trả 404). */

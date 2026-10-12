@@ -44,8 +44,8 @@ export class AlertsController {
   @Post('alerts/ack-all')
   @HttpCode(HttpStatus.OK)
   @NoProjectScope(OPERATOR_SCOPE)
-  ackAll(@Query() q: { project?: unknown; asOf?: unknown }, @CurrentUser() actor: string) {
-    return ackAllAlerts(this.prisma, q, actor);
+  ackAll(@Body() body: unknown, @Query() q: Record<string, unknown>, @CurrentUser() actor: string) {
+    return ackAllAlerts(this.prisma, body, q, actor);
   }
 
   @Post('alerts/:id/ack')

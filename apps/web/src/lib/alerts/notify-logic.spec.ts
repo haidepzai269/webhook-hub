@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import {
-  ackAllAsOf,
+  ackAllIds,
   BANNER_RESOLVED_HOLD_MS,
   bannerAnnounceKey,
   bannerNextExpiry,
@@ -70,9 +70,10 @@ describe("chuông: badge từ summary", () => {
     expect(bellBadge({ ...s, unackedBySeverity: undefined })?.tone).toBe("critical");
   });
 
-  it("review L2: asOf của 'đã xem tất cả' = cảnh báo mới nhất đang hiện (+1ms vì opened_at có µs), không phải đồng hồ máy", () => {
-    expect(ackAllAsOf([])).toBeNull();
-    expect(ackAllAsOf([{ openedAt: "2026-10-12T10:00:00.000Z" }, { openedAt: "2026-10-12T11:00:00.500Z" }])).toBe("2026-10-12T11:00:00.501Z");
+  it("re-review CB4: 'đã xem tất cả' gửi đúng id CHƯA XEM đang hiện trong chuông (không theo mốc thời gian)", () => {
+    const groups = groupForBell([alert("a", "warning"), alert("b", "critical", { acknowledgedAt: "2026-10-12T10:01:00Z" }), alert("c", "warning", { project: P2 })]);
+    expect(ackAllIds(groups).sort()).toEqual(["a", "c"]);
+    expect(ackAllIds([])).toEqual([]);
   });
 });
 

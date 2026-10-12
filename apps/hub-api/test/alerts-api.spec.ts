@@ -68,16 +68,19 @@ describe('[CB:T10] (phần a) chỉ operator: /alerts* và /me/alert-preferences
 });
 
 /** Store giả: ghi lại lời gọi escape hatch + transaction. */
-function fakeStore(opts: { rows?: any[]; tenantOf?: Record<string, string>; ackResults?: { found: boolean; changed: boolean }[]; projects?: string[] } = {}) {
+function fakeStore(
+  opts: { rows?: any[]; tenantOf?: Record<string, string>; ackResults?: { found: boolean; changed: boolean }[]; projects?: string[]; stillOpen?: string[] } = {},
+) {
   const calls: any[] = [];
   const audits: any[] = [];
   const authAudits: any[] = [];
   const ackResults = [...(opts.ackResults ?? [])];
   const repo = (tenantId: string) => ({
     ackAlert: async () => ackResults.shift() ?? { found: false, changed: false },
-    ackAllOpenAlerts: async (_u: string, _now: Date, asOf?: Date) => {
-      calls.push({ ackAll: tenantId, asOf: asOf ?? null });
-      return tenantId === A ? 2 : 0;
+    // Chỉ id trong `stillOpen` còn OPEN + chưa xem (giả lập bộ lọc của repo).
+    ackAlertsByIds: async (ids: string[]) => {
+      calls.push({ ackIds: tenantId, ids });
+      return ids.filter((id) => (opts.stillOpen ?? ids).includes(id));
     },
     findAlertById: async (id: string) => ({ id, state: 'OPEN', acknowledgedAt: new Date('2026-10-12T00:00:00Z'), acknowledgedBy: 'u-1' }),
     createAuditLog: async (x: any) => audits.push({ tenantId, ...x }),
@@ -103,9 +106,9 @@ function fakeStore(opts: { rows?: any[]; tenantOf?: Record<string, string>; ackR
         { project: { id: B, slug: 'b', name: 'B' }, critical: 0, warning: 3, info: 1, unacked: 0 },
       ],
     }),
-    operatorAlertsUnackedTenants: async (asOf?: Date) => {
-      calls.push({ unackedAsOf: asOf ?? null });
-      return [A];
+    operatorFindAlertTenants: async (ids: string[]) => {
+      calls.push({ findTenants: ids });
+      return ids.filter((id) => opts.tenantOf?.[id]).map((id) => ({ id, tenantId: opts.tenantOf![id] }));
     },
     operatorFindAlertTenant: async (id: string) => opts.tenantOf?.[id] ?? null,
     tenantTx: async (t: string, fn: any) => fn({ tx: t }),
@@ -172,17 +175,40 @@ describe('POST /api/v1/alerts/:id/ack + ack-all', () => {
     expect(audits).toEqual([{ tenantId: A, action: 'alert.acknowledged', entityType: 'alert', entityId: ALERT, actor: 'u-1' }]);
   });
 
-  it('ack-all: ?project= sai -> 400, không tồn tại -> 404; không có project -> danh sách tenant riêng (không trần); asOf truyền xuống repo; audit chỉ khi ghi được', async () => {
-    const { store, audits, calls } = fakeStore();
-    expect((await bodyOf(ackAllAlerts(store, { project: 'cafe' }, 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'project' });
-    expect((await bodyOf(ackAllAlerts(store, { asOf: 'hôm qua' }, 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'asOf' });
-    expect((await bodyOf(ackAllAlerts(store, { project: '44444444-4444-4444-8444-444444444444' }, 'u-1'))).status).toBe(404);
-    const asOf = '2026-10-12T07:00:00.000Z';
-    expect(await ackAllAlerts(store, { asOf }, 'u-1')).toEqual({ acknowledged: 2, projects: [{ id: A, acknowledged: 2 }] });
-    expect(calls).toEqual([{ unackedAsOf: new Date(asOf) }, { ackAll: A, asOf: new Date(asOf) }]);
-    expect(await ackAllAlerts(store, { project: B }, 'u-1')).toEqual({ acknowledged: 0, projects: [{ id: B, acknowledged: 0 }] });
-    expect(audits).toEqual([{ tenantId: A, action: 'alert.acknowledged_all', entityType: 'project', entityId: A, actor: 'u-1', metadata: { count: 2, asOf } }]);
-  });
+  it('ack-all theo id (re-review CB4): body {ids} 1..200 UUID, bỏ trùng; query cũ (?project/?asOf) -> 400; chỉ ghi id còn OPEN+chưa xem, gom theo tenant, audit kèm ids', async () => {
+    const X1 = '11111111-1111-4111-8111-111111111111';
+    const X2 = '22222222-2222-4222-8222-222222222222';
+    const Y1 = '33333333-3333-4333-8333-333333333333';
+    const GONE = '55555555-5555-4555-8555-555555555555';
+    const { store, audits, calls } = fakeStore({ tenantOf: { [X1]: A, [X2]: A, [Y1]: B }, stillOpen: [X1, Y1] });
+    for (const [body, field] of [
+      [undefined, 'body'],
+      [[X1], 'body'],
+      [{}, 'ids'],
+      [{ ids: [] }, 'ids'],
+      [{ ids: 'x' }, 'ids'],
+      [{ ids: ['cafe'] }, 'ids'],
+      [{ ids: Array.from({ length: 201 }, () => X1) }, 'ids'],
+      [{ ids: [X1], asOf: 'x' }, 'asOf'],
+    ] as const) {
+      expect({ body, err: (await bodyOf(ackAllAlerts(store, body, {}, 'u-1'))).body }).toMatchObject({ err: { error: 'bad_request', field } });
+    }
+    expect((await bodyOf(ackAllAlerts(store, { ids: [X1] }, { asOf: '2026-10-12T00:00:00Z' }, 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'asOf' });
+    expect((await bodyOf(ackAllAlerts(store, { ids: [X1] }, { project: A }, 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'project' });
+    expect(calls).toEqual([]);
+
+    const r = await ackAllAlerts(store, { ids: [X1, X1.toUpperCase(), X2, Y1, GONE] }, {}, 'u-1');
+    expect(calls[0]).toEqual({ findTenants: [X1, X2, Y1, GONE] });
+    expect(calls.slice(1)).toEqual([
+      { ackIds: A, ids: [X1, X2] },
+      { ackIds: B, ids: [Y1] },
+    ]);
+    expect(r).toEqual({ acknowledged: 2, projects: [{ id: A, acknowledged: 1 }, { id: B, acknowledged: 1 }] });
+    expect(audits).toEqual([
+      { tenantId: A, action: 'alert.acknowledged_all', entityType: 'project', entityId: A, actor: 'u-1', metadata: { count: 1, ids: [X1] } },
+      { tenantId: B, action: 'alert.acknowledged_all', entityType: 'project', entityId: B, actor: 'u-1', metadata: { count: 1, ids: [Y1] } },
+    ]);
+});
 });
 
 describe('GET/PUT /api/v1/me/alert-preferences + PUT /api/v1/me/locale', () => {

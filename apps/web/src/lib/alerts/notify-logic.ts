@@ -37,17 +37,12 @@ export function bellBadge(summary: AlertSummary | null | undefined): BellBadge |
 }
 
 /**
- * Mốc `asOf` cho "Đánh dấu đã xem tất cả" lấy từ dữ liệu SERVER (review L2 — không dùng đồng hồ máy người xem): cảnh
- * báo mới nhất đang hiện trong chuông, +1ms vì `opened_at` có µs còn JSON chỉ có ms (không thì chính dòng mới nhất bị
- * loại). Không có dòng nào -> null (không có gì để đánh dấu).
+ * "Đánh dấu đã xem tất cả" gửi ĐÚNG id các cảnh báo CHƯA XEM đang hiện trong chuông (re-review CB4 — không theo mốc
+ * thời gian: `opened_at` là `now` của lượt đánh giá, một cảnh báo commit muộn hơn cùng lượt có cùng mốc mà chưa ai thấy).
+ * Rỗng -> nút tắt.
  */
-export function ackAllAsOf(rows: readonly Pick<AlertView, "openedAt">[]): string | null {
-  let max = Number.NEGATIVE_INFINITY;
-  for (const r of rows) {
-    const at = Date.parse(r.openedAt);
-    if (at > max) max = at;
-  }
-  return Number.isFinite(max) ? new Date(max + 1).toISOString() : null;
+export function ackAllIds(groups: readonly Pick<BellGroup, "items">[]): string[] {
+  return groups.flatMap((g) => g.items.filter((a) => a.state === "OPEN" && !a.acknowledgedAt).map((a) => a.id));
 }
 
 const RANK: Record<AlertSeverity, number> = { critical: 0, warning: 1, info: 2 };

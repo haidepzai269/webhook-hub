@@ -75,8 +75,11 @@ describeDb('CB1 alerts (Postgres, hub_app)', () => {
     expect(await repo.ackAlert(alert.id, u2.id, new Date(now.getTime() + 1000))).toEqual({ found: true, changed: false });
     const acked = await repo.findAlertById(alert.id);
     expect(acked).toMatchObject({ state: 'OPEN', acknowledgedBy: u1.id, acknowledgedAt: now });
-    expect(await repo.ackAllOpenAlerts(u2.id, now)).toBeGreaterThanOrEqual(1); // auth_rejected đang mở của phần trước
-    expect(await repo.ackAllOpenAlerts(u2.id, now)).toBe(0);
+    // re-review CB4: "đã xem tất cả" theo id — dòng đã xem / không có thì bỏ qua; lần hai không ghi gì.
+    const openIds = (await repo.findOpenAlerts()).filter((x) => !x.acknowledgedAt).map((x) => x.id);
+    expect(openIds.length).toBeGreaterThanOrEqual(1); // auth_rejected đang mở của phần trước
+    expect(await repo.ackAlertsByIds([...openIds, alert.id], u2.id, now)).toEqual([...openIds].sort());
+    expect(await repo.ackAlertsByIds([...openIds, alert.id], u2.id, now)).toEqual([]);
 
     expect(await repo.enqueueAlertEmails(alert.id, 'OPEN', [u1.id, u2.id, u1.id])).toBe(2);
     expect(await repo.enqueueAlertEmails(alert.id, 'OPEN', [u1.id])).toBe(0);

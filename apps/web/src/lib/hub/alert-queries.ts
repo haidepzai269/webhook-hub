@@ -67,15 +67,15 @@ export function useAckAlert() {
   });
 }
 
-/** "Đánh dấu đã xem tất cả" — `asOf` = lúc mở chuông: cảnh báo đến SAU đó không bị đánh dấu oan (CB3 review L2). */
+/**
+ * "Đánh dấu đã xem tất cả" — gửi ĐÚNG id các cảnh báo chưa xem đang hiện trong chuông (re-review CB4): server chỉ đánh
+ * dấu những id đó, cảnh báo đến sau (kể cả cùng `opened_at` của lượt đánh giá) không bị đánh dấu oan.
+ */
 export function useAckAllAlerts() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ asOf, project }: { asOf: string; project?: string }) => {
-      const p = new URLSearchParams({ asOf });
-      if (project) p.set("project", project);
-      return hubFetch<{ acknowledged: number }>(`/api/v1/alerts/ack-all?${p.toString()}`, { method: "POST" });
-    },
+    mutationFn: (ids: string[]) =>
+      hubFetch<{ acknowledged: number }>("/api/v1/alerts/ack-all", { method: "POST", body: JSON.stringify({ ids }) }),
     onSettled: () => void qc.invalidateQueries({ queryKey: alertKeys.all }),
   });
 }

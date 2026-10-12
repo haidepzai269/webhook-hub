@@ -116,14 +116,14 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     expect(await repoB.findAlertById(aId)).toBeNull();
     expect((await repoB.findOpenAlerts()).some((x) => x.tenantId === A)).toBe(false);
     expect(await repoB.ackAlert(aId, op, new Date())).toEqual({ found: false, changed: false });
-    expect(await repoB.ackAllOpenAlerts(op, new Date())).toBe(5); // chỉ 5 dòng của B
+    expect(await repoB.ackAlertsByIds([aId, idOf(60)], op, new Date())).toEqual([idOf(60)]); // id của A bị bỏ qua (BB-5)
     expect(await owner.alert.count({ where: { tenantId: A, acknowledgedAt: { not: null } } })).toBe(0);
     // client trần (không set project, không systemTx) dưới hub_app: RLS trả 0 dòng
     expect(await app.alert.count({ where: { tenantId: { in: [A, B] } } })).toBe(0);
     await owner.alert.updateMany({ where: { tenantId: B }, data: { acknowledgedAt: null, acknowledgedBy: null } });
   });
 
-  it('ack idempotent: lần đầu ghi + MỘT dòng audit_logs (đúng tenant), lần hai changed:false không audit thêm, không đóng cảnh báo; ack-all theo project + audit', async () => {
+  it('ack idempotent: lần đầu ghi + MỘT dòng audit_logs (đúng tenant), lần hai changed:false không audit thêm, không đóng cảnh báo; ack-all theo ID (không theo mốc) + audit', async () => {
     const aId = idOf(70);
     const r1 = await ackAlert(svc, aId, op);
     expect(r1).toMatchObject({ id: aId, state: 'OPEN', acknowledgedBy: op, changed: true });
@@ -134,19 +134,23 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     expect(audits[0]).toMatchObject({ tenantId: A, entityType: 'alert', actor: op });
     await expect(ackAlert(svc, randomUUID(), op)).rejects.toMatchObject({ status: 404 });
 
-    const unacked = await svc.operatorAlertsUnackedTenants();
-    expect(unacked).toEqual(expect.arrayContaining([A, B]));
-    expect(await svc.operatorAlertsUnackedTenants(new Date('2000-01-01T00:00:00Z'))).not.toContain(A);
-    // asOf = lúc mở chuông: dòng 2091 (mở sau mốc) KHÔNG bị đánh dấu
-    const asOf = '2090-12-31T00:00:00.000Z';
-    expect(await ackAllAlerts(svc, { project: A, asOf }, op)).toEqual({ acknowledged: 3, projects: [{ id: A, acknowledged: 3 }] }); // 5 dòng A, 1 đã xem, 1 sau asOf
-    expect(await owner.alert.findUniqueOrThrow({ where: { id: idOf(99) } })).toMatchObject({ acknowledgedAt: null });
-    expect(await ackAllAlerts(svc, { project: A }, op)).toEqual({ acknowledged: 1, projects: [{ id: A, acknowledged: 1 }] });
-    expect(await ackAllAlerts(svc, { project: A }, op)).toEqual({ acknowledged: 0, projects: [{ id: A, acknowledged: 0 }] });
+    // re-review CB4: ack-all theo ID đang hiện trong chuông, KHÔNG theo mốc — 50 hoà mốc `tie` với 52 nhưng không có trong ids
+    // -> vẫn chưa xem; id đã xem (aId) / không tồn tại bị bỏ qua.
+    const map = await svc.operatorFindAlertTenants([idOf(52), idOf(60), randomUUID()]);
+    expect(map).toEqual(expect.arrayContaining([{ id: idOf(52), tenantId: A }, { id: idOf(60), tenantId: B }]));
+    expect(map).toHaveLength(2);
+    expect(await ackAllAlerts(svc, { ids: [idOf(52), aId, randomUUID()] }, {}, op)).toEqual({ acknowledged: 1, projects: [{ id: A, acknowledged: 1 }] });
+    expect(await owner.alert.findUniqueOrThrow({ where: { id: idOf(50) } })).toMatchObject({ acknowledgedAt: null });
+    expect(await owner.alert.findUniqueOrThrow({ where: { id: idOf(52) } })).toMatchObject({ acknowledgedBy: op });
+    expect(await ackAllAlerts(svc, { ids: [idOf(52)] }, {}, op)).toEqual({ acknowledged: 0, projects: [{ id: A, acknowledged: 0 }] });
+    const both = await ackAllAlerts(svc, { ids: [idOf(50), idOf(30), idOf(99), idOf(60)] }, {}, op);
+    expect(both.acknowledged).toBe(4);
+    expect(both.projects).toEqual(expect.arrayContaining([{ id: A, acknowledged: 3 }, { id: B, acknowledged: 1 }]));
     expect(await owner.auditLog.findMany({ where: { tenantId: A, action: 'alert.acknowledged_all' }, select: { metadata: true, actor: true }, orderBy: { id: 'asc' } })).toEqual([
-      { metadata: { count: 3, asOf }, actor: op },
-      { metadata: { count: 1 }, actor: op },
+      { metadata: { count: 1, ids: [idOf(52)] }, actor: op },
+      { metadata: { count: 3, ids: [idOf(30), idOf(50), idOf(99)].sort() }, actor: op },
     ]);
+    expect(await owner.auditLog.count({ where: { tenantId: B, action: 'alert.acknowledged_all' } })).toBe(1);
     expect(await owner.alert.count({ where: { tenantId: A, state: 'OPEN' } })).toBe(5);
     expect((await alertSummary(svc)).perProject.find((p) => p.project.id === A)).toMatchObject({ unacked: 0 });
   });
