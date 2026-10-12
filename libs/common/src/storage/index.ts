@@ -3,3 +3,4 @@ export * from './importance';
 export * from './policy';
 export * from './usage';
 export * from './clean';
+export * from './cleanup-advisor';

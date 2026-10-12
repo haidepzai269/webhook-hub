@@ -1651,6 +1651,26 @@ export class TenantScopedRepository {
     return Number(r?.b ?? 0);
   }
 
+  // --- QT4b: gợi ý dọn (SPEC §5.6, ADR-187) ---
+
+  /** Lưu bộ gợi ý mới nhất (ĐÃ qua `assertSuggestionSafe`) vào `project_usage.suggestions`. */
+  async saveStorageSuggestions(suggestions: unknown[]): Promise<number> {
+    return this.prisma.$executeRaw(Prisma.sql`
+      UPDATE hub.project_usage SET suggestions = ${JSON.stringify(suggestions)}::jsonb WHERE tenant_id = ${this.tenantId}::uuid`);
+  }
+
+  /** Đã phát `hub.project.cleanup_suggested`: mốc cho luật "không quá 1 lần/ngày" và "đổi ≥ 10% quota" — cùng transaction với event. */
+  async markCleanupSuggestedEmitted(totalBytes: number): Promise<number> {
+    return this.prisma.$executeRaw(Prisma.sql`
+      UPDATE hub.project_usage SET suggested_at = now(), suggested_bytes = ${Math.round(totalBytes)}::bigint WHERE tenant_id = ${this.tenantId}::uuid`);
+  }
+
+  /** id các source "Giữ lâu" của project (kể cả đã lưu trữ — lịch sử của chúng vẫn được giữ). */
+  async findKeepLongerSourceIds(): Promise<string[]> {
+    const rows = await this.prisma.source.findMany({ where: { tenantId: this.tenantId, keepLonger: true }, select: { id: true } });
+    return rows.map((r) => r.id);
+  }
+
   // --- QT4: lệnh dọn (bảng storage_clean_jobs) ---
 
   async createStorageCleanJob(input: {

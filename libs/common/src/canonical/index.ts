@@ -6,16 +6,21 @@
 import { CanonicalResult, FAIL } from './result';
 import { paymentKeys, validatePayment } from './payment';
 import { repoKeys, validateRepo } from './repo';
+import { HUB_CLEANUP_SUGGESTED, hubKeys, validateHub } from './hub';
 import { SAMPLE_TYPES } from './samples';
 
 export type { CanonicalResult } from './result';
 export * from './payment';
 export * from './repo';
+export * from './hub';
 export * from './time';
 export * from './samples';
 
-/** Không gian tên dành riêng cho kiểu chuẩn: `payment.*`, `repo.*`. */
-export const RESERVED_NAMESPACES = ['payment', 'repo'] as const;
+/**
+ * Không gian tên dành riêng cho kiểu chuẩn: `payment.*`, `repo.*` và `hub.*` (sự kiện do chính hub phát — QT4b, ADR-187;
+ * dành riêng để service/adapter không giả mạo được).
+ */
+export const RESERVED_NAMESPACES = ['payment', 'repo', 'hub'] as const;
 
 export function isReservedType(type: string): boolean {
   if (typeof type !== 'string') return false;
@@ -24,7 +29,7 @@ export function isReservedType(type: string): boolean {
 
 /** Tập khoá đầy đủ của `data` cho một kiểu chuẩn; null nếu kiểu không có trong catalog. */
 export function canonicalKeys(type: string): string[] | null {
-  return paymentKeys(type) ?? repoKeys(type);
+  return paymentKeys(type) ?? repoKeys(type) ?? hubKeys(type);
 }
 
 /**
@@ -35,11 +40,12 @@ export function canonicalKeys(type: string): string[] | null {
 export function validateCanonical(type: string, data: unknown): CanonicalResult {
   if (!isReservedType(type)) return { ok: true };
   if (type.startsWith('payment')) return paymentKeys(type) ? validatePayment(type, data) : FAIL('type');
+  if (type.startsWith('hub')) return hubKeys(type) ? validateHub(type, data) : FAIL('type');
   return repoKeys(type) ? validateRepo(type, data) : FAIL('type');
 }
 
 /** Kiểu cụ thể đại diện của catalog — dùng để hỏi "mẫu wildcard này có phủ kiểu chuẩn nào không". */
-const CATALOG_REPRESENTATIVES = [...SAMPLE_TYPES, 'repo.pull_request.closed', 'repo.issue.closed'];
+const CATALOG_REPRESENTATIVES = [...SAMPLE_TYPES, 'repo.pull_request.closed', 'repo.issue.closed', HUB_CLEANUP_SUGGESTED];
 
 /**
  * KN1 (SPEC-ket-noi §3.1): mẫu `eventTypes` của endpoint console có khớp catalog không. Mẫu NGOÀI không gian dành

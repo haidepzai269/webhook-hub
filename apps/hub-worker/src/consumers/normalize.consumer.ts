@@ -22,6 +22,7 @@ import {
   readNormalizeRetryCount,
 } from './normalize-errors';
 import { normalizeRetries, normalizeSchemaErrors } from '../metrics';
+import { DELIVERY_REQUESTED_TOPIC, routeEventToSubscriptions } from './route-event';
 
 /**
  * S3-2 (ADR-053): adapter phát kiểu thuộc không gian dành riêng (`payment.*`, `repo.*`) mà `data`
@@ -51,8 +52,8 @@ export function assertCanonical(events: NormalizedEvent[], source: string): void
   }
 }
 
-/** Topic outbox cho chặng normalize → delivery (S1-2). Relay định tuyến theo TOPIC_ROUTES. */
-export const DELIVERY_REQUESTED_TOPIC = 'delivery.requested';
+/** Topic outbox cho chặng normalize → delivery (S1-2) — nguồn ở route-event.ts (dùng chung với event của hub, QT4b). */
+export { DELIVERY_REQUESTED_TOPIC };
 
 @Injectable()
 export class NormalizeConsumer {
@@ -169,44 +170,8 @@ export class NormalizeConsumer {
             log.info({ eventType: evt.type }, 'Event probe của provider -> lưu, không định tuyến');
             continue;
           }
-          const subscriptions = await repoTx.findActiveSubscriptionsForEvent(evt.type, sourceId ?? null);
-          log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
-
-          for (const sub of subscriptions) {
-            // S6 (SPEC §4.6, ADR-040): endpoint chưa chứng minh sở hữu (challenge) thì KHÔNG nhận sự kiện —
-            // không ghi delivery nào. Telegram/Discord/đích cũ mặc định VERIFIED.
-            const dest = sub.destination as { type?: string; verification?: string } | undefined;
-            if (dest?.type === 'webhook' && dest.verification && dest.verification !== 'VERIFIED') {
-              log.info({ subscriptionId: sub.id, destinationId: sub.destinationId, verification: dest.verification }, 'Bỏ qua đích webhook chưa VERIFIED');
-              continue;
-            }
-            const delivery = await repoTx.createDelivery({
-              eventId: evt.id,
-              subscriptionId: sub.id,
-              attemptGeneration: 1,
-              status: 'PENDING',
-            });
-            // Outbox không mang tenant_id (hạ tầng xuyên tenant) — payload chỉ là tham chiếu (S1-1).
-            await tx.outbox.create({
-              data: {
-                topic: DELIVERY_REQUESTED_TOPIC,
-                payload: buildDeliveryMessage({
-                  deliveryId: delivery.id,
-                  tenantId,
-                  attemptGeneration: 1,
-                  attemptCount: 0,
-                  correlationId: String(correlationId),
-                }) as unknown as Prisma.InputJsonValue,
-              },
-            });
-            routed.push({
-              deliveryId: delivery.id,
-              eventId: evt.id,
-              destinationId: sub.destination?.id ?? sub.destinationId,
-              destinationName: sub.destination?.name ?? '',
-              destinationType: sub.destination?.type ?? '',
-            });
-          }
+          // QT4b: định tuyến dùng CHUNG với event do hub phát (route-event.ts) — một đường outbox duy nhất.
+          routed.push(...(await routeEventToSubscriptions(tx, repoTx, tenantId, { id: evt.id, type: evt.type, sourceId: sourceId ?? null, correlationId: String(correlationId) }, log)));
         }
 
         await tx.processedMessage.create({ data: { consumer: 'normalize', messageId: rawEventId } });

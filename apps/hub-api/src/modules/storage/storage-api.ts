@@ -1,8 +1,13 @@
 import { randomUUID } from 'crypto';
 import {
+  CleanRequest,
+  CleanupSuggestion,
   Importance,
+  RuleAdvisor,
   StorageLevel,
   bytesByImportance,
+  guardSuggestions,
+  logger,
   clampBloatFactor,
   forecastHours,
   isCleanRequestError,
@@ -11,9 +16,10 @@ import {
   parseStorageLevel,
   quotaBytesFor,
 } from '@hub/common';
-import { PrismaService } from '@hub/database';
+import { PrismaService, TenantScopedRepository } from '@hub/database';
 import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
 import { hubError } from '../errors/hub-error';
+import { cleanupSuggestionsRejectedApi } from '../metrics/metrics';
 
 /**
  * QT4 (SPEC-han-muc-dung-luong §5.5 + E2/E5, ADR-184): logic của `GET …/storage`, `POST …/storage/clean`,
@@ -184,36 +190,121 @@ export async function createCleanJob(
     if (!src) throw hubError('bad_request', { field: 'sourceId' }, 'sourceId không phải source của project này');
     if (src.keepLonger) throw hubError('bad_request', { field: 'sourceId' }, 'Source đang "Giữ lâu" — bỏ cờ "Giữ lâu" trước khi dọn source này');
   }
+  const job = await store.tenantTx(projectId, (tx) => insertCleanJob(store.forTenant(projectId, tx), req, actor, opts));
+  return cleanJobView(job);
+}
+
+/** Ghi lệnh PENDING + `audit_logs` `storage.clean.requested` trên repo ĐÃ dựng trong transaction của người gọi. */
+async function insertCleanJob(
+  r: TenantScopedRepository,
+  req: CleanRequest,
+  actor: string,
+  opts: { origin?: 'manual' | 'suggestion'; suggestionId?: string; advisor?: string },
+) {
   const id = randomUUID();
-  const job = await store.tenantTx(projectId, async (tx) => {
-    const r = store.forTenant(projectId, tx);
-    const created = await r.createStorageCleanJob({
-      id,
+  const created = await r.createStorageCleanJob({
+    id,
+    action: req.action,
+    importance: req.importance,
+    olderThan: req.olderThan.label,
+    cutoff: req.olderThan.cutoff,
+    sourceId: req.sourceId,
+    origin: opts.origin ?? 'manual',
+    suggestionId: opts.suggestionId ?? null,
+    advisor: opts.advisor ?? null,
+    requestedBy: actor,
+  });
+  await r.createAuditLog({
+    action: 'storage.clean.requested',
+    entityType: 'storage_clean_job',
+    entityId: id,
+    actor,
+    metadata: {
       action: req.action,
       importance: req.importance,
       olderThan: req.olderThan.label,
-      cutoff: req.olderThan.cutoff,
+      cutoff: req.olderThan.cutoff.toISOString(),
       sourceId: req.sourceId,
       origin: opts.origin ?? 'manual',
-      suggestionId: opts.suggestionId ?? null,
-      advisor: opts.advisor ?? null,
-      requestedBy: actor,
-    });
-    await r.createAuditLog({
-      action: 'storage.clean.requested',
-      entityType: 'storage_clean_job',
-      entityId: id,
-      actor,
-      metadata: {
-        action: req.action,
-        importance: req.importance,
-        olderThan: req.olderThan.label,
-        cutoff: req.olderThan.cutoff.toISOString(),
-        sourceId: req.sourceId,
-        ...(opts.suggestionId ? { suggestionId: opts.suggestionId, advisor: opts.advisor ?? null } : {}),
-      },
-    });
-    return created;
+      // §5.6: áp dụng gợi ý -> audit ghi rõ AI (advisor nào) đã gợi ý
+      ...(opts.suggestionId ? { suggestionId: opts.suggestionId, advisor: opts.advisor ?? null } : {}),
+    },
+  });
+  return created;
+}
+
+const SUGGESTION_ID_RE = /^sug_[0-9a-f]{24}$/;
+const APPLY_IDEMPOTENT_MS = 86_400_000;
+
+/**
+ * `POST …/storage/suggestions/:id/apply` (scope `storage:write`, console hoặc API key — §5.6). Hub TÍNH LẠI gợi ý tại thời
+ * điểm gọi (advisor `rules@1` trên `by_bucket` hiện có) và cho qua hàng rào lần nữa:
+ *  - id không còn trong bộ hiện tại, hoặc bản đã lưu (đã gửi cho user) hết hạn -> 409 `suggestion_stale` + `suggestions`
+ *    (bộ mới — cũng được lưu thay bộ cũ để lần gọi sau với id còn hợp lệ đi qua);
+ *  - idempotent theo id: gọi lại trong 24h -> trả CÙNG lệnh dọn (khoá advisory theo (project, id) trong transaction);
+ *  - tạo lệnh dọn như `POST …/storage/clean` (202 + id), audit ghi `suggestionId` + `advisor`.
+ * Advisor chỉ gợi ý — thực thi chỉ qua lệnh dọn này (user/hệ thống của user quyết).
+ */
+export async function applySuggestion(
+  store: StorageStore,
+  projectId: string,
+  suggestionId: string,
+  actor: string,
+  opts: { floorMs?: number; now?: number } = {},
+): Promise<CleanJobView> {
+  if (!SUGGESTION_ID_RE.test(suggestionId)) throw hubError('not_found');
+  const now = opts.now ?? Date.now();
+  const floorMs = opts.floorMs ?? TOTAL_RETRY_WINDOW_MS;
+  const repo = store.forTenant(projectId);
+  const [project, usage, policies, keepLongerSourceIds, traffic24h] = await Promise.all([
+    store.findProjectById(projectId),
+    repo.findProjectUsage(),
+    repo.findStoragePolicies(),
+    repo.findKeepLongerSourceIds(),
+    repo.trafficBytesSince(new Date(now - DAY_MS)),
+  ]);
+  if (!project) throw hubError('not_found');
+  const buckets = parseBuckets(usage?.byBucket);
+  const quotaBytes = quotaBytesFor((project as { storageQuotaMb?: number | null }).storageQuotaMb ?? null);
+  const advisor = new RuleAdvisor(() => now);
+  const raw = await advisor.suggest({
+    usedBytes: Number(usage?.usedBytes ?? 0),
+    quotaBytes,
+    level: parseStorageLevel(usage?.level),
+    growthPerDay: Math.round(clampBloatFactor(Number(usage?.bloatFactor ?? 2)) * traffic24h),
+    buckets,
+    policies: (policies as { importance: string; action: string; afterDays: number; trigger: string }[]).map((p) => ({
+      importance: p.importance as 'junk' | 'low' | 'medium',
+      action: p.action as 'trim' | 'delete' | 'off',
+      afterDays: p.afterDays,
+      trigger: p.trigger as 'always' | 'above_85',
+    })),
+    keepLongerSourceIds,
+  });
+  const g = guardSuggestions(raw, { buckets, keepLongerSourceIds, floorMs, now });
+  for (const x of g.rejected) {
+    cleanupSuggestionsRejectedApi.inc({ advisor: x.advisor });
+    logger.warn({ projectId, advisor: x.advisor, reason: x.reason }, 'Storage apply: gợi ý bị hàng rào an toàn loại');
+  }
+  const fresh = g.accepted;
+  const stored = (Array.isArray(usage?.suggestions) ? (usage!.suggestions as Partial<CleanupSuggestion>[]) : []).find((x) => x?.id === suggestionId);
+  const found = fresh.find((x) => x.id === suggestionId);
+  const expired = !!stored && !(Date.parse(String(stored.expiresAt)) > now);
+  if (!found || expired) {
+    await repo.saveStorageSuggestions(fresh);
+    throw hubError(
+      'suggestion_stale',
+      { suggestions: fresh },
+      expired ? 'Gợi ý đã hết hạn — đây là bộ gợi ý vừa tính lại' : 'Gợi ý không còn trong bộ hiện tại (dữ liệu đã đổi) — đây là bộ gợi ý vừa tính lại',
+    );
+  }
+  const req = parseCleanRequest({ action: found.action, importance: found.importance, olderThan: found.olderThan, sourceId: found.sourceId }, floorMs, now);
+  if (isCleanRequestError(req)) throw hubError('suggestion_stale', { suggestions: fresh }, req.message);
+  const job = await store.tenantTx(projectId, async (tx) => {
+    const r = store.forTenant(projectId, tx);
+    const existing = await r.lockAndFindCleanJobForSuggestion(found.id, new Date(now - APPLY_IDEMPOTENT_MS));
+    if (existing) return existing;
+    return insertCleanJob(r, req, actor, { origin: 'suggestion', suggestionId: found.id, advisor: found.advisor });
   });
   return cleanJobView(job);
 }

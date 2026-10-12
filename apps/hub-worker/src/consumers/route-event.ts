@@ -1,0 +1,47 @@
+import { Prisma } from '@prisma/client';
+import { TenantScopedRepository } from '@hub/database';
+import { EventReceivedNotice, buildDeliveryMessage, logger } from '@hub/common';
+
+/** Topic outbox cho chặng normalize → delivery (S1-2). Relay định tuyến theo TOPIC_ROUTES. */
+export const DELIVERY_REQUESTED_TOPIC = 'delivery.requested';
+
+/**
+ * Định tuyến MỘT event đã ghi tới các subscription khớp: delivery PENDING + outbox `delivery.requested` trong CÙNG transaction
+ * của người gọi (S1-2, outbox pattern). ĐƯỜNG DUY NHẤT — dùng chung cho event chuẩn hoá từ provider (`NormalizeConsumer`) và
+ * event do chính hub phát (`hub.*`, QT4b `emitHubEvent`): không có đường gửi riêng, không có `if` trong lõi.
+ * S6 (ADR-040): đích webhook chưa VERIFIED không nhận sự kiện.
+ */
+export async function routeEventToSubscriptions(
+  tx: Prisma.TransactionClient,
+  repoTx: TenantScopedRepository,
+  tenantId: string,
+  evt: { id: string; type: string; sourceId: string | null; correlationId: string },
+  log: Pick<typeof logger, 'info'> = logger,
+): Promise<EventReceivedNotice['deliveries']> {
+  const routed: EventReceivedNotice['deliveries'] = [];
+  const subscriptions = await repoTx.findActiveSubscriptionsForEvent(evt.type, evt.sourceId ?? null);
+  log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
+  for (const sub of subscriptions) {
+    const dest = sub.destination as { type?: string; verification?: string } | undefined;
+    if (dest?.type === 'webhook' && dest.verification && dest.verification !== 'VERIFIED') {
+      log.info({ subscriptionId: sub.id, destinationId: sub.destinationId, verification: dest.verification }, 'Bỏ qua đích webhook chưa VERIFIED');
+      continue;
+    }
+    const delivery = await repoTx.createDelivery({ eventId: evt.id, subscriptionId: sub.id, attemptGeneration: 1, status: 'PENDING' });
+    // Outbox không mang tenant_id (hạ tầng xuyên tenant) — payload chỉ là tham chiếu (S1-1).
+    await tx.outbox.create({
+      data: {
+        topic: DELIVERY_REQUESTED_TOPIC,
+        payload: buildDeliveryMessage({ deliveryId: delivery.id, tenantId, attemptGeneration: 1, attemptCount: 0, correlationId: String(evt.correlationId) }) as unknown as Prisma.InputJsonValue,
+      },
+    });
+    routed.push({
+      deliveryId: delivery.id,
+      eventId: evt.id,
+      destinationId: sub.destination?.id ?? sub.destinationId,
+      destinationName: sub.destination?.name ?? '',
+      destinationType: sub.destination?.type ?? '',
+    });
+  }
+  return routed;
+}

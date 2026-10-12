@@ -191,7 +191,8 @@ export const MAIN_STEPS: readonly Step[] = [
     },
     component: "postgres",
     journey: "routed",
-    source: { file: NORMALIZE, symbol: "repoTx.findActiveSubscriptionsForEvent(" },
+    // QT4b (ADR-187): định tuyến tách sang route-event.ts — dùng chung cho event provider và event của hub.
+    source: { file: "apps/hub-worker/src/consumers/route-event.ts", symbol: "repoTx.findActiveSubscriptionsForEvent(" },
   },
   {
     id: "realtime-notify",

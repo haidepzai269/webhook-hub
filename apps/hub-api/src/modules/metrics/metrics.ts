@@ -114,3 +114,11 @@ export const storageWouldRejectTotal = new Counter({
   labelNames: ['path'] as const,
   registers: [apiRegistry],
 });
+
+/** QT4b (§5.6, ADR-187): gợi ý bị hàng rào `assertSuggestionSafe` loại khi `apply` tính lại (cùng tên metric với hub-worker). */
+export const cleanupSuggestionsRejectedApi = new Counter({
+  name: 'hub_cleanup_suggestions_rejected_total',
+  help: 'Số gợi ý dọn bị hàng rào an toàn loại, theo advisor',
+  labelNames: ['advisor'] as const,
+  registers: [apiRegistry],
+});

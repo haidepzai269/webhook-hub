@@ -5,7 +5,7 @@ import { SessionGuard } from '../auth/session.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
-import { StorageFlags, createCleanJob, getCleanJob, getStorageOverview } from './storage-api';
+import { StorageFlags, applySuggestion, createCleanJob, getCleanJob, getStorageOverview } from './storage-api';
 
 /**
  * QT4 (SPEC-han-muc-dung-luong §5.5, ADR-184): trang "Dung lượng" của một project. Quyền = scope (`storage:read` cho
@@ -31,6 +31,14 @@ export class StorageController {
   @RequireScope('storage:write')
   clean(@Param('projectId') projectId: string, @CurrentUser() actor: string, @Body() body: unknown) {
     return createCleanJob(this.prisma, projectId, body, actor);
+  }
+
+  /** QT4b (§5.6, ADR-187): áp dụng gợi ý — tính lại tại thời điểm gọi, 409 `suggestion_stale` kèm bộ mới, idempotent theo id. */
+  @Post('storage/suggestions/:suggestionId/apply')
+  @HttpCode(202)
+  @RequireScope('storage:write')
+  apply(@Param('projectId') projectId: string, @Param('suggestionId') suggestionId: string, @CurrentUser() actor: string) {
+    return applySuggestion(this.prisma, projectId, suggestionId, actor);
   }
 
   @Get('storage/clean/:jobId')

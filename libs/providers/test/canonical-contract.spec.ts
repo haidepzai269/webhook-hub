@@ -1,5 +1,5 @@
 import { GithubAdapter, PayosAdapter, SepayAdapter, StripeAdapter } from '../src';
-import { canonicalKeys, isReservedType, NormalizedEvent, validateCanonical } from '@hub/common';
+import { canonicalKeys, isReservedType, NormalizedEvent, validateCanonical, HUB_CLEANUP_SUGGESTED, HUB_SUGGESTION_KEYS, RuleAdvisor } from '@hub/common';
 import * as f from './fixtures';
 
 /**
@@ -54,3 +54,27 @@ describe('[MS:U50] U50 hợp đồng catalog', () => {
     );
   });
 });
+
+/**
+ * QT4b (ADR-187): miền `hub.*` — sự kiện do CHÍNH hub phát. Cùng luật hợp đồng với kiểu chuẩn của adapter: tập khoá `data`
+ * khớp TUYỆT ĐỐI catalog, qua validator; phần tử `suggestions[]` cũng đủ khoá. Thêm/bớt khoá mà không sửa catalog -> đỏ.
+ */
+describe('[QT:T24] (phần e) U50 hợp đồng catalog — hub.project.cleanup_suggested', () => {
+  it('data + suggestions[] khớp tuyệt đối khoá catalog; hub.* là không gian dành riêng', async () => {
+    const suggestions = await new RuleAdvisor(() => 0).suggest({
+      usedBytes: 0,
+      quotaBytes: 1,
+      level: 'OK',
+      growthPerDay: 0,
+      buckets: [{ sourceId: null, importance: 'low', ageDays: 9, events: 1, bytes: 10 }],
+      policies: [],
+      keepLongerSourceIds: [],
+    });
+    const data = { level: 'WARN_70', usedBytes: 1, quotaBytes: 2, forecastHours: 1.5, suggestions };
+    expect(isReservedType(HUB_CLEANUP_SUGGESTED)).toBe(true);
+    expect(Object.keys(data).sort()).toEqual([...(canonicalKeys(HUB_CLEANUP_SUGGESTED) ?? [])].sort());
+    expect(Object.keys(suggestions[0]).sort()).toEqual([...HUB_SUGGESTION_KEYS].sort());
+    expect(validateCanonical(HUB_CLEANUP_SUGGESTED, data)).toEqual({ ok: true });
+  });
+});
+

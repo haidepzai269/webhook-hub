@@ -1999,3 +1999,17 @@ CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
 - Event đã dọn không replay được, không xem lại được body; "Xoá hẳn" để provider gửi lại khoá cũ thì hub nhận lần nữa (test QT:T16 ghi nhận, không phải lỗi).
 - Lệnh dọn chạy bất đồng bộ (thăm dò 5s, `STORAGE_CLEAN_POLL_MS`): bấm xong phải xem tiến độ ở `GET …/storage/clean/:jobId`. Thêm một bảng và một vòng thăm dò DB nhẹ (outbox relay đã thăm dò 500ms nên Neon không ngủ thêm vì vòng này).
 - Đo byte trước/sau tốn thêm hai câu gộp mỗi lô — đổi lại `used_bytes` sau dọn là số thật, không phải ước.
+
+## ADR-187 — Gợi ý dọn là interface `CleanupAdvisor` (`rules@1`), hàng rào an toàn NGOÀI advisor; webhook `hub.project.cleanup_suggested` qua outbox bình thường + API `apply` tính lại khi gọi (QT4b, 2026-10-13)
+
+**Vấn đề:** user cần được hub gợi ý dọn gì (kèm số MB) và tự động hoá được (nhận webhook → quyết định → gọi lại); sau này Admin muốn thay luật bằng LLM mà không đụng lõi. Một gợi ý sai (dọn event giao lỗi chưa xử lý, dọn dữ liệu còn retry, đụng `audit_logs`) là mất dữ liệu thật.
+**Chọn:**
+- `CleanupAdvisor { id; suggest(StorageSnapshot) }` (libs/common/src/storage/cleanup-advisor.ts) — snapshot CHỈ là số gộp (`by_bucket`, policy, id source "Giữ lâu"), không payload. Hôm nay `RuleAdvisor` (`rules@1`, bảng §5.3: Rác xoá hẳn ≥1 ngày, Thấp dọn ≥3 ngày, Trung bình dọn ≥5 ngày; Cao/Giữ không có luật). Chạy trong lượt hiệu chỉnh 24h, lưu `project_usage.suggestions`.
+- `assertSuggestionSafe`/`guardSuggestions` NGOÀI advisor, áp trước khi lưu, phát hay áp dụng: dựng LẠI gợi ý từ danh sách trắng trường (không thể nêu bảng nào khác), chỉ `trim`/`delete` × Rác/Thấp/Trung bình, Rác chỉ xoá hẳn, `olderThan` không mới hơn sàn retry, không nhắm source "Giữ lâu", id tính lại (hash xác định), `estimatedBytes`/`estimatedEvents` tính lại từ `by_bucket`. Vi phạm → loại + log + `hub_cleanup_suggestions_rejected_total{advisor}`. Advisor lỗi/quá 5s → fail-open về `rules@1` (`hub_cleanup_advisor_fail_open_total`).
+- `hub.*` thành không gian dành riêng của catalog (`hub.project.cleanup_suggested` + validator + U50): event của hub ghi `events` (source `hub`, `sourceId` null) rồi đi `routeEventToSubscriptions` — hàm định tuyến tách ra từ `NormalizeConsumer`, DÙNG CHUNG cho mọi event (delivery PENDING + outbox `delivery.requested` cùng transaction, đích chưa VERIFIED không nhận). Phát khi nấc đi lên (kể cả LOCKED) hoặc tổng gợi ý đổi ≥10% quota và lần trước cũ hơn 24h; `suggested_at/bytes` đánh dấu CÙNG transaction với event.
+- `POST …/storage/suggestions/:id/apply` (console + `/v1/p` với key `storage:write`, scope mới cấp được cho key — chỉ owner cấp vì role phải có scope): tính lại bằng `rules@1` + hàng rào tại thời điểm gọi; id không còn trong bộ mới hoặc bản đã gửi hết hạn → 409 `suggestion_stale` kèm bộ mới (lưu thay bộ cũ); idempotent theo id trong 24h (khoá advisory `(project, id)` trong transaction); tạo lệnh dọn như ADR-184, audit ghi `suggestionId` + `advisor`.
+**Đánh đổi:**
+- Thêm một lớp trừu tượng khi mới có một bản cài; `CLEANUP_ADVISOR` chưa có (chỉ `rules`) — LLM là việc sau, cắm vào `StorageJob.advisor`.
+- Gợi ý và số MB có thể cũ tới 24h (theo `by_bucket` của lần hiệu chỉnh); `apply` tính lại trên CÙNG số cũ đó, nên "tính lại" bảo đảm an toàn và nhất quán, không bảo đảm số mới nhất.
+- Gợi ý nằm ở mức project (không tách theo source) để id ổn định; user muốn dọn một source thì dùng lệnh dọn tay có `sourceId`.
+- Dành riêng `hub.*`: service nào lỡ dùng tiền tố `hub.` cho kiểu riêng sẽ bị 422 (hôm nay không có).

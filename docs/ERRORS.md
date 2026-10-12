@@ -283,6 +283,17 @@ Hoặc nhờ người vận hành tăng hạn mức.
 curl -si -X POST $API/hooks/github/$SOURCE_KEY -H 'content-type: application/json' -d '{}'
 ```
 
+## suggestion_stale
+
+**409 (`POST /api/v1/projects/:p/storage/suggestions/:id/apply` và `/v1/p/:project/storage/suggestions/:id/apply`).** Hub tính
+lại gợi ý dọn ngay lúc gọi (SPEC-han-muc-dung-luong §5.6, ADR-187): gợi ý `:id` đã hết hạn (24h) hoặc không còn trong bộ
+hiện tại (dữ liệu đã đổi, đã được dọn…). Tham số `suggestions` = bộ gợi ý vừa tính lại (đã qua hàng rào an toàn).
+**Sửa:** chọn một gợi ý trong `suggestions` rồi gọi `apply` lại với `id` của nó. Gọi lại cùng một id hợp lệ trong 24h trả
+CÙNG lệnh dọn (idempotent).
+```bash
+curl -si -X POST $API/v1/p/cafe/storage/suggestions/sug_0123456789abcdef01234567/apply -H "Authorization: Bearer $KEY"
+```
+
 ## event_trimmed
 
 **409 (console: replay delivery).** Nội dung của event đã được **"Dọn"** để giải phóng dung lượng (SPEC-han-muc-dung-luong

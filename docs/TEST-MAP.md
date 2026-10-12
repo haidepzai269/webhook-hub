@@ -4,7 +4,7 @@
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 376 mã khai báo · 301 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 376 mã khai báo · 306 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -302,6 +302,11 @@ Tổng: 376 mã khai báo · 301 mã có test · 0 mồ côi · 24 mồ côi có
 | `QT:T16` | SPEC-han-muc-dung-luong.md · QT4 | L1 | libs/database/test/storage-clean-db.spec.ts:95 | chưa chạy |
 | `QT:T17` | SPEC-han-muc-dung-luong.md · QT1 | L0,L1 | libs/common/test/storage-level.spec.ts:92<br>libs/database/test/storage-clean-db.spec.ts:149 | chưa chạy |
 | `QT:T20` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/replay-message.spec.ts:54<br>libs/database/test/storage-clean-db.spec.ts:166 | chưa chạy |
+| `QT:T21` | SPEC-han-muc-dung-luong.md · QT4b | L0 | libs/common/test/cleanup-advisor.spec.ts:43 | chưa chạy |
+| `QT:T22` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:56<br>libs/common/test/cleanup-advisor.spec.ts:64 | chưa chạy |
+| `QT:T23` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:74<br>libs/common/test/cleanup-advisor.spec.ts:98 | chưa chạy |
+| `QT:T24` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:84<br>apps/hub-worker/test/cleanup-suggested.spec.ts:108<br>libs/common/test/cleanup-advisor.spec.ts:113<br>libs/common/test/cleanup-advisor.spec.ts:124<br>libs/providers/test/canonical-contract.spec.ts:62 | chưa chạy |
+| `QT:T25` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-api/test/storage-apply.spec.ts:53<br>apps/hub-api/test/storage-apply.spec.ts:63<br>apps/hub-api/test/storage-apply.spec.ts:72 | chưa chạy |
 | `QT:T26` | SPEC-han-muc-dung-luong.md · QT1 | L0,L1 | libs/common/test/storage-level.spec.ts:119<br>libs/database/test/storage-quota-db.spec.ts:70<br>libs/database/test/storage-quota-db.spec.ts:80 | chưa chạy |
 | `QT:T27` | SPEC-han-muc-dung-luong.md · QT9 | L1,L0 | apps/hub-api/test/source-limit-db.spec.ts:35<br>apps/hub-api/test/source-limit.spec.ts:11<br>apps/hub-api/test/source-limit.spec.ts:32 | chưa chạy |
 | `QT:T28` | SPEC-han-muc-dung-luong.md · QT1 | L0 | libs/common/test/storage-level.spec.ts:50 | chưa chạy |
@@ -334,6 +339,6 @@ Tổng: 376 mã khai báo · 301 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (209 file, 1349 khai báo it/test)
+## File test (212 file, 1364 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

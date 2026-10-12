@@ -1,8 +1,21 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import {
+  CleanupAdvisor,
+  CleanupSuggestion,
+  HUB_CLEANUP_SUGGESTED,
+  RuleAdvisor,
+  StorageBucket,
   StorageLevel,
+  StoragePolicyDefault,
   bloatFactorFrom,
+  clampBloatFactor,
+  forecastHours,
+  guardSuggestions,
+  levelRose,
+  parseBuckets,
+  shouldEmitCleanupSuggested,
+  suggestWithFallback,
   calibrationDueBefore,
   computeUsedBytes,
   fastFailRedisOptions,
@@ -20,8 +33,13 @@ import {
 import Redis from 'ioredis';
 import { hostname } from 'os';
 import { randomUUID } from 'crypto';
+import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
 import { resolveTrafficRetentionDays } from './cleanup.job';
+import { emitHubEvent } from './hub-events';
 import {
+  cleanupAdvisorFailOpen,
+  cleanupSuggestedEmitted,
+  cleanupSuggestionsRejected,
   dbSizeBytes,
   projectStorageBytes,
   projectStorageLocked,
@@ -108,6 +126,13 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
 
   /** Đồng hồ (test thay được). */
   clock: () => number = Date.now;
+  /**
+   * QT4b (§5.6, ADR-187): bộ gợi ý dọn. Hôm nay `rules@1`; sau này `LlmAdvisor` cắm vào đây (`CLEANUP_ADVISOR`) — job đo,
+   * webhook, `apply`, hàng rào không đổi. Lỗi / quá `advisorTimeoutMs` -> fail-open về `fallbackAdvisor` (`rules@1`).
+   */
+  advisor: CleanupAdvisor = new RuleAdvisor(() => this.clock());
+  readonly fallbackAdvisor: CleanupAdvisor = new RuleAdvisor(() => this.clock());
+  advisorTimeoutMs = 5_000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -229,6 +254,15 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
     }
     const log = LOCKED_LEVELS.has(c.to) ? logger.warn.bind(logger) : logger.info.bind(logger);
     log({ tenantId: c.tenantId, from: c.from, to: c.to, usedBytes: c.usedBytes, quotaBytes: c.quotaBytes }, 'Storage: project đổi nấc dung lượng (ước tính)');
+    // QT4b (§5.6): nấc đi LÊN -> phát `hub.project.cleanup_suggested` (cùng lúc với `hub.project.storage` của QT6), kể cả
+    // khi LOCKED. Lỗi không làm hỏng lượt đo.
+    if (levelRose(c.from, c.to)) {
+      try {
+        await this.emitCleanupSuggested(c.tenantId, { levelRose: true, level: c.to, usedBytes: c.usedBytes, quotaBytes: c.quotaBytes });
+      } catch (err: any) {
+        logger.warn({ err: err?.message, tenantId: c.tenantId }, 'Storage: không phát được hub.project.cleanup_suggested (bỏ qua)');
+      }
+    }
     for (const h of this.onLevelChange) {
       try {
         await h(c);
@@ -335,7 +369,119 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       },
       'Storage: hiệu chỉnh (quét thật) — so số cộng dồn với số quét',
     );
+    // QT4b: gợi ý tính trong lượt hiệu chỉnh (by_bucket vừa quét). Nấc LÊN thì reportLevelChange phát webhook; còn lại phát
+    // khi bộ gợi ý đổi đáng kể. Gợi ý lỗi không làm hỏng lượt hiệu chỉnh (mốc đã lưu ở trên).
+    const rose = levelRose(prevLevel, level);
+    try {
+      await this.refreshSuggestions(tenantId, { usedBytes: m.totalBytes, quotaBytes, level, bloatFactor, buckets: parseBuckets(buckets), emitIfChanged: !rose });
+    } catch (err: any) {
+      logger.warn({ err: err?.message, tenantId }, 'Storage: tính gợi ý dọn lỗi (bỏ qua lượt này)');
+    }
     if (level !== prevLevel) await this.reportLevelChange({ tenantId, from: prevLevel, to: level, usedBytes: m.totalBytes, quotaBytes });
+  }
+
+  /**
+   * QT4b (§5.6): advisor (fail-open về rules@1) -> hàng rào `guardSuggestions` (NGOÀI advisor; loại = metric + log) -> lưu
+   * `project_usage.suggestions`. Advisor chỉ nhận SỐ GỘP (snapshot), không payload. Trả bộ gợi ý đã qua hàng rào.
+   */
+  async refreshSuggestions(
+    tenantId: string,
+    i: { usedBytes: number; quotaBytes: number; level: StorageLevel; bloatFactor: number; buckets: StorageBucket[]; emitIfChanged: boolean },
+  ): Promise<CleanupSuggestion[]> {
+    const repo = this.prisma.forTenant(tenantId);
+    const now = this.clock();
+    const [policies, keepLongerSourceIds, traffic24h] = await Promise.all([
+      repo.findStoragePolicies(),
+      repo.findKeepLongerSourceIds(),
+      repo.trafficBytesSince(new Date(now - 86_400_000)),
+    ]);
+    const snapshot = {
+      usedBytes: Math.round(i.usedBytes),
+      quotaBytes: i.quotaBytes,
+      level: i.level,
+      growthPerDay: Math.round(clampBloatFactor(i.bloatFactor) * traffic24h),
+      buckets: i.buckets,
+      policies: (policies as { importance: string; action: string; afterDays: number; trigger: string }[]).map(
+        (p) => ({ importance: p.importance, action: p.action, afterDays: p.afterDays, trigger: p.trigger }) as StoragePolicyDefault,
+      ),
+      keepLongerSourceIds,
+    };
+    const r = await suggestWithFallback(this.advisor, this.fallbackAdvisor, snapshot, this.advisorTimeoutMs);
+    if (r.failedOpen) {
+      cleanupAdvisorFailOpen.inc({ advisor: this.advisor.id });
+      logger.warn({ tenantId, advisor: this.advisor.id, err: r.error }, 'Storage: advisor gợi ý dọn lỗi/quá giờ -> fail-open về rules@1');
+    }
+    const g = guardSuggestions(r.suggestions, { buckets: i.buckets, keepLongerSourceIds, floorMs: TOTAL_RETRY_WINDOW_MS, now });
+    for (const x of g.rejected) {
+      cleanupSuggestionsRejected.inc({ advisor: x.advisor });
+      logger.warn({ tenantId, advisor: x.advisor, reason: x.reason }, 'Storage: gợi ý dọn bị hàng rào an toàn loại');
+    }
+    await repo.saveStorageSuggestions(g.accepted);
+    if (i.emitIfChanged) {
+      await this.emitCleanupSuggested(tenantId, {
+        levelRose: false,
+        level: i.level,
+        usedBytes: i.usedBytes,
+        quotaBytes: i.quotaBytes,
+        suggestions: g.accepted,
+        traffic24h,
+        bloatFactor: i.bloatFactor,
+      });
+    }
+    return g.accepted;
+  }
+
+  /**
+   * QT4b (§5.6): phát `hub.project.cleanup_suggested` QUA OUTBOX BÌNH THƯỜNG (`emitHubEvent` -> events + delivery +
+   * outbox `delivery.requested`) nếu `shouldEmitCleanupSuggested` cho phép; đánh dấu `suggested_at/bytes` CÙNG transaction.
+   * Không truyền `suggestions` -> lấy bộ đã lưu và cho qua hàng rào lần nữa (tính lại byte theo by_bucket hiện có).
+   */
+  async emitCleanupSuggested(
+    tenantId: string,
+    i: { levelRose: boolean; level: StorageLevel; usedBytes: number; quotaBytes: number; suggestions?: CleanupSuggestion[]; traffic24h?: number; bloatFactor?: number },
+  ): Promise<boolean> {
+    const repo = this.prisma.forTenant(tenantId);
+    const now = this.clock();
+    const usage = await repo.findProjectUsage();
+    let suggestions = i.suggestions;
+    if (!suggestions) {
+      const keep = await repo.findKeepLongerSourceIds();
+      suggestions = guardSuggestions(Array.isArray(usage?.suggestions) ? (usage!.suggestions as unknown[]) : [], {
+        buckets: parseBuckets(usage?.byBucket),
+        keepLongerSourceIds: keep,
+        floorMs: TOTAL_RETRY_WINDOW_MS,
+        now,
+      }).accepted;
+    }
+    const totalBytes = suggestions.reduce((a, x) => a + x.estimatedBytes, 0);
+    const ok = shouldEmitCleanupSuggested({
+      levelRose: i.levelRose,
+      level: i.level,
+      suggestionsCount: suggestions.length,
+      totalBytes,
+      quotaBytes: i.quotaBytes,
+      prevEmittedBytes: usage?.suggestedBytes !== null && usage?.suggestedBytes !== undefined ? Number(usage.suggestedBytes) : null,
+      prevEmittedAt: usage?.suggestedAt ?? null,
+      now,
+    });
+    if (!ok) return false;
+    const bloat = i.bloatFactor ?? Number(usage?.bloatFactor ?? 2);
+    const traffic = i.traffic24h ?? (await repo.trafficBytesSince(new Date(now - 86_400_000)));
+    const data = {
+      level: i.level,
+      usedBytes: Math.max(0, Math.round(i.usedBytes)),
+      quotaBytes: Math.round(i.quotaBytes),
+      forecastHours: forecastHours(i.usedBytes, i.quotaBytes, bloat, traffic),
+      suggestions,
+    };
+    await this.prisma.tenantTx(tenantId, async (tx) => {
+      const repoTx = this.prisma.forTenant(tenantId, tx);
+      await emitHubEvent(tx, repoTx, tenantId, { type: HUB_CLEANUP_SUGGESTED, data: data as unknown as Record<string, unknown>, now: new Date(now) });
+      await repoTx.markCleanupSuggestedEmitted(totalBytes);
+    });
+    cleanupSuggestedEmitted.inc({ reason: i.levelRose ? 'level_up' : 'changed' });
+    logger.info({ tenantId, level: i.level, suggestions: suggestions.length, totalBytes, levelRose: i.levelRose }, 'Storage: đã phát hub.project.cleanup_suggested (qua outbox)');
+    return true;
   }
 
   private scheduleLevel(delayMs: number) {

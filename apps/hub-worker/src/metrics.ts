@@ -189,3 +189,29 @@ export const storageCleanBatches = new Counter({
   labelNames: ['trigger', 'result'] as const,
   registers: [workerRegistry],
 });
+
+// ---------------------------------------------------------------- QT4b gợi ý dọn (ADR-187)
+
+/** Gợi ý bị hàng rào `assertSuggestionSafe` loại (mức Cao/Giữ, olderThan quá mới, source Giữ lâu…) theo advisor. */
+export const cleanupSuggestionsRejected = new Counter({
+  name: 'hub_cleanup_suggestions_rejected_total',
+  help: 'Số gợi ý dọn bị hàng rào an toàn loại, theo advisor',
+  labelNames: ['advisor'] as const,
+  registers: [workerRegistry],
+});
+
+/** Advisor ném lỗi / quá giờ -> fail-open về rules@1. */
+export const cleanupAdvisorFailOpen = new Counter({
+  name: 'hub_cleanup_advisor_fail_open_total',
+  help: 'Số lần advisor gợi ý dọn lỗi/quá giờ và hub quay về rules@1',
+  labelNames: ['advisor'] as const,
+  registers: [workerRegistry],
+});
+
+/** Số webhook `hub.project.cleanup_suggested` đã ghi vào outbox — reason: level_up | changed. */
+export const cleanupSuggestedEmitted = new Counter({
+  name: 'hub_cleanup_suggested_emitted_total',
+  help: 'Số event hub.project.cleanup_suggested đã phát (qua outbox)',
+  labelNames: ['reason'] as const,
+  registers: [workerRegistry],
+});

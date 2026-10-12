@@ -25,6 +25,7 @@ import { OperatorGuard } from './modules/console/operator.guard';
 import { InsightsController } from './modules/insights/insights.controller';
 import { TrafficController } from './modules/traffic/traffic.controller';
 import { StorageController } from './modules/storage/storage.controller';
+import { ServiceStorageController } from './modules/storage/service-storage.controller';
 
 /**
  * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
@@ -39,6 +40,7 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
     InsightsController, // CB6: nhận định theo project (thành viên đọc được project)
     TrafficController, // EG5 (ADR-181): lưu lượng theo source — scope traffic:read (owner + operator)
     StorageController, // QT4 (ADR-184): dung lượng + lệnh dọn — scope storage:read / storage:write
+    ServiceStorageController, // QT4b (ADR-187): /v1/p — key storage:write áp dụng gợi ý dọn
   ];
   return nodeEnv === 'production' ? base : [...base, MockController];
 }

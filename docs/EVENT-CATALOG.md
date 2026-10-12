@@ -109,6 +109,25 @@ Ví dụ — cùng một khoản 50.000đ qua PayOS và SePay ra **cùng tập k
 
 Không chép email của author vào phần chung (dữ liệu cá nhân); email vẫn trong `raw`.
 
+## 4a. Miền hub — sự kiện do chính hub phát (`hub.*`, ADR-187)
+
+`hub.*` là không gian **dành riêng** như `payment.*`/`repo.*`: service tự phát (`POST /v1/p/:project/events`) hay adapter
+phát kiểu `hub.*` không có trong catalog / sai khuôn → từ chối (422 `schema_mismatch` / lỗi normalize vĩnh viễn) — không ai
+giả mạo được sự kiện của hub. Event của hub đi **đúng đường outbox của mọi event** (định tuyến theo subscription, push ký
+Standard Webhooks, polling): `source = "hub"`, `sourceId = null` (subscription lọc theo `sourceIds` sẽ không nhận),
+`normalized: true`, `subject = "project:<projectId>"`. Đăng ký nhận bằng `eventTypes: ["hub.*"]` hoặc đúng tên kiểu.
+
+| Kiểu | Khi nào | `data` |
+|---|---|---|
+| `hub.project.cleanup_suggested` | Nấc dung lượng đi lên (kể cả `LOCKED`); hoặc tổng byte gợi ý đổi ≥ 10% hạn mức so với lần phát trước và lần trước cũ hơn 24h. Không phát khi `OK` và không có gợi ý | `level`, `usedBytes`, `quotaBytes`, `forecastHours` (số \| null), `suggestions[]` |
+
+Phần tử `suggestions[]` (mọi khoá luôn có mặt): `id` (`sug_` + 24 hex, xác định từ advisor/mức/hành động/tuổi/source — cùng
+dữ liệu → cùng id), `action` (`trim` = Dọn \| `delete` = Xoá hẳn), `importance` (`junk` \| `low` \| `medium` — không bao giờ
+`high`/`keep`), `olderThan` (`3d`…), `sourceId` (null = mọi source trừ source "Giữ lâu"), `estimatedBytes`, `estimatedEvents`
+(tính lại từ số đo của hub, không phải số advisor đưa), `reasonCode`, `reason` (câu cho người đọc, có MB + đánh đổi),
+`advisor` (`rules@1`), `expiresAt` (+24h). Số liệu là **ước tính**. Áp dụng: `POST /v1/p/:project/storage/suggestions/:id/apply`
+(key có `storage:write`) → 202 + lệnh dọn; gợi ý lạc hậu → 409 `suggestion_stale` kèm bộ mới.
+
 ## 5. Dùng trong subscription và template
 
 - `eventTypes` khớp chính xác hoặc theo mẫu (`payment.*` = mọi sự kiện thanh toán, `*` = mọi sự kiện — S3-3).

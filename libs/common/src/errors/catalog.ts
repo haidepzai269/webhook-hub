@@ -277,6 +277,13 @@ export const ERROR_CATALOG = {
     fix: () => 'Reconnect with POST /api/v1/sources/:id/connection/retry and the credentials in the body.',
   },
   // ---- hạn mức dung lượng (SPEC-han-muc-dung-luong §4 + E1/E4, ADR-182/189) ----
+  // QT:T25 (§5.6, ADR-187): `apply` một gợi ý dọn đã hết hạn / không còn trong bộ hiện tại — kèm bộ mới.
+  suggestion_stale: {
+    status: 409,
+    message: 'This cleanup suggestion is expired or no longer matches the current storage; a fresh set is included.',
+    params: ['suggestions'],
+    fix: () => 'Pick a suggestion from "suggestions" (recomputed just now) and call apply again with its id.',
+  },
   // QT:T20 (§5.1, ADR-184): event đã "Dọn" — dòng gầy giữ chống trùng, không còn nội dung để replay.
   event_trimmed: {
     status: 409,
