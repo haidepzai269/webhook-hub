@@ -1339,6 +1339,72 @@ export class TenantScopedRepository {
     return this.prisma.projectUsage.findUnique({ where: { tenantId: this.tenantId } });
   }
 
+  /**
+   * QT2 hiệu chỉnh (E2, §2): quét THẬT dung lượng của project — MỘT truy vấn gộp theo source (không giữ transaction dài):
+   * `raw_events.body_raw` (octet_length), `events.data`, `deliveries.last_error`, `delivery_attempts` (request/response/
+   * error) qua pg_column_size, `audit_logs` (metadata + reason). Không tính index/TOAST overhead — số liệu ƯỚC TÍNH.
+   * `bodyRawBytes` = mẫu số của hệ số phình. Khoá `bySource`: id source; `_none` = event không còn source; `_audit`.
+   */
+  async measureStorage(): Promise<{ totalBytes: number; bodyRawBytes: number; bySource: Record<string, number> }> {
+    const t = this.tenantId;
+    const rows = await this.prisma.$queryRaw<{ k: string; raw: bigint; other: bigint }[]>(Prisma.sql`
+      WITH r AS (
+        SELECT r.source_id::text AS k, sum(octet_length(r.body_raw))::bigint AS raw
+        FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
+        WHERE s.tenant_id = ${t}::uuid GROUP BY r.source_id),
+      e AS (
+        SELECT COALESCE(e.source_id::text, '_none') AS k, sum(COALESCE(pg_column_size(e.data), 0))::bigint AS b
+        FROM hub.events e WHERE e.tenant_id = ${t}::uuid GROUP BY 1),
+      a AS (
+        SELECT a.delivery_id, sum(COALESCE(pg_column_size(a.request_body), 0) + COALESCE(pg_column_size(a.response_body), 0)
+                                  + COALESCE(pg_column_size(a.error), 0))::bigint AS b
+        FROM hub.delivery_attempts a
+        WHERE a.delivery_id IN (SELECT id FROM hub.deliveries WHERE tenant_id = ${t}::uuid) GROUP BY a.delivery_id),
+      d AS (
+        SELECT COALESCE(e.source_id::text, '_none') AS k, sum(COALESCE(pg_column_size(d.last_error), 0) + COALESCE(a.b, 0))::bigint AS b
+        FROM hub.deliveries d JOIN hub.events e ON e.id = d.event_id LEFT JOIN a ON a.delivery_id = d.id
+        WHERE d.tenant_id = ${t}::uuid GROUP BY 1),
+      au AS (
+        SELECT '_audit'::text AS k, sum(COALESCE(pg_column_size(metadata), 0) + COALESCE(octet_length(reason), 0))::bigint AS b
+        FROM hub.audit_logs WHERE tenant_id = ${t}::uuid),
+      keys AS (SELECT k FROM r UNION SELECT k FROM e UNION SELECT k FROM d UNION SELECT k FROM au)
+      SELECT keys.k, COALESCE(r.raw, 0)::bigint AS raw, (COALESCE(e.b, 0) + COALESCE(d.b, 0) + COALESCE(au.b, 0))::bigint AS other
+      FROM keys LEFT JOIN r ON r.k = keys.k LEFT JOIN e ON e.k = keys.k LEFT JOIN d ON d.k = keys.k LEFT JOIN au ON au.k = keys.k`);
+    const bySource: Record<string, number> = {};
+    let totalBytes = 0;
+    let bodyRawBytes = 0;
+    for (const r of rows) {
+      const raw = Number(r.raw);
+      const sum = raw + Number(r.other);
+      bodyRawBytes += raw;
+      totalBytes += sum;
+      if (sum > 0) bySource[r.k] = sum;
+    }
+    return { totalBytes, bodyRawBytes, bySource };
+  }
+
+  /**
+   * QT2 (E2): đặt lại mốc hiệu chỉnh — `calibrated_at = now()` (đồng hồ DB), `freed_since_calibration = 0`, `used_bytes` =
+   * số vừa quét. Chưa có dòng thì tạo (project tạo trước khi có seed).
+   */
+  async saveStorageCalibration(m: { calibratedBytes: number; bloatFactor: number; bySource: Record<string, number>; level: string }): Promise<number> {
+    const t = this.tenantId;
+    return this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO hub.project_usage AS pu (tenant_id, used_bytes, calibrated_bytes, calibrated_at, freed_since_calibration, bloat_factor, by_source, level, measured_at)
+      VALUES (${t}::uuid, ${m.calibratedBytes}::bigint, ${m.calibratedBytes}::bigint, now(), 0, ${m.bloatFactor}::numeric, ${JSON.stringify(m.bySource)}::jsonb, ${m.level}, now())
+      ON CONFLICT (tenant_id) DO UPDATE SET
+        used_bytes = EXCLUDED.used_bytes, calibrated_bytes = EXCLUDED.calibrated_bytes, calibrated_at = EXCLUDED.calibrated_at,
+        freed_since_calibration = 0, bloat_factor = EXCLUDED.bloat_factor, by_source = EXCLUDED.by_source,
+        level = EXCLUDED.level, measured_at = EXCLUDED.measured_at`);
+  }
+
+  /** QT2 (E2): job cập nhật nấc ghi lại số cộng dồn + nấc (chỉ gọi khi có đổi). */
+  async updateStorageUsage(m: { usedBytes: number; level: string }): Promise<number> {
+    return this.prisma.$executeRaw(Prisma.sql`
+      UPDATE hub.project_usage SET used_bytes = ${m.usedBytes}::bigint, level = ${m.level}, measured_at = now()
+      WHERE tenant_id = ${this.tenantId}::uuid`);
+  }
+
   async addIngestDuplicates(rows:{ sourceId: string; bucket: Date; n: number }[]): Promise<number> {
     const valid = rows.filter((r) => r.n > 0);
     if (valid.length === 0) return 0;
@@ -1357,10 +1423,11 @@ export class TenantScopedRepository {
     const valid = rows.filter((r) => r.count > 0);
     if (valid.length === 0) return 0;
     return this.prisma.$executeRaw(Prisma.sql`
-      INSERT INTO hub.source_traffic_minutely AS t (tenant_id, source_id, minute, outcome, count, top_ips)
-      VALUES ${Prisma.join(valid.map((r) => Prisma.sql`(${this.tenantId}::uuid, ${r.sourceId}::uuid, ${r.minute}, ${r.outcome}::"hub"."TrafficOutcome", ${r.count}::int, ${JSON.stringify(r.topIps.slice(0, 5))}::jsonb)`))}
+      INSERT INTO hub.source_traffic_minutely AS t (tenant_id, source_id, minute, outcome, count, bytes, top_ips)
+      VALUES ${Prisma.join(valid.map((r) => Prisma.sql`(${this.tenantId}::uuid, ${r.sourceId}::uuid, ${r.minute}, ${r.outcome}::"hub"."TrafficOutcome", ${r.count}::int, ${Math.max(0, Math.floor(r.bytes ?? 0))}::bigint, ${JSON.stringify(r.topIps.slice(0, 5))}::jsonb)`))}
       ON CONFLICT (tenant_id, source_id, minute, outcome) DO UPDATE SET
         count = t.count + EXCLUDED.count,
+        bytes = t.bytes + EXCLUDED.bytes,
         top_ips = (
           SELECT coalesce(jsonb_agg(jsonb_build_object('ip', m.ip, 'count', m.c) ORDER BY m.c DESC, m.ip), '[]'::jsonb)
           FROM (
@@ -1817,7 +1884,9 @@ function typeFilterSql(patterns?: string[]): Prisma.Sql {
 export interface SourceTrafficRow {
   sourceId: string;
   minute: Date;
-  outcome: 'ACCEPTED' | 'DUPLICATE' | 'REJECTED' | 'RATE_LIMITED' | 'BLOCKED';
+  outcome: 'ACCEPTED' | 'DUPLICATE' | 'REJECTED' | 'RATE_LIMITED' | 'BLOCKED' | 'STORAGE_FULL';
   count: number;
+  /** QT E2 (ADR-183): byte thực sự ghi xuống DB (cộng dồn khi upsert). Thiếu = 0. */
+  bytes?: number;
   topIps: { ip: string; count: number }[];
 }

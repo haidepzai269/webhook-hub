@@ -14,6 +14,8 @@ import { clampEnvInt, ipKey } from './penalty-box';
  * - Khoá ngoại (source vừa bị xoá giữa hai lượt) -> ghi từng dòng, bỏ dòng hỏng (như DuplicateCounter).
  * - `top_ips`: mỗi ô giữ tối đa `IPS_PER_CELL` IP theo thuật toán space-saving (đầy thì IP mới THAY IP có đếm nhỏ nhất và
  *   kế thừa đếm đó + 1) — IP gửi nhiều đến sau vẫn lên được top; ghi 5 IP nhiều nhất (xấp xỉ, đếm có thể dư tối đa = min).
+ * - QT E2 (ADR-183): mỗi ô cộng thêm `bytes` = số byte THỰC SỰ ghi xuống DB (đo dung lượng cộng dồn) — vẫn không I/O; flush
+ *   cộng `bytes = bytes + excluded.bytes` trong CÙNG câu upsert (không thêm truy vấn).
  */
 export type TrafficOutcome = SourceTrafficRow['outcome'];
 export type TrafficSink = (tenantId: string, rows: SourceTrafficRow[]) => Promise<unknown>;
@@ -32,6 +34,7 @@ interface Cell {
   minute: number;
   outcome: TrafficOutcome;
   count: number;
+  bytes: number;
   ips: Map<string, number>;
 }
 
@@ -58,7 +61,7 @@ export function addSpaceSaving(ips: Map<string, number>, ip: string, cap = IPS_P
   ips.set(ip, min + 1);
 }
 
-const OUTCOME_ORDER: Record<TrafficOutcome, number> = { ACCEPTED: 0, DUPLICATE: 1, REJECTED: 2, RATE_LIMITED: 3, BLOCKED: 4 };
+const OUTCOME_ORDER: Record<TrafficOutcome, number> = { ACCEPTED: 0, DUPLICATE: 1, REJECTED: 2, RATE_LIMITED: 3, BLOCKED: 4, STORAGE_FULL: 5 };
 const rowOrder = (a: SourceTrafficRow, b: SourceTrafficRow) =>
   a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : a.minute.getTime() - b.minute.getTime() || OUTCOME_ORDER[a.outcome] - OUTCOME_ORDER[b.outcome];
 
@@ -81,15 +84,17 @@ export class TrafficRecorder {
     return (this.opts.clock ?? Date.now)();
   }
 
-  record(tenantId: string, sourceId: string, outcome: TrafficOutcome, ip?: string): void {
+  /** `bytes` (QT E2): số byte đã ghi xuống DB cho request này — 0 khi không ghi gì (trùng, 429, 507, bị chặn). */
+  record(tenantId: string, sourceId: string, outcome: TrafficOutcome, ip?: string, bytes = 0): void {
     const minute = Math.floor(this.now() / MINUTE_MS) * MINUTE_MS;
     const k = `${tenantId}|${sourceId}|${minute}|${outcome}`;
     let cell = this.pending.get(k);
     if (!cell) {
-      cell = { tenantId, sourceId, minute, outcome, count: 0, ips: new Map() };
+      cell = { tenantId, sourceId, minute, outcome, count: 0, bytes: 0, ips: new Map() };
       this.pending.set(k, cell);
     }
     cell.count++;
+    if (Number.isFinite(bytes) && bytes > 0) cell.bytes += Math.floor(bytes);
     const key = ipKey(ip);
     if (key) addSpaceSaving(cell.ips, key);
     this.schedule();
@@ -145,6 +150,7 @@ export class TrafficRecorder {
         minute: new Date(c.minute),
         outcome: c.outcome,
         count: c.count,
+        bytes: c.bytes,
         topIps: [...c.ips].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 5).map(([ip, count]) => ({ ip, count })),
       });
       byTenant.set(c.tenantId, rows);
@@ -190,10 +196,11 @@ export class TrafficRecorder {
       const k = `${tenantId}|${r.sourceId}|${minute}|${r.outcome}`;
       let cell = this.pending.get(k);
       if (!cell) {
-        cell = { tenantId, sourceId: r.sourceId, minute, outcome: r.outcome, count: 0, ips: new Map() };
+        cell = { tenantId, sourceId: r.sourceId, minute, outcome: r.outcome, count: 0, bytes: 0, ips: new Map() };
         this.pending.set(k, cell);
       }
       cell.count += r.count;
+      cell.bytes += r.bytes ?? 0;
       for (const { ip, count } of r.topIps) cell.ips.set(ip, (cell.ips.get(ip) ?? 0) + count);
     }
   }

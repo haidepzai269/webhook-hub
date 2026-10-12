@@ -436,6 +436,67 @@ export class PrismaService {
     });
   }
 
+  // ================== Hạn mức dung lượng: escape hatch của JOB ĐO (QT2, SPEC-han-muc-dung-luong E2, ADR-183) ==================
+  // `project_usage` + `source_traffic_minutely` mang tenant_id + RLS. Job cập nhật nấc làm việc XUYÊN project (một truy vấn
+  // gộp mỗi 60s) -> đi qua ĐÚNG các hàm có tên dưới đây (systemTx), tiền lệ `cleanup.job`. Chỉ
+  // `apps/hub-worker/src/scheduler/storage.job.ts` gọi — gate `storage-cross-tenant` giữ điều này. GHI đi `forTenant`.
+
+  /**
+   * MỘT truy vấn gộp xuyên project: mỗi dòng `project_usage` kèm hạn mức ghi đè + Σ bytes traffic SAU mốc hiệu chỉnh
+   * (`minute > date_trunc('minute', calibrated_at)` — phút chứa mốc thuộc về lần quét). Dùng tiền tố PK
+   * `(tenant_id, …, minute)` của bảng traffic. `tenantIds`: CHỈ test (DB kiểm chứng dùng chung).
+   */
+  public storageLevelTickAcrossTenants(tenantIds?: string[]): Promise<StorageTickRow[]> {
+    const scope = tenantIds ? Prisma.sql`WHERE pu.tenant_id = ANY(${tenantIds}::uuid[])` : Prisma.empty;
+    return this.systemTx('storage: level tick', async (tx) => {
+      const rows = await tx.$queryRaw<
+        { tenantId: string; usedBytes: bigint; level: string; calibratedBytes: bigint; calibratedAt: Date | null; freed: bigint; bloatFactor: number; quotaMb: number | null; trafficBytes: bigint }[]
+      >(Prisma.sql`
+        SELECT pu.tenant_id AS "tenantId", pu.used_bytes AS "usedBytes", pu.level, pu.calibrated_bytes AS "calibratedBytes",
+               pu.calibrated_at AS "calibratedAt", pu.freed_since_calibration AS freed, pu.bloat_factor::float8 AS "bloatFactor",
+               p.storage_quota_mb AS "quotaMb",
+               COALESCE((SELECT sum(t.bytes) FROM hub.source_traffic_minutely t
+                         WHERE t.tenant_id = pu.tenant_id
+                           AND t.minute > date_trunc('minute', COALESCE(pu.calibrated_at, '-infinity'::timestamptz))), 0)::bigint AS "trafficBytes"
+        FROM hub.project_usage pu JOIN hub.projects p ON p.id = pu.tenant_id
+        ${scope}
+        ORDER BY pu.tenant_id`);
+      return rows.map((r) => ({
+        tenantId: r.tenantId,
+        usedBytes: Number(r.usedBytes),
+        level: r.level,
+        calibratedBytes: Number(r.calibratedBytes),
+        calibratedAt: r.calibratedAt,
+        freedSinceCalibration: Number(r.freed),
+        bloatFactor: Number(r.bloatFactor),
+        quotaMb: r.quotaMb,
+        trafficBytesSinceCalibration: Number(r.trafficBytes),
+      }));
+    });
+  }
+
+  /**
+   * Project cần hiệu chỉnh ở lượt này: chưa có `project_usage`, chưa hiệu chỉnh lần nào, hoặc mốc cũ hơn `dueBefore`
+   * (theo chu kỳ / sắp mất traffic sau mốc). Cũ nhất trước. `tenantIds`: CHỈ test.
+   */
+  public storageProjectsDueForCalibrationAcrossTenants(dueBefore: Date, limit: number, tenantIds?: string[]): Promise<string[]> {
+    const scope = tenantIds ? Prisma.sql`AND p.id = ANY(${tenantIds}::uuid[])` : Prisma.empty;
+    return this.systemTx('storage: project cần hiệu chỉnh', async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT p.id FROM hub.projects p LEFT JOIN hub.project_usage pu ON pu.tenant_id = p.id
+        WHERE (pu.tenant_id IS NULL OR pu.calibrated_at IS NULL OR pu.calibrated_at < ${dueBefore}) ${scope}
+        ORDER BY pu.calibrated_at ASC NULLS FIRST, p.id
+        LIMIT ${limit}`);
+      return rows.map((r) => r.id);
+    });
+  }
+
+  /** §6 (ADR-185): kích thước cả database — không đọc dữ liệu tenant nào (catalog của Postgres). */
+  public async databaseSizeBytes(): Promise<number> {
+    const [r] = await this.client.$queryRaw<{ n: bigint }[]>`SELECT pg_database_size(current_database()) AS n`;
+    return Number(r?.n ?? 0);
+  }
+
   // ================== RLS (SPEC-auth §5.12, AU6) ==================
 
   /**
@@ -588,4 +649,17 @@ export function withSystemRlsUrl(url: string): string {
   const existing = u.searchParams.get('options');
   u.searchParams.set('options', `${existing ? existing + ' ' : ''}-c app.rls_system=on`);
   return u.toString();
+}
+
+/** QT2 (ADR-183): một dòng của truy vấn gộp job cập nhật nấc. */
+export interface StorageTickRow {
+  tenantId: string;
+  usedBytes: number;
+  level: string;
+  calibratedBytes: number;
+  calibratedAt: Date | null;
+  freedSinceCalibration: number;
+  bloatFactor: number;
+  quotaMb: number | null;
+  trafficBytesSinceCalibration: number;
 }

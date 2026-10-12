@@ -255,6 +255,11 @@ services:
       - EVENT_RETENTION_DAYS=${EVENT_RETENTION_DAYS:-}
       # S10 (ADR-078): trần TỔNG một lần gửi, kẹp 1000–10000ms
       - DELIVERY_TIMEOUT_MS=${DELIVERY_TIMEOUT_MS:-5000}
+      # QT2 (ADR-183/185): hạn mức dung lượng — hạn mức mặc định/project (MB), nhịp cập nhật nấc, nhịp hiệu chỉnh, ngân sách ổ DB
+      - PROJECT_STORAGE_QUOTA_MB=${PROJECT_STORAGE_QUOTA_MB:-50}
+      - STORAGE_LEVEL_INTERVAL_MS=${STORAGE_LEVEL_INTERVAL_MS:-60000}
+      - STORAGE_RECALIBRATE_INTERVAL_MS=${STORAGE_RECALIBRATE_INTERVAL_MS:-86400000}
+      - DB_DISK_BUDGET_MB=${DB_DISK_BUDGET_MB:-512}
       # CB5 (ADR-173): vòng gửi email cảnh báo — cùng driver mail với hub-api; WEB_PUBLIC_URL = gốc deep link trong thư.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
       - MAIL_DRIVER=${MAIL_DRIVER:-log}

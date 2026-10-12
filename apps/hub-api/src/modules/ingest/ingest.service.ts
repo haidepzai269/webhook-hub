@@ -52,6 +52,8 @@ interface TraceState {
   blocked?: boolean;
   /** EG4: source đã biết -> lưu lượng theo phút. */
   sourceId?: string;
+  /** QT E2 (ADR-183): byte THỰC SỰ ghi xuống DB bởi request này (body_raw khi ACCEPTED, mẫu ≤4KB khi REJECTED có lưu). */
+  bytes?: number;
 }
 
 /** EG4: outcome của trace -> outcome của bảng lưu lượng (ERROR không lưu — đã có metric + log). */
@@ -255,7 +257,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // Sau khi COMMIT thành công: cập nhật đường tắt Redis (BB-3)
     await this.redis.setIdempotencyKey(redisIdemKey, rawEventRecord.id, 86400);
     log.info({ rawEventId: rawEventRecord.id }, 'Đã tiếp nhận và commit thành công vào Outbox');
-    return { kind: 'accepted', rawEventId: rawEventRecord.id };
+    return { kind: 'accepted', rawEventId: rawEventRecord.id, bytes: req.rawBody.length };
   }
 
   /** Kết quả persistAccepted -> ACK đúng định dạng của adapter (provider hoặc API). */
@@ -275,6 +277,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     }
     trace.outcome = 'ACCEPTED';
     trace.rawEventId = r.rawEventId;
+    trace.bytes = r.bytes; // QT E2: = octet_length(body_raw) vừa COMMIT
     return adapter.buildAck({ accepted: true, status: 200, rawEventId: r.rawEventId, idempotencyKey, isDuplicate: false });
   }
 
@@ -384,7 +387,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       log.warn('Chữ ký webhook không hợp lệ! Lưu raw_event với status REJECTED');
       // Lưu MẪU request lỗi để điều tra (§7.1) — có giới hạn (S1-4): tối đa 4KB body và
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
-      await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
+      trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
       trace.outcome = 'REJECTED';
       // EG2 luật (b): phạt theo CẶP (ip, sourceKey) — tenant khác dùng chung IP của provider không bị vạ lây.
       this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
@@ -412,7 +415,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       // S8: lỗi CHUNG — chữ ký đúng nhưng không có khoá chống trùng. KHÔNG fallback ulid (gửi lại = 2 sự kiện).
       // Lưu REJECTED (signature_valid = true) để chế độ lắng nghe chẩn đoán được; trả 422.
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
-      await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log);
+      trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log);
       trace.outcome = 'REJECTED';
       return rejectAck(adapter, 422, 'missing_idempotency_key', log);
     }
@@ -430,7 +433,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const outcome: TrafficOutcome | null = trace.blocked ? 'BLOCKED' : trace.outcome && TRAFFIC_OUTCOMES.has(trace.outcome) ? (trace.outcome as TrafficOutcome) : null;
     if (!outcome) return;
     try {
-      this.traffic.record(trace.tenantId, trace.sourceId, outcome, req.ip);
+      // QT E2: chỉ ACCEPTED / REJECTED có ghi mẫu mới mang byte; còn lại 0 (trùng, 429, chặn, 507).
+      this.traffic.record(trace.tenantId, trace.sourceId, outcome, req.ip, trace.bytes ?? 0);
     } catch (err: any) {
       logger.warn({ err: err?.message }, 'Không ghi được lưu lượng vào bộ nhớ (bỏ qua)');
     }
@@ -472,7 +476,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     return r;
   }
 
-  /** Mẫu request bị từ chối (§7.1, S1-4): ≤4KB body, ≤20 bản ghi/phút/source; vượt trần chỉ log. */
+  /**
+   * Mẫu request bị từ chối (§7.1, S1-4): ≤4KB body, ≤20 bản ghi/phút/source; vượt trần chỉ log. Trả số byte body_raw đã
+   * ghi (QT E2) — 0 khi vượt trần hoặc ghi lỗi.
+   */
   private async storeRejected(
     source: { id: string; tenantId: string },
     req: RawWebhookRequest,
@@ -481,11 +488,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     signatureValid: boolean,
     correlationId: string,
     log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void },
-  ): Promise<void> {
+  ): Promise<number> {
     const sourceId = source.id;
     if (!this.rejectedLimiter.tryAcquire(sourceId)) {
       log.warn({ sourceId }, 'Vượt trần 20 bản ghi REJECTED/phút cho source này -> không lưu raw_event, chỉ log');
-      return;
+      return 0;
     }
     const sample = sampleRejectedBody(req.rawBody, req.body);
     try {
@@ -504,13 +511,15 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
           origin: 'webhook',
         },
       }));
+      return sample.bodyRaw.length;
     } catch (err) {
       log.error({ err }, 'Lỗi khi lưu rejected raw_event');
+      return 0;
     }
   }
 }
 
-export type PersistResult = { kind: 'accepted'; rawEventId: string } | { kind: 'duplicate' } | { kind: 'error' };
+export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error' };
 
 /** Trần request/phút/source (mặc định 100). Giá trị không hợp lệ -> 100. */
 export function ingestRateLimitPerMin(v: string | undefined = process.env.INGEST_RATE_LIMIT_PER_MIN): number {

@@ -128,3 +128,46 @@ export function startMetricsServer(
   server.listen(port);
   return server;
 }
+
+// ---------------------------------------------------------------- QT2 hạn mức dung lượng (ADR-183/185)
+
+/** Dung lượng ƯỚC TÍNH theo project (cộng dồn E2). Nhãn = tenant id (số project nhỏ, có trần project/user). */
+export const projectStorageBytes = new Gauge({
+  name: 'hub_project_storage_bytes',
+  help: 'Dung lượng ước tính của project (mốc hiệu chỉnh + bloat × byte cộng dồn − đã giải phóng)',
+  labelNames: ['tenant'] as const,
+  registers: [workerRegistry],
+});
+
+/** Số project đang ở LOCKED hoặc HARD_LOCKED (theo lượt cập nhật nấc gần nhất). */
+export const projectStorageLocked = new Gauge({
+  name: 'hub_project_storage_locked',
+  help: 'Số project đang khoá chiều ghi vì đầy hạn mức (LOCKED + HARD_LOCKED)',
+  registers: [workerRegistry],
+});
+
+export const storageLevelTransitions = new Counter({
+  name: 'hub_project_storage_level_transitions_total',
+  help: 'Số lần một project đổi nấc dung lượng',
+  labelNames: ['from', 'to'] as const,
+  registers: [workerRegistry],
+});
+
+export const storageCalibrations = new Counter({
+  name: 'hub_project_storage_calibrations_total',
+  help: 'Số lần hiệu chỉnh (quét thật) dung lượng project',
+  labelNames: ['result'] as const,
+  registers: [workerRegistry],
+});
+
+/** §6 (ADR-185): kích thước database và cờ chốt toàn cục (≥ 80% DB_DISK_BUDGET_MB). */
+export const dbSizeBytes = new Gauge({
+  name: 'hub_db_size_bytes',
+  help: 'pg_database_size(current_database()) — đọc tối đa 10 phút một lần',
+  registers: [workerRegistry],
+});
+export const storageNearFull = new Gauge({
+  name: 'hub_storage_near_full',
+  help: '1 khi database vượt 80% DB_DISK_BUDGET_MB (chốt toàn cục cho người vận hành), 0 nếu không',
+  registers: [workerRegistry],
+});

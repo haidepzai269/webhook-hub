@@ -173,6 +173,13 @@ export const GATES: Gate[] = [
     check: grepLines(/\balertEmailOutbox\w*\s*\(/),
   },
   {
+    id: 'storage-cross-tenant',
+    rule: 'Escape hatch đo dung lượng xuyên project `storage…AcrossTenants(` (systemTx) chỉ được gọi ở apps/hub-worker/src/scheduler/storage.job.ts và khai ở prisma.service.ts',
+    source: 'SPEC-han-muc-dung-luong ĐÍNH CHÍNH E2, ADR-183',
+    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && f !== 'apps/hub-worker/src/scheduler/storage.job.ts',
+    check: grepLines(/\bstorage\w*AcrossTenants\s*\(/),
+  },
+  {
     id: 'data-migration-rls',
     rule:
       "Migration DỮ LIỆU (UPDATE/INSERT/DELETE trên bảng có RLS) tạo sau 20261011110000_rls_hub_app phải tự `SET LOCAL app.rls" +
