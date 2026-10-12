@@ -214,7 +214,7 @@ function authStore(existing: string[], opts: { failTx?: boolean } = {}) {
     invalidateEmailTokens: async () => undefined,
     createEmailToken: async () => undefined,
   };
-  const tx = { $executeRaw: async () => 0, auditLog: { create: async () => ({}) } };
+  const tx = { $executeRaw: async () => 0, auditLog: { create: async () => ({}) }, storagePolicy: { createMany: async () => ({ count: 3 }) }, projectUsage: { createMany: async () => ({ count: 1 }) } };
   const store = {
     identity: () => idn,
     $transaction: async (fn: (t: unknown) => Promise<unknown>) => {

@@ -1,4 +1,4 @@
-import { eventTypeCandidates } from '@hub/common';
+import { DEFAULT_STORAGE_POLICIES, eventTypeCandidates } from '@hub/common';
 import { PrismaClient, Destination, Delivery, Prisma, CircuitState } from '@prisma/client';
 
 /**
@@ -1317,7 +1317,29 @@ export class TenantScopedRepository {
    * CB6 / ADR-171: cộng dồn bộ đếm bản trùng (đã gom trong bộ nhớ ở hub-api) — MỘT câu cho cả lô của project này.
    * `ON CONFLICT DO UPDATE n = n + EXCLUDED.n` trên PK (tenant, source, giờ): nhiều instance hub-api cùng ghi vẫn cộng đúng.
    */
-  async addIngestDuplicates(rows: { sourceId: string; bucket: Date; n: number }[]): Promise<number> {
+  // --- QT: hạn mức dung lượng (SPEC-han-muc-dung-luong, ADR-182..189) ---
+
+  /**
+   * QT:T26 (Q10): project MỚI nhận policy dọn tự động mặc định + dòng `project_usage` (nấc OK, chưa hiệu chỉnh). Gọi trong
+   * transaction tạo project. Idempotent (`skipDuplicates`) — project có sẵn đã được migration QT1 seed.
+   */
+  async seedStorageDefaults(updatedBy: string): Promise<void> {
+    await this.prisma.storagePolicy.createMany({
+      data: DEFAULT_STORAGE_POLICIES.map((p) => ({ tenantId: this.tenantId, importance: p.importance, action: p.action, afterDays: p.afterDays, trigger: p.trigger, updatedBy })),
+      skipDuplicates: true,
+    });
+    await this.prisma.projectUsage.createMany({ data: [{ tenantId: this.tenantId }], skipDuplicates: true });
+  }
+
+  async findStoragePolicies() {
+    return this.prisma.storagePolicy.findMany({ where: { tenantId: this.tenantId }, orderBy: { importance: 'asc' } });
+  }
+
+  async findProjectUsage() {
+    return this.prisma.projectUsage.findUnique({ where: { tenantId: this.tenantId } });
+  }
+
+  async addIngestDuplicates(rows:{ sourceId: string; bucket: Date; n: number }[]): Promise<number> {
     const valid = rows.filter((r) => r.n > 0);
     if (valid.length === 0) return 0;
     return this.prisma.$executeRaw(Prisma.sql`

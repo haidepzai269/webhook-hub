@@ -142,6 +142,8 @@ export class ProjectsController {
         }
         const project = await this.prisma.identity(tx).createProject({ id, slug, name, environment });
         await this.prisma.identity(tx).ensureMembership(me(req).id, id, 'owner');
+        // QT:T26 (Q10, ADR-186): policy dọn tự động mặc định + dòng project_usage — cùng transaction với project.
+        await new TenantScopedRepository(tx, id).seedStorageDefaults('system:project-create');
         await new TenantScopedRepository(tx, id).createAuditLog({
           action: 'project.created',
           entityType: 'project',

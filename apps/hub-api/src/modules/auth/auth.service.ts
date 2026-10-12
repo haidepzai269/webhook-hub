@@ -165,6 +165,8 @@ export class AuthService {
           const projectId = randomUUID();
           await idn.createProject({ id: projectId, slug, name: `${data.name}'s project`.slice(0, 255), environment: 'test' });
           await idn.ensureMembership(user.id, projectId, 'owner');
+          // QT:T26 (Q10, ADR-186): policy dọn tự động mặc định + dòng project_usage — cùng transaction với project.
+          await new TenantScopedRepository(tx, projectId).seedStorageDefaults('system:project-create');
           await new TenantScopedRepository(tx, projectId).createAuditLog({
             action: 'project.created',
             entityType: 'project',

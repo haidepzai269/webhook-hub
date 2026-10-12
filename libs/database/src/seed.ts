@@ -108,6 +108,8 @@ export async function ensureDefaultProject() {
     update: {},
     create: { id: DEFAULT_TENANT_ID, slug: 'default', name: 'Default', environment: 'test' },
   });
+  // QT:T26 (Q10): policy dọn tự động mặc định — idempotent (DB mới: migration QT1 chạy khi chưa có project nào).
+  await new TenantScopedRepository(prisma, DEFAULT_TENANT_ID).seedStorageDefaults('seed');
 }
 
 /**
@@ -185,6 +187,7 @@ export async function seedDemoProjects(env: NodeJS.ProcessEnv = process.env): Pr
     await prisma.$transaction(async (tx) => {
       await tx.project.create({ data: { id: projectId, slug: p.slug, name: p.name, environment: p.environment } });
       const repo = new TenantScopedRepository(tx as any, projectId);
+      await repo.seedStorageDefaults('seed'); // QT:T26 (Q10)
       await repo.createSource({
         provider: p.provider,
         name: p.sourceName,

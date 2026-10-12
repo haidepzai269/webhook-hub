@@ -252,6 +252,21 @@
         }
       },
       "note": "SPEC-chong-qua-tai §8 (ADR-175..179, 181). L0/L1 + L2 trên hubv (service edge/edge-sink). EG1 (nginx) từ feat/edge-nginx; EG2–EG5 từ feat/edge."
+    },
+    {
+      "ns": "QT",
+      "file": "_bmad-output/planning-artifacts/quota/SPEC-han-muc-dung-luong.md",
+      "pattern": "^\\|\\s*QT:(T\\d+)\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] (QT\\d+b?)",
+        "groups": {
+          "QT1": "T1,T13,T17,T26,T28",
+          "QT2": "T12,T14,T31,T32",
+          "QT3": "T2,T3,T5,T6,T7,T8,T29,T30",
+          "QT9": "T27"
+        }
+      },
+      "note": "SPEC-han-muc-dung-luong §12 + mục ĐÍNH CHÍNH (T28–T34; ADR-182..187, 189). Chặng 1 = QT1, QT2, QT3, QT9 (feat/qt). L0 + L1 (describeDb trên hubv)."
     }
   ],
   "inline": [

@@ -17,3 +17,4 @@ export * from './limits';
 export * from './http-outcome';
 export * from './alerts';
 export * from './traffic';
+export * from './storage';

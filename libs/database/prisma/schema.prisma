@@ -152,9 +152,13 @@ model Project {
   name        String     @db.VarChar(255)
   environment ProjectEnv @default(test)
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// QT (SPEC-han-muc-dung-luong §2, ADR-182): operator ghi đè hạn mức (MB). NULL = `PROJECT_STORAGE_QUOTA_MB` (mặc định 50).
+  storageQuotaMb Int?    @map("storage_quota_mb")
 
   apiKeys ApiKey[]
   members ProjectMember[]
+  usage           ProjectUsage?
+  storagePolicies StoragePolicy[]
 
   @@map("projects")
   @@schema("hub")
@@ -307,6 +311,8 @@ model Source {
   verificationConfig Json?        @map("verification_config")
   /// ADR-161: "Xoá" trên bản đồ luồng = lưu trữ (luôn kèm is_active=false). NULL = còn dùng. Lịch sử giữ nguyên.
   archivedAt         DateTime?    @map("archived_at") @db.Timestamptz(6)
+  /// QT E1 (ADR-189): user tự gắn "Giữ lâu" — nhận tới 110% (HARD_LOCKED), không gợi ý/không dọn tự động. Hub không tự gắn (BB-1).
+  keepLonger         Boolean      @default(false) @map("keep_longer")
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
   secrets     SourceSecret[]
@@ -374,6 +380,8 @@ model RawEvent {
   status          RawStatus   @default(ACCEPTED)
   origin          EventOrigin @default(webhook)
   receivedAt      DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)
+  /// QT §5.1 (ADR-184): "Dọn" đã bỏ nội dung (body_raw rỗng) — dòng gầy giữ khoá chống trùng (BB-2).
+  trimmedAt       DateTime?   @map("trimmed_at") @db.Timestamptz(6)
 
   source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   event  Event?
@@ -409,6 +417,7 @@ enum TrafficOutcome {
   REJECTED
   RATE_LIMITED
   BLOCKED
+  STORAGE_FULL // QT E2: bị 507 vì project đầy (bytes = 0)
 
   @@schema("hub")
 }
@@ -425,12 +434,57 @@ model SourceTrafficMinutely {
   count    Int            @default(0)
   /// ≤ 5 phần tử `{ip, count}` nhiều nhất của phút đó; IPv6 ghi theo prefix /64.
   topIps   Json           @default("[]") @map("top_ips")
+  /// QT E2 (ADR-183): số byte THỰC SỰ ghi xuống DB trong phút đó (body_raw khi ACCEPTED, mẫu ≤4KB khi REJECTED, còn lại 0).
+  bytes    BigInt         @default(0)
 
   source Source @relation(fields: [sourceId, tenantId], references: [id, tenantId], onDelete: Cascade)
 
   @@id([tenantId, sourceId, minute, outcome])
   @@index([minute])
   @@map("source_traffic_minutely")
+  @@schema("hub")
+}
+
+/// QT (SPEC-han-muc-dung-luong §7 + E2, ADR-183): dung lượng ƯỚC TÍNH của project. `used_bytes` = mốc hiệu chỉnh
+/// + bloat_factor × Σ bytes traffic sau mốc − đã giải phóng sau mốc. RLS + TenantScopedRepository; job worker đọc xuyên
+/// project qua systemTx có tên.
+model ProjectUsage {
+  tenantId              String    @id @map("tenant_id") @db.Uuid
+  usedBytes             BigInt    @default(0) @map("used_bytes")
+  calibratedBytes       BigInt    @default(0) @map("calibrated_bytes")
+  calibratedAt          DateTime? @map("calibrated_at") @db.Timestamptz(6)
+  freedSinceCalibration BigInt    @default(0) @map("freed_since_calibration")
+  bloatFactor           Decimal   @default(2) @map("bloat_factor") @db.Decimal(6, 3)
+  bySource              Json      @default("{}") @map("by_source")
+  byBucket              Json      @default("[]") @map("by_bucket")
+  suggestions           Json      @default("[]")
+  suggestedAt           DateTime? @map("suggested_at") @db.Timestamptz(6)
+  suggestedBytes        BigInt?   @map("suggested_bytes")
+  level                 String    @default("OK") @db.VarChar(16)
+  notifiedLevel         String?   @map("notified_level") @db.VarChar(16)
+  notifiedAt            DateTime? @map("notified_at") @db.Timestamptz(6)
+  measuredAt            DateTime? @map("measured_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("project_usage")
+  @@schema("hub")
+}
+
+/// QT §5.4 (ADR-186): dọn tự động theo mức quan trọng (chỉ junk/low/medium — "Cao"/"Giữ" không có ở đây). RLS.
+model StoragePolicy {
+  tenantId   String   @map("tenant_id") @db.Uuid
+  importance String   @db.VarChar(16)
+  action     String   @db.VarChar(8)
+  afterDays  Int      @map("after_days")
+  trigger    String   @default("always") @db.VarChar(16)
+  updatedBy  String   @default("system") @map("updated_by") @db.VarChar(128)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, importance])
+  @@map("storage_policies")
   @@schema("hub")
 }
 
@@ -461,6 +515,8 @@ model Event {
   receivedAt     DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)
   /// S7 (ADR-077): lúc INSERT (clock_timestamp) — cửa sổ lắng của polling lọc theo cột này, không theo received_at.
   createdAt      DateTime    @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(6)
+  /// QT §5.1 (ADR-184): "Dọn" đã bỏ `data` — polling trả `trimmed: true, data: null`.
+  trimmedAt      DateTime?   @map("trimmed_at") @db.Timestamptz(6)
 
   rawEvent   RawEvent?  @relation(fields: [rawEventId], references: [id], onDelete: SetNull)
   deliveries Delivery[]
