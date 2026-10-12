@@ -19,6 +19,8 @@ import { EndpointVerifier } from './modules/service-api/endpoint-verifier';
 import { FlowModule } from './modules/flow/flow.module';
 import { ConsoleEndpointsController } from './modules/console/endpoints.controller';
 import { SourceConnectionsController } from './modules/console/source-connections.controller';
+import { AlertsController, MeLocaleController } from './modules/alerts/alerts.controller';
+import { OperatorGuard } from './modules/console/operator.guard';
 
 /**
  * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
@@ -28,6 +30,8 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
   const base = [IngestController, HealthController, ApiController, ProjectsController, MembersController, ServiceApiController, ServiceResourcesController, MetricsController,
     ConsoleEndpointsController, // KN1 (ADR-138): console tạo endpoint — controller riêng, không sửa ApiController
     SourceConnectionsController, // KN2 (ADR-138): hub tự đăng ký URL ingest tại provider
+    AlertsController, // CB3 (ADR-169): cảnh báo xuyên project — chỉ operator
+    MeLocaleController, // CB3 / DINH-CHINH D3: PUT /api/v1/me/locale
   ];
   return nodeEnv === 'production' ? base : [...base, MockController];
 }
@@ -46,6 +50,7 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
     IngestService,
     RealtimeGateway,
     ProjectScopeGuard,
+    OperatorGuard,
     ApiKeyGuard,
     EndpointVerifier,
     // trace.ingested đi in-process: IngestService chỉ thấy interface TraceNotifier (ADR-021, ADR-049)

@@ -9,7 +9,7 @@ import { Inject, OnModuleDestroy, Optional } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
-import { logger, TraceIngestedNotice } from '@hub/common';
+import { ALERT_REALTIME_CHANNEL, logger, parseAlertChangedNotice, TraceIngestedNotice } from '@hub/common';
 import Redis from 'ioredis';
 import { TraceNotifier } from '../ingest/ingest.service';
 import { AUTH_CONFIG, AuthConfig } from '../auth/auth-config';
@@ -29,6 +29,9 @@ export const REALTIME_CHANNELS: Record<string, string> = {
   'hub:realtime:events': 'event.received',
   'hub:realtime:deliveries': 'delivery.attempt',
   'hub:realtime:circuit': 'circuit.changed',
+  // CB3 (SPEC-canh-bao §5.3, ADR-169): cảnh báo đổi trạng thái -> CHỈ room của project trong tin (socket đang mở project
+  // đó). Không có room "operator": chuông xuyên project gọi lại GET /alerts/summary khi nhận tin này + poll 30s.
+  [ALERT_REALTIME_CHANNEL]: 'alert.changed',
 };
 
 export interface TickCounter {
@@ -151,12 +154,21 @@ export class RealtimeGateway
       logger.error({ e, channel }, 'Lỗi parse realtime message từ Redis');
       return;
     }
+    if (eventName === 'alert.changed') {
+      // Chỉ đúng 6 trường của hợp đồng (không `facts` thô, không trường lạ); sai hình -> bỏ.
+      data = parseAlertChangedNotice(data);
+      if (!data) {
+        logger.warn({ channel }, 'Realtime alert.changed sai hình, bỏ qua');
+        return;
+      }
+    }
     const tenantId = data?.tenantId;
     if (typeof tenantId !== 'string' || !tenantId) {
       logger.warn({ channel }, 'Realtime message thiếu tenantId, bỏ qua');
       return;
     }
     this.server.to(tenantRoom(tenantId)).emit(eventName, data);
+    if (eventName === 'alert.changed') return; // không đụng bộ đếm metrics.tick
     const c = this.counterFor(tenantId);
     if (eventName === 'event.received') {
       c.events += Array.isArray(data.events) ? data.events.length : 1;

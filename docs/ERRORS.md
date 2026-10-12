@@ -103,6 +103,15 @@ curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY_CHI_DOC" -H 'conte
 curl -si -X PATCH "$API/api/v1/projects/$PID/members/$UID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"role":"owner"}'
 ```
 
+## operator_required
+
+**403 (console).** Chỉ **người vận hành hub** (`users.is_operator`) mới gọi được: cảnh báo `/api/v1/alerts*` và tuỳ chọn
+cảnh báo `/api/v1/me/alert-preferences` (SPEC-canh-bao-nhan-dinh §5.2, ADR-169). Owner của project vẫn nhận mã này.
+**Sửa:** đăng nhập bằng tài khoản operator, hoặc nhờ admin của hub.
+```bash
+curl -si "$API/api/v1/alerts" -b cookies-cua-owner.txt
+```
+
 ## email_not_verified
 
 **403 (console).** Email chưa xác minh: không tạo được project/key `live`, không mời người.

@@ -55,6 +55,11 @@ export const ERROR_CATALOG = {
     message: 'Only a project owner can do this.',
     fix: () => 'Ask a project owner to perform this action or to grant you the owner role.',
   },
+  operator_required: {
+    status: 403,
+    message: 'Only a hub operator can do this.',
+    fix: () => 'Alerts and alert settings are for hub operators. Sign in with an operator account, or ask the hub admin.',
+  },
   email_not_verified: {
     status: 403,
     message: 'Verify your email first.',

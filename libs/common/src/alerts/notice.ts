@@ -24,3 +24,26 @@ export function alertTitleKey(rule: AlertRuleCode): string {
 export function toAlertChangedNotice(a: { id: string; tenantId: string; rule: AlertRuleCode; state: 'OPEN' | 'RESOLVED' }): AlertChangedNotice {
   return { id: a.id, tenantId: a.tenantId, rule: a.rule, severity: ALERT_RULES[a.rule].severity, state: a.state, titleKey: alertTitleKey(a.rule) };
 }
+
+/**
+ * CB3 (§5.3): hub-api đọc tin từ Redis rồi chuyển NGUYÊN hợp đồng ra socket — chỉ 6 trường, không gì khác (tin lạ có kèm
+ * `facts` hay trường thêm thì bị bỏ). Sai hình (thiếu tenantId, luật lạ, …) -> null: thà mất một cập nhật realtime
+ * (web còn poll `/alerts/summary` mỗi 30s) còn hơn đẩy dữ liệu không rõ nguồn gốc.
+ */
+export function parseAlertChangedNotice(raw: unknown): AlertChangedNotice | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const str = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 200;
+  if (!str(r.id) || !str(r.tenantId) || !str(r.titleKey)) return null;
+  if (typeof r.rule !== 'string' || !Object.prototype.hasOwnProperty.call(ALERT_RULES, r.rule)) return null;
+  if (r.severity !== 'critical' && r.severity !== 'warning' && r.severity !== 'info') return null;
+  if (r.state !== 'OPEN' && r.state !== 'RESOLVED') return null;
+  return {
+    id: r.id as string,
+    tenantId: r.tenantId as string,
+    rule: r.rule as AlertRuleCode,
+    severity: r.severity,
+    state: r.state,
+    titleKey: r.titleKey as string,
+  };
+}

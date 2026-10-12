@@ -1664,6 +1664,19 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 ---
 
+## ADR-169 — API cảnh báo chỉ cho operator: mã lỗi `operator_required`, ba escape hatch đọc xuyên project, ghi theo tenant của cảnh báo, audit tuỳ chọn ở `auth_audit` (CB3, 2026-10-12)
+
+**Vấn đề:** Chuông của operator nhìn mọi project (SPEC §5.2), trong khi `alerts` mang `tenant_id` + RLS (BB-5). Cần chặn người không phải operator theo khuôn lỗi, đọc xuyên project mà không mở lỗ, ghi "đã xem" có audit, và audit cả thay đổi gắn NGƯỜI (tuỳ chọn, ngôn ngữ) vốn không có tenant cho `audit_logs`.
+**Chọn:**
+- **Quyền:** `OperatorGuard` sau `SessionGuard` (cờ `isOperator` lấy từ chính truy vấn session/user), mã lỗi mới **`operator_required` (403)** ở catalog + `docs/ERRORS.md` — tách khỏi `forbidden` để client rẽ nhánh được ("bạn không phải operator" khác "role của bạn trong project thiếu quyền"). Owner của project cũng nhận mã này. `PUT /api/v1/me/locale` (D3) cho mọi người dùng.
+- **Đọc xuyên project:** ĐÚNG ba hàm có tên trên `PrismaService`, chạy trong `systemTx`: `operatorAlertsAcrossTenants` (keyset `(opened_at, id)`, cùng cursor/`before`/`after` của ADR-163, `cursor` = `before` theo tên trong SPEC), `operatorAlertSummaryAcrossTenants`, `operatorFindAlertTenant`. Chỉ `AlertsController` gọi.
+- **Ghi:** ack / ack-all tra tenant của cảnh báo rồi `tenantTx` + `forTenant(tenant, tx)`; dòng `audit_logs` (`alert.acknowledged`, `alert.acknowledged_all`) cùng transaction và chỉ ghi khi thật sự đổi — ack lần hai trả 200 `changed:false`, không thêm audit.
+- **Tuỳ chọn / ngôn ngữ** (gắn người, ADR-166): `IdentityRepository` + `auth_audit` (`alert_preferences.updated`, `user.locale_changed`) cùng transaction. `emailRules` ⊆ `ALERT_RULE_CODES`, `mutedProjects` phải là project đang tồn tại (kiểm trước khi ghi), trường lạ → 400.
+- **Realtime:** `hub:realtime:alerts` → `alert.changed` qua đúng đường các kênh cũ (`REALTIME_CHANNELS`), vào room `project:<tenantId>` của tin; payload lọc lại còn 6 trường (`parseAlertChangedNotice`), sai hình thì bỏ. Không room operator, không đụng R-3.
+**Đánh đổi:** Escape hatch dùng `app.rls_system` — một chỗ quên lọc trong ba hàm này là lộ chéo, nên chúng chỉ ĐỌC và có test riêng. Danh sách không lọc `state` sắp theo `opened_at` không có index khớp hoàn toàn (index hiện có bắt đầu bằng `state`/`tenant_id`) — đủ ở quy mô đồ án. Tóm tắt trả tối đa 500 project. `unacked` tính trên cảnh báo OPEN.
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

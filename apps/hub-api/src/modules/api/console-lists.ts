@@ -50,7 +50,7 @@ export interface AuditListQuery {
   limit?: string;
 }
 
-function parseLimit(v: string | undefined, max: number): number {
+export function parseLimit(v: string | undefined, max: number): number {
   if (v === undefined || v === '') return LIST_PAGE_SIZE;
   if (!/^\d{1,4}$/.test(v)) throw badParam('limit', `limit phải là số 1–${max}`);
   return Math.min(Math.max(parseInt(v, 10), 1), max);
@@ -65,13 +65,13 @@ export function parseHttpCode(v: string | undefined): DeliveryHttpCode | undefin
   throw badParam('code', 'code phải là mã HTTP (vd 404), một lớp (4xx, 5xx) hoặc none');
 }
 
-type PageOf<R> = { items: R[]; next: string | null; prev: string | null };
+export type PageOf<R> = { items: R[]; next: string | null; prev: string | null };
 
 /**
  * Chạy truy vấn theo cursor; trang "Trước" (newer) mà ít hơn `limit` dòng = đã chạm đầu danh sách -> trả lại
  * trang ĐẦU (mới nhất) đủ cỡ, `prev: null` — người xem không bao giờ thấy trang lửng ở đầu.
  */
-async function runPage<R>(
+export async function runPage<R>(
   fetch: (dir: PageDir, cursor: Keyset | undefined) => Promise<R[]>,
   page: { dir: PageDir; cursor?: Keyset },
   limit: number,
