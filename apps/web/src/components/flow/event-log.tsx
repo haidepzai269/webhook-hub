@@ -246,7 +246,7 @@ function EventLogPanel() {
           {open && (
             <>
               <Select value={logProvider ?? ALL} onValueChange={(v) => url.setFilter({ logProvider: v === ALL ? null : v })}>
-                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label={t("journey.log.filter-provider")}>
+                <SelectTrigger size="sm" className="h-7 w-40 text-xs" aria-label={t("journey.log.filter-provider")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

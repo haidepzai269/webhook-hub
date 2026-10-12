@@ -8,6 +8,8 @@ import {
   ruleRows,
   toggleMuted,
   toggleRule,
+  MUTE_LIST_COLLAPSED,
+  muteListView,
 } from "./settings-logic";
 import { ALERT_RULE_CODES } from "./types";
 
@@ -71,5 +73,27 @@ describe("trang Cài đặt — cảnh báo qua email", () => {
       expect(ruleName(code, t)).not.toBe(code);
       expect(DICTIONARIES[locale][ruleDescriptionKey(code)]).toBeTruthy();
     }
+  });
+});
+
+describe("trang Cài đặt — danh sách tắt email theo dự án (xem trên trình duyệt thật: ~120 dòng)", () => {
+  const projects = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, name: `Dự án ${i}`, slug: `slug-${i}` }));
+  projects[5] = { id: "p5", name: "Cà phê Sáng", slug: "cafe-sang-very-long-slug" };
+
+  it("thu gọn còn 8 dòng, dự án đang tắt lên đầu (giữ thứ tự gốc), phần còn lại đếm vào 'Hiện thêm'", () => {
+    const v = muteListView(projects, ["p12", "p3"]);
+    expect(MUTE_LIST_COLLAPSED).toBe(8);
+    expect(v.rows.map((r) => r.id)).toEqual(["p3", "p12", "p0", "p1", "p2", "p4", "p5", "p6"]);
+    expect(v.rows.slice(0, 2).every((r) => r.muted)).toBe(true);
+    expect(v).toMatchObject({ matched: 20, hidden: 12 });
+    expect(muteListView(projects, [], { expanded: true })).toMatchObject({ hidden: 0, matched: 20 });
+  });
+
+  it("tìm theo tên hoặc slug, không phân biệt hoa thường / dấu; đang tìm thì hiện mọi kết quả", () => {
+    expect(muteListView(projects, [], { query: "  CA PHE " }).rows.map((r) => r.id)).toEqual(["p5"]);
+    expect(muteListView(projects, [], { query: "very-long" }).rows.map((r) => r.id)).toEqual(["p5"]);
+    const many = muteListView(projects, [], { query: "dự án" });
+    expect(many).toMatchObject({ matched: 19, hidden: 0 });
+    expect(muteListView(projects, [], { query: "zzz" })).toMatchObject({ rows: [], matched: 0, hidden: 0 });
   });
 });

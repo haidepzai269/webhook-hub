@@ -9,7 +9,7 @@ import { create } from "zustand";
 import type { AlertChangedNotice } from "@/lib/alerts/types";
 import { HUB_API_URL } from "@/lib/env";
 
-import { emptyToastCursor, type ToastCursor } from "./ui-logic";
+import { emptyToastCursor, SOCKET_INVALIDATES, type ToastCursor } from "./ui-logic";
 import { hubFetch } from "./client";
 import { currentProjectId, useProjectStore } from "./project-store";
 import type { CircuitChangedNotice, DeliveryAttemptNotice, MetricsTick, TraceIngestedNotice } from "./types";
@@ -170,31 +170,31 @@ export function useHubRealtime() {
     const onEvent = (n: EventReceivedNotice) => {
       if (foreign(n)) return;
       emitLocal("event.received", n);
-      invalidate("overview", "events", "timeseries", "flow");
+      invalidate(...SOCKET_INVALIDATES["event.received"]);
     };
     // delivery.attempt (thay delivery.updated, S2-2): prefix "event" phủ cả sheet "Dấu vết" của đúng eventId.
     const onDelivery = (n: DeliveryAttemptNotice) => {
       if (foreign(n)) return;
       emitLocal("delivery.attempt", n);
-      invalidate("overview", "deliveries", "dlq", "timeseries", "event", "events", "flow");
+      invalidate(...SOCKET_INVALIDATES["delivery.attempt"]);
     };
     const onCircuit = (n: CircuitChangedNotice) => {
       if (foreign(n)) return;
       emitLocal("circuit.changed", n);
-      invalidate("destinations", "flow");
+      invalidate(...SOCKET_INVALIDATES["circuit.changed"]);
     };
     const onTrace = (n: TraceIngestedNotice) => {
       emitLocal("trace.ingested", n);
-      if (n.outcome === "REJECTED") invalidate("flow");
+      if (n.outcome === "REJECTED") invalidate(...SOCKET_INVALIDATES["trace.rejected"]);
       useRealtimeStore.setState((st) => ({
         traces: [{ ...n, receivedAt: Date.now() }, ...st.traces].slice(0, MAX_TRACES),
       }));
     };
-    // CB4: cảnh báo — bộ nhớ banner ghi nhận id (AlertNotifier nghe bus), rồi chuông + danh sách gọi lại API (prefix "alerts").
+    // CB4: cảnh báo — bộ nhớ banner ghi nhận id (AlertNotifier nghe bus), rồi chuông + danh sách + nhận định gọi lại API.
     // Không lọc `foreign`: cảnh báo là xuyên project; server đã chỉ gửi cho operator.
     const onAlert = (n: AlertChangedNotice) => {
       emitLocal("alert.changed", n);
-      invalidate("alerts");
+      invalidate(...SOCKET_INVALIDATES["alert.changed"]);
     };
     const onTick = (tick: MetricsTick) =>
       useRealtimeStore.setState((st) => ({ ticks: [...st.ticks, tick].slice(-MAX_TICKS) }));

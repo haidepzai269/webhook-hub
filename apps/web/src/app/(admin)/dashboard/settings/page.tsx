@@ -1,8 +1,8 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 
-import { Loader2, Mail } from "lucide-react";
+import { Loader2, Mail, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/admin/page-header";
@@ -10,6 +10,7 @@ import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ruleName } from "@/lib/alerts/message";
@@ -17,6 +18,7 @@ import {
   type AlertPreferencesPatch,
   activePreset,
   emailSwitchState,
+  muteListView,
   presetRules,
   ruleDescriptionKey,
   ruleRows,
@@ -217,20 +219,12 @@ function AlertSettings() {
               {(projects.data ?? []).length === 0 ? (
                 <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.empty")}</p>
               ) : (
-                <ul className="grid gap-1.5 sm:grid-cols-2">
-                  {(projects.data ?? []).map((pr) => (
-                    <li key={pr.id} className="flex items-center gap-2 text-sm">
-                      <Check
-                        checked={p.mutedProjects.includes(pr.id)}
-                        disabled={busy}
-                        label={t("page.settings.alerts.muted.label", { name: pr.name })}
-                        onChange={(mute) => put({ mutedProjects: toggleMuted(p.mutedProjects, pr.id, mute) })}
-                      />
-                      <span className="truncate">{pr.name}</span>
-                      <span className="text-muted-foreground text-xs">{pr.slug}</span>
-                    </li>
-                  ))}
-                </ul>
+                <MuteList
+                  projects={projects.data ?? []}
+                  muted={p.mutedProjects}
+                  busy={busy}
+                  onToggle={(id, mute) => put({ mutedProjects: toggleMuted(p.mutedProjects, id, mute) })}
+                />
               )}
             </section>
           </>
@@ -247,5 +241,63 @@ function AlertSettings() {
         </section>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Danh sách tắt email theo dự án — có thể hàng trăm dự án: ô tìm (tên/slug), dự án đang tắt lên đầu, thu gọn còn 8 dòng
+ * với "Hiện thêm" (logic thuần `muteListView`). Tên là chính, slug phụ và cắt "…" (đủ chữ trong `title`).
+ */
+function MuteList({
+  projects,
+  muted,
+  busy,
+  onToggle,
+}: {
+  projects: readonly { id: string; name: string; slug: string }[];
+  muted: readonly string[];
+  busy: boolean;
+  onToggle: (id: string, mute: boolean) => void;
+}) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const view = muteListView(projects, muted, { query, expanded });
+  return (
+    <div className="space-y-2">
+      <div className="relative max-w-xs">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t("page.settings.alerts.muted.search")}
+          aria-label={t("page.settings.alerts.muted.search")}
+          className="h-8 pl-8 text-sm"
+        />
+      </div>
+      {view.matched === 0 ? (
+        <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.no-match")}</p>
+      ) : (
+        <ul className="grid gap-1.5 sm:grid-cols-2">
+          {view.rows.map((pr) => (
+            <li key={pr.id} className="flex min-w-0 items-center gap-2 text-sm" title={`${pr.name} · ${pr.slug}`}>
+              <Check
+                checked={pr.muted}
+                disabled={busy}
+                label={t("page.settings.alerts.muted.label", { name: pr.name })}
+                onChange={(mute) => onToggle(pr.id, mute)}
+              />
+              <span className="min-w-0 shrink truncate">{pr.name}</span>
+              <span className="min-w-0 max-w-[45%] shrink-[2] truncate text-muted-foreground text-xs">{pr.slug}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!query && (view.hidden > 0 || expanded) && (
+        <Button size="xs" variant="ghost" onClick={() => setExpanded((x) => !x)}>
+          {expanded ? t("common.show-less") : t("page.settings.alerts.muted.show-more", { count: view.hidden })}
+        </Button>
+      )}
+    </div>
   );
 }

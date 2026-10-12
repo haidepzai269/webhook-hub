@@ -151,7 +151,9 @@ export function DataTable<T extends RowData>({
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
                 {hg.headers.map((header) => (
-                  <TableHead key={header.id} colSpan={header.colSpan} className="h-10 px-3 font-medium">
+                  // Tiêu đề dài ("Giới hạn (yêu cầu/giây)", "Cầu dao ngắt mạch") được xuống dòng khi trang hẹp — đủ chỗ
+                  // thì bảng tự động vẫn để một dòng; không thì bảng tràn ngang và cắt cột cuối ở 1280–1440px.
+                  <TableHead key={header.id} colSpan={header.colSpan} className="h-10 whitespace-normal px-3 py-1.5 font-medium leading-tight">
                     {header.isPlaceholder ? null : <table.FlexRender header={header} />}
                   </TableHead>
                 ))}

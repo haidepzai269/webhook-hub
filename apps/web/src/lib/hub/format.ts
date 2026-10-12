@@ -13,6 +13,28 @@ export function formatDateTime(iso: string | null | undefined, locale: Locale = 
   return Number.isNaN(d.getTime()) ? "—" : dateTime[locale].format(d);
 }
 
+// Mốc "dd/MM HH:mm[:ss]" CÙNG một khuôn ở mọi ngôn ngữ, 24 giờ (review trên trình duyệt thật: vi ra "14:19 12-10", en
+// ra "10/12, 02:19 PM" cho cùng một mốc). Lấy từng phần qua formatToParts để không phụ thuộc thứ tự/dấu nối của locale.
+const stampParts = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+/** Mốc tuyệt đối gọn cho cảnh báo (dòng thời gian, bảng số liệu): "12/10 14:19" hoặc "12/10 14:19:38" — vi và en như nhau. */
+export function formatStamp(at: string | number | Date | null | undefined, opts: { seconds?: boolean } = {}): string {
+  if (at === null || at === undefined || at === "") return "—";
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p: Record<string, string> = {};
+  for (const x of stampParts.formatToParts(d)) p[x.type] = x.value;
+  const hour = p.hour === "24" ? "00" : p.hour;
+  return `${p.day}/${p.month} ${hour}:${p.minute}${opts.seconds ? `:${p.second}` : ""}`;
+}
+
 const rtf: Record<Locale, Intl.RelativeTimeFormat> = {
   vi: new Intl.RelativeTimeFormat("vi", { numeric: "auto" }),
   en: new Intl.RelativeTimeFormat("en", { numeric: "auto" }),

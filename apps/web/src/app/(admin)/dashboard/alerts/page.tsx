@@ -16,7 +16,7 @@ import type { AlertText } from "@/lib/alerts/message";
 import { ruleName } from "@/lib/alerts/message";
 import { ALERT_RULE_CODES, ALERT_SEVERITIES, type AlertView } from "@/lib/alerts/types";
 import { useAlertsPage, useSubjectNames } from "@/lib/hub/alert-queries";
-import { formatDateTime, formatRelative } from "@/lib/hub/format";
+import { formatRelative, formatStamp } from "@/lib/hub/format";
 import { ALERT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useIsOperator } from "@/lib/hub/me-store";
 import { useProjects } from "@/lib/hub/queries";
@@ -68,8 +68,8 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<Row>[] => [
     header: t("page.alerts.col.opened"),
     accessorFn: (a) => a.openedAt,
     cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.openedAt, locale)}>
-        {formatDateTime(row.original.openedAt, locale)}
+      <span className="whitespace-nowrap text-xs" title={formatStamp(row.original.openedAt, { seconds: true })}>
+        {formatStamp(row.original.openedAt, { seconds: true })}
         <span className="block text-[11px] text-muted-foreground">{formatRelative(row.original.openedAt, undefined, locale)}</span>
       </span>
     ),

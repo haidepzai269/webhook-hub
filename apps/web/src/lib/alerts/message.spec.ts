@@ -1,7 +1,8 @@
 import { createT, LOCALES, type Locale } from "../i18n/dictionary";
-import { factRows } from "./facts";
+import { formatStamp } from "../hub/format";
+import { factRows, HIDDEN_FACT_KEYS } from "./facts";
 import { alertActions, primaryHref } from "./links";
-import { buildAlertText, failingFixKey, formatDuration, ruleKey, ruleName, subjectLabel } from "./message";
+import { buildAlertText, failingFixKey, formatClock, formatDuration, ruleKey, ruleName, subjectLabel } from "./message";
 import { ALERT_RULE_CODES, type AlertSubjectType } from "./types";
 
 /** CB4: câu cảnh báo dựng phía client từ rule + facts (SPEC §4, §7) — đủ vi/en, không bao giờ in "undefined"/JSON. */
@@ -130,6 +131,38 @@ describe("facts -> bảng đọc được", () => {
     for (const r of rows) expect(r.value).not.toMatch(/[{}"]/);
     const silent = factRows(SAMPLE_FACTS["source.silent"], createT("en"), { locale: "en", now: NOW });
     expect(silent.find((r) => r.key === "medianGapMs")).toMatchObject({ label: "Normal rhythm", value: "10 min" });
+  });
+});
+
+describe("facts -> bảng: ẩn sổ sách nội bộ, mốc giờ cùng khuôn vi/en (xem trên trình duyệt thật)", () => {
+  const facts = {
+    httpStatus: 401,
+    count: 4,
+    sinceAt: "2026-10-12T07:19:00.000Z",
+    lastAttemptAt: "2026-10-12T07:19:38.000Z",
+    lastMatchAt: "2026-10-12T07:19:38.000Z",
+    calmStreak: 1,
+    lastCalmAt: "2026-10-12T07:20:00.000Z",
+  };
+
+  it("lastAttemptAt / lastMatchAt / calmStreak / lastCalmAt không lên bảng (vẫn nằm trong facts)", () => {
+    const rows = factRows(facts, createT("vi"), { locale: "vi", now: NOW });
+    expect(rows.map((r) => r.key)).toEqual(["httpStatus", "count", "sinceAt"]);
+    for (const k of HIDDEN_FACT_KEYS) expect(k in facts).toBe(true);
+  });
+
+  it("mốc giờ: 'dd/MM HH:mm' 24 giờ, vi và en giống hệt (không '12-10' / 'PM')", () => {
+    const vi = factRows(facts, createT("vi"), { locale: "vi", now: NOW }).find((r) => r.key === "sinceAt")?.value;
+    const en = factRows(facts, createT("en"), { locale: "en", now: NOW }).find((r) => r.key === "sinceAt")?.value;
+    expect(vi).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}$/);
+    expect(en).toBe(vi);
+    expect(formatStamp("2026-10-12T07:19:38.000Z", { seconds: true })).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}:38$/);
+    expect(formatStamp("không phải ngày")).toBe("—");
+    // Câu cảnh báo (lõi chung với email): 24 giờ ở cả en — không "02:36 PM".
+    const at = new Date(2026, 9, 12, 14, 36).getTime();
+    expect(formatClock(at, { locale: "en", now: at })).toBe("14:36");
+    expect(formatClock(at, { locale: "vi", now: at })).toBe("14:36");
+    expect(formatStamp(null)).toBe("—");
   });
 });
 

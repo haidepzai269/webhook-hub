@@ -11,6 +11,21 @@ import { createT, type MessageKey, type TranslateFn } from "../i18n/dictionary";
 /** Mặc định cho caller chưa truyền `t` (vd ngoài trang cấu hình) — tiếng Việt như trước. */
 const VI_T: TranslateFn = createT("vi");
 
+/**
+ * Socket -> prefix query cần gọi lại (socket.ts gom trong 400ms rồi invalidate). Nguồn sự thật là API, không tự vá state.
+ * "insights" (CB6 — I-dead/I-dest/I-dup/I-silent) đi cùng mọi tin làm đổi số của nó: trước đây chỉ poll 60s nên thẻ
+ * "Hàng đợi lỗi" ở Tổng quan báo "không có lượt nào" trong khi KPI ngay trên đã là 4 (xem trên trình duyệt thật).
+ */
+export const SOCKET_INVALIDATES = {
+  // event.received không kéo "insights": dưới tải mỗi sự kiện đều kèm delivery.attempt (đã gọi lại nhận định).
+  "event.received": ["overview", "events", "timeseries", "flow"],
+  "delivery.attempt": ["overview", "deliveries", "dlq", "timeseries", "event", "events", "flow", "insights"],
+  "circuit.changed": ["destinations", "flow", "insights"],
+  "alert.changed": ["alerts", "insights"],
+  /** trace.ingested chỉ gọi lại bản đồ khi bị từ chối (cổng xác thực đỏ). */
+  "trace.rejected": ["flow"],
+} as const satisfies Record<string, readonly string[]>;
+
 export const TOAST_WINDOW_MS = 2000;
 export const NOTABLE_OUTCOMES = new Set(["REJECTED", "DUPLICATE", "RATE_LIMITED"]);
 

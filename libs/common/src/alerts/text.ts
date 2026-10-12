@@ -251,9 +251,12 @@ function fmt(locale: AlertTextLocale, withDay: boolean, timeZone?: string): Intl
   const k = `${locale}:${withDay}:${timeZone ?? ''}`;
   let f = timeFmt.get(k);
   if (!f) {
+    // 24 giờ ở MỌI ngôn ngữ (en-US mặc định ra "02:36 PM" còn vi ra "14:36" — xem trên trình duyệt thật); thứ tự
+    // ngày/tháng vẫn theo locale.
     f = new Intl.DateTimeFormat(ALERT_INTL_LOCALE[locale], {
       hour: '2-digit',
       minute: '2-digit',
+      hourCycle: 'h23',
       ...(withDay ? { day: '2-digit', month: '2-digit' } : {}),
       ...(timeZone ? { timeZone } : {}),
     });

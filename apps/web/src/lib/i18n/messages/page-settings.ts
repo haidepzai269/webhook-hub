@@ -33,6 +33,9 @@ export const pageSettings = defineMessages("page.settings", {
     "page.settings.alerts.muted.hint": "Dự án được tắt vẫn hiện cảnh báo trong chuông, chỉ không gửi email.",
     "page.settings.alerts.muted.label": "Tắt email cho {name}",
     "page.settings.alerts.muted.empty": "Chưa có dự án nào.",
+    "page.settings.alerts.muted.search": "Tìm dự án theo tên…",
+    "page.settings.alerts.muted.no-match": "Không có dự án nào khớp.",
+    "page.settings.alerts.muted.show-more": "Hiện thêm {count} dự án",
     "page.settings.alerts.test.button": "Gửi email thử",
     "page.settings.alerts.test.sent": "Đã gửi email thử tới {email}. Còn {remaining} lần trong giờ này.",
     "page.settings.alerts.test.note":
@@ -78,6 +81,9 @@ export const pageSettings = defineMessages("page.settings", {
     "page.settings.alerts.muted.hint": "Muted projects still show alerts in the bell; they are just not emailed.",
     "page.settings.alerts.muted.label": "Mute email for {name}",
     "page.settings.alerts.muted.empty": "No projects yet.",
+    "page.settings.alerts.muted.search": "Search projects by name…",
+    "page.settings.alerts.muted.no-match": "No matching projects.",
+    "page.settings.alerts.muted.show-more": "Show {count} more projects",
     "page.settings.alerts.test.button": "Send test email",
     "page.settings.alerts.test.sent": "Test email sent to {email}. {remaining} left this hour.",
     "page.settings.alerts.test.note":

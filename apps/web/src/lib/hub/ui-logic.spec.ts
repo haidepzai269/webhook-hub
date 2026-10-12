@@ -9,6 +9,7 @@ import {
   describeDeleteConflict,
   describeVerification,
   emptyToastCursor,
+  SOCKET_INVALIDATES,
   errorMessageOf,
   keysAfterAudited,
   stepToasts,
@@ -163,6 +164,19 @@ describe("describeVerification — cột Xác minh của trang Đích (P2, ADR-1
     expect(describeVerification("VERIFIED", null)).toMatchObject({ tone: "ok", reason: null });
     expect(describeVerification("PENDING", null)).toMatchObject({ tone: "wait", label: "PENDING" });
     expect(describeVerification(undefined, undefined)).toMatchObject({ tone: "ok" });
+  });
+});
+
+describe("socket -> invalidate: nhận định (insights) theo kịp KPI", () => {
+  it("delivery.attempt / alert.changed / circuit.changed đều gọi lại 'insights'; socket.ts dùng đúng bảng này", () => {
+    for (const k of ["delivery.attempt", "alert.changed", "circuit.changed"] as const) {
+      expect(SOCKET_INVALIDATES[k]).toContain("insights");
+    }
+    expect(SOCKET_INVALIDATES["delivery.attempt"]).toEqual(expect.arrayContaining(["overview", "dlq", "deliveries"]));
+    expect(SOCKET_INVALIDATES["alert.changed"]).toContain("alerts");
+    const src = fs.readFileSync(path.join(__dirname, "socket.ts"), "utf8");
+    for (const k of Object.keys(SOCKET_INVALIDATES)) expect(src).toContain(`invalidate(...SOCKET_INVALIDATES["${k}"])`);
+    expect(src).not.toMatch(/invalidate\("/);
   });
 });
 

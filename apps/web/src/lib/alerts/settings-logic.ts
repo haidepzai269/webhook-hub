@@ -92,3 +92,36 @@ export function activePreset(
 export function ruleDescriptionKey(code: string): MessageKey {
   return `page.settings.rule.${code.replace(/[._]/g, "-")}` as MessageKey;
 }
+
+/** Số dự án hiện sẵn trong danh sách tắt email trước khi bấm "Hiện thêm". */
+export const MUTE_LIST_COLLAPSED = 8;
+
+/** Chuẩn hoá để tìm: chữ thường, bỏ dấu tiếng Việt (gõ "cafe" ra "Cà phê"). */
+const fold = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase();
+
+/**
+ * Danh sách dự án ở mục "Tắt email theo dự án" (có thể hàng trăm dòng): lọc theo ô tìm (tên hoặc slug, không phân biệt
+ * dấu), dự án ĐANG tắt lên đầu (giữ thứ tự gốc trong từng nhóm), và chỉ hiện `limit` dòng đầu khi chưa mở rộng. Đang tìm
+ * thì hiện mọi kết quả khớp. `hidden` = số dòng khớp nhưng đang bị thu gọn (nhãn "Hiện thêm").
+ */
+export function muteListView<P extends { id: string; name: string; slug: string }>(
+  projects: readonly P[],
+  muted: readonly string[],
+  opts: { query?: string; expanded?: boolean; limit?: number } = {},
+): { rows: (P & { muted: boolean })[]; matched: number; hidden: number } {
+  const limit = opts.limit ?? MUTE_LIST_COLLAPSED;
+  const q = fold((opts.query ?? "").trim());
+  const set = new Set(muted);
+  const all = projects
+    .map((p, i) => ({ ...p, muted: set.has(p.id), i }))
+    .filter((p) => !q || fold(p.name).includes(q) || fold(p.slug).includes(q))
+    .sort((a, b) => Number(b.muted) - Number(a.muted) || a.i - b.i)
+    .map(({ i: _i, ...p }) => p as P & { muted: boolean });
+  const show = q || opts.expanded ? all : all.slice(0, limit);
+  return { rows: show, matched: all.length, hidden: all.length - show.length };
+}

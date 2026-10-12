@@ -37,6 +37,15 @@ describe("log-layout — lưới cột cố định của Nhật ký sự kiện
     expect(logMinWidth()).toBe(`${mins + 0.75 * 5 + 1.625}rem`);
   });
 
+  it("cột Kết quả đủ rộng cho 'Giao → <tên đích> · HTTP 401' (≥ 15rem khi ngăn đủ chỗ); tổng tối đa các cột cố định chừa ≥ 10rem cho Ghi chú ở ngăn 1440px", () => {
+    const maxRem = (w: string) => Number((w.match(/(\d+(?:\.\d+)?)rem\)?$/) ?? [])[1]);
+    const result = LOG_COLUMNS.find((c) => c.key === "result");
+    expect(maxRem(result?.width ?? "")).toBeGreaterThanOrEqual(15);
+    const fixedMax = LOG_COLUMNS.slice(0, -1).reduce((n, c) => n + maxRem(c.width), 0);
+    // Ngăn nhật ký ở 1440px ≈ 1440 - 256 (sidebar) - 2×16 (lề) ≈ 72rem; trừ khe + đệm.
+    expect(72 - fixedMax - 0.75 * 5 - 1.625).toBeGreaterThanOrEqual(10);
+  });
+
   it("clampLogHeight giữ trong [25%, 85%] viewport", () => {
     expect(LOG_HEIGHT_MIN_FRAC).toBe(0.25);
     expect(LOG_HEIGHT_MAX_FRAC).toBe(0.85);

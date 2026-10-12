@@ -144,6 +144,39 @@ export function routeArrival(a: Pick<AlertView, "id" | "severity" | "state" | "a
   return { kind: "none" };
 }
 
+/** Chờ tên đối tượng tối đa bấy nhiêu trước khi hiện toast (quá hạn -> "Đích 1cc4de59"). */
+export const TOAST_NAME_TIMEOUT_MS = 1_500;
+
+export type NameLookup = (subjectId: string) => string | null;
+
+/**
+ * Tên đích/nguồn cho toast TRƯỚC khi hiện (xem trên trình duyệt thật: toast của project khác ra "Đích 1cc4de59" vì câu
+ * dựng lúc cảnh báo đến, trước khi tên của project đó tải xong). Đã biết -> trả ngay; cấp dự án -> null (nhãn "Toàn dự
+ * án"); chưa biết -> `load()` tên của project đó, chờ tối đa `timeoutMs`; lỗi/quá hạn -> null (nhãn rơi về id ngắn).
+ */
+export async function resolveSubjectName(
+  a: Pick<AlertView, "subjectType" | "subjectId">,
+  known: NameLookup,
+  load: () => Promise<NameLookup>,
+  timeoutMs = TOAST_NAME_TIMEOUT_MS,
+): Promise<string | null> {
+  if (a.subjectType === "project") return null;
+  const hit = known(a.subjectId);
+  if (hit) return hit;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((res) => {
+    timer = setTimeout(() => res(null), timeoutMs);
+  });
+  try {
+    const lookup = await Promise.race([load(), timeout]);
+    return lookup ? lookup(a.subjectId) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Review L4: toast nào phải gỡ — cảnh báo đã được "Đã xem", hoặc vắng khỏi danh sách OPEN ĐẦY ĐỦ (đã đóng). Danh sách
  * bị cắt thì chỉ gỡ theo "Đã xem". Trả id và quên chúng khỏi `mem.toasted`.

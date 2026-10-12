@@ -9,10 +9,12 @@ import type { MessageKey } from "../../lib/i18n/dictionary";
 
 export const LOG_COLUMNS = [
   { key: "time", labelKey: "journey.col.time", width: "6.5rem", min: 6.5 },
-  { key: "provider", labelKey: "journey.col.provider", width: "minmax(4.5rem,8rem)", min: 4.5 },
+  { key: "provider", labelKey: "journey.col.provider", width: "minmax(4.5rem,7rem)", min: 4.5 },
   { key: "stages", labelKey: "journey.col.stages", width: "11rem", min: 11 },
-  { key: "type", labelKey: "journey.col.type", width: "minmax(7rem,13rem)", min: 7 },
-  { key: "result", labelKey: "journey.col.result", width: "minmax(5.5rem,10rem)", min: 5.5 },
+  { key: "type", labelKey: "journey.col.type", width: "minmax(7rem,11rem)", min: 7 },
+  // "Giao → cafe-endpoint · HTTP 401" cần ~15rem (xem ở 1440px: 10rem cắt còn "cafe-endpoint · H"). Phần lấy thêm
+  // lấy từ "Kiểu" (payment.received ~8rem) và "Nhà cung cấp".
+  { key: "result", labelKey: "journey.col.result", width: "minmax(7rem,16rem)", min: 7 },
   { key: "note", labelKey: "journey.col.note", width: "minmax(10rem,1fr)", min: 10 },
 ] as const satisfies readonly { key: string; labelKey: MessageKey; width: string; min: number }[];
 

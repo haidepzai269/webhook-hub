@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { AlertPage, AlertSummary, AlertView } from "@/lib/alerts/types";
 
@@ -90,22 +90,39 @@ export function useSubjectNames(alerts: readonly Pick<AlertView, "project" | "su
   const projects = [...new Set((alerts ?? []).filter((a) => a.subjectType !== "project").map((a) => a.project.id))].sort();
   const on = operator && enabled;
   return useQueries({
-    queries: projects.flatMap((p) => [
-      {
-        queryKey: ["destinations", p],
-        queryFn: () => hubFetch<Destination[]>(withProject("/api/v1/destinations", p)),
-        enabled: on,
-        staleTime: 5 * 60_000,
-      },
-      {
-        queryKey: ["sources", p],
-        queryFn: () => hubFetch<Source[]>(withProject("/api/v1/sources", p)),
-        enabled: on,
-        staleTime: 5 * 60_000,
-      },
-    ]),
+    queries: projects.flatMap((p) => subjectNameQueries(p).map((q) => ({ ...q, enabled: on }))),
     combine: combineNames,
   });
+}
+
+const SUBJECT_NAME_STALE_MS = 5 * 60_000;
+
+/** Hai query tên (đích + nguồn) của một project — dùng chung cho hook và cho `loadSubjectNames` (cùng key, cùng cache). */
+type NamedRow = { id: string; name: string };
+function subjectNameQueries(projectId: string): { queryKey: string[]; queryFn: () => Promise<NamedRow[]>; staleTime: number }[] {
+  return [
+    {
+      queryKey: ["destinations", projectId],
+      queryFn: () => hubFetch<Destination[]>(withProject("/api/v1/destinations", projectId)),
+      staleTime: SUBJECT_NAME_STALE_MS,
+    },
+    {
+      queryKey: ["sources", projectId],
+      queryFn: () => hubFetch<Source[]>(withProject("/api/v1/sources", projectId)),
+      staleTime: SUBJECT_NAME_STALE_MS,
+    },
+  ];
+}
+
+/**
+ * Tải (hoặc lấy từ cache) tên đích/nguồn của MỘT project ngay lúc cần — toast cảnh báo của project khác chờ cái này
+ * (có hạn, `resolveSubjectName`) thay vì hiện "Đích 1cc4de59" khi `useSubjectNames` chưa kịp tải.
+ */
+export async function loadSubjectNames(qc: QueryClient, projectId: string): Promise<(subjectId: string) => string | null> {
+  const results = await Promise.all(
+    subjectNameQueries(projectId).map((q) => qc.fetchQuery(q).then((data) => ({ data }), () => ({ data: undefined }))),
+  );
+  return combineNames(results);
 }
 
 /**

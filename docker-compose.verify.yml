@@ -73,6 +73,13 @@ services:
   web:
     container_name: !reset null
     profiles: ["web"]
+    # Trình duyệt mở console hubv (:13000) phải nói chuyện với hub-api/shop của hubv (:14000/:14001) — socket realtime,
+    # URL webhook hiển thị, Shop. Không đặt thì bundle nhúng localhost:4000 = stack dev (nhầm stack, hoặc không có ai).
+    # Chỉ ảnh hưởng JS phía trình duyệt; e2e qua proxy web (/api, /auth) dùng HUB_API_INTERNAL_URL như cũ.
+    build:
+      args:
+        NEXT_PUBLIC_HUB_API_URL: http://localhost:14000
+        NEXT_PUBLIC_SHOP_API_URL: http://localhost:14001
     ports: !override
       - "13000:3000"
 

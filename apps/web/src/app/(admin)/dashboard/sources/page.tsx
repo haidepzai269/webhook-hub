@@ -82,8 +82,10 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
     header: t("page.sources.col.webhook-url"),
     accessorFn: (s) => s.webhookUrl,
     cell: ({ row }) => (
-      <div className="flex max-w-md items-center gap-1">
-        <span className="truncate font-mono text-xs" title={fullUrl(row.original)}>
+      // URL dài không quyết định bề rộng bảng (span w-0 flex-1): cột co về tối thiểu 11rem khi trang hẹp, phần dư cắt "…"
+      // (đủ trong title + nút chép) — để cột "Nhịp sự kiện" không bị đẩy ra ngoài mép phải ở 1280–1440px.
+      <div className="flex w-full min-w-44 max-w-md items-center gap-1">
+        <span className="w-0 flex-1 truncate font-mono text-xs" title={fullUrl(row.original)}>
           {fullUrl(row.original)}
         </span>
         <CopyButton value={fullUrl(row.original)} label={t("page.sources.copy-url")} />

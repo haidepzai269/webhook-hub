@@ -52,8 +52,15 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
         <TooltipProvider>
           <PreferencesStoreProvider initialValues={PREFERENCE_DEFAULTS}>
             <QueryProvider>{children}</QueryProvider>
-            {/* CB4 §8.3: tối đa 3 toast cùng lúc (toast cảnh báo dùng chung Toaster này). */}
-            <Toaster richColors position="top-right" visibleToasts={3} />
+            {/* CB4 §8.3: tối đa 3 toast cùng lúc (toast cảnh báo dùng chung Toaster này). Đẩy xuống dưới header 48px
+                (h-12) + 12px — không thì toast che badge Thời gian thực, nút cài đặt, chuông, ngôn ngữ, giao diện. */}
+            <Toaster
+              richColors
+              position="top-right"
+              visibleToasts={3}
+              offset={{ top: 60, right: 16 }}
+              mobileOffset={{ top: 56, right: 12, left: 12 }}
+            />
           </PreferencesStoreProvider>
         </TooltipProvider>
       </body>

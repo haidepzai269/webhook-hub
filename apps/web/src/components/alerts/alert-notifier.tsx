@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { primaryHref } from "@/lib/alerts/links";
@@ -12,11 +13,12 @@ import {
   bannerResolve,
   bannerSync,
   noteSocketNotice,
+  resolveSubjectName,
   routeArrival,
   takeArrivals,
   toastsToDismiss,
 } from "@/lib/alerts/notify-logic";
-import { useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
+import { loadSubjectNames, useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
 import { useIsOperator } from "@/lib/hub/me-store";
 import { subscribeHubSocket } from "@/lib/hub/socket";
 import { useT } from "@/lib/i18n/use-t";
@@ -40,6 +42,7 @@ export function AlertNotifier() {
   const text = useAlertText();
   const t = useT();
   const open = useOpenAlertTarget();
+  const qc = useQueryClient();
   const nameOf = useSubjectNames(feed.data?.items, operator);
   // Hàm dựng câu/tên đổi danh tính theo ngôn ngữ — để trong ref, effect xử lý dữ liệu không chạy lại vì chúng.
   const deps = useRef({ text, t, open, nameOf });
@@ -68,22 +71,27 @@ export function AlertNotifier() {
       if (route.kind === "banner") {
         setBanner((b) => bannerAdd(b, a));
       } else if (route.kind === "toast") {
-        const { text: build, t: tr, open: go, nameOf: names } = deps.current;
-        const msg = build(a, names(a.subjectId));
         mem.toasted.add(a.id);
-        showAlertToast(a.id, route.durationMs, {
-          severity: a.severity,
-          severityLabel: tr(`alerts.severity.${a.severity}`),
-          projectName: a.project.name,
-          title: msg.headline,
-          description: msg.message || msg.fix,
-          viewLabel: tr("alerts.toast.view"),
-          dismissLabel: tr("alerts.toast.dismiss"),
-          onView: () => go(a.project.id, primaryHref(a)),
+        // Tên đích/nguồn trước khi hiện (project khác: tên chưa tải lúc cảnh báo đến) — chờ có hạn, quá hạn rơi về id ngắn.
+        void resolveSubjectName(a, deps.current.nameOf, () => loadSubjectNames(qc, a.project.id)).then((name) => {
+          // Trong lúc chờ mà cảnh báo đã "Đã xem"/đóng (toastsToDismiss đã quên id) -> thôi, không bật toast muộn.
+          if (!useAlertUiStore.getState().mem.toasted.has(a.id)) return;
+          const { text: build, t: tr, open: go } = deps.current;
+          const msg = build(a, name);
+          showAlertToast(a.id, route.durationMs, {
+            severity: a.severity,
+            severityLabel: tr(`alerts.severity.${a.severity}`),
+            projectName: a.project.name,
+            title: msg.headline,
+            description: msg.message || msg.fix,
+            viewLabel: tr("alerts.toast.view"),
+            dismissLabel: tr("alerts.toast.dismiss"),
+            onView: () => go(a.project.id, primaryHref(a)),
+          });
         });
       }
     }
-  }, [operator, data, setBanner]);
+  }, [operator, data, setBanner, qc]);
 
   // Banner xanh "Đã ổn trở lại" giữ 4s rồi thu lại. Review TB2: hẹn theo HẠN SỚM NHẤT; thu xong hạn đổi -> hẹn lại.
   useEffect(() => {

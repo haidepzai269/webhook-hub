@@ -4,7 +4,8 @@
  * (server mới hơn web) hiện tên khoá + giá trị phẳng. TS thuần để jest test thẳng.
  */
 import type { MessageKey, TranslateFn } from "../i18n/dictionary";
-import { FAILURE_CLASSES, formatClock, formatDuration, type MessageContext, providerDisplayName } from "./message";
+import { formatStamp } from "../hub/format";
+import { FAILURE_CLASSES, formatDuration, type MessageContext, providerDisplayName } from "./message";
 
 export interface FactRow {
   key: string;
@@ -16,7 +17,13 @@ export interface FactRow {
 
 type Kind = "count" | "time" | "duration" | "pct" | "text" | "provider" | "reason" | "classes";
 
-/** Thứ tự hiển thị + cách định dạng của khoá đã biết (rules.ts). Khoá nội bộ của hysteresis để cuối. */
+/**
+ * Khoá SỔ SÁCH nội bộ của luật (rules.ts: mốc đã xét / mốc lỗi cùng loại cuối / đếm lượt "êm" của hysteresis) — có ích
+ * cho evaluator, vô nghĩa với người đọc. Giữ nguyên trong `facts` (API/email không đổi), chỉ không lên bảng số liệu.
+ */
+export const HIDDEN_FACT_KEYS: ReadonlySet<string> = new Set(["lastAttemptAt", "lastMatchAt", "calmStreak", "lastCalmAt"]);
+
+/** Thứ tự hiển thị + cách định dạng của khoá đã biết (rules.ts). Khoá nội bộ của hysteresis để cuối (và bị ẩn). */
 const KNOWN: [key: string, kind: Kind][] = [
   ["httpStatus", "text"],
   ["count", "count"],
@@ -61,13 +68,14 @@ function flat(v: unknown): string {
   return String(v);
 }
 
-export function factRows(facts: Record<string, unknown> | null | undefined, t: TranslateFn, ctx: Pick<MessageContext, "locale" | "now">): FactRow[] {
+export function factRows(facts: Record<string, unknown> | null | undefined, t: TranslateFn, _ctx: Pick<MessageContext, "locale" | "now">): FactRow[] {
   const f = facts ?? {};
   const rows: FactRow[] = [];
   const done = new Set<string>();
   for (const [key, kind] of KNOWN) {
     if (!(key in f)) continue;
     done.add(key);
+    if (HIDDEN_FACT_KEYS.has(key)) continue;
     const v = f[key];
     if (v === null || v === undefined || v === "") continue;
     const label = t(`alerts.fact.${kebab(key)}` as MessageKey);
@@ -86,7 +94,8 @@ export function factRows(facts: Record<string, unknown> | null | undefined, t: T
     switch (kind) {
       case "time": {
         const at = typeof v === "string" ? Date.parse(v) : Number.NaN;
-        value = Number.isNaN(at) ? flat(v) : formatClock(at, { ...ctx, now: Number.POSITIVE_INFINITY });
+        // Cùng khuôn "dd/MM HH:mm" với dòng thời gian của sheet ở mọi ngôn ngữ (formatStamp).
+        value = Number.isNaN(at) ? flat(v) : formatStamp(at);
         break;
       }
       case "duration":

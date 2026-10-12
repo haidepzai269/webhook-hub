@@ -20,6 +20,8 @@ import {
   routeArrival,
   selectBanner,
   takeArrivals,
+  resolveSubjectName,
+  TOAST_NAME_TIMEOUT_MS,
   toastsToDismiss,
   WARNING_TOAST_MS,
 } from "./notify-logic";
@@ -244,5 +246,33 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
       expect(block).not.toMatch(/transform/);
     }
     expect(css).toMatch(/@keyframes alert-slide-in \{[\s\S]*?translateY/);
+  });
+});
+
+describe("toast: tên đích của project khác có trước khi hiện (xem trên trình duyệt thật)", () => {
+  const dest = { subjectType: "destination" as const, subjectId: "1cc4de59-cb00-4d9d-b250-c8407144e551" };
+  const none = () => null;
+
+  it("đã biết -> trả ngay, không tải; cấp dự án -> null, không tải", async () => {
+    const load = jest.fn();
+    await expect(resolveSubjectName(dest, () => "bookstore-endpoint", load)).resolves.toBe("bookstore-endpoint");
+    await expect(resolveSubjectName({ subjectType: "project", subjectId: "p" }, none, load)).resolves.toBeNull();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("chưa biết -> tải tên của project đó rồi tra; thiếu trong project -> null", async () => {
+    const load = jest.fn(async () => (id: string) => (id === dest.subjectId ? "bookstore-endpoint" : null));
+    await expect(resolveSubjectName(dest, none, load)).resolves.toBe("bookstore-endpoint");
+    expect(load).toHaveBeenCalledTimes(1);
+    await expect(resolveSubjectName({ ...dest, subjectId: "khac" }, none, load)).resolves.toBeNull();
+  });
+
+  it("tải lỗi hoặc quá hạn -> null (nhãn rơi về id ngắn), không treo toast", async () => {
+    await expect(resolveSubjectName(dest, none, () => Promise.reject(new Error("401")))).resolves.toBeNull();
+    const never = () => new Promise<(id: string) => string | null>(() => {});
+    const t0 = Date.now();
+    await expect(resolveSubjectName(dest, none, never, 20)).resolves.toBeNull();
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(TOAST_NAME_TIMEOUT_MS).toBeLessThanOrEqual(2000);
   });
 });
