@@ -1,6 +1,6 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T06:52:16.322Z, commit 4e64f3d).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T06:54:56.135Z, commit 1987879).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
@@ -140,10 +140,10 @@ Tổng: 323 mã khai báo · 258 mã có test · 0 mồ côi · 24 mồ côi có
 | `BB:4` | spec-sources.json | L0 | verify/test/bb-invariants.spec.ts:25 | chưa chạy |
 | `BB:5` | spec-sources.json | L1 | libs/database/test/alerts-db.spec.ts:92<br>libs/database/test/project-schema-db.spec.ts:41<br>libs/database/test/rls-db.spec.ts:42<br>libs/database/test/rls-db.spec.ts:72 | ✅ pass |
 | `CB:T1` | SPEC-canh-bao-nhan-dinh.md · CB1 | L0 | libs/common/test/alert-rules.spec.ts:57<br>libs/common/test/alert-rules.spec.ts:97<br>libs/common/test/alert-rules.spec.ts:105<br>libs/common/test/alert-rules.spec.ts:142<br>libs/common/test/alert-rules.spec.ts:151<br>libs/common/test/alert-rules.spec.ts:165<br>libs/common/test/alert-rules.spec.ts:177<br>libs/common/test/alert-rules.spec.ts:200<br>libs/common/test/alert-rules.spec.ts:222<br>libs/common/test/alert-rules.spec.ts:229 | chưa chạy |
-| `CB:T2` | SPEC-canh-bao-nhan-dinh.md · CB1 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:116<br>libs/database/test/alerts-db.spec.ts:42 | ✅ pass |
+| `CB:T2` | SPEC-canh-bao-nhan-dinh.md · CB1 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:117<br>libs/database/test/alerts-db.spec.ts:42 | ✅ pass |
 | `CB:T3` | SPEC-canh-bao-nhan-dinh.md · CB2 | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:174 | chưa chạy |
 | `CB:T4` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:76 | ✅ pass |
-| `CB:T5` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:178 | ✅ pass |
+| `CB:T5` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:179 | ✅ pass |
 | `CB:T6` | SPEC-canh-bao-nhan-dinh.md · CB2 | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:195 | chưa chạy |
 | `CB:T7` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1,L0 | apps/hub-worker/test/alert-evaluator-db.spec.ts:76<br>apps/hub-worker/test/alert-evaluator.spec.ts:223 | ✅ pass |
 | `CB:T8` | SPEC-canh-bao-nhan-dinh.md · CB5 | L1,L0 | apps/hub-worker/test/alert-email-sender-db.spec.ts:118<br>apps/hub-worker/test/alert-email-sender-db.spec.ts:167<br>verify/test/gates.spec.ts:49 | ✅ pass |
@@ -153,9 +153,9 @@ Tổng: 323 mã khai báo · 258 mã có test · 0 mồ côi · 24 mồ côi có
 | `CB:T12` | SPEC-canh-bao-nhan-dinh.md · CB3 | L1 | apps/hub-api/test/alerts-api-db.spec.ts:49 | ✅ pass |
 | `CB:T13` | SPEC-canh-bao-nhan-dinh.md · CB5 | L1 | apps/hub-worker/test/alert-email-sender-db.spec.ts:302 | ✅ pass |
 | `CB:T14` | SPEC-canh-bao-nhan-dinh.md · CB7 | L0 | apps/hub-api/test/destination-view.spec.ts:47 | chưa chạy |
-| `CB:T15` | SPEC-canh-bao-nhan-dinh.md · CB4 | L0 | apps/web/src/lib/alerts/notify-logic.spec.ts:104 | chưa chạy |
+| `CB:T15` | SPEC-canh-bao-nhan-dinh.md · CB4 | L0 | apps/web/src/lib/alerts/notify-logic.spec.ts:106 | chưa chạy |
 | `CB:T16` | SPEC-canh-bao-nhan-dinh.md · CB6 | L0 | libs/common/test/insights.spec.ts:25 | chưa chạy |
-| `CB:T17` | DINH-CHINH-2026-10-12.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:134 | ✅ pass |
+| `CB:T17` | DINH-CHINH-2026-10-12.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:135 | ✅ pass |
 | `DX:TX1` | SPEC-dev-experience.md | — | — | mồ côi có lý do: E2E làm tay bằng curl trên stack dev (SPEC-dev-experience §6.2, PASS 2026-10-11 ở §9). Logic phủ tự động ở L0 [DX:UX1]-[DX:UX5] (error-filter.spec, error-catalog.spec) + [DX:UX11] after=abc/after=latest. |
 | `DX:TX2` | SPEC-dev-experience.md | — | — | mồ côi có lý do: Đo bằng đồng hồ với người test chưa đọc code (thời gian từ connection string tới event đầu tiên) — bản chất là phép đo thủ công, không tự động hoá được; chưa có kết quả ở §9. |
 | `DX:TX3` | SPEC-dev-experience.md | — | — | mồ côi có lý do: E2E làm tay: hub listen + examples/quickstart-node + SePay mock trên stack dev (PASS 2026-10-11 ở §9). Phần lõi phủ tự động ở L0 [DX:UX9], [DX:UX10], [DX:UX12]-[DX:UX14] (webhook-body.spec, listen.spec). |
@@ -291,6 +291,6 @@ Tổng: 323 mã khai báo · 258 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (183 file, 1181 khai báo it/test)
+## File test (187 file, 1221 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.
