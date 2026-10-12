@@ -609,6 +609,12 @@ phút dữ liệu, quá thì bỏ phần cũ + `hub_traffic_flush_dropped_total`
 Giữ `TRAFFIC_RETENTION_DAYS` (7) ngày, dọn trong `cleanup.job.ts`. **404 của sourceKey lạ không vào bảng** (không thuộc
 tenant nào) — chỉ có `hub_ingest_unknown_source_total` + log. Số liệu quan sát: được phép thiếu, không được làm chậm ingest.
 
+**Xem lưu lượng (EG5, ADR-181)** — `GET /api/v1/projects/:p/sources/:id/traffic?range=1h|24h|7d` (cột 1 phút / 5 phút /
+1 giờ, lấp 0) trả `{buckets, topIps, insight: {code: 'I-traffic', facts}, blockedNow}`. Quyền = scope `traffic:read`, chỉ
+`owner` có trong `ROLE_SCOPES`; người vận hành vào qua `viaOperator` (= owner). `developer`/`viewer` → 403. Console: nút
+"Lưu lượng" trên từng dòng của trang Nguồn mở ngăn bên (không có trang mới). `blockedNow` là hộp phạt của instance đang trả
+lời — ước lượng khi nhiều instance. Lớp biên toàn hub (sourceKey lạ, hộp phạt) chỉ có ở Grafana (panel 9–10).
+
 ## 8. Quan sát (Observability)
 
 | Thứ | Cách làm | Ghi chú |

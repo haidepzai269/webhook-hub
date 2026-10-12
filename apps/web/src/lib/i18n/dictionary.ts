@@ -54,6 +54,7 @@ import { pageSettings } from "./messages/page-settings";
 import { pageSources } from "./messages/page-sources";
 import { pageSubscriptions } from "./messages/page-subscriptions";
 import { status } from "./messages/status";
+import { traffic } from "./messages/traffic";
 
 export { DEFAULT_LOCALE, INTL_LOCALE, LOCALES, type Locale } from "./locales";
 
@@ -84,6 +85,7 @@ const NAMESPACES = {
     ...pageAlerts.vi,
     ...insights.vi,
     ...pageSettings.vi,
+    ...traffic.vi,
   },
   en: {
     ...common.en,
@@ -111,6 +113,7 @@ const NAMESPACES = {
     ...pageAlerts.en,
     ...insights.en,
     ...pageSettings.en,
+    ...traffic.en,
   },
 } satisfies Record<Locale, unknown>;
 

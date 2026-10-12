@@ -13,13 +13,14 @@ export const ALL_SCOPES = [
   'manage:keys',
   'manage:members',
   'manage:project', // đổi tên, xoá project
+  'traffic:read', // EG5 (ADR-181): lưu lượng theo source (IP, tỷ lệ sai chữ ký) — chỉ owner + người vận hành (viaOperator)
 ] as const;
 export type Scope = (typeof ALL_SCOPES)[number];
 export type MemberRoleName = 'owner' | 'developer' | 'viewer';
 
 const VIEWER: Scope[] = ['read:project', 'read:events'];
 const DEVELOPER: Scope[] = [...VIEWER, 'publish:events', 'manage:endpoints', 'manage:sources', 'replay:deliveries', 'manage:keys'];
-const OWNER: Scope[] = [...DEVELOPER, 'manage:members', 'manage:project'];
+const OWNER: Scope[] = [...DEVELOPER, 'manage:members', 'manage:project', 'traffic:read'];
 
 export const ROLE_SCOPES: Readonly<Record<MemberRoleName, readonly Scope[]>> = { viewer: VIEWER, developer: DEVELOPER, owner: OWNER };
 

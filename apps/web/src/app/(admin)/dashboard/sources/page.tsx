@@ -3,15 +3,15 @@
 import { createContext, useContext, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link2, Plug, Plus } from "lucide-react";
+import { Activity, Link2, Plug, Plus } from "lucide-react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
 import { CopyButton } from "@/components/admin/copy-button";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
-import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { FormDialog } from "@/components/admin/form-dialog";
+import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
+import { TrafficSheet } from "./traffic-sheet";
 
 /** KN2: nút "Kết nối" trên từng dòng mở hộp tình trạng kết nối. */
 const OpenConnection = createContext<(id: string) => void>(() => undefined);
@@ -42,6 +43,24 @@ function ConnectionButton({ id }: { id: string }) {
       aria-label={t("page.sources.connection-button")}
     >
       <Link2 />
+    </Button>
+  );
+}
+
+/** EG5 (ADR-181): nút "Lưu lượng" trên từng dòng mở khối Lưu lượng của nguồn (không tạo trang mới). */
+const OpenTraffic = createContext<(id: string) => void>(() => undefined);
+function TrafficButton({ id }: { id: string }) {
+  const open = useContext(OpenTraffic);
+  const t = useT();
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => open(id)}
+      title={t("traffic.button")}
+      aria-label={t("traffic.button")}
+    >
+      <Activity />
     </Button>
   );
 }
@@ -131,7 +150,12 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
     header: "",
     enableSorting: false,
     enableHiding: false,
-    cell: ({ row }) => <ConnectionButton id={row.original.id} />,
+    cell: ({ row }) => (
+      <div className="flex">
+        <TrafficButton id={row.original.id} />
+        <ConnectionButton id={row.original.id} />
+      </div>
+    ),
   },
 ];
 
@@ -147,6 +171,8 @@ export default function SourcesPage() {
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [preset, setPreset] = useState<{ provider: string; sourceId: string } | null>(null);
   const connectionSource = data?.find((s) => s.id === connectionId) ?? null;
+  const [trafficId, setTrafficId] = useState<string | null>(null);
+  const trafficSource = data?.find((s) => s.id === trafficId) ?? null;
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { provider: "github", name: "", secret: "" },
@@ -197,19 +223,22 @@ export default function SourcesPage() {
         onClose={() => setConnectionId(null)}
         onConnect={(s) => (setPreset({ provider: s.provider, sourceId: s.id }), setConnectOpen(true))}
       />
-      <OpenConnection.Provider value={setConnectionId}>
-        <InsightRowsProvider code="I-silent">
-          <DataTable
-            data={data}
-            columns={columns}
-            getRowId={(s) => s.id}
-            isLoading={isLoading}
-            error={error}
-            searchPlaceholder={t("page.sources.search")}
-            emptyText={t("page.sources.empty")}
-          />
-        </InsightRowsProvider>
-      </OpenConnection.Provider>
+      <TrafficSheet source={trafficSource} onClose={() => setTrafficId(null)} />
+      <OpenTraffic.Provider value={setTrafficId}>
+        <OpenConnection.Provider value={setConnectionId}>
+          <InsightRowsProvider code="I-silent">
+            <DataTable
+              data={data}
+              columns={columns}
+              getRowId={(s) => s.id}
+              isLoading={isLoading}
+              error={error}
+              searchPlaceholder={t("page.sources.search")}
+              emptyText={t("page.sources.empty")}
+            />
+          </InsightRowsProvider>
+        </OpenConnection.Provider>
+      </OpenTraffic.Provider>
 
       <FormDialog
         open={open}

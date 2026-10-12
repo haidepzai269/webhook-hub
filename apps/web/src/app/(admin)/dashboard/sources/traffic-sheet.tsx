@@ -1,0 +1,207 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+
+import { AdminSheetContent } from "@/components/admin/overlay-content";
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { HubApiError } from "@/lib/hub/client";
+import { useSourceTraffic } from "@/lib/hub/traffic-queries";
+import type { Source } from "@/lib/hub/types";
+import { INTL_LOCALE, type MessageKey } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
+import { INSIGHT_DOT, INSIGHT_TONE } from "@/lib/insights/message";
+import {
+  blockedNowText,
+  TRAFFIC_OUTCOMES,
+  type TrafficOutcome,
+  type TrafficRange,
+  trafficInsightText,
+} from "@/lib/traffic/message";
+
+const TZ = "Asia/Ho_Chi_Minh";
+
+/** Màu từng kết quả — cùng bảng màu với biểu đồ Tổng quan (xanh = nhận, đỏ = lỗi, hổ phách = vượt trần). */
+const SERIES: Record<TrafficOutcome, { key: MessageKey; color: string }> = {
+  ACCEPTED: { key: "traffic.outcome.accepted", color: "oklch(0.65 0.15 155)" },
+  DUPLICATE: { key: "traffic.outcome.duplicate", color: "var(--chart-2)" },
+  REJECTED: { key: "traffic.outcome.rejected", color: "oklch(0.63 0.22 25)" },
+  RATE_LIMITED: { key: "traffic.outcome.rate-limited", color: "oklch(0.75 0.15 75)" },
+  BLOCKED: { key: "traffic.outcome.blocked", color: "oklch(0.55 0.2 300)" },
+};
+
+/**
+ * EG5 (SPEC-chong-qua-tai §6.2, ADR-181): khối "Lưu lượng" của MỘT nguồn — mở từ dòng của bảng Nguồn (không có trang mới).
+ * Câu nhận định ở đầu, dòng "đang tạm chặn" (ước lượng của một máy chủ), biểu đồ cột xếp chồng theo kết quả, bảng IP.
+ * 403 (developer/viewer) -> câu giải thích thay cho dữ liệu.
+ */
+export function TrafficSheet({ source, onClose }: { source: Source | null; onClose: () => void }) {
+  const t = useT();
+  return (
+    <Sheet open={Boolean(source)} onOpenChange={(o) => !o && onClose()}>
+      <AdminSheetContent className="w-full gap-0 overflow-y-auto data-[side=right]:sm:max-w-2xl">
+        {source && (
+          <>
+            <SheetHeader>
+              <SheetTitle>{t("traffic.title", { name: source.name })}</SheetTitle>
+              <SheetDescription>{t("traffic.description")}</SheetDescription>
+            </SheetHeader>
+            <TrafficBlock sourceId={source.id} />
+          </>
+        )}
+      </AdminSheetContent>
+    </Sheet>
+  );
+}
+
+function TrafficBlock({ sourceId }: { sourceId: string }) {
+  const t = useT();
+  const locale = useLocale();
+  const [range, setRange] = useState<TrafficRange>("1h");
+  const { data, isLoading, isPlaceholderData, error } = useSourceTraffic(sourceId, range);
+  const chartConfig = useMemo<ChartConfig>(
+    () => Object.fromEntries(TRAFFIC_OUTCOMES.map((k) => [k, { label: t(SERIES[k].key), color: SERIES[k].color }])),
+    [t],
+  );
+  const [timeFmt, dayFmt] = useMemo(
+    () => [
+      new Intl.DateTimeFormat(INTL_LOCALE[locale], { hour: "2-digit", minute: "2-digit", timeZone: TZ }),
+      new Intl.DateTimeFormat(INTL_LOCALE[locale], { day: "2-digit", month: "2-digit", timeZone: TZ }),
+    ],
+    [locale],
+  );
+  const nf = useMemo(() => new Intl.NumberFormat(INTL_LOCALE[locale]), [locale]);
+  const dataRange = data?.range ?? range;
+  const tick = (v: string) => (dataRange === "7d" ? dayFmt.format(new Date(v)) : timeFmt.format(new Date(v)));
+
+  const forbidden = error instanceof HubApiError && error.status === 403;
+  const text = data ? trafficInsightText(data.insight, t, locale, dataRange) : null;
+  const blocked = blockedNowText(data?.blockedNow, t);
+
+  return (
+    <div className="space-y-4 px-4 pb-6">
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="sm"
+        value={range}
+        onValueChange={(v) => v && setRange(v as TrafficRange)}
+        aria-label={t("traffic.button")}
+      >
+        {(["1h", "24h", "7d"] as const).map((r) => (
+          <ToggleGroupItem key={r} value={r}>
+            {t(`traffic.range.${r}`)}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+
+      {forbidden ? (
+        <p className="rounded-lg border px-3 py-2 text-muted-foreground text-sm">{t("traffic.forbidden")}</p>
+      ) : error ? (
+        <p className="text-destructive text-sm">{t("traffic.load-error", { message: error.message })}</p>
+      ) : isLoading && !data ? (
+        <Skeleton className="h-64 w-full" />
+      ) : data && text ? (
+        <div className={`space-y-4 transition-opacity ${isPlaceholderData ? "opacity-50" : ""}`}>
+          <div className="space-y-1" data-testid="traffic-insight">
+            <p className={`flex items-start gap-2 font-medium text-sm ${INSIGHT_TONE[text.level]}`}>
+              <span className={`mt-1.5 size-2 shrink-0 rounded-full ${INSIGHT_DOT[text.level]}`} aria-hidden />
+              <span>{text.label}</span>
+            </p>
+            <p className="text-muted-foreground text-xs">{text.detail}</p>
+          </div>
+
+          {blocked && (
+            <div className="rounded-lg border border-amber-500/40 px-3 py-2 text-sm">
+              <p className="text-amber-800 dark:text-amber-200">{blocked}</p>
+              <p className="text-muted-foreground text-xs">{t("traffic.blocked-now-estimate")}</p>
+            </div>
+          )}
+
+          {!text.empty && (
+            <>
+              <ChartContainer
+                config={chartConfig}
+                className="aspect-auto h-60 w-full"
+                aria-label={t("traffic.chart.aria")}
+                role="img"
+              >
+                <BarChart data={data.buckets} margin={{ left: -16, right: 8 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    dataKey="t"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    minTickGap={24}
+                    tickFormatter={tick}
+                  />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
+                  <ChartTooltip
+                    cursor={false}
+                    content={
+                      <ChartTooltipContent
+                        indicator="dot"
+                        labelFormatter={(_, payload) => {
+                          const v = payload?.[0]?.payload?.t as string | undefined;
+                          return v ? `${dayFmt.format(new Date(v))} ${timeFmt.format(new Date(v))}` : "";
+                        }}
+                      />
+                    }
+                  />
+                  {TRAFFIC_OUTCOMES.map((k) => (
+                    <Bar key={k} dataKey={k} stackId="a" fill={`var(--color-${k})`} isAnimationActive={false} />
+                  ))}
+                  <ChartLegend content={<ChartLegendContent />} itemSorter={null} />
+                </BarChart>
+              </ChartContainer>
+
+              {data.topIps.length > 0 && (
+                <div className="space-y-1">
+                  <h3 className="font-medium text-sm">{t("traffic.top-ips.title")}</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t("traffic.top-ips.col.ip")}</TableHead>
+                        <TableHead className="text-right">{t("traffic.top-ips.col.count")}</TableHead>
+                        <TableHead className="text-right">{t("traffic.top-ips.col.rejected")}</TableHead>
+                        <TableHead>{t("traffic.top-ips.col.last")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.topIps.map((r) => (
+                        <TableRow key={r.ip}>
+                          <TableCell className="font-mono text-xs">{r.ip}</TableCell>
+                          <TableCell className="text-right tabular-nums">{nf.format(r.count)}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.count > 0 ? `${Math.round((r.rejected / r.count) * 100)}%` : "—"}
+                          </TableCell>
+                          <TableCell className="text-xs tabular-nums">
+                            {dayFmt.format(new Date(r.lastSeen))} {timeFmt.format(new Date(r.lastSeen))}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <p className="text-muted-foreground text-xs">{t("traffic.top-ips.note")}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}

@@ -1848,3 +1848,15 @@ CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
 - `REJECTED` gộp cả 401 sai chữ ký lẫn 422 thiếu khoá chống trùng (đúng như `trace.ingested`); ERROR (5xx) không lưu — đã có metric + log.
 - Thêm một lượt ghi DB mỗi 60s mỗi instance mỗi project có lưu lượng.
 - **Yêu cầu thay đổi gửi sang CB (ghi lại, CHƯA code — §5.3 SPEC-chong-qua-tai):** (1) evaluator luật `source.signature_failing` nên đếm từ `source_traffic_minutely` (outcome REJECTED) thay vì mẫu `REJECTED` trong `raw_events` (mẫu có trần 20/phút nên đếm thiếu); (2) luật mới `source.rate_limited`, mức warning, bật khi có ≥ 1 phút `RATE_LIMITED` trong 15 phút gần nhất, người nhận vẫn chỉ là người vận hành. Không sửa evaluator trong EG4 để không trộn với nhánh alerts.
+
+---
+
+## ADR-181 — Quyền xem lưu lượng theo source là scope `traffic:read` (owner + người vận hành), khối "Lưu lượng" mở từ trang Nguồn (EG5, 2026-10-12)
+
+**Vấn đề:** lưu lượng theo source lộ IP người gửi và tỷ lệ sai chữ ký — thông tin vận hành/an ninh, không phải dữ liệu nghiệp vụ mà mọi thành viên cần. Admin chốt (Q6): người vận hành + `owner` của project xem được; `developer`/`viewer` thì không.
+**Chọn:** scope mới `traffic:read` thêm vào `ALL_SCOPES` và CHỈ bó `owner` của `ROLE_SCOPES`; người vận hành không là thành viên đi qua `viaOperator` (= owner, có `operator.access` audit như mọi route). Route `GET /api/v1/projects/:p/sources/:id/traffic` khai `@RequireScope('traffic:read')` — không `if` theo vai trò. Không cấp cho API key (`KEY_GRANTABLE_SCOPES` không đổi). Câu nhận định `I-traffic` là hàm thuần `buildTrafficInsight` (libs/common) trả `code + level + facts`, câu chữ vi/en dựng ở web. Repo console chưa có trang chi tiết source → khối Lưu lượng là **ngăn bên (Sheet)** mở từ nút trên từng dòng của trang Nguồn, không tạo trang mới.
+**Đánh đổi:**
+- Thêm một scope làm `ROLE_SCOPES.owner` dài thêm; role tuỳ biến sau này phải nhớ cân nhắc scope này.
+- `blockedNow` chỉ là của instance hub-api đang trả lời (hộp phạt trong bộ nhớ) — UI ghi rõ là ước lượng.
+- Bảng "IP gửi nhiều nhất" gộp top-5 của từng phút → xấp xỉ (IP gửi đều nhưng chưa bao giờ lọt top-5 của phút nào sẽ không hiện). UI ghi rõ.
+- Lớp biên toàn hub (sourceKey lạ, hộp phạt) chỉ có panel Grafana 9–10 — màn hình console để P2 vì cần dữ liệu không thuộc tenant.

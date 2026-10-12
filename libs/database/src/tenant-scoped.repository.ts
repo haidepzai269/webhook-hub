@@ -1354,6 +1354,33 @@ export class TenantScopedRepository {
   }
 
   /**
+   * EG5 (ADR-181): lưu lượng của MỘT source từ `since`, gộp theo cột `bucketSec` giây và outcome. Dùng tiền tố PK
+   * `(tenant_id, source_id, minute)`. Tối đa 5 outcome × (span / bucket) dòng (7 ngày theo giờ = 840).
+   */
+  async sourceTrafficBuckets(sourceId: string, since: Date, bucketSec: number): Promise<{ t: Date; outcome: string; n: number }[]> {
+    return this.prisma.$queryRaw<{ t: Date; outcome: string; n: number }[]>(Prisma.sql`
+      SELECT to_timestamp(floor(extract(epoch FROM minute) / ${bucketSec}::int) * ${bucketSec}::int) AS t,
+             outcome::text AS outcome, sum(count)::int AS n
+      FROM hub.source_traffic_minutely
+      WHERE tenant_id = ${this.tenantId}::uuid AND source_id = ${sourceId}::uuid AND minute >= ${since}
+      GROUP BY 1, 2 ORDER BY 1`);
+  }
+
+  /**
+   * EG5: IP gửi nhiều nhất vào một source từ `since` — gộp `top_ips` (≤ 5 IP mỗi phút × outcome, nên là XẤP XỈ), kèm số
+   * request sai chữ ký (outcome REJECTED) và lần cuối thấy.
+   */
+  async sourceTrafficTopIps(sourceId: string, since: Date, limit: number): Promise<{ ip: string; count: number; rejected: number; lastSeen: Date }[]> {
+    return this.prisma.$queryRaw<{ ip: string; count: number; rejected: number; lastSeen: Date }[]>(Prisma.sql`
+      SELECT e->>'ip' AS ip, sum((e->>'count')::int)::int AS count,
+             sum(CASE WHEN t.outcome = 'REJECTED' THEN (e->>'count')::int ELSE 0 END)::int AS rejected,
+             max(t.minute) AS "lastSeen"
+      FROM hub.source_traffic_minutely t, jsonb_array_elements(t.top_ips) e
+      WHERE t.tenant_id = ${this.tenantId}::uuid AND t.source_id = ${sourceId}::uuid AND t.minute >= ${since}
+      GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT ${limit}::int`);
+  }
+
+  /**
    * `I-dup`: số bản trùng từ đầu ngày hôm nay (múi giờ của dashboard) theo provider của source. Luôn trả ≥ 1 dòng (mang
    * `since`; `provider` null khi chưa có bản trùng). Index `(tenant_id, bucket DESC)`.
    */

@@ -375,6 +375,117 @@
           "legendFormat": "lỗi {{rule}}"
         }
       ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Lớp biên: sourceKey lạ + hộp phạt (EG2)",
+      "description": "Chỉ người vận hành (Grafana). hub_ingest_unknown_source_total: request /hooks vào sourceKey không tồn tại (404, không thuộc tenant nào — không lưu DB). hub_ingest_penalty_bans_total{reason}: lần BẮT ĐẦU tạm chặn (unknown_source = cả IP; bad_signature = cặp IP + sourceKey). hub_ingest_penalty_blocked_total{reason}: request bị chặn 429 ip_temporarily_blocked. Mỗi instance hub-api đếm riêng (ADR-177).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hub_ingest_unknown_source_total[5m]))",
+          "legendFormat": "sourceKey lạ (404)"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "sum by (reason) (increase(hub_ingest_penalty_bans_total[5m]))",
+          "legendFormat": "bắt đầu phạt {{reason}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "C",
+          "expr": "sum by (reason) (increase(hub_ingest_penalty_blocked_total[5m]))",
+          "legendFormat": "bị chặn {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Hộp phạt: số khoá trong bộ nhớ + lưu lượng bị bỏ (EG2/EG4)",
+      "description": "hub_ingest_penalty_entries: số khoá hộp phạt đang giữ ở mỗi instance (trần EDGE_PENALTY_MAX_ENTRIES — chạm trần là đang bị dội nhiều IP). hub_traffic_flush_dropped_total: request của bảng lưu lượng bị bỏ vì ghi Postgres lỗi quá 10 phút (ADR-179).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (instance) (hub_ingest_penalty_entries)",
+          "legendFormat": "khoá hộp phạt {{instance}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "sum(increase(hub_traffic_flush_dropped_total[5m]))",
+          "legendFormat": "lưu lượng bị bỏ"
+        }
+      ]
     }
   ]
 }
