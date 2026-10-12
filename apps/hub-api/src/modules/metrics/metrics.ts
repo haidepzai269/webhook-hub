@@ -58,10 +58,10 @@ export const penaltyBlocked = new Counter({
   registers: [apiRegistry],
 });
 
-/** Đính chính ADR-177: đủ ngưỡng nhưng KHÔNG phạt — `capacity` (số ban chạm trần) hoặc `good_pair` (cặp đã verify đúng). */
+/** Đính chính ADR-177: đủ ngưỡng nhưng KHÔNG phạt — `capacity` (số ban chạm trần). */
 export const penaltyBansSkipped = new Counter({
   name: 'hub_ingest_penalty_bans_skipped_total',
-  help: 'Số lần đủ ngưỡng phạt nhưng không phạt (capacity = hộp đầy ban; good_pair = cặp IP+sourceKey đã verify đúng gần đây)',
+  help: 'Số lần đủ ngưỡng phạt nhưng không phạt vì số ban đã chạm trần (capacity)',
   labelNames: ['reason', 'cause'] as const,
   registers: [apiRegistry],
 });
@@ -82,5 +82,13 @@ export const unknownSourceTotal = new Counter({
 export const trafficFlushDropped = new Counter({
   name: 'hub_traffic_flush_dropped_total',
   help: 'Số request của bảng lưu lượng theo source bị bỏ vì ghi Postgres lỗi quá trần bộ đệm 10 phút',
+  registers: [apiRegistry],
+});
+
+/** Review lượt 2: request /hooks không được hộp phạt chấm điểm. `private_ip` > 50% lưu lượng /hooks = cấu hình IP thật sai. */
+export const penaltySkipped = new Counter({
+  name: 'hub_ingest_penalty_skipped_total',
+  help: 'Số request /hooks hộp phạt bỏ qua không chấm điểm (private_ip = IP loopback/private/dùng chung)',
+  labelNames: ['cause'] as const,
   registers: [apiRegistry],
 });

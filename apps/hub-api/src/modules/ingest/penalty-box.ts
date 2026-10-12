@@ -15,11 +15,15 @@ import { logger } from '@hub/common';
  * - Ai gọi hộp phạt phải nuốt lỗi (fail-open) — xem `IngestService`.
  *
  * Đính chính sau review (ADR-177 bổ sung):
- * - "Cặp tốt": (ip, sourceKey) đã verify ĐÚNG trong `goodTtlMs` gần nhất. Luật (a) KHÔNG chặn cặp tốt (flood 404 vào IP
- *   chung của GitHub không cắt được source đang chạy của tenant khác); luật (b) với cặp tốt chỉ ĐẾM, không BAN.
+ * - "Cặp tốt": (ip, sourceKey) đã verify ĐÚNG (và qua rate limit) trong `goodTtlMs` gần nhất. Luật (a) KHÔNG chặn cặp tốt
+ *   (flood 404 vào IP chung của GitHub không cắt được source đang chạy của tenant khác); luật (b) với cặp tốt dùng ngưỡng
+ *   × `good401Multiplier` (mặc định ×10) — không miễn vô hạn.
+ * - Cache tốt CHIA THEO sourceKey: mỗi key một LRU nhỏ (`goodIpsPerKey`, mặc định 64) -> một key không đẩy được cặp của key
+ *   khác; bảng ngoài theo key có trần `maxGoodKeys` (= maxEntries), loại key hoạt động cũ nhất.
  * - Ban hết hạn được quét ở đầu Map `banned` (banMs cố định -> thứ tự chèn = thứ tự hết hạn); `banned` có trần riêng
  *   (≤ 50% `maxEntries`) — đầy thì không tạo ban mới (fail-open, có log + metric); khoá vừa chèn không bao giờ bị loại.
- * - IP loopback/private (127/8, 10/8, 172.16/12, 192.168/16, ::1, fc00::/7, IPv4-mapped của chúng) không chấm điểm, không
+ * - IP loopback/private/dùng chung (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, ::1, fc00::/7, fe80::/10,
+ *   IPv4-mapped của chúng) không chấm điểm, không
  *   chặn — sau NAT/proxy chưa cấu hình, mọi người trông như một IP. `EDGE_PENALTY_ENABLED=0` tắt hẳn hộp phạt.
  */
 export type PenaltyReason = 'unknown_source' | 'bad_signature';
@@ -36,8 +40,12 @@ export interface PenaltyConfig {
   goodTtlMs?: number;
   /** Trần số ban đồng thời. Mặc định 50% `maxEntries`. */
   maxBanned?: number;
-  /** Trần số cặp tốt (LRU). Mặc định = `maxEntries`. */
-  maxGood?: number;
+  /** Trần số sourceKey trong cache tốt (LRU theo hoạt động). Mặc định = `maxEntries`. */
+  maxGoodKeys?: number;
+  /** Trần số IP tốt mỗi sourceKey (LRU riêng). Mặc định 64. */
+  goodIpsPerKey?: number;
+  /** Ngưỡng luật (b) với cặp tốt = threshold401 × hệ số này. Mặc định 10. */
+  good401Multiplier?: number;
 }
 
 export interface BanOwner {
@@ -55,7 +63,9 @@ export interface PenaltyHooks {
   /** Request bị chặn vì đang bị phạt. */
   onBlocked?(reason: PenaltyReason): void;
   /** Đủ ngưỡng nhưng `banned` đã đầy -> KHÔNG phạt (fail-open có tiếng). */
-  onBanSkipped?(reason: PenaltyReason, cause: 'capacity' | 'good_pair'): void;
+  onBanSkipped?(reason: PenaltyReason, cause: 'capacity'): void;
+  /** IP loopback/private/dùng chung -> không chấm điểm (metric `skipped{cause="private_ip"}`). */
+  onSkippedPrivate?(): void;
 }
 
 const WINDOW_MS = 60_000;
@@ -76,6 +86,8 @@ export function resolvePenaltyConfig(env: Record<string, string | undefined> = p
     windowMs: WINDOW_MS,
     enabled: env.EDGE_PENALTY_ENABLED !== '0',
     goodTtlMs: clampEnvInt(env.EDGE_PENALTY_GOOD_TTL, 86_400, 300, 7 * 86_400) * 1000,
+    goodIpsPerKey: clampEnvInt(env.EDGE_PENALTY_GOOD_IPS_PER_KEY, 64, 4, 1_024),
+    good401Multiplier: clampEnvInt(env.EDGE_PENALTY_401_GOOD_MULTIPLIER, 10, 2, 100),
   };
 }
 
@@ -116,10 +128,18 @@ export function isLocalOrPrivateIp(ip: string | undefined | null): boolean {
   if (!p) return false;
   if (p.v4) {
     const [a, b] = p.v4.split('.').map(Number);
-    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    return (
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) || // link-local
+      (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64/10 — nhiều thuê bao chung một IP
+    );
   }
   const g = p.groups;
   if (g.slice(0, 7).every((n) => n === 0) && g[7] === 1) return true; // ::1
+  if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
   return (g[0] & 0xfe00) === 0xfc00; // fc00::/7
 }
 
@@ -158,10 +178,12 @@ export class PenaltyBox {
   private readonly counting = new Map<string, Counting>();
   /** Khoá đang bị phạt — thứ tự chèn = thứ tự hết hạn (banMs cố định). */
   private readonly banned = new Map<string, Ban>();
-  /** Cặp tốt (pairKey -> hết hạn lúc), LRU. */
-  private readonly good = new Map<string, number>();
+  /** Cặp tốt: sourceKey -> (ipKey -> hết hạn lúc). Cả hai tầng là LRU (Map: chạm = xoá rồi chèn lại). */
+  private readonly good = new Map<string, Map<string, number>>();
   private readonly maxBanned: number;
-  private readonly maxGood: number;
+  private readonly maxGoodKeys: number;
+  private readonly goodIpsPerKey: number;
+  private readonly good401Multiplier: number;
   private readonly goodTtlMs: number;
   private readonly enabled: boolean;
 
@@ -172,7 +194,9 @@ export class PenaltyBox {
   ) {
     this.enabled = cfg.enabled !== false;
     this.maxBanned = Math.max(1, cfg.maxBanned ?? Math.floor(cfg.maxEntries / 2));
-    this.maxGood = Math.max(1, cfg.maxGood ?? cfg.maxEntries);
+    this.maxGoodKeys = Math.max(1, cfg.maxGoodKeys ?? cfg.maxEntries);
+    this.goodIpsPerKey = Math.max(1, cfg.goodIpsPerKey ?? 64);
+    this.good401Multiplier = Math.max(1, cfg.good401Multiplier ?? 10);
     this.goodTtlMs = cfg.goodTtlMs ?? 86_400_000;
   }
 
@@ -186,8 +210,11 @@ export class PenaltyBox {
     return this.banned.size;
   }
 
+  /** Tổng số cặp tốt đang nhớ. */
   goodSize(): number {
-    return this.good.size;
+    let n = 0;
+    for (const m of this.good.values()) n += m.size;
+    return n;
   }
 
   /**
@@ -199,7 +226,7 @@ export class PenaltyBox {
     if (!k) return { blocked: false };
     const v = this.verdict(`ip|${k}`, false);
     if (!v.blocked) return v;
-    if (sourceKey !== undefined && this.isGood(pairKey(k, sourceKey))) return { blocked: false };
+    if (sourceKey !== undefined && this.isGood(k, sourceKey)) return { blocked: false };
     this.safeHook(() => this.hooks.onBlocked?.(v.reason));
     return v;
   }
@@ -213,14 +240,23 @@ export class PenaltyBox {
     return v;
   }
 
-  /** Chữ ký ĐÚNG -> nhớ cặp tốt `goodTtlMs` (LRU, có trần). */
+  /**
+   * Chữ ký ĐÚNG và đã qua rate limit -> nhớ cặp tốt `goodTtlMs`. LRU riêng mỗi sourceKey (một key không đẩy được cặp của
+   * key khác); bảng ngoài theo key loại key hoạt động cũ nhất khi vượt `maxGoodKeys`.
+   */
   markGood(ip: string | undefined, sourceKey: string): void {
     const k = this.keyOf(ip);
     if (!k) return;
-    const key = pairKey(k, sourceKey);
-    this.good.delete(key);
-    this.good.set(key, this.clock() + this.goodTtlMs);
-    while (this.good.size > this.maxGood) this.good.delete(this.good.keys().next().value as string);
+    const now = this.clock();
+    this.sweepExpiredGood(now);
+    let ips = this.good.get(sourceKey);
+    if (ips) this.good.delete(sourceKey); // chạm key -> cuối (hoạt động mới nhất)
+    else ips = new Map();
+    this.good.set(sourceKey, ips);
+    ips.delete(k);
+    ips.set(k, now + this.goodTtlMs);
+    while (ips.size > this.goodIpsPerKey) ips.delete(ips.keys().next().value as string);
+    while (this.good.size > this.maxGoodKeys) this.good.delete(this.good.keys().next().value as string);
   }
 
   /** 404 do không tìm thấy source. */
@@ -233,8 +269,9 @@ export class PenaltyBox {
   recordBadSignature(ip: string | undefined, sourceKey: string, owner: BanOwner): void {
     const k = this.keyOf(ip);
     if (!k) return;
-    const key = pairKey(k, sourceKey);
-    this.hit(key, k, 'bad_signature', this.cfg.threshold401, owner, sourceKey, this.isGood(key));
+    // Cặp tốt: ngưỡng × hệ số (GitHub dùng chung IP, đúng/sai xen kẽ không bị ban oan) — nhưng không miễn vô hạn.
+    const threshold = this.isGood(k, sourceKey) ? this.cfg.threshold401 * this.good401Multiplier : this.cfg.threshold401;
+    this.hit(pairKey(k, sourceKey), k, 'bad_signature', threshold, owner, sourceKey);
   }
 
   /** EG5: các IP đang bị chặn theo cặp trên một source (ước lượng — chỉ của instance này). */
@@ -252,19 +289,35 @@ export class PenaltyBox {
     if (!this.enabled) return null;
     if (isLocalOrPrivateIp(ip)) {
       logger.debug({ ip }, 'Hộp phạt: bỏ qua IP loopback/private (có thể là IP dùng chung sau NAT/proxy)');
+      this.safeHook(() => this.hooks.onSkippedPrivate?.());
       return null;
     }
     return ipKey(ip);
   }
 
-  private isGood(key: string): boolean {
-    const until = this.good.get(key);
+  private isGood(ip: string, sourceKey: string): boolean {
+    const ips = this.good.get(sourceKey);
+    const until = ips?.get(ip);
     if (until === undefined) return false;
     if (until <= this.clock()) {
-      this.good.delete(key);
+      ips!.delete(ip);
+      if (ips!.size === 0) this.good.delete(sourceKey);
       return false;
     }
     return true;
+  }
+
+  /**
+   * Key ở đầu bảng ngoài là key hoạt động cũ nhất; TTL cố định nên IP cuối trong LRU của nó hết hạn muộn nhất — hết hạn thì
+   * cả key hết hạn. Dừng ở key đầu tiên còn hiệu lực (mỗi key tốn ≤ goodIpsPerKey bước).
+   */
+  private sweepExpiredGood(now: number): void {
+    for (const [key, ips] of this.good) {
+      let last = 0;
+      for (const v of ips.values()) last = v; // phần tử cuối
+      if (last > now) break;
+      this.good.delete(key);
+    }
   }
 
   private verdict(key: string, notify = true): PenaltyVerdict {
@@ -279,7 +332,7 @@ export class PenaltyBox {
     return { blocked: true, reason: ban.reason, retryAfterSec: Math.max(1, Math.ceil((ban.until - now) / 1000)), owner: ban.owner };
   }
 
-  private hit(key: string, ip: string, reason: PenaltyReason, threshold: number, owner?: BanOwner, sourceKey?: string, goodPair = false): void {
+  private hit(key: string, ip: string, reason: PenaltyReason, threshold: number, owner?: BanOwner, sourceKey?: string): void {
     const now = this.clock();
     this.sweepExpiredBans(now);
     const ban = this.banned.get(key);
@@ -291,11 +344,7 @@ export class PenaltyBox {
     c.count++;
     let banned = false;
     if (c.count >= threshold) {
-      if (goodPair) {
-        // Cặp đã verify đúng gần đây: chỉ đếm. Bắt đầu cửa sổ mới để báo lại tối đa một lần mỗi cửa sổ.
-        this.safeHook(() => this.hooks.onBanSkipped?.(reason, 'good_pair'));
-        c = { count: 0, windowStart: now };
-      } else if (this.banned.size >= this.maxBanned) {
+      if (this.banned.size >= this.maxBanned) {
         this.safeHook(() => this.hooks.onBanSkipped?.(reason, 'capacity'));
         c = { count: 0, windowStart: now };
       } else {

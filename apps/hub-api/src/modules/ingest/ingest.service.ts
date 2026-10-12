@@ -25,6 +25,7 @@ import {
   penaltyBansSkipped,
   penaltyBlocked,
   penaltyEntries,
+  penaltySkipped,
   trafficFlushDropped,
   unknownSourceTotal,
 } from '../metrics/metrics';
@@ -123,6 +124,14 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       logBan(reason, ip, sourceKey, banSeconds);
     },
     onBlocked: (reason) => penaltyBlocked.inc({ reason }),
+    onSkippedPrivate: () => {
+      penaltySkipped.inc({ cause: 'private_ip' });
+      // IP private khi đang deploy (production) hoặc đã bật TRUST_PROXY = gần như chắc cấu hình IP thật sai. ≤ 1 lần/giờ.
+      if ((process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') && Date.now() - this.lastPrivateLog > 3_600_000) {
+        this.lastPrivateLog = Date.now();
+        logger.warn('Hộp phạt: /hooks nhận request từ IP loopback/private -> KHÔNG chấm điểm. Kiểm cấu hình IP thật (TRUST_PROXY, proxy/edge)');
+      }
+    },
     onBanSkipped: (reason, cause) => {
       penaltyBansSkipped.inc({ reason, cause });
       // `capacity` = hộp đầy ban -> không phạt (fail-open có tiếng). Log tối đa một lần mỗi phút.
@@ -133,6 +142,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     },
   });
   private lastCapacityLog = 0;
+  private lastPrivateLog = 0;
   /**
    * EG4 (ADR-179): lưu lượng theo (source, phút, outcome) — `record()` không I/O; đẩy xuống Postgres mỗi `TRAFFIC_FLUSH_MS`
    * qua `forTenant` (RLS). Ghi lỗi -> giữ tối đa 10 phút dữ liệu.
@@ -430,8 +440,6 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
       return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log);
     }
-    // EG2 (đính chính ADR-177): chữ ký đúng -> nhớ "cặp tốt" (bộ nhớ, 0 I/O).
-    this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey), undefined);
 
     // 3c. EG3 (ADR-178): rate limit theo source chạy SAU verify — chỉ request ký đúng mới tiêu hạn mức. Kẻ biết một
     // sourceKey thật bắn chữ ký sai không còn khoá được webhook thật của nạn nhân. Cửa sổ cố định 60s, 1 EVAL INCR+EXPIRE,
@@ -442,6 +450,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       trace.outcome = 'RATE_LIMITED';
       return { status: 429, body: { error: 'Vượt quá tần suất cho phép (Rate limit)' } };
     }
+    // EG2 (đính chính ADR-177): ký đúng VÀ qua rate limit -> nhớ "cặp tốt" (bộ nhớ, 0 I/O). Request bị 429 không được tính.
+    this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey), undefined);
 
     // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)
     let idempotencyKey: string;

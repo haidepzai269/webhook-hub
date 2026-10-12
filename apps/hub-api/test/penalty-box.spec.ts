@@ -179,19 +179,51 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     expect(box.checkIp(gh, 'k').blocked).toBe(true);
   });
 
-  it('[EG:T18] luật (b) KHÔNG ban cặp tốt: kẻ biết key nạn nhân đặt secret sai ở GitHub -> chỉ đếm, giao hàng thật của nạn nhân từ IP đó vẫn 200', async () => {
+  it('[EG:T18] luật (b) với cặp tốt NÂNG ngưỡng (×10), không miễn: sai/đúng xen kẽ của GitHub không bị ban oan; flood 401 vô hạn cuối cùng vẫn bị ban', async () => {
     const { svc } = build({ srcA: src('A') });
-    const skipped = jest.fn();
-    svc.penalty = new PenaltyBox(cfg(), { onBanSkipped: skipped });
     const gh = '140.82.115.30';
     expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200); // cặp tốt
-    for (let i = 0; i < 100; i++) expect((await svc.ingestWebhook(req('srcA', gh, sign('secret-cua-ke-xau')))).status).toBe(401);
-    expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200);
-    expect(skipped).toHaveBeenCalledWith('bad_signature', 'good_pair');
+    // kẻ biết key nạn nhân đặt secret sai ở GitHub: 100 lần sai/phút xen với giao hàng thật -> không ban (ngưỡng 30 × 10)
+    for (let i = 0; i < 100; i++) {
+      expect((await svc.ingestWebhook(req('srcA', gh, sign('secret-cua-ke-xau')))).status).toBe(401);
+      if (i % 10 === 0) expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200);
+    }
     expect(svc.penalty.activeBansFor('A')).toEqual([]);
-    // cặp CHƯA từng verify đúng vẫn bị ban như cũ
+    // flood không giới hạn trên cặp tốt (1 request đúng rồi bắn sai mãi): tới 300 lần trong cửa sổ thì bị ban
+    for (let i = 0; i < 200; i++) await svc.ingestWebhook(req('srcA', gh, sign('secret-cua-ke-xau')));
+    expect((await svc.ingestWebhook(req('srcA', gh, sign('secret-cua-ke-xau')))).status).toBe(429);
+    expect(svc.penalty.activeBansFor('A')).toHaveLength(1);
+    // cặp CHƯA từng verify đúng vẫn bị ban ở ngưỡng thường (30)
     for (let i = 0; i < 30; i++) await svc.ingestWebhook(req('srcA', '203.0.113.99', sign('sai')));
     expect((await svc.ingestWebhook(req('srcA', '203.0.113.99'))).status).toBe(429);
+  });
+
+  it('review lượt 2 CHẶN A: cache tốt chia theo sourceKey — 1 key × N IP (N > trần) không đẩy được cặp tốt của key khác; bảng ngoài loại key hoạt động cũ nhất', () => {
+    const box = new PenaltyBox(cfg({ threshold404: 2, maxEntries: 1000, goodIpsPerKey: 64, maxGoodKeys: 3 }));
+    const gh = '140.82.115.40';
+    box.markGood(gh, 'key-nan-nhan');
+    // kẻ xấu: source riêng, 50k request ký đúng, mỗi request một /64 khác nhau
+    for (let i = 0; i < 50_000; i++) box.markGood(`2001:db8:${(i >> 16) & 0xffff}:${i & 0xffff}::1`, 'key-ke-xau');
+    expect(box.goodSize()).toBe(64 + 1);
+    box.recordUnknownSource(gh);
+    box.recordUnknownSource(gh); // IP GitHub bị ban qua chiêu 404
+    expect(box.checkIp(gh, 'key-nan-nhan').blocked).toBe(false); // cặp tốt của nạn nhân còn nguyên
+    expect(box.checkIp(gh, 'khong_co').blocked).toBe(true);
+    // muốn đẩy key thật ra phải có nhiều key hợp lệ ĐANG hoạt động hơn trần bảng ngoài
+    box.markGood('198.51.100.1', 'k1');
+    box.markGood('198.51.100.1', 'k2');
+    box.markGood('198.51.100.1', 'k3');
+    expect(box.checkIp(gh, 'key-nan-nhan').blocked).toBe(true);
+  });
+
+  it('review lượt 2 CHẶN A(3): request bị rate limit (429) KHÔNG được đánh dấu cặp tốt', async () => {
+    const { svc, redis } = build({ srcA: src('A') });
+    redis.checkRateLimit.mockResolvedValue(false);
+    expect((await svc.ingestWebhook(req('srcA', '203.0.113.60'))).status).toBe(429);
+    expect(svc.penalty.goodSize()).toBe(0);
+    redis.checkRateLimit.mockResolvedValue(true);
+    expect((await svc.ingestWebhook(req('srcA', '203.0.113.60'))).status).toBe(200);
+    expect(svc.penalty.goodSize()).toBe(1);
   });
 
   it('review CHẶN 1: ban hết hạn được quét, ban có trần riêng (≤50%), khoá vừa chèn không bị loại — hộp đầy không tự vô hiệu', () => {
@@ -216,13 +248,15 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
   });
 
   it('review NÊN 3: IP loopback/private không chấm điểm, không chặn; EDGE_PENALTY_ENABLED=0 tắt hẳn; IPv4-mapped dạng hex', () => {
-    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1', 'fd00::1', 'fc12::5']) {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.1.1', '100.64.0.1', '100.127.255.255', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1', 'fd00::1', 'fc12::5', 'fe80::1', 'febf::1']) {
       expect([ip, isLocalOrPrivateIp(ip)]).toEqual([ip, true]);
     }
-    for (const ip of ['172.32.0.1', '203.0.113.7', '2001:db8::1', '::ffff:cb00:7107']) expect([ip, isLocalOrPrivateIp(ip)]).toEqual([ip, false]);
+    for (const ip of ['172.32.0.1', '100.128.0.1', '203.0.113.7', '2001:db8::1', 'fec0::1', '::ffff:cb00:7107']) expect([ip, isLocalOrPrivateIp(ip)]).toEqual([ip, false]);
     expect(ipKey('::ffff:cb00:7107')).toBe('203.0.113.7');
-    const box = new PenaltyBox(cfg({ threshold404: 2 }));
+    const skippedPrivate = jest.fn();
+    const box = new PenaltyBox(cfg({ threshold404: 2 }), { onSkippedPrivate: skippedPrivate });
     for (let i = 0; i < 10; i++) box.recordUnknownSource('172.18.0.5'); // NAT của Docker
+    expect(skippedPrivate).toHaveBeenCalledTimes(10); // không câm: metric skipped{cause="private_ip"}
     expect(box.checkIp('172.18.0.5').blocked).toBe(false);
     expect(box.size()).toBe(0);
     const off = new PenaltyBox(cfg({ threshold404: 2, enabled: false }));

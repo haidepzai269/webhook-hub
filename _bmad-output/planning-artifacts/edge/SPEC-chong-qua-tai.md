@@ -194,7 +194,7 @@ Mỗi lớp được phép sai theo hướng **cho request đi qua (fail-open)**
 | 404 do source **tắt hoặc đã lưu trữ** | — | **Không tính điểm** | — |
 | 2xx, trùng, 429 | — | Không tính điểm | — |
 
-> **Đính chính sau review (2026-10-12, ADR-177 bổ sung):** IP hook của GitHub/PayOS là IP CHUNG của mọi tenant — kẻ xấu tự kích 404 (luật a) hoặc đặt secret sai vào key của nạn nhân (luật b) từ chính IP đó. Vì vậy: cặp (IP, sourceKey) đã verify đúng trong `EDGE_PENALTY_GOOD_TTL` (24h) **không bị luật (a) chặn** và **không bị luật (b) ban** (chỉ đếm). IP loopback/private không chấm điểm; `EDGE_PENALTY_ENABLED=0` tắt hẳn. Ban có trần riêng (≤ 50% `MAX_ENTRIES`), ban hết hạn được quét; đầy thì không phạt thêm (log + metric). Test `[EG:T17]`, `[EG:T18]`.
+> **Đính chính sau review (2026-10-12, ADR-177 bổ sung):** IP hook của GitHub/PayOS là IP CHUNG của mọi tenant — kẻ xấu tự kích 404 (luật a) hoặc đặt secret sai vào key của nạn nhân (luật b) từ chính IP đó. Vì vậy: cặp (IP, sourceKey) đã verify đúng trong `EDGE_PENALTY_GOOD_TTL` (24h) **không bị luật (a) chặn**; với luật (b) cặp tốt dùng ngưỡng ×10 (lượt 2: không miễn vô hạn). Cache tốt chia theo sourceKey (≤ 64 IP mỗi key), chỉ ghi khi đã qua rate limit. IP loopback/private không chấm điểm; `EDGE_PENALTY_ENABLED=0` tắt hẳn. Ban có trần riêng (≤ 50% `MAX_ENTRIES`), ban hết hạn được quét; đầy thì không phạt thêm (log + metric). Test `[EG:T17]`, `[EG:T18]`.
 
 **Vì sao luật được thiết kế như vậy:**
 
@@ -326,7 +326,7 @@ Quyền xem dùng scope mới `traffic:read`, thêm vào `ROLE_SCOPES` cho `owne
 | `[EG:T15]` | L0 | Hàm nhận định: trả `code` + `facts` đúng ngưỡng. Không có dữ liệu thì trả trạng thái trống |
 | `[EG:T16]` | L1 | `EDGE_NGINX=0` thì hub-api nghe như cũ, không có tiến trình nginx, mọi test ingest hiện có vẫn xanh |
 | `[EG:T17]` | L0 | *Đính chính sau review (2026-10-12):* luật (a) không chặn cặp (IP, sourceKey) đã verify đúng gần đây của một IP đang bị phạt; key lạ từ IP đó vẫn bị 429 trước DB |
-| `[EG:T18]` | L0 | *Đính chính sau review (2026-10-12):* luật (b) không ban cặp tốt — chỉ đếm; cặp chưa từng verify đúng vẫn bị ban |
+| `[EG:T18]` | L0 | *Đính chính sau review (2026-10-12, lượt 2):* luật (b) với cặp tốt dùng ngưỡng × `EDGE_PENALTY_401_GOOD_MULTIPLIER` (10) — sai/đúng xen kẽ không bị ban oan, flood 401 vô hạn trên cặp tốt cuối cùng vẫn bị ban; cặp chưa từng verify đúng bị ban ở ngưỡng thường |
 
 ## 9. P2 (ghi lại, chưa làm)
 
