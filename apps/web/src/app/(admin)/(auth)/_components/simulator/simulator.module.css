@@ -20,7 +20,7 @@
 .canvas {
   flex: 1;
   /* Co theo chiều cao khung nhìn: mô phỏng toàn màn hình không được làm trang cuộn trên laptop thấp. */
-  min-height: clamp(200px, 42dvh, 380px);
+  min-height: clamp(160px, calc(42 * var(--auth-vh, 1vh)), 380px);
   overflow: hidden;
   border: 1px solid var(--v-line);
   border-radius: 12px;
@@ -188,4 +188,19 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* Khung rất thấp (≤ 560px, vd. zoom 200%): bỏ chiều cao tối thiểu của chú thích, canvas co tới 120px. */
+@media (max-height: 560px) {
+  .panel {
+    gap: 8px;
+  }
+
+  .canvas {
+    min-height: 120px;
+  }
+
+  .caption {
+    min-height: 0;
+  }
 }

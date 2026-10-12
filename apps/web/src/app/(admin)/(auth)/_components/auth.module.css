@@ -12,15 +12,25 @@
   /* KHÔNG dùng --font-mono của globals: ở :root nó trỏ --font-jetbrains-mono (chỉ định nghĩa trên body) → giá trị
      không hợp lệ, cả khai báo font-family bị bỏ và rơi về Inter. Đọc thẳng biến của next/font, có dự phòng. */
   --auth-mono: var(--font-jetbrains-mono, ui-monospace), ui-monospace, monospace;
+  /* 1% chiều cao khung nhìn: dvh (trừ thanh địa chỉ di động) nếu trình duyệt hỗ trợ, không thì vh. */
+  --auth-vh: 1vh;
 
   /* Trang KHÔNG cuộn (yêu cầu admin): khung cố định đúng một khung nhìn. Hai panel tự co theo chiều cao (clamp theo dvh +
      @media max-height); nếu vẫn không đủ chỗ thì CHỈ khung form cuộn (.formPanel overflow-y: auto), không cuộn cả trang. */
+  /* Neo cho các span .srOnly (absolute) — không để chúng thoát ra ngoài và kéo dài trang. */
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  height: 100dvh;
+  height: calc(100 * var(--auth-vh));
   background-color: var(--background);
   color: var(--foreground);
+}
+
+@supports (height: 1dvh) {
+  .page {
+    --auth-vh: 1dvh;
+  }
 }
 
 /* ── Panel minh hoạ (aria-hidden) ─────────────────────────────────────────────────────────────────────── */
@@ -38,12 +48,12 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: clamp(12px, 3dvh, 32px);
+  gap: clamp(12px, calc(3 * var(--auth-vh)), 32px);
   min-height: 0;
   overflow: hidden;
   /* Viền mảnh tách panel khỏi form khi theme tối (hai nền gần như cùng màu). */
   border-right: 1px solid rgb(255 255 255 / 0.08);
-  padding: clamp(20px, 4.5dvh, 40px) clamp(24px, 3.5vw, 48px);
+  padding: clamp(20px, calc(4.5 * var(--auth-vh)), 40px) clamp(24px, 3.5vw, 48px);
   background-color: var(--v-bg);
   background-image:
     radial-gradient(ellipse 60% 45% at 45% 45%, rgb(52 211 153 / 0.08), transparent 70%),
@@ -75,7 +85,7 @@
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
-  gap: clamp(10px, 2.2dvh, 24px);
+  gap: clamp(10px, calc(2.2 * var(--auth-vh)), 24px);
   width: 100%;
   min-height: 0;
   max-width: 540px;
@@ -84,7 +94,7 @@
 
 /* Chỉ sơ đồ co lại khi thiếu chiều cao (SVG giữ tỉ lệ, căn giữa); chữ, log, nút giữ nguyên cỡ. */
 .visualBody > *,
-.visual > * {
+.visual:not([data-sim="on"]) > * {
   flex-shrink: 0;
 }
 
@@ -268,7 +278,7 @@
 .tagline {
   max-width: 22ch;
   color: #f4f4f5;
-  font-size: clamp(18px, 2.6dvh, 22px);
+  font-size: clamp(18px, calc(2.6 * var(--auth-vh)), 22px);
   font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.3;
@@ -283,13 +293,17 @@
 /* ── Panel form (theo theme admin) ────────────────────────────────────────────────────────────────────── */
 
 .formPanel {
+  /* .srOnly (absolute) trong form phải neo vào khung cuộn này, không neo vào trang. */
+  position: relative;
   display: flex;
   justify-content: center;
   min-width: 0;
   min-height: 0;
   /* Lối thoát cuối cùng khi khung nhìn quá thấp (vd. register trên màn thấp): cuộn TRONG khung form, trang vẫn đứng yên. */
   overflow-y: auto;
-  padding: clamp(16px, 4dvh, 48px) 24px;
+  /* Link footer có vùng bấm 40px (margin âm) + viền focus 4px: chừa chỗ để viền không bị cắt khi khung đang cuộn. */
+  scroll-padding-block: 16px;
+  padding: clamp(16px, calc(4 * var(--auth-vh)), 48px) 24px;
 }
 
 /* margin-block: auto = căn giữa dọc "an toàn": khi form dài hơn khung, phần đầu không bị đẩy ra ngoài vùng cuộn. */
@@ -307,11 +321,11 @@
 }
 
 .header {
-  margin-bottom: clamp(14px, 3.2dvh, 28px);
+  margin-bottom: clamp(14px, calc(3.2 * var(--auth-vh)), 28px);
 }
 
 .title {
-  font-size: clamp(20px, 3.2dvh, 24px);
+  font-size: clamp(20px, calc(3.2 * var(--auth-vh)), 24px);
   font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.25;
@@ -325,7 +339,7 @@
 }
 
 .inputGroup {
-  margin-bottom: clamp(10px, 2dvh, 16px);
+  margin-bottom: clamp(10px, calc(2 * var(--auth-vh)), 16px);
 }
 
 .label {
@@ -495,7 +509,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: clamp(10px, 2.6dvh, 24px) 0;
+  margin: clamp(10px, calc(2.6 * var(--auth-vh)), 24px) 0;
   color: var(--muted-foreground);
   font-size: 13px;
 }
@@ -534,7 +548,7 @@
 }
 
 .footer {
-  margin-top: clamp(12px, 2.6dvh, 24px);
+  margin-top: clamp(12px, calc(2.6 * var(--auth-vh)), 24px);
   color: var(--muted-foreground);
   font-size: 14px;
   text-align: center;
@@ -562,8 +576,16 @@
 .visual[data-sim="on"] {
   justify-content: flex-start;
   gap: 20px;
-  height: 100dvh;
+  height: calc(100 * var(--auth-vh));
   padding: 28px 40px;
+}
+
+/* Mô phỏng trên khung rất thấp: nén lề để canvas + chú thích + meta vẫn nằm trọn trong một màn hình. */
+@media (max-height: 560px) {
+  .visual[data-sim="on"] {
+    gap: 10px;
+    padding-block: 14px;
+  }
 }
 
 .simTop {
@@ -589,7 +611,7 @@
     max-height: 120px;
     border-right: 0;
     border-bottom: 1px solid rgb(255 255 255 / 0.08);
-    padding: clamp(10px, 2dvh, 20px) 16px;
+    padding: clamp(10px, calc(2 * var(--auth-vh)), 20px) 16px;
   }
 
   .visualBody,
@@ -605,7 +627,7 @@
   }
 
   .formPanel {
-    padding: clamp(16px, 3dvh, 32px) 16px;
+    padding: clamp(16px, calc(3 * var(--auth-vh)), 32px) 16px;
   }
 
   /* Màn hẹp: form neo trên (dưới dải thương hiệu), không căn giữa dọc. */
@@ -626,13 +648,21 @@
 /* ── Khung nhìn thấp (laptop 1280×720/650, điện thoại thấp): nén khoảng cách để /login kể cả khi đang hiện lỗi vẫn vừa
    một màn hình. Ô nhập/nút 36px (vẫn > 24px của WCAG 2.5.8). ───────────────────────────────────────────── */
 
-@media (max-height: 760px) {
+@media (min-width: 900px) and (max-height: 760px) {
   .page {
     --auth-control-h: 36px;
   }
+}
 
+@media (max-width: 899.98px) {
+  .page {
+    --auth-control-h: 44px;
+  }
+}
+
+@media (max-height: 760px) {
   .formPanel {
-    padding-block: 12px;
+    padding-block: 16px;
   }
 
   .header {
@@ -685,6 +715,31 @@
 /* Điện thoại thấp: dải trên chỉ còn thương hiệu (câu khẩu hiệu là trang trí, nhường chỗ cho form). */
 @media (max-width: 899.98px) and (max-height: 760px) {
   .tagline {
+    display: none;
+  }
+}
+
+/* Cột đôi rất thấp (≤ 520px, vd. zoom 200%): bớt phần trang trí của panel trái để sơ đồ, nút "Mô phỏng" và khẩu hiệu
+   không chồng lên nhau. Log là trang trí (aria-hidden). */
+@media (min-width: 900px) and (max-height: 520px) {
+  .eyebrow,
+  .note,
+  .log li:nth-child(n + 3) {
+    display: none;
+  }
+
+  .log {
+    padding-top: 8px;
+  }
+
+  .tagline {
+    max-width: none;
+    font-size: 16px;
+  }
+}
+
+@media (min-width: 900px) and (max-height: 440px) {
+  .log {
     display: none;
   }
 }
