@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T08:46:41.337Z, commit d9edad8).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T08:50:04.879Z, commit 65924de).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 339 mã khai báo · 263 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 339 mã khai báo · 265 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -45,7 +45,7 @@ Tổng: 339 mã khai báo · 263 mã có test · 0 mồ côi · 24 mồ côi có
 | `AF:#37` | REVIEW-CHECKLIST.md · S2-4 | L0 | libs/providers/test/payos-sign.spec.ts:44 | ✅ pass |
 | `AF:#38` | REVIEW-CHECKLIST.md · S3-4 | L0 | apps/hub-api/test/metrics.spec.ts:66 | ✅ pass |
 | `AF:#39` | REVIEW-CHECKLIST.md · S1-8 | L2 | verify/scenarios/ingest-e2e.ts:156 | chưa chạy |
-| `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:222 | ✅ pass |
+| `AF:#40` | REVIEW-CHECKLIST.md · S3-5 | L0 | apps/hub-api/test/redis-budget.spec.ts:223 | ✅ pass |
 | `AF:#41` | REVIEW-CHECKLIST.md · S3-6 | — | — | mồ côi có lý do: PHU-LUC-SUA.md có bằng chứng cho mỗi câu — tài liệu, không phải test |
 | `AR:D-1` | REVIEW-DEPLOY-2026-10-11.md | L0 | apps/hub-api/test/hub-all-supervisor.spec.ts:37 | ✅ pass |
 | `AR:D-4` | REVIEW-DEPLOY-2026-10-11.md | L0 | apps/hub-api/test/hub-all-supervisor.spec.ts:48 | ✅ pass |
@@ -182,6 +182,8 @@ Tổng: 339 mã khai báo · 263 mã có test · 0 mồ côi · 24 mồ côi có
 | `EG:T5` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:86 | ✅ pass |
 | `EG:T6` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:101 | ✅ pass |
 | `EG:T7` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:123 | ✅ pass |
+| `EG:T8` | SPEC-chong-qua-tai.md · EG3 | L0 | apps/hub-api/test/redis-budget.spec.ts:256 | ✅ pass |
+| `EG:T12` | SPEC-chong-qua-tai.md · EG3 | L1 | apps/hub-api/test/ingest-ratelimit-after-verify-db.spec.ts:43 | ✅ pass |
 | `KN:T1` | SPEC-ket-noi.md · KN1 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv — VF đang chạy chaos). Logic phủ ở L1 [KN:U1]-[KN:U4] (console-endpoints-db.spec.ts). |
 | `KN:T2` | SPEC-ket-noi.md · KN3 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + PAYOS_FAKE_BASE_URL/CONNECTOR_INGEST_BASE_URL trong .env.verify). Luồng tương đương chạy ở L1 với fake PayOS của sink trong tiến trình: payos-connect-db.spec.ts [KN:U8] (phần b). |
 | `KN:T3` | SPEC-ket-noi.md · KN4 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + STRIPE_FAKE_BASE_URL trong .env.verify). Tương đương ở L1 với fake Stripe của sink trong tiến trình: stripe-connect-db.spec.ts [KN:U14][KN:U15] + [KN4] status/ngắt (DELETE tới đúng we_). |
@@ -296,6 +298,6 @@ Tổng: 339 mã khai báo · 263 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (188 file, 1228 khai báo it/test)
+## File test (189 file, 1230 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

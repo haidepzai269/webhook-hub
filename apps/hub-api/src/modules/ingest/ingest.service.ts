@@ -344,21 +344,11 @@ export class IngestService implements OnModuleDestroy {
     }
     trace.tenantId = source.tenantId;
 
-    // 2a. EG2 luật (b): cặp (IP, sourceKey) đang bị phạt vì ký sai liên tục -> chặn trước verify/rate limit.
+    // 2a. EG2 luật (b): cặp (IP, sourceKey) đang bị phạt vì ký sai liên tục -> chặn trước verify (0 HMAC, 0 Redis).
     const pairVerdict = this.penaltySafe(() => this.penalty.checkPair(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
     if (pairVerdict.blocked) {
       trace.blocked = true;
       return blockedAck(pairVerdict.retryAfterSec, req, trace);
-    }
-
-    // 2b. Rate limit theo source (cửa sổ cố định 60s, INCR+EXPIRE)
-    const rateLimitKey = `rate:source:${source.id}`;
-    // S3-4: trần cấu hình được (`INGEST_RATE_LIMIT_PER_MIN`, mặc định 100/phút/source) — k6 cần nâng trần.
-    const allowed = await this.redis.checkRateLimit(rateLimitKey, ingestRateLimitPerMin(), 60);
-    if (!allowed) {
-      log.warn('Bị chặn bởi Rate Limit theo Source');
-      trace.outcome = 'RATE_LIMITED';
-      return { status: 429, body: { error: 'Vượt quá tần suất cho phép (Rate limit)' } };
     }
 
     // Giải mã danh sách secrets còn hiệu lực
@@ -393,6 +383,16 @@ export class IngestService implements OnModuleDestroy {
       // EG2 luật (b): phạt theo CẶP (ip, sourceKey) — tenant khác dùng chung IP của provider không bị vạ lây.
       this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
       return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log);
+    }
+
+    // 3c. EG3 (ADR-178): rate limit theo source chạy SAU verify — chỉ request ký đúng mới tiêu hạn mức. Kẻ biết một
+    // sourceKey thật bắn chữ ký sai không còn khoá được webhook thật của nạn nhân. Cửa sổ cố định 60s, 1 EVAL INCR+EXPIRE,
+    // trần `INGEST_RATE_LIMIT_PER_MIN` (S3-4, mặc định 100/phút/source). Redis chết -> fail-open.
+    const allowed = await this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60);
+    if (!allowed) {
+      log.warn('Bị chặn bởi Rate Limit theo Source');
+      trace.outcome = 'RATE_LIMITED';
+      return { status: 429, body: { error: 'Vượt quá tần suất cho phép (Rate limit)' } };
     }
 
     // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)

@@ -219,7 +219,7 @@ new Redis(process.env.REDIS_URL, { enableAutoPipelining: true, maxRetriesPerRequ
 | mỗi delivery | `MGET` circuit (đích không throttle) **hoặc** một `EVAL` gộp circuit + throttle (đích có `rate_limit_rps`, review #2) · `PUBLISH hub:realtime:deliveries` (thành công khi `failures=0`: 0 lệnh circuit) | 2 |
 | **Tổng** | 1 đích = **6**, 2 đích = **8** | |
 
-Ngoài đường nóng: delivery lỗi thêm `EVAL` INCR circuit; circuit HALF_OPEN thêm `EVAL` giành probe; gửi trùng (GET idem trúng) chỉ 2 lệnh. Đích có throttle **không** tốn thêm lệnh nào (đo `redis-cli MONITOR` 10/10 sau review #2: 1 SePay → 2 đích có `rate_limit_rps` = **8 lệnh client**, trước đó 10). Cố ý **giữ** `GET` idem trước transaction (không làm R2): request trùng trả lời từ Redis, khỏi mở transaction và chịu P2002 + rollback.
+Ngoài đường nóng: request sai chữ ký **0 lệnh** (EG3, ADR-178: rate limit chạy sau verify; trước đó 1 `EVAL`); request bị hộp phạt chặn 0 lệnh (ADR-177); delivery lỗi thêm `EVAL` INCR circuit; circuit HALF_OPEN thêm `EVAL` giành probe; gửi trùng (GET idem trúng) chỉ 2 lệnh. Đích có throttle **không** tốn thêm lệnh nào (đo `redis-cli MONITOR` 10/10 sau review #2: 1 SePay → 2 đích có `rate_limit_rps` = **8 lệnh client**, trước đó 10). Cố ý **giữ** `GET` idem trước transaction (không làm R2): request trùng trả lời từ Redis, khỏi mở transaction và chịu P2002 + rollback.
 
 **Quota Upstash free (kiểm 10/10/2026 trên [upstash.com/pricing/redis](https://upstash.com/pricing/redis)): 500.000 lệnh/tháng** (≈ 16.600/ngày) → ≈ **2.700 sự kiện/ngày** với 1 đích (÷6), ≈ 2.000 với 2 đích (÷8) — chưa trừ lệnh nền (pub/sub adapter, health).
 

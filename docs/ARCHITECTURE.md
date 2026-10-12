@@ -110,15 +110,20 @@ Tách ra mua được ba thứ:
 > ⚠️ **Bản ý tưởng gốc (mục 6.2) làm MẤT sự kiện.** Nó `SET NX` vào Redis **trước** transaction. Postgres chết giữa chừng → Redis key vẫn còn → provider retry → hub trả "200 duplicate" → sự kiện biến mất vĩnh viễn và provider tưởng đã giao thành công.
 
 ```
+0.  Hộp phạt theo IP (bộ nhớ, 0 Redis, 0 DB — §7.5, ADR-177): IP đang bị phạt vì dò sourceKey -> 429 -> DỪNG
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
 2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant)
-       không có / tắt / đã lưu trữ -> 404 -> DỪNG
-3.  Rate limit theo source (cửa sổ CỐ ĐỊNH 60s, 1 lệnh EVAL INCR+EXPIRE, trần INGEST_RATE_LIMIT_PER_MIN;
-    Redis chết -> fail-OPEN + log cảnh báo) -> vượt trần: 429 -> DỪNG
-    (sau bước 2 vì khoá rate:source:{source.id} cần source.id; sourceKey rác bị 404 trước, không tốn EVAL Redis)
-3b. Giải mã secrets · adapter.verify(rawBytes, headers, secrets[])
-       sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) -> 401 -> DỪNG
+       không tìm thấy -> 404 (+1 điểm phạt cho IP) -> DỪNG · tắt / đã lưu trữ -> 404 (không tính điểm) -> DỪNG
+    [SPEC QT, chưa code: "khoá dung lượng" của project chèn ngay SAU bước này — cần trạng thái khoá nạp kèm source]
+2a. Hộp phạt theo cặp (IP, sourceKey): cặp đang bị phạt vì ký sai liên tục -> 429 -> DỪNG (0 HMAC, 0 Redis)
+3.  Giải mã secrets · adapter.verify(rawBytes, headers, secrets[])
+       sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) (+1 điểm phạt cho cặp) -> 401 -> DỪNG
     Header nhạy cảm che trước khi lưu (ADR-051); signature_header = adapter.extractSignature(req) (S3-1)
+3c. Rate limit theo source (cửa sổ CỐ ĐỊNH 60s, 1 lệnh EVAL INCR+EXPIRE, trần INGEST_RATE_LIMIT_PER_MIN;
+    Redis chết -> fail-OPEN + log cảnh báo) -> vượt trần: 429 -> DỪNG
+    SAU verify (EG3, ADR-178): request sai chữ ký KHÔNG tiêu hạn mức của source — kẻ biết một sourceKey thật không
+    khoá được webhook thật của nạn nhân. Cái giá: thêm một HMAC cho request sai chữ ký (body ≤ 1MB).
+    (sau bước 2 vì khoá rate:source:{source.id} cần source.id; sourceKey rác bị 404 trước, không tốn EVAL Redis)
 4.  key = adapter.extractIdempotencyKey(req)
 5.  GET idem:{sourceId}:{key}          <- đường tắt, chỉ ĐỌC
        hit -> trả ACK duplicate -> DỪNG (không chạm DB)

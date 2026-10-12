@@ -5,6 +5,7 @@
  *
  * Kỳ vọng (đường thành công, đích không cấu hình throttle, circuit CLOSED và chưa từng lỗi):
  *   ingest     3 = EVAL rate limit + GET idem + SET NX idem (sau COMMIT)
+ *              (EG3, ADR-178: EVAL rate limit chạy SAU verify -> request sai chữ ký 0 lệnh)
  *   normalize  1 = PUBLISH hub:realtime:events (gộp mọi event/đích của raw event)
  *   delivery   2 = MGET circuit + PUBLISH hub:realtime:deliveries   (recordSuccess khi failures=0: 0 lệnh)
  *   => 1 đích = 6, 2 đích = 8.
@@ -250,6 +251,28 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(res.status).toBe(200);
     expect(take()).toEqual(['eval', 'get']);
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('[EG:T8] EG3 (ADR-178): request SAI chữ ký KHÔNG gọi checkRateLimit -> 0 lệnh Redis (trước EG3: 1 EVAL); sự kiện hợp lệ vẫn 3', async () => {
+    const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'rej' }) } };
+    const prisma: any = {
+      findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
+        id: 'src-sepay', tenantId: TENANT, isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
+      }),
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      $transaction: jest.fn(async (fn: any) => fn(tx)),
+    };
+    const svc = new IngestService(prisma, new RedisService());
+    const spy = jest.spyOn(svc['redis'], 'checkRateLimit');
+    const raw = JSON.stringify(sepayBody);
+    const res = await svc.ingestWebhook({
+      provider: 'sepay', sourceKey: 'src_sepay_main', headers: { authorization: 'Apikey sai-key' }, rawBody: Buffer.from(raw), body: JSON.parse(raw),
+    });
+    expect(res.status).toBe(401);
+    expect(spy).not.toHaveBeenCalled();
+    expect(take()).toEqual([]);
+    await runIngest();
+    expect(take()).toEqual(['eval', 'get', 'set']);
   });
 
   it('X9: POST /v1/p/:project/events đi qua persistAccepted -> ĐÚNG số lệnh như /hooks (EVAL + GET + SET); ApiKeyGuard 0 lệnh', async () => {

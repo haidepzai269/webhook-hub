@@ -1827,3 +1827,11 @@ CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
 - **401 phạt theo cặp, không phạt cả IP:** một tenant cấu hình sai secret GitHub làm IP GitHub ra 401 hàng loạt; phạt cả IP là tenant khác dùng chung GitHub mất webhook. Cái giá: kẻ đổi `sourceKey` liên tục không bị luật (b) bắt — nhưng `sourceKey` lạ thì rơi vào luật (a).
 - **Bộ nhớ có trần** `EDGE_PENALTY_MAX_ENTRIES` (50.000), LRU, khoá đang bị phạt giữ lâu hơn khoá đang đếm → nhiều IP chỉ làm hộp đầy, không cạn RAM; khi đầy thì có thể quên bớt bộ đếm của IP chưa bị phạt.
 - `/v1/p/*` (`publishFromService`) **chưa** áp luật (b): 401 API key nằm ở `ApiKeyGuard`, không đi qua ingest; để P2 nếu có số đo cần.
+
+---
+
+## ADR-178 — Rate limit theo source chạy SAU `adapter.verify` (EG3, 2026-10-12)
+
+**Vấn đề:** `checkRateLimit` chạy trước verify nên request sai chữ ký vẫn tiêu hạn mức `rate:source:{id}`. Ai biết một `sourceKey` thật (lộ qua log, ảnh chụp) bắn 100 request ký sai mỗi phút là PayOS/GitHub thật của nạn nhân nhận 429. Hộp phạt (ADR-177) chỉ ra tay sau 30 lần/cặp và không bắt được kẻ xoay IP.
+**Chọn:** thứ tự mới: hộp phạt IP → nạp source → hộp phạt cặp → verify → **rate limit** → idem key → GET idem → tx → SET NX (ARCHITECTURE §3.1). Chỉ request ký đúng mới tiêu hạn mức. Sự kiện hợp lệ vẫn 3 lệnh Redis; request sai chữ ký 1 → **0** lệnh (`redis-budget.spec.ts` [EG:T8]). `/v1/p/*/events` không đổi (API key đã xác thực ở `ApiKeyGuard` trước khi tới rate limit).
+**Đánh đổi:** request sai chữ ký tốn thêm một HMAC (body ≤ 1MB, vài micro giây tới ~1ms) mà trước đây có thể bị 429 chặn trước — đổi lại source không bị khoá oan. Rate limit vẫn chặn đúng hai thứ nó cần: provider gửi lại dồn dập và secret bị lộ. Spec QT (chưa code) sẽ chèn "khoá dung lượng" ngay sau bước nạp source, trước hộp phạt cặp.
