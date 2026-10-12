@@ -65,6 +65,8 @@ export interface CleanupResult {
   emailTokens: number;
   /** CB6 (ADR-171, review): bộ đếm bản trùng theo giờ quá `INGEST_DUPLICATES_KEEP_DAYS`. */
   ingestDuplicates: number;
+  /** EG4 (ADR-179): lưu lượng theo phút quá `TRAFFIC_RETENTION_DAYS`. */
+  sourceTraffic: number;
 }
 
 /** SPEC-auth §5.3: giữ phiên đã hết hạn thêm 30 ngày (điều tra reuse_detected), token mail thêm 7 ngày. */
@@ -72,7 +74,14 @@ export const AUTH_SESSION_KEEP_DAYS = 30;
 export const EMAIL_TOKEN_KEEP_DAYS = 7;
 /** CB6: nhận định `I-dup` chỉ đọc "hôm nay" — giữ 30 ngày bucket giờ để tra lại, hơn nữa là rác. */
 export const INGEST_DUPLICATES_KEEP_DAYS = 30;
-const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0 };
+/** EG4 (ADR-179): lưu lượng theo phút giữ 7 ngày (khối "Lưu lượng" xem tối đa 7 ngày). Kẹp 1–90. */
+export const DEFAULT_TRAFFIC_RETENTION_DAYS = 7;
+export function resolveTrafficRetentionDays(v: string | undefined = process.env.TRAFFIC_RETENTION_DAYS): number {
+  const n = v === undefined || v === '' ? NaN : Number(v);
+  if (!Number.isFinite(n)) return DEFAULT_TRAFFIC_RETENTION_DAYS;
+  return Math.min(90, Math.max(1, Math.round(n)));
+}
+const SKIPPED: CleanupResult = { skipped: true, outbox: 0, processedMessages: 0, rejectedRawEvents: 0, events: 0, authSessions: 0, emailTokens: 0, ingestDuplicates: 0, sourceTraffic: 0 };
 
 
 @Injectable()
@@ -168,6 +177,12 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
           DELETE FROM hub.ingest_duplicates WHERE (tenant_id, source_id, bucket) IN (
             SELECT tenant_id, source_id, bucket FROM hub.ingest_duplicates
             WHERE bucket < now() - make_interval(days => ${INGEST_DUPLICATES_KEEP_DAYS}::int)
+            LIMIT ${CLEANUP_BATCH})`),
+        // EG4 (ADR-179): như trên — xuyên project qua systemTx, theo lô, index (minute).
+        sourceTraffic: await this.deleteInBatches(Prisma.sql`
+          DELETE FROM hub.source_traffic_minutely WHERE (tenant_id, source_id, minute, outcome) IN (
+            SELECT tenant_id, source_id, minute, outcome FROM hub.source_traffic_minutely
+            WHERE minute < now() - make_interval(days => ${resolveTrafficRetentionDays()}::int)
             LIMIT ${CLEANUP_BATCH})`),
       };
       logger.info({ ...result, retentionDays: this.retentionDays }, 'Cleanup: hoàn tất một lượt');

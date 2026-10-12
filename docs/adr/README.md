@@ -1835,3 +1835,16 @@ CLAUDE.md và ARCHITECTURE §7.1 sửa theo.
 **Vấn đề:** `checkRateLimit` chạy trước verify nên request sai chữ ký vẫn tiêu hạn mức `rate:source:{id}`. Ai biết một `sourceKey` thật (lộ qua log, ảnh chụp) bắn 100 request ký sai mỗi phút là PayOS/GitHub thật của nạn nhân nhận 429. Hộp phạt (ADR-177) chỉ ra tay sau 30 lần/cặp và không bắt được kẻ xoay IP.
 **Chọn:** thứ tự mới: hộp phạt IP → nạp source → hộp phạt cặp → verify → **rate limit** → idem key → GET idem → tx → SET NX (ARCHITECTURE §3.1). Chỉ request ký đúng mới tiêu hạn mức. Sự kiện hợp lệ vẫn 3 lệnh Redis; request sai chữ ký 1 → **0** lệnh (`redis-budget.spec.ts` [EG:T8]). `/v1/p/*/events` không đổi (API key đã xác thực ở `ApiKeyGuard` trước khi tới rate limit).
 **Đánh đổi:** request sai chữ ký tốn thêm một HMAC (body ≤ 1MB, vài micro giây tới ~1ms) mà trước đây có thể bị 429 chặn trước — đổi lại source không bị khoá oan. Rate limit vẫn chặn đúng hai thứ nó cần: provider gửi lại dồn dập và secret bị lộ. Spec QT (chưa code) sẽ chèn "khoá dung lượng" ngay sau bước nạp source, trước hộp phạt cặp.
+
+---
+
+## ADR-179 — Lưu lượng theo source: gộp theo phút trong bộ nhớ hub-api, đẩy xuống Postgres mỗi 60s, giữ 7 ngày; được phép thiếu, không được làm chậm ingest (EG4, 2026-10-12)
+
+**Vấn đề:** `trace.ingested` (ACCEPTED/DUPLICATE/REJECTED/RATE_LIMITED) chỉ phát realtime, không lưu; `RATE_LIMITED` không để lại dấu vết nào, còn REJECTED chỉ có mẫu ≤ 20/phút/source. Chủ project và người vận hành không biết source của mình đang bị dội bao nhiêu.
+**Chọn:** bảng `hub.source_traffic_minutely` (tenant_id + RLS, PK `(tenant_id, source_id, minute, outcome)`, `top_ips` ≤ 5, IPv6 theo /64). `traced()` cộng vào Map trong bộ nhớ (`traffic-recorder.ts`, 0 truy vấn + 0 Redis trên đường nóng); mỗi `TRAFFIC_FLUSH_MS` mỗi project MỘT câu upsert `count = count + excluded.count` qua `forTenant`. Ghi lỗi → giữ tối đa 10 phút, quá thì bỏ phần cũ + `hub_traffic_flush_dropped_total`. Tắt máy: ghi nốt qua `onShutdownFlush` (chạy song song với bộ đếm bản trùng, chung trần 5s trong ngân sách 25s). Cleanup xoá cũ hơn `TRAFFIC_RETENTION_DAYS` (7). 404 của sourceKey lạ **không** lưu (không thuộc tenant nào) — chỉ metric + log; không tạo bảng toàn hub không có `tenant_id` (BB-5).
+**Đánh đổi:**
+- Mất tối đa ~60s số liệu khi tiến trình bị SIGKILL, và mất phần quá 10 phút khi DB chết lâu — chấp nhận: đây là số liệu quan sát, không phải trọng tài (BB-2 không đổi).
+- `top_ips` là xấp xỉ: mỗi ô (source, phút, outcome) chỉ theo dõi 64 IP khác nhau trong bộ nhớ, ghi 5 IP lớn nhất; gộp nhiều instance là gộp các top-5.
+- `REJECTED` gộp cả 401 sai chữ ký lẫn 422 thiếu khoá chống trùng (đúng như `trace.ingested`); ERROR (5xx) không lưu — đã có metric + log.
+- Thêm một lượt ghi DB mỗi 60s mỗi instance mỗi project có lưu lượng.
+- **Yêu cầu thay đổi gửi sang CB (ghi lại, CHƯA code — §5.3 SPEC-chong-qua-tai):** (1) evaluator luật `source.signature_failing` nên đếm từ `source_traffic_minutely` (outcome REJECTED) thay vì mẫu `REJECTED` trong `raw_events` (mẫu có trần 20/phút nên đếm thiếu); (2) luật mới `source.rate_limited`, mức warning, bật khi có ≥ 1 phút `RATE_LIMITED` trong 15 phút gần nhất, người nhận vẫn chỉ là người vận hành. Không sửa evaluator trong EG4 để không trộn với nhánh alerts.

@@ -438,6 +438,9 @@ EDGE_PENALTY_404_THRESHOLD=20  # hub-api, hộp phạt (EG2, ADR-177): số 404 
 EDGE_PENALTY_401_THRESHOLD=30  # số 401 sai chữ ký / 60s / cặp (IP, sourceKey) thì chặn CHỈ cặp đó. Kẹp 5–1000
 EDGE_PENALTY_BAN_SECONDS=600   # thời gian phạt, kẹp 30–86400
 EDGE_PENALTY_MAX_ENTRIES=50000 # trần số khoá trong bộ nhớ (LRU, khoá đang phạt giữ lâu hơn). Kẹp 1000–1000000
+TRAFFIC_FLUSH_MS=60000   # hub-api (EG4, ADR-179): nhịp đẩy lưu lượng theo source từ bộ nhớ xuống Postgres, kẹp 5000–600000.
+                         # Ghi lỗi -> giữ tối đa 10 phút dữ liệu rồi bỏ phần cũ (metric hub_traffic_flush_dropped_total)
+TRAFFIC_RETENTION_DAYS=7 # hub-worker: cleanup xoá hub.source_traffic_minutely cũ hơn N ngày, kẹp 1–90
 DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078); đổi phải restart worker
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần
                          # WEB_PUBLIC_URL (gốc deep link trong thư) + MAIL_DRIVER/MAIL_FROM/GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN

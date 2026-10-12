@@ -600,6 +600,15 @@ Bị chặn → `429 ip_temporarily_blocked` + `Retry-After` (giây còn lại).
 `hub_ingest_unknown_source_total`. Trần `EDGE_PENALTY_MAX_ENTRIES` khoá (LRU; khoá đang bị phạt giữ lâu hơn khoá đang đếm).
 Ngưỡng thực tế nhân theo số instance hub-api (mỗi instance đếm riêng).
 
+**Lưu lượng theo source (EG4, ADR-179)** — bảng `hub.source_traffic_minutely(tenant_id, source_id, minute, outcome,
+count, top_ips)`, PK `(tenant_id, source_id, minute, outcome)`, RLS + `TenantScopedRepository` (BB-5). `outcome` ∈
+`ACCEPTED, DUPLICATE, REJECTED, RATE_LIMITED, BLOCKED` (BLOCKED = hộp phạt chặn theo cặp). `traced()` của ingest chỉ cộng
+vào Map trong bộ nhớ (0 truy vấn, 0 Redis trên đường nóng); mỗi `TRAFFIC_FLUSH_MS` (60s) upsert theo lô
+`count = count + excluded.count`, `top_ips` gộp còn 5 IP — nhiều instance cùng ghi vẫn cộng đúng. Ghi lỗi → giữ tối đa 10
+phút dữ liệu, quá thì bỏ phần cũ + `hub_traffic_flush_dropped_total`. Tắt máy: ghi nốt best-effort trong ngân sách shutdown.
+Giữ `TRAFFIC_RETENTION_DAYS` (7) ngày, dọn trong `cleanup.job.ts`. **404 của sourceKey lạ không vào bảng** (không thuộc
+tenant nào) — chỉ có `hub_ingest_unknown_source_total` + log. Số liệu quan sát: được phép thiếu, không được làm chậm ingest.
+
 ## 8. Quan sát (Observability)
 
 | Thứ | Cách làm | Ghi chú |

@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, Optional } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService, getMasterKey } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
 import { AdapterContext, IdempotencyKeyMissingError, ProviderRegistry } from '@hub/providers';
@@ -18,9 +18,11 @@ import {
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
 import { redactHeaders } from './redact-headers';
-import { ingestDuration, ingestRequests, penaltyBans, penaltyBlocked, penaltyEntries, unknownSourceTotal } from '../metrics/metrics';
+import { ingestDuration, ingestRequests, penaltyBans, penaltyBlocked, penaltyEntries, trafficFlushDropped, unknownSourceTotal } from '../metrics/metrics';
 import { DuplicateCounter } from './duplicate-counter';
 import { PenaltyBox, PenaltyVerdict, logBan, resolvePenaltyConfig } from './penalty-box';
+import { TrafficOutcome, TrafficRecorder } from './traffic-recorder';
+import { onShutdownFlush } from '../../shutdown';
 
 /** Phản hồi của lõi ingest. `headers` chỉ dùng cho 429 của hộp phạt (`Retry-After`). */
 export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string> };
@@ -41,7 +43,12 @@ interface TraceState {
   rawEventId?: string;
   /** EG2: cặp (ip, sourceKey) đang bị hộp phạt chặn — tenant đã biết, không có `outcome` (không phát trace). */
   blocked?: boolean;
+  /** EG4: source đã biết -> lưu lượng theo phút. */
+  sourceId?: string;
 }
+
+/** EG4: outcome của trace -> outcome của bảng lưu lượng (ERROR không lưu — đã có metric + log). */
+const TRAFFIC_OUTCOMES = new Set<string>(['ACCEPTED', 'DUPLICATE', 'REJECTED', 'RATE_LIMITED']);
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
 
@@ -89,7 +96,7 @@ function rejectAck(
 }
 
 @Injectable()
-export class IngestService implements OnModuleDestroy {
+export class IngestService implements OnModuleInit, OnModuleDestroy {
   /** S1-4: trần 20 bản ghi REJECTED/phút/source, trong bộ nhớ (không tốn Redis). */
   private readonly rejectedLimiter = new RejectedRecordLimiter();
   /**
@@ -108,6 +115,14 @@ export class IngestService implements OnModuleDestroy {
     },
     onBlocked: (reason) => penaltyBlocked.inc({ reason }),
   });
+  /**
+   * EG4 (ADR-179): lưu lượng theo (source, phút, outcome) — `record()` không I/O; đẩy xuống Postgres mỗi `TRAFFIC_FLUSH_MS`
+   * qua `forTenant` (RLS). Ghi lỗi -> giữ tối đa 10 phút dữ liệu.
+   */
+  readonly traffic = new TrafficRecorder((tenantId, rows) => this.prisma.forTenant(tenantId).addSourceTraffic(rows), {
+    onDropped: (n) => trafficFlushDropped.inc(n),
+  });
+  private unregisterShutdown?: () => void;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -119,8 +134,14 @@ export class IngestService implements OnModuleDestroy {
    * `app.close()` (test, Nest): ghi nốt bộ đếm bản trùng. Tín hiệu SIGTERM/SIGINT thật KHÔNG đi qua đây — `main.ts`
    * (`installShutdown`) gọi `duplicates.close()` có trần thời gian rồi thoát (review CB6 Thấp 3).
    */
+  onModuleInit(): void {
+    // SIGTERM thật không đi qua onModuleDestroy (xem trên) -> lưu lượng đăng ký ghi nốt với `installShutdown` (best-effort).
+    this.unregisterShutdown = onShutdownFlush(() => this.traffic.close());
+  }
+
   async onModuleDestroy(): Promise<void> {
-    await this.duplicates.close();
+    this.unregisterShutdown?.();
+    await Promise.all([this.duplicates.close(), this.traffic.close()]);
   }
 
   async ingestWebhook(req: RawWebhookRequest): Promise<IngestResponse> {
@@ -143,6 +164,7 @@ export class IngestService implements OnModuleDestroy {
         return { status: 409, body: { error: 'source_inactive' } };
       }
       trace.tenantId = source.tenantId;
+      trace.sourceId = source.id;
       if (!(await this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60))) {
         trace.outcome = 'RATE_LIMITED';
         return { status: 429, body: { error: 'rate_limited' } };
@@ -167,6 +189,7 @@ export class IngestService implements OnModuleDestroy {
     const trace: TraceState = { correlationId: generateCorrelationId() };
     const result = await run(trace);
     this.recordMetrics(req.provider, trace, result.status, startedAt);
+    this.recordTraffic(req, trace);
     // Chỉ phát khi ĐÃ BIẾT tenant (source tồn tại) — 404/400/413 không phát gì. Best-effort.
     if (trace.tenantId && trace.outcome && this.notifier) {
       try {
@@ -343,6 +366,7 @@ export class IngestService implements OnModuleDestroy {
       return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
     }
     trace.tenantId = source.tenantId;
+    trace.sourceId = source.id;
 
     // 2a. EG2 luật (b): cặp (IP, sourceKey) đang bị phạt vì ký sai liên tục -> chặn trước verify (0 HMAC, 0 Redis).
     const pairVerdict = this.penaltySafe(() => this.penalty.checkPair(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
@@ -414,6 +438,18 @@ export class IngestService implements OnModuleDestroy {
     });
     // 8. ACK theo định dạng của provider
     return this.ackFor(adapter, persisted, idempotencyKey, trace);
+  }
+
+  /** EG4: cộng một request vào lưu lượng trong bộ nhớ (không I/O). Lỗi -> bỏ qua (số liệu quan sát). */
+  private recordTraffic(req: RawWebhookRequest, trace: TraceState): void {
+    if (!trace.tenantId || !trace.sourceId) return; // 404 sourceKey lạ: không thuộc tenant nào -> chỉ metric + log
+    const outcome: TrafficOutcome | null = trace.blocked ? 'BLOCKED' : trace.outcome && TRAFFIC_OUTCOMES.has(trace.outcome) ? (trace.outcome as TrafficOutcome) : null;
+    if (!outcome) return;
+    try {
+      this.traffic.record(trace.tenantId, trace.sourceId, outcome, req.ip);
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, 'Không ghi được lưu lượng vào bộ nhớ (bỏ qua)');
+    }
   }
 
   /** EG2: hộp phạt lỗi thì cho request đi qua như chưa có hộp phạt (fail-open) — chỉ log. */

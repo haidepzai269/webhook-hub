@@ -69,3 +69,10 @@ export const unknownSourceTotal = new Counter({
   help: 'Số request /hooks có sourceKey không tồn tại (404, không thuộc tenant nào — không lưu vào DB)',
   registers: [apiRegistry],
 });
+
+/** EG4 (ADR-179): số request lưu lượng bị bỏ vì ghi DB lỗi quá trần bộ đệm 10 phút (số liệu quan sát được phép thiếu). */
+export const trafficFlushDropped = new Counter({
+  name: 'hub_traffic_flush_dropped_total',
+  help: 'Số request của bảng lưu lượng theo source bị bỏ vì ghi Postgres lỗi quá trần bộ đệm 10 phút',
+  registers: [apiRegistry],
+});

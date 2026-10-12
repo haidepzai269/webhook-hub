@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T08:50:04.879Z, commit 65924de).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T08:56:06.119Z, commit 87083ae).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 339 mã khai báo · 265 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 339 mã khai báo · 266 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -28,7 +28,7 @@ Tổng: 339 mã khai báo · 265 mã có test · 0 mồ côi · 24 mồ côi có
 | `AF:#18` | REVIEW-CHECKLIST.md · S1-3 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:204 | ✅ pass |
 | `AF:#19` | REVIEW-CHECKLIST.md · S1-3 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:87 | ✅ pass |
 | `AF:#20` | REVIEW-CHECKLIST.md · S1-4 | L2 | verify/scenarios/chaos-l3.ts:217 | chưa chạy |
-| `AF:#21` | REVIEW-CHECKLIST.md · S1-4 | L0 | apps/hub-worker/test/cleanup-job.spec.ts:44 | ✅ pass |
+| `AF:#21` | REVIEW-CHECKLIST.md · S1-4 | L0 | apps/hub-worker/test/cleanup-job.spec.ts:45 | ✅ pass |
 | `AF:#22` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:196 | ✅ pass |
 | `AF:#23` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:175 | ✅ pass |
 | `AF:#24` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:151 | ✅ pass |
@@ -184,6 +184,7 @@ Tổng: 339 mã khai báo · 265 mã có test · 0 mồ côi · 24 mồ côi có
 | `EG:T7` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:123 | ✅ pass |
 | `EG:T8` | SPEC-chong-qua-tai.md · EG3 | L0 | apps/hub-api/test/redis-budget.spec.ts:256 | ✅ pass |
 | `EG:T12` | SPEC-chong-qua-tai.md · EG3 | L1 | apps/hub-api/test/ingest-ratelimit-after-verify-db.spec.ts:43 | ✅ pass |
+| `EG:T13` | SPEC-chong-qua-tai.md · EG4 | L1 | apps/hub-api/test/source-traffic-db.spec.ts:31 | ✅ pass |
 | `KN:T1` | SPEC-ket-noi.md · KN1 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv — VF đang chạy chaos). Logic phủ ở L1 [KN:U1]-[KN:U4] (console-endpoints-db.spec.ts). |
 | `KN:T2` | SPEC-ket-noi.md · KN3 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + PAYOS_FAKE_BASE_URL/CONNECTOR_INGEST_BASE_URL trong .env.verify). Luồng tương đương chạy ở L1 với fake PayOS của sink trong tiến trình: payos-connect-db.spec.ts [KN:U8] (phần b). |
 | `KN:T3` | SPEC-ket-noi.md · KN4 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + STRIPE_FAKE_BASE_URL trong .env.verify). Tương đương ở L1 với fake Stripe của sink trong tiến trình: stripe-connect-db.spec.ts [KN:U14][KN:U15] + [KN4] status/ngắt (DELETE tới đúng we_). |
@@ -222,7 +223,7 @@ Tổng: 339 mã khai báo · 265 mã có test · 0 mồ côi · 24 mồ côi có
 | `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:124<br>apps/hub-api/test/service-resources.spec.ts:131<br>apps/hub-api/test/service-resources.spec.ts:149 | ✅ pass |
 | `MS:T9` | SPEC-hub-multi-service.md · S8 | L0 | apps/hub-api/test/ingest-generic.spec.ts:34<br>apps/hub-api/test/ingest-generic.spec.ts:41<br>apps/hub-api/test/service-sources.spec.ts:48<br>apps/hub-api/test/service-sources.spec.ts:62<br>apps/hub-api/test/service-sources.spec.ts:102 | ✅ pass |
 | `MS:T10` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-timeout.spec.ts:29 | ✅ pass |
-| `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:75<br>libs/database/test/retention-db.spec.ts:52 | ✅ pass |
+| `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:76<br>libs/database/test/retention-db.spec.ts:52 | ✅ pass |
 | `MS:T14` | SPEC-hub-multi-service.md · S12 | L1 | libs/database/test/seed-demo-db.spec.ts:16 | ✅ pass |
 | `MS:U1` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:16 | ✅ pass |
 | `MS:U2` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:20 | ✅ pass |
@@ -298,6 +299,6 @@ Tổng: 339 mã khai báo · 265 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (189 file, 1230 khai báo it/test)
+## File test (191 file, 1234 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

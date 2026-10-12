@@ -1327,6 +1327,33 @@ export class TenantScopedRepository {
   }
 
   /**
+   * EG4 (ADR-179): cộng lưu lượng theo (source, phút, outcome) — MỘT câu `INSERT … ON CONFLICT DO UPDATE` cho cả lô của
+   * project. `count` cộng dồn (nhiều instance cùng ghi vẫn đúng); `top_ips` gộp hai bên rồi giữ 5 IP nhiều nhất.
+   * Người gọi xếp dòng theo (source, minute, outcome) và không lặp khoá trong một lô.
+   */
+  async addSourceTraffic(rows: SourceTrafficRow[]): Promise<number> {
+    const valid = rows.filter((r) => r.count > 0);
+    if (valid.length === 0) return 0;
+    return this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO hub.source_traffic_minutely AS t (tenant_id, source_id, minute, outcome, count, top_ips)
+      VALUES ${Prisma.join(valid.map((r) => Prisma.sql`(${this.tenantId}::uuid, ${r.sourceId}::uuid, ${r.minute}, ${r.outcome}::"hub"."TrafficOutcome", ${r.count}::int, ${JSON.stringify(r.topIps.slice(0, 5))}::jsonb)`))}
+      ON CONFLICT (tenant_id, source_id, minute, outcome) DO UPDATE SET
+        count = t.count + EXCLUDED.count,
+        top_ips = (
+          SELECT coalesce(jsonb_agg(jsonb_build_object('ip', m.ip, 'count', m.c) ORDER BY m.c DESC, m.ip), '[]'::jsonb)
+          FROM (
+            SELECT u.ip, sum(u.c)::int AS c
+            FROM (
+              SELECT e->>'ip' AS ip, (e->>'count')::int AS c FROM jsonb_array_elements(t.top_ips) e
+              UNION ALL
+              SELECT e->>'ip', (e->>'count')::int FROM jsonb_array_elements(EXCLUDED.top_ips) e
+            ) u
+            GROUP BY u.ip ORDER BY c DESC, u.ip LIMIT 5
+          ) m
+        )`);
+  }
+
+  /**
    * `I-dup`: số bản trùng từ đầu ngày hôm nay (múi giờ của dashboard) theo provider của source. Luôn trả ≥ 1 dòng (mang
    * `since`; `provider` null khi chưa có bản trùng). Index `(tenant_id, bucket DESC)`.
    */
@@ -1735,4 +1762,13 @@ function typeFilterSql(patterns?: string[]): Prisma.Sql {
   const exact = patterns.filter((p) => !p.endsWith('.*'));
   const prefixes = patterns.filter((p) => p.endsWith('.*')).map((p) => p.slice(0, -1));
   return Prisma.sql`(e.type = ANY(${exact}::text[]) OR EXISTS (SELECT 1 FROM unnest(${prefixes}::text[]) p WHERE starts_with(e.type, p)))`;
+}
+
+/** EG4 (ADR-179): một dòng lưu lượng chờ ghi (đã gộp trong bộ nhớ của hub-api). */
+export interface SourceTrafficRow {
+  sourceId: string;
+  minute: Date;
+  outcome: 'ACCEPTED' | 'DUPLICATE' | 'REJECTED' | 'RATE_LIMITED' | 'BLOCKED';
+  count: number;
+  topIps: { ip: string; count: number }[];
 }

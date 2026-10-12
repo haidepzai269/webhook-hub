@@ -34,6 +34,25 @@ export async function flushThenExit(
   return outcome;
 }
 
+/**
+ * EG4 (ADR-179): bộ đệm khác cần ghi nốt khi tắt (lưu lượng theo source) tự đăng ký ở đây — chạy SONG SONG với `flush` của
+ * `installShutdown`, chung trần thời gian. Lỗi của một bộ không chặn bộ khác (best-effort).
+ */
+const extraFlushers = new Set<() => Promise<void>>();
+export function onShutdownFlush(fn: () => Promise<void>): () => void {
+  extraFlushers.add(fn);
+  return () => {
+    extraFlushers.delete(fn);
+  };
+}
+
+/** `flush` chính + mọi bộ đã đăng ký, song song; lỗi riêng từng bộ chỉ log. */
+export async function flushAll(flush: () => Promise<void>): Promise<void> {
+  const results = await Promise.allSettled([flush(), ...[...extraFlushers].map((f) => f())]);
+  const failed = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+  if (failed.length) logger.warn({ errs: failed.map((f) => f.reason?.message ?? String(f.reason)) }, 'Shutdown: một số bộ đệm không ghi nốt được');
+}
+
 export function installShutdown(flush: () => Promise<void>, env: NodeJS.ProcessEnv = process.env): void {
   const shutdownTimeoutMs = parseInt(env.SHUTDOWN_TIMEOUT_MS || '25000', 10);
   let started = false;
@@ -41,7 +60,7 @@ export function installShutdown(flush: () => Promise<void>, env: NodeJS.ProcessE
     if (started) return;
     started = true;
     logger.info(`Nhận tín hiệu ${signal} — ghi nốt bộ đếm bản trùng rồi thoát`);
-    void flushThenExit(flush, { shutdownTimeoutMs: Number.isFinite(shutdownTimeoutMs) ? shutdownTimeoutMs : 25_000, exit: (c) => process.exit(c) });
+    void flushThenExit(() => flushAll(flush), { shutdownTimeoutMs: Number.isFinite(shutdownTimeoutMs) ? shutdownTimeoutMs : 25_000, exit: (c) => process.exit(c) });
   };
   process.on('SIGTERM', () => handle('SIGTERM'));
   process.on('SIGINT', () => handle('SIGINT'));
