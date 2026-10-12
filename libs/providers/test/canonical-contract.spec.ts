@@ -42,8 +42,14 @@ describe('[MS:U50] U50 hợp đồng catalog', () => {
       expect(e.type.startsWith(`${e.source}.`)).toBe(true);
       expect(Object.keys(e.data)).toEqual(['raw']);
     }
+    // `probe` (ADR-159/162): cờ tuỳ chọn của phong bì — chỉ có khi true, chỉ trên kiểu chưa ánh xạ (github.ping, payos.webhook_test).
+    if ('probe' in e) {
+      expect(e.probe).toBe(true);
+      expect(e.normalized).toBe(false);
+    }
+    const { probe: _probe, ...envelopeOnly } = e;
     // Phong bì không đổi (luật 1)
-    expect(Object.keys(e).sort()).toEqual(
+    expect(Object.keys(envelopeOnly).sort()).toEqual(
       ['correlationId', 'data', 'id', 'normalized', 'occurredAt', 'origin', 'rawEventId', 'receivedAt', 'source', 'sourceId', 'subject', 'tenantId', 'type'].sort(),
     );
   });

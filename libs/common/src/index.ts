@@ -13,3 +13,4 @@ export * from './auth';
 export * from './mail';
 export * from './webhook-body';
 export * from './errors/catalog';
+export * from './limits';

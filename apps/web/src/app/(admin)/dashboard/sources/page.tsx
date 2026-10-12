@@ -37,7 +37,7 @@ function ConnectionButton({ id }: { id: string }) {
 }
 
 const SECRET_HINT: Record<(typeof PROVIDERS)[number], string> = {
-  github: "Webhook secret đặt trong GitHub (HMAC-SHA256 trên raw body).",
+  github: "Webhook secret đặt trong GitHub (HMAC-SHA256 trên raw body). Content type: application/json khuyến nghị.",
   sepay: "API key SePay (header Authorization: Apikey …).",
   payos: "Checksum key của PayOS.",
   stripe: "Signing secret của endpoint Stripe (whsec_…).",

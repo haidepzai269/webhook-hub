@@ -4,6 +4,44 @@ import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, REPO_PU
 import { NormalizeContext, envelope, str } from './normalize-helpers';
 import { bodyHashKey } from '@hub/crypto';
 
+/** ADR-162: kiểu của request "ping" — GitHub gửi khi tạo/sửa webhook (giống request kiểm tra confirm-webhook của PayOS). */
+export const GITHUB_PING_EVENT = 'ping';
+
+function headerOf(req: RawWebhookRequest, name: string): string | undefined {
+  const v = req.headers[name] ?? req.headers[name.toLowerCase()];
+  const s = Array.isArray(v) ? v[0] : v;
+  return s === undefined || s === null ? undefined : String(s);
+}
+
+/**
+ * ADR-162: webhook GitHub đặt "Content type: application/x-www-form-urlencoded" gửi `payload=<json đã URL-encode>`.
+ * express.urlencoded giữ đúng bytes (rawBody) nên chữ ký vẫn khớp, nhưng `req.body` chỉ là `{ payload: "<json>" }`.
+ * Giải từ `rawBody` (cũng là `raw_events.body_raw` -> renormalize/replay ra đúng như lần đầu); rawBody không có
+ * `payload` thì rớt về `req.body.payload` dạng chuỗi (CHỈ khi content-type là form hoặc thiếu). Không phải form / JSON hỏng -> trả `req.body` nguyên trạng.
+ */
+export function githubPayload(req: RawWebhookRequest): any {
+  const body = req.body;
+  const ct = (req.contentType ?? headerOf(req, 'content-type') ?? '').toLowerCase();
+  const isForm = ct.includes('application/x-www-form-urlencoded');
+  // JSON thật có thể có trường `payload` chuỗi của riêng nó -> chỉ coi là form khi content-type là form hoặc THIẾU.
+  if (!isForm && ct !== '') return body;
+  const bodyPayload = body && typeof body === 'object' && typeof body.payload === 'string' ? (body.payload as string) : undefined;
+  if (!isForm && bodyPayload === undefined) return body;
+
+  let text: string | null | undefined;
+  if (isForm && req.rawBody && req.rawBody.length > 0) {
+    text = new URLSearchParams(Buffer.from(req.rawBody).toString('utf8')).get('payload');
+  }
+  text = text ?? bodyPayload;
+  if (typeof text !== 'string') return body;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? parsed : body;
+  } catch {
+    return body;
+  }
+}
+
 export class GithubAdapter implements ProviderAdapter {
   readonly provider: ProviderType = 'github';
 
@@ -21,7 +59,7 @@ export class GithubAdapter implements ProviderAdapter {
 
     const [primary, ...fallback] = secrets;
     // eventPayload PHẢI là chuỗi tương ứng đúng byte đã ký (CLAUDE.md: HMAC trên
-    // body_raw) — webhook GitHub luôn là JSON UTF-8 nên decode rawBody an toàn.
+    // body_raw) — webhook GitHub là JSON UTF-8 hoặc form-urlencoded (ASCII) nên decode rawBody an toàn.
     const payload = req.rawBody.toString('utf8');
 
     try {
@@ -38,7 +76,8 @@ export class GithubAdapter implements ProviderAdapter {
       return `github:${delivery}`;
     }
     // Fallback nếu thiếu header
-    const commitId = req.body?.head_commit?.id || req.body?.after;
+    const payload = githubPayload(req);
+    const commitId = payload?.head_commit?.id || payload?.after;
     if (commitId) {
       return `github:${commitId}`;
     }
@@ -60,7 +99,8 @@ export class GithubAdapter implements ProviderAdapter {
   normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
     const h = req.headers['x-github-event'] || req.headers['X-GitHub-Event'];
     const eventName = (Array.isArray(h) ? h[0] : h) || 'unknown';
-    const body = req.body || {};
+    // ADR-162: form-urlencoded -> JSON nằm trong `payload` (giải từ rawBody).
+    const body = githubPayload(req) || {};
     const repository = body.repository || {};
     const repo = { fullName: repository.full_name ?? repository.name, url: repository.html_url };
     const actor = { login: body.sender?.login };
@@ -139,6 +179,20 @@ export class GithubAdapter implements ProviderAdapter {
             labels: Array.isArray(issue.labels) ? issue.labels.map((l: any) => (typeof l === 'string' ? l : l?.name)) : [],
             raw: body,
           },
+        }),
+      ];
+    }
+
+    // ADR-162 (giống KQ1/ADR-159 của PayOS): `ping` là request kiểm tra kết nối của GitHub, không phải sự kiện repo ->
+    // giữ kiểu `github.ping`, normalized:false, probe:true — lõi lưu cho console nhưng KHÔNG định tuyến (kể cả `*`).
+    if (eventName === GITHUB_PING_EVENT) {
+      return [
+        envelope('github', context, {
+          type: 'github.ping',
+          subject: repo.fullName || undefined,
+          data: { raw: body },
+          normalized: false,
+          probe: true,
         }),
       ];
     }

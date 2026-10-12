@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { authSecretProblems } from './modules/auth/auth-config';
 import { installErrorHandling } from './modules/errors/install';
+import { configureBodyParsers } from './body-parsers';
 
 function assertMasterKeyConfigured(): void {
   const masterKey = process.env.MASTER_KEY;
@@ -69,6 +70,10 @@ async function bootstrap() {
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
   app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials
+
+  // ADR-162: body parser theo route (/hooks/* 1MB, còn lại 100KB), giữ rawBody. Đặt SAU helmet/requestId/CORS để lỗi
+  // 400/413 của parser vẫn mang header CORS + bảo mật.
+  configureBodyParsers(app);
 
   const port = process.env.PORT || 4000;
   await app.listen(port);
