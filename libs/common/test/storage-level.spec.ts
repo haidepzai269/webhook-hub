@@ -89,7 +89,7 @@ describe('QT1 — levelFor / isWriteBlocked / importanceOf (hàm thuần)', () =
     expect(quotaBytesFor(200, 50)).toBe(200 * 1024 * 1024);
   });
 
-  it('[QT:T17] importanceOf: đủ 5 mức; keep_longer luôn là Giữ; không đọc payload', () => {
+  it('[QT:T17] (phần a) importanceOf: đủ 5 mức; keep_longer luôn là Giữ; không đọc payload', () => {
     const now = Date.parse('2026-10-12T00:00:00Z');
     const plain = { keepLonger: false };
     const ev = (extra: object = {}) => ({ kind: 'event' as const, ...extra });

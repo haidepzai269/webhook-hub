@@ -159,6 +159,7 @@ model Project {
   members ProjectMember[]
   usage           ProjectUsage?
   storagePolicies StoragePolicy[]
+  cleanJobs       StorageCleanJob[]
 
   @@map("projects")
   @@schema("hub")
@@ -485,6 +486,39 @@ model StoragePolicy {
 
   @@id([tenantId, importance])
   @@map("storage_policies")
+  @@schema("hub")
+}
+
+/// QT4 (§5.5, ADR-184): LỆNH DỌN — API ghi PENDING + trả 202; hub-worker nhận bằng SKIP LOCKED và chạy theo lô (mỗi lô một
+/// transaction ngắn, tiến độ + byte giải phóng cộng trong CÙNG transaction). Index một phần (status đang chờ) chỉ ở migration.
+model StorageCleanJob {
+  id               String    @id @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  action           String    @db.VarChar(8)
+  importance       String[]
+  olderThan        String    @map("older_than") @db.VarChar(40)
+  cutoff           DateTime  @db.Timestamptz(6)
+  sourceId         String?   @map("source_id") @db.Uuid
+  origin           String    @default("manual") @db.VarChar(16)
+  suggestionId     String?   @map("suggestion_id") @db.VarChar(64)
+  advisor          String?   @db.VarChar(32)
+  requestedBy      String    @map("requested_by") @db.VarChar(128)
+  status           String    @default("PENDING") @db.VarChar(16)
+  eventsAffected   Int       @default(0) @map("events_affected")
+  rejectedAffected Int       @default(0) @map("rejected_affected")
+  freedBytes       BigInt    @default(0) @map("freed_bytes")
+  batches          Int       @default(0)
+  attempts         Int       @default(0)
+  leaseUntil       DateTime? @map("lease_until") @db.Timestamptz(6)
+  error            String?   @db.VarChar(500)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt        DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt       DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)], map: "storage_clean_jobs_tenant_created_idx")
+  @@map("storage_clean_jobs")
   @@schema("hub")
 }
 

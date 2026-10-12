@@ -1,4 +1,4 @@
-import { DEFAULT_STORAGE_POLICIES, eventTypeCandidates } from '@hub/common';
+import { BUCKET_MAX_AGE_DAYS, DEFAULT_STORAGE_POLICIES, eventTypeCandidates, levelFor, parseStorageLevel } from '@hub/common';
 import { PrismaClient, Destination, Delivery, Prisma, CircuitState, Source, SourceSecret } from '@prisma/client';
 
 /**
@@ -168,7 +168,7 @@ export class TenantScopedRepository {
   }
 
   /** ADR-161: source đã lưu trữ coi như không còn — không sửa/bật lại được (trả null -> 404). */
-  async updateSource(id: string, data: Pick<Prisma.SourceUncheckedUpdateInput, 'name' | 'isActive'>) {
+  async updateSource(id: string, data: Pick<Prisma.SourceUncheckedUpdateInput, 'name' | 'isActive' | 'keepLonger'>) {
     const result = await this.prisma.source.updateMany({ where: { id, tenantId: this.tenantId, archivedAt: null }, data });
     if (result.count !== 1) return null;
     return this.findSourceById(id);
@@ -512,7 +512,9 @@ export class TenantScopedRepository {
                           AND d2.subscription_id = d.subscription_id AND d2.attempt_generation > d.attempt_generation))`
       : Prisma.empty;
     return this.prisma.$queryRaw<PolledEvent[]>`
-      SELECT e.id, e.poll_seq AS cursor, e.type, e.source, e.source_id AS "sourceId", e.subject, e.data, e.normalized,
+      SELECT e.id, e.poll_seq AS cursor, e.type, e.source, e.source_id AS "sourceId", e.subject,
+             -- QT:T20 (ADR-184): event đã "Dọn" -> data null + trimmed true (dòng gầy vẫn trả: cursor không có lỗ).
+             CASE WHEN e.trimmed_at IS NULL THEN e.data ELSE NULL END AS data, (e.trimmed_at IS NOT NULL) AS trimmed, e.normalized,
              e.correlation_id AS "correlationId", e.occurred_at AS "occurredAt", e.received_at AS "receivedAt"
       FROM "hub"."events" e
       WHERE e.tenant_id = ${this.tenantId}::uuid
@@ -688,6 +690,8 @@ export class TenantScopedRepository {
       // ADR-163: + subscription đang bật — subscription tắt thì replay tới đó cũng vô nghĩa.
       conds.push(Prisma.sql`AND s.archived_at IS NULL AND s.is_active AND EXISTS (SELECT 1 FROM hub.destinations dst WHERE dst.id = s.destination_id
                             AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)`);
+      // QT:T20 (ADR-184): event đã "Dọn" không còn nội dung — không replay được (409 `event_trimmed` ở replay đơn).
+      conds.push(Prisma.sql`AND e.trimmed_at IS NULL`);
     }
     return this.prisma.$queryRaw<DeadDeliveryRef[]>(Prisma.sql`
       SELECT d.id, d.event_id AS "eventId", d.subscription_id AS "subscriptionId",
@@ -710,10 +714,11 @@ export class TenantScopedRepository {
    */
   async findReplaySkipReasons(ids: string[]): Promise<{ id: string; reason: ReplaySkipReason }[]> {
     if (ids.length === 0) return [];
-    const rows = await this.prisma.$queryRaw<{ id: string; dead: boolean; superseded: boolean; replayable: boolean }[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<{ id: string; dead: boolean; superseded: boolean; replayable: boolean; trimmed: boolean }[]>(Prisma.sql`
       SELECT d.id, d.status = 'DEAD' AS dead, NOT ${notSuperseded} AS superseded,
              (s.archived_at IS NULL AND s.is_active AND EXISTS (SELECT 1 FROM hub.destinations dst WHERE dst.id = s.destination_id
-                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)) AS replayable
+                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)) AS replayable,
+             EXISTS (SELECT 1 FROM hub.events e WHERE e.id = d.event_id AND e.tenant_id = d.tenant_id AND e.trimmed_at IS NOT NULL) AS trimmed
       FROM hub.deliveries d
       JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
       WHERE d.tenant_id = ${this.tenantId}::uuid AND d.id = ANY(${ids}::uuid[])
@@ -721,7 +726,17 @@ export class TenantScopedRepository {
     const byId = new Map(rows.map((r) => [r.id, r]));
     return ids.map((id) => {
       const r = byId.get(id);
-      const reason: ReplaySkipReason = !r ? 'not_found' : !r.dead ? 'not_dead' : r.superseded ? 'already_replayed' : !r.replayable ? 'destination_unavailable' : 'already_replayed';
+      const reason: ReplaySkipReason = !r
+        ? 'not_found'
+        : !r.dead
+          ? 'not_dead'
+          : r.superseded
+            ? 'already_replayed'
+            : !r.replayable
+              ? 'destination_unavailable'
+              : r.trimmed
+                ? 'event_trimmed'
+                : 'already_replayed';
       return { id, reason };
     });
   }
@@ -1418,28 +1433,292 @@ export class TenantScopedRepository {
   /**
    * QT2 (E2): đặt lại mốc hiệu chỉnh — `calibrated_at = now()` (đồng hồ DB), `freed_since_calibration = 0`, `used_bytes` =
    * số vừa quét. Chưa có dòng thì tạo (project tạo trước khi có seed).
+   * QT4: `byBucket` (§7) ghi cùng lúc. `freedBaseline` = `freed_since_calibration` đọc NGAY TRƯỚC khi quét: lô dọn COMMIT
+   * trong lúc quét (số quét có thể chưa thấy) không bị xoá mất — phần freed tăng thêm sau mốc đọc được giữ lại và trừ khỏi
+   * `used_bytes` (sai số còn lại: lô COMMIT giữa lúc đọc mốc và lúc câu quét bắt đầu — vài ms, lần hiệu chỉnh kế sửa).
    */
-  async saveStorageCalibration(m: { calibratedBytes: number; bloatFactor: number; bySource: Record<string, number>; level: string }): Promise<number> {
+  async saveStorageCalibration(m: {
+    calibratedBytes: number;
+    bloatFactor: number;
+    bySource: Record<string, number>;
+    level: string;
+    byBucket?: unknown[];
+    freedBaseline?: number;
+  }): Promise<number> {
     const t = this.tenantId;
+    // Không truyền mốc -> coi như mọi freed đã nằm trong số quét (đặt lại 0, hành vi QT2).
+    const base = m.freedBaseline === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.round(m.freedBaseline));
+    const bucket = m.byBucket ? Prisma.sql`, by_bucket = ${JSON.stringify(m.byBucket)}::jsonb` : Prisma.empty;
     return this.prisma.$executeRaw(Prisma.sql`
-      INSERT INTO hub.project_usage AS pu (tenant_id, used_bytes, calibrated_bytes, calibrated_at, freed_since_calibration, bloat_factor, by_source, level, measured_at)
-      VALUES (${t}::uuid, ${m.calibratedBytes}::bigint, ${m.calibratedBytes}::bigint, now(), 0, ${m.bloatFactor}::numeric, ${JSON.stringify(m.bySource)}::jsonb, ${m.level}, now())
+      INSERT INTO hub.project_usage AS pu (tenant_id, used_bytes, calibrated_bytes, calibrated_at, freed_since_calibration, bloat_factor, by_source, by_bucket, level, measured_at)
+      VALUES (${t}::uuid, ${m.calibratedBytes}::bigint, ${m.calibratedBytes}::bigint, now(), 0, ${m.bloatFactor}::numeric, ${JSON.stringify(m.bySource)}::jsonb,
+              ${JSON.stringify(m.byBucket ?? [])}::jsonb, ${m.level}, now())
       ON CONFLICT (tenant_id) DO UPDATE SET
-        used_bytes = EXCLUDED.used_bytes, calibrated_bytes = EXCLUDED.calibrated_bytes, calibrated_at = EXCLUDED.calibrated_at,
-        freed_since_calibration = 0, bloat_factor = EXCLUDED.bloat_factor, by_source = EXCLUDED.by_source,
-        level = EXCLUDED.level, measured_at = EXCLUDED.measured_at`);
+        used_bytes = GREATEST(0, EXCLUDED.used_bytes - GREATEST(0, pu.freed_since_calibration - ${base}::bigint)),
+        calibrated_bytes = EXCLUDED.calibrated_bytes, calibrated_at = EXCLUDED.calibrated_at,
+        freed_since_calibration = GREATEST(0, pu.freed_since_calibration - ${base}::bigint), bloat_factor = EXCLUDED.bloat_factor,
+        by_source = EXCLUDED.by_source, level = EXCLUDED.level, measured_at = EXCLUDED.measured_at ${bucket}`);
   }
 
   /**
    * QT2 (E2): job cập nhật nấc ghi lại số cộng dồn + nấc (chỉ gọi khi có đổi). Review QT-S1 L1: compare-and-set theo mốc
    * hiệu chỉnh ĐÃ ĐỌC (`calibratedAtToken` = `calibrated_at::text`, đủ µs — Date của JS chỉ tới ms). Hiệu chỉnh ghi mốc
    * mới xen giữa lúc đọc và lúc ghi -> 0 dòng: số quét thật thắng, lượt nấc sau tính lại từ mốc mới.
+   * QT4 (E2): thêm `freedToken` — một lô dọn vừa cộng `freed_since_calibration` (và hạ nấc NGAY) xen giữa thì lượt nấc đọc
+   * số cũ KHÔNG được ghi đè lên (nấc bật ngược lại tới 60s); 0 dòng, lượt sau tính lại.
    */
-  async updateStorageUsage(m: { usedBytes: number; level: string; calibratedAtToken: string | null }): Promise<number> {
+  async updateStorageUsage(m: { usedBytes: number; level: string; calibratedAtToken: string | null; freedToken?: number }): Promise<number> {
+    const freed = m.freedToken === undefined ? Prisma.empty : Prisma.sql`AND freed_since_calibration = ${Math.round(m.freedToken)}::bigint`;
     return this.prisma.$executeRaw(Prisma.sql`
       UPDATE hub.project_usage SET used_bytes = ${m.usedBytes}::bigint, level = ${m.level}, measured_at = now()
       WHERE tenant_id = ${this.tenantId}::uuid
-        AND calibrated_at IS NOT DISTINCT FROM ${m.calibratedAtToken}::timestamptz`);
+        AND calibrated_at IS NOT DISTINCT FROM ${m.calibratedAtToken}::timestamptz ${freed}`);
+  }
+
+  // --- QT4: dọn tay / tự động (SPEC-han-muc-dung-luong §5.1–§5.5 + E2, ADR-184) ---
+
+  /**
+   * MỘT lô dọn của project — mọi thứ trong CÙNG transaction (repo trên client gốc = một transaction; worker gọi trong
+   * `tenantTx` có hạn rõ ràng): chọn nạn nhân (`FOR UPDATE SKIP LOCKED`) → đo byte TRƯỚC (đúng công thức §2 như
+   * `measureStorage`) → dọn/xoá → đo SAU → cộng phần chênh vào `freed_since_calibration`, trừ `used_bytes` và TÍNH LẠI NẤC
+   * ngay (E2: mở khoá không chờ job 60s).
+   *
+   * Bất biến (§5.2, §14) nằm trong SQL, không phụ thuộc người gọi:
+   *  - không bao giờ đụng event còn delivery `PENDING`/`DELIVERING`/`RETRYING`, hay event/mẫu nhận SAU `floor`
+   *    (= now − cửa sổ retry, người gọi truyền từ `TOTAL_RETRY_WINDOW_MS`);
+   *  - không bao giờ đụng source "Giữ lâu" (mức `keep`); `audit_logs` không có trong câu nào;
+   *  - "Dọn" (`trim`) KHÔNG xoá dòng `events`/`raw_events`: khoá chống trùng còn nguyên (BB-2, QT:T15);
+   *    "Xoá hẳn" (`delete`) xoá cả hai — mất chống trùng (QT:T16, đánh đổi có chủ đích).
+   * Mẫu REJECTED (`junk`) chỉ xoá hẳn. `done` = lô không đầy (hết việc).
+   */
+  async cleanStorageBatch(o: {
+    action: 'trim' | 'delete';
+    importance: readonly string[];
+    cutoff: Date;
+    floor: Date;
+    sourceId?: string | null;
+    limit: number;
+    quotaBytes: number;
+  }): Promise<CleanBatchResult> {
+    const t = this.tenantId;
+    const before = o.cutoff.getTime() < o.floor.getTime() ? o.cutoff : o.floor;
+    let rejected = 0;
+    let freed = 0;
+    if (o.action === 'delete' && o.importance.includes('junk')) {
+      const src = o.sourceId ? Prisma.sql`AND s.id = ${o.sourceId}::uuid` : Prisma.empty;
+      const [r] = await this.prisma.$queryRaw<{ n: number; b: bigint | null }[]>(Prisma.sql`
+        WITH v AS (
+          SELECT r.id FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
+          WHERE s.tenant_id = ${t}::uuid AND r.status = 'REJECTED' AND r.received_at < ${before} AND NOT s.keep_longer ${src}
+          ORDER BY r.received_at LIMIT ${o.limit} FOR UPDATE OF r SKIP LOCKED),
+        d AS (DELETE FROM hub.raw_events r USING v WHERE r.id = v.id RETURNING octet_length(r.body_raw) AS b)
+        SELECT count(*)::int AS n, sum(b)::bigint AS b FROM d`);
+      rejected = Number(r?.n ?? 0);
+      freed += Number(r?.b ?? 0);
+    }
+    const eventImportance = o.importance.filter((i) => i !== 'junk' && i !== 'keep');
+    const room = o.limit - rejected;
+    let events = 0;
+    if (eventImportance.length > 0 && room > 0) {
+      const onlyUntrimmed = o.action === 'trim' ? Prisma.sql`AND e.trimmed_at IS NULL` : Prisma.empty;
+      const bySource = o.sourceId ? Prisma.sql`AND e.source_id = ${o.sourceId}::uuid` : Prisma.empty;
+      const victims = await this.prisma.$queryRaw<{ id: string; rawEventId: string | null }[]>(Prisma.sql`
+        SELECT e.id, e.raw_event_id AS "rawEventId"
+        FROM hub.events e LEFT JOIN hub.sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id
+        WHERE e.tenant_id = ${t}::uuid AND e.received_at < ${before} ${onlyUntrimmed} ${bySource}
+          AND NOT EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id
+                          AND d.status IN ('PENDING', 'DELIVERING', 'RETRYING'))
+          AND ${eventImportanceSql} = ANY(${eventImportance}::text[])
+        ORDER BY e.received_at LIMIT ${room} FOR UPDATE OF e SKIP LOCKED`);
+      events = victims.length;
+      if (events > 0) {
+        const ids = victims.map((v) => v.id);
+        const rawIds = victims.map((v) => v.rawEventId).filter((x): x is string => !!x);
+        const sizeBefore = await this.eventSetBytes(ids);
+        if (o.action === 'trim') {
+          await this.prisma.$executeRaw(Prisma.sql`
+            UPDATE hub.events SET data = 'null'::jsonb, trimmed_at = now() WHERE tenant_id = ${t}::uuid AND id = ANY(${ids}::text[])`);
+          if (rawIds.length > 0) {
+            await this.prisma.$executeRaw(Prisma.sql`
+              UPDATE hub.raw_events r SET body_raw = ''::bytea, body = 'null'::jsonb, headers = '{}'::jsonb, trimmed_at = now()
+              FROM hub.sources s WHERE s.id = r.source_id AND s.tenant_id = ${t}::uuid AND r.id = ANY(${rawIds}::uuid[])`);
+          }
+          await this.prisma.$executeRaw(Prisma.sql`
+            UPDATE hub.deliveries SET last_error = left(last_error, ${TRIM_KEEP_CHARS}::int)
+            WHERE tenant_id = ${t}::uuid AND event_id = ANY(${ids}::text[]) AND length(last_error) > ${TRIM_KEEP_CHARS}::int`);
+          await this.prisma.$executeRaw(Prisma.sql`
+            UPDATE hub.delivery_attempts a SET request_body = NULL, response_body = NULL, error = left(a.error, ${TRIM_KEEP_CHARS}::int)
+            FROM hub.deliveries d WHERE d.id = a.delivery_id AND d.tenant_id = ${t}::uuid AND d.event_id = ANY(${ids}::text[])
+              AND (a.request_body IS NOT NULL OR a.response_body IS NOT NULL OR length(a.error) > ${TRIM_KEEP_CHARS}::int)`);
+          freed += Math.max(0, sizeBefore - (await this.eventSetBytes(ids)));
+        } else {
+          // deliveries + delivery_attempts đi theo CASCADE; raw_events (FK SET NULL từ events) xoá riêng, cùng tenant.
+          await this.prisma.$executeRaw(Prisma.sql`DELETE FROM hub.events WHERE tenant_id = ${t}::uuid AND id = ANY(${ids}::text[])`);
+          if (rawIds.length > 0) {
+            await this.prisma.$executeRaw(Prisma.sql`
+              DELETE FROM hub.raw_events r USING hub.sources s
+              WHERE s.id = r.source_id AND s.tenant_id = ${t}::uuid AND r.id = ANY(${rawIds}::uuid[])`);
+          }
+          freed += sizeBefore;
+        }
+      }
+    }
+    const level = freed > 0 ? await this.applyFreedBytes(freed, o.quotaBytes) : null;
+    return { events, rejected, freedBytes: freed, level, done: events + rejected < o.limit };
+  }
+
+  /** Byte của một tập event theo ĐÚNG công thức §2 (`measureStorage`): events.data + body_raw + deliveries + attempts. */
+  async eventSetBytes(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const t = this.tenantId;
+    const [r] = await this.prisma.$queryRaw<{ b: bigint | null }[]>(Prisma.sql`
+      SELECT (
+        (SELECT COALESCE(sum(COALESCE(pg_column_size(e.data), 0)), 0) FROM hub.events e WHERE e.tenant_id = ${t}::uuid AND e.id = ANY(${ids}::text[]))
+      + (SELECT COALESCE(sum(octet_length(r.body_raw)), 0) FROM hub.events e JOIN hub.raw_events r ON r.id = e.raw_event_id
+         WHERE e.tenant_id = ${t}::uuid AND e.id = ANY(${ids}::text[]))
+      + (SELECT COALESCE(sum(COALESCE(pg_column_size(d.last_error), 0)), 0) FROM hub.deliveries d WHERE d.tenant_id = ${t}::uuid AND d.event_id = ANY(${ids}::text[]))
+      + (SELECT COALESCE(sum(COALESCE(pg_column_size(a.request_body), 0) + COALESCE(pg_column_size(a.response_body), 0) + COALESCE(pg_column_size(a.error), 0)), 0)
+         FROM hub.delivery_attempts a JOIN hub.deliveries d ON d.id = a.delivery_id WHERE d.tenant_id = ${t}::uuid AND d.event_id = ANY(${ids}::text[]))
+      )::bigint AS b`);
+    return Number(r?.b ?? 0);
+  }
+
+  /**
+   * E2: cộng byte vừa giải phóng vào `freed_since_calibration`, trừ `used_bytes` và tính lại nấc NGAY (vùng đệm của
+   * `levelFor`: LOCKED mở khi < 90%) — trong transaction của người gọi. Chưa có dòng usage (project trước seed) -> null.
+   */
+  async applyFreedBytes(freed: number, quotaBytes: number): Promise<StorageLevelChange | null> {
+    const [row] = await this.prisma.$queryRaw<{ usedBytes: bigint; level: string }[]>(Prisma.sql`
+      UPDATE hub.project_usage SET freed_since_calibration = freed_since_calibration + ${Math.round(freed)}::bigint,
+             used_bytes = GREATEST(0, used_bytes - ${Math.round(freed)}::bigint), measured_at = now()
+      WHERE tenant_id = ${this.tenantId}::uuid
+      RETURNING used_bytes AS "usedBytes", level`);
+    if (!row) return null;
+    return this.writeLevel(Number(row.usedBytes), row.level, quotaBytes);
+  }
+
+  /** Tính lại nấc từ `used_bytes` hiện có (sau retention xuyên project đã trừ byte trong systemTx). */
+  async recomputeStorageLevel(quotaBytes: number): Promise<StorageLevelChange | null> {
+    const [row] = await this.prisma.$queryRaw<{ usedBytes: bigint; level: string }[]>(Prisma.sql`
+      SELECT used_bytes AS "usedBytes", level FROM hub.project_usage WHERE tenant_id = ${this.tenantId}::uuid FOR UPDATE`);
+    if (!row) return null;
+    return this.writeLevel(Number(row.usedBytes), row.level, quotaBytes);
+  }
+
+  private async writeLevel(usedBytes: number, prev: string, quotaBytes: number): Promise<StorageLevelChange> {
+    const to = levelFor(usedBytes, quotaBytes, parseStorageLevel(prev));
+    if (to !== prev) {
+      await this.prisma.$executeRaw(Prisma.sql`UPDATE hub.project_usage SET level = ${to} WHERE tenant_id = ${this.tenantId}::uuid`);
+    }
+    return { from: prev, to, usedBytes };
+  }
+
+  /**
+   * §7 + E2 (QT4): `by_bucket` — byte + số event CHƯA dọn theo (source, mức quan trọng, tuổi theo ngày), cùng công thức §2
+   * và CÙNG biểu thức mức quan trọng với lệnh dọn (`eventImportanceSql`), cộng mẫu REJECTED (`junk`). Chạy trong lượt hiệu
+   * chỉnh (24h, transaction có hạn của job), không bao giờ trên đường nóng. Số liệu có thể cũ tới 24h (console ghi "tính lúc").
+   */
+  async measureStorageBuckets(): Promise<StorageBucketRow[]> {
+    const t = this.tenantId;
+    const rows = await this.prisma.$queryRaw<{ sourceId: string | null; importance: string; ageDays: number; events: number; bytes: bigint }[]>(Prisma.sql`
+      WITH ev AS (
+        SELECT e.source_id, ${eventImportanceSql} AS imp,
+               LEAST(${BUCKET_MAX_AGE}::int, floor(extract(epoch FROM now() - e.received_at) / 86400)::int) AS age,
+               COALESCE(pg_column_size(e.data), 0)
+               + COALESCE((SELECT octet_length(r.body_raw) FROM hub.raw_events r WHERE r.id = e.raw_event_id), 0)
+               + COALESCE((SELECT sum(COALESCE(pg_column_size(d.last_error), 0)
+                                      + COALESCE((SELECT sum(COALESCE(pg_column_size(a.request_body), 0) + COALESCE(pg_column_size(a.response_body), 0)
+                                                             + COALESCE(pg_column_size(a.error), 0)) FROM hub.delivery_attempts a WHERE a.delivery_id = d.id), 0))
+                           FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id), 0) AS b
+        FROM hub.events e LEFT JOIN hub.sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id
+        WHERE e.tenant_id = ${t}::uuid AND e.trimmed_at IS NULL),
+      rj AS (
+        SELECT r.source_id, CASE WHEN s.keep_longer THEN 'keep' ELSE 'junk' END AS imp,
+               LEAST(${BUCKET_MAX_AGE}::int, floor(extract(epoch FROM now() - r.received_at) / 86400)::int) AS age,
+               octet_length(r.body_raw) AS b
+        FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
+        WHERE s.tenant_id = ${t}::uuid AND r.status = 'REJECTED')
+      SELECT source_id::text AS "sourceId", imp AS importance, age AS "ageDays", count(*)::int AS events, sum(b)::bigint AS bytes FROM ev GROUP BY 1, 2, 3
+      UNION ALL
+      SELECT source_id::text, imp, age, count(*)::int, sum(b)::bigint FROM rj GROUP BY 1, 2, 3`);
+    return rows.map((r) => ({ sourceId: r.sourceId, importance: r.importance, ageDays: Number(r.ageDays), events: Number(r.events), bytes: Number(r.bytes ?? 0) }));
+  }
+
+  /** E2: Σ byte (cột `bytes` của bảng lưu lượng) nhận từ `since` — tốc độ tăng cho "còn ~X giờ" và `growthPerDay`. */
+  async trafficBytesSince(since: Date): Promise<number> {
+    const [r] = await this.prisma.$queryRaw<{ b: bigint | null }[]>(Prisma.sql`
+      SELECT sum(bytes)::bigint AS b FROM hub.source_traffic_minutely WHERE tenant_id = ${this.tenantId}::uuid AND minute >= ${since}`);
+    return Number(r?.b ?? 0);
+  }
+
+  // --- QT4: lệnh dọn (bảng storage_clean_jobs) ---
+
+  async createStorageCleanJob(input: {
+    id: string;
+    action: 'trim' | 'delete';
+    importance: string[];
+    olderThan: string;
+    cutoff: Date;
+    sourceId: string | null;
+    origin: 'manual' | 'suggestion';
+    suggestionId?: string | null;
+    advisor?: string | null;
+    requestedBy: string;
+  }) {
+    return this.prisma.storageCleanJob.create({
+      data: {
+        id: input.id,
+        tenantId: this.tenantId,
+        action: input.action,
+        importance: input.importance,
+        olderThan: input.olderThan,
+        cutoff: input.cutoff,
+        sourceId: input.sourceId,
+        origin: input.origin,
+        suggestionId: input.suggestionId ?? null,
+        advisor: input.advisor ?? null,
+        requestedBy: input.requestedBy,
+      },
+    });
+  }
+
+  async findStorageCleanJob(id: string) {
+    return this.prisma.storageCleanJob.findFirst({ where: { id, tenantId: this.tenantId } });
+  }
+
+  async listStorageCleanJobs(take = 10) {
+    return this.prisma.storageCleanJob.findMany({ where: { tenantId: this.tenantId }, orderBy: { createdAt: 'desc' }, take });
+  }
+
+  /**
+   * QT4b `apply` idempotent theo id gợi ý: lệnh đã tạo cho CÙNG id kể từ `since` (lúc bộ gợi ý hiện tại được tính). Khoá
+   * advisory theo (project, id gợi ý) trong transaction của người gọi -> hai lần gọi song song không tạo hai lệnh. PHẢI gọi
+   * trên repo dựng trong `tx` (khoá nhả khi transaction kết thúc).
+   */
+  async lockAndFindCleanJobForSuggestion(suggestionId: string, since: Date) {
+    await this.prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'storage-apply:' + this.tenantId + ':' + suggestionId}, 0))`;
+    return this.prisma.storageCleanJob.findFirst({
+      where: { tenantId: this.tenantId, suggestionId, createdAt: { gte: since } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Tiến độ của lệnh sau MỘT lô — gọi trong CÙNG transaction với lô (số đếm khớp dữ liệu đã đổi, kể cả khi worker chết). */
+  async recordCleanJobBatch(id: string, r: { events: number; rejected: number; freedBytes: number; done: boolean; leaseMs: number }): Promise<void> {
+    const finished = r.done ? Prisma.sql`now()` : Prisma.sql`NULL`;
+    const lease = r.done ? Prisma.sql`NULL` : Prisma.sql`now() + make_interval(secs => ${r.leaseMs / 1000}::double precision)`;
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE hub.storage_clean_jobs SET
+        events_affected = events_affected + ${r.events}::int, rejected_affected = rejected_affected + ${r.rejected}::int,
+        freed_bytes = freed_bytes + ${Math.round(r.freedBytes)}::bigint, batches = batches + 1,
+        status = ${r.done ? 'DONE' : 'RUNNING'}, finished_at = ${finished}, lease_until = ${lease}
+      WHERE tenant_id = ${this.tenantId}::uuid AND id = ${id}::uuid`);
+  }
+
+  async failCleanJob(id: string, error: string): Promise<void> {
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE hub.storage_clean_jobs SET status = 'FAILED', error = ${error.slice(0, 500)}, finished_at = now(), lease_until = NULL
+      WHERE tenant_id = ${this.tenantId}::uuid AND id = ${id}::uuid`);
   }
 
   async addIngestDuplicates(rows:{ sourceId: string; bucket: Date; n: number }[]): Promise<number> {
@@ -1629,6 +1908,28 @@ export class TenantScopedRepository {
 
 // Bản DEAD chưa bị replay = không tồn tại generation cao hơn cho cùng (event, subscription).
 // Cùng tenant là hệ quả (event thuộc đúng một tenant), nhưng vẫn ghi rõ để không ai phải suy luận.
+/** QT4: "Dọn" giữ lại tối đa ngần này ký tự của cột lỗi (đủ đọc loại lỗi, bỏ phần dài). */
+const TRIM_KEEP_CHARS = 200;
+const BUCKET_MAX_AGE = BUCKET_MAX_AGE_DAYS;
+
+/**
+ * QT §5.3 (ADR-186) bằng SQL — CÙNG bảng với `importanceOf` (libs/common/src/storage/importance.ts), dùng chung cho lệnh dọn
+ * và `by_bucket` (một định nghĩa, hai chỗ không lệch nhau; test DB `[QT:T17]` đối chiếu). Cần alias `e` (events) và `s`
+ * (sources, LEFT JOIN). Delivery xét theo BẢN MỚI NHẤT mỗi subscription (replay thành công thì DEAD cũ không còn là "Cao").
+ * KHÔNG đọc payload, KHÔNG xét provider (BB-1). Event không còn source (hub event, source đã mất) -> theo trạng thái giao.
+ */
+const eventImportanceSql = Prisma.sql`(CASE
+  WHEN COALESCE(s.keep_longer, false) THEN 'keep'
+  WHEN EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id
+               AND d.status IN ('PENDING', 'DELIVERING', 'RETRYING')) THEN 'high'
+  WHEN EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id
+               AND d.attempt_generation > 1 AND d.created_at > now() - interval '1 day') THEN 'high'
+  WHEN EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id AND d.status = 'DEAD'
+               AND NOT EXISTS (SELECT 1 FROM hub.deliveries n WHERE n.event_id = d.event_id AND n.subscription_id = d.subscription_id
+                               AND n.attempt_generation > d.attempt_generation)) THEN 'high'
+  WHEN NOT EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id) THEN 'medium'
+  ELSE 'low' END)`;
+
 const notSuperseded = Prisma.sql`NOT EXISTS (
   SELECT 1 FROM hub.deliveries n
   WHERE n.tenant_id = d.tenant_id AND n.event_id = d.event_id
@@ -1800,7 +2101,7 @@ export interface DeadDeliveryFilter {
 }
 
 /** ADR-163: vì sao một id đã xem trước KHÔNG được replay lúc chạy thật. */
-export type ReplaySkipReason = 'not_found' | 'not_dead' | 'already_replayed' | 'destination_unavailable';
+export type ReplaySkipReason = 'not_found' | 'not_dead' | 'already_replayed' | 'destination_unavailable' | 'event_trimmed';
 
 /**
  * ADR-163: "loại lỗi" của delivery DEAD theo HTTP status của lần thử CUỐI (worker chỉ đặt DEAD sau một attempt):
@@ -1902,7 +2203,10 @@ export interface PolledEvent {
   source: string;
   sourceId: string | null;
   subject: string | null;
+  /** QT:T20: `null` khi event đã "Dọn" (`trimmed: true`). */
   data: unknown;
+  /** QT §5.1 (ADR-184): nội dung đã được dọn — chỉ còn dòng gầy (khoá chống trùng, kiểu, thời gian). */
+  trimmed: boolean;
   normalized: boolean;
   correlationId: string;
   occurredAt: Date;
@@ -1930,3 +2234,28 @@ export interface SourceTrafficRow {
 
 /** QT3 (E4): source của đường publish kèm nấc dung lượng của project (JOIN cùng câu). null = chưa đo (= OK). */
 export type SourceWithStorageLevel = Source & { storageLevel: string | null };
+
+/** QT4: nấc trước/sau khi trừ byte vừa giải phóng (E2: tính lại NGAY). */
+export interface StorageLevelChange {
+  from: string;
+  to: string;
+  usedBytes: number;
+}
+
+/** QT4: kết quả MỘT lô dọn (byte giải phóng theo công thức §2; nấc sau khi trừ — null nếu không giải phóng gì). */
+export interface CleanBatchResult {
+  events: number;
+  rejected: number;
+  freedBytes: number;
+  level: StorageLevelChange | null;
+  done: boolean;
+}
+
+/** QT4: một ô `by_bucket` đọc từ DB (mức quan trọng là chuỗi của `eventImportanceSql`). */
+export interface StorageBucketRow {
+  sourceId: string | null;
+  importance: string;
+  ageDays: number;
+  events: number;
+  bytes: number;
+}

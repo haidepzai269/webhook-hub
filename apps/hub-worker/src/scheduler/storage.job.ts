@@ -191,7 +191,8 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       if (usedBytes === r.usedBytes && level === r.level) continue;
       try {
         // L1: compare-and-set theo mốc đã đọc — hiệu chỉnh vừa ghi mốc mới thì số quét thật thắng, lượt sau tính lại.
-        const n = await this.prisma.forTenant(r.tenantId).updateStorageUsage({ usedBytes, level, calibratedAtToken: r.calibratedAtToken ?? null });
+        // QT4 (E2): + `freedToken` — lô dọn vừa trừ byte và hạ nấc NGAY xen giữa thì số đọc ở đây đã cũ: bỏ ghi, lượt sau tính lại.
+        const n = await this.prisma.forTenant(r.tenantId).updateStorageUsage({ usedBytes, level, calibratedAtToken: r.calibratedAtToken ?? null, freedToken: r.freedSinceCalibration });
         if (n === 0) {
           logger.debug({ tenantId: r.tenantId }, 'Storage: mốc hiệu chỉnh vừa đổi giữa lúc đọc và ghi -> bỏ ghi nấc lượt này');
           continue;
@@ -204,7 +205,7 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       if (level !== prev) {
         const c: LevelChange = { tenantId: r.tenantId, from: prev, to: level, usedBytes, quotaBytes };
         changes.push(c);
-        await this.notifyChange(c);
+        await this.reportLevelChange(c);
       }
     }
     try {
@@ -216,7 +217,11 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
     return { skipped: false, projects: rows.length, updated, changes, ...(disk ? { disk } : {}) };
   }
 
-  private async notifyChange(c: LevelChange): Promise<void> {
+  /**
+   * Đổi nấc: metric + log + hook `onLevelChange` (QT6 cắm cảnh báo). Công khai cho lệnh dọn (QT4, E2: nấc hạ NGAY sau lô
+   * dọn, không chờ lượt 60s) và dọn tự động (QT5) — một đường báo duy nhất.
+   */
+  async reportLevelChange(c: LevelChange): Promise<void> {
     try {
       storageLevelTransitions.inc({ from: c.from, to: c.to });
     } catch {
@@ -294,18 +299,31 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
     const project = await this.prisma.findProjectById(tenantId);
     if (!project) return;
     const repo = this.prisma.forTenant(tenantId);
-    const prev = await repo.findProjectUsage();
     // M2: quét trong transaction có hạn rõ ràng (không phải 5s mặc định của proxy) + statement_timeout cục bộ.
-    const m = await this.prisma.tenantTx(
+    // QT4: đọc `freed_since_calibration` NGAY TRƯỚC khi quét (mốc cho lô dọn COMMIT trong lúc quét) + `by_bucket` (§7).
+    const { prev, m, buckets } = await this.prisma.tenantTx(
       tenantId,
-      (tx) => this.prisma.forTenant(tenantId, tx).measureStorage({ statementTimeoutMs: STORAGE_MEASURE_STATEMENT_TIMEOUT_MS }),
+      async (tx) => {
+        const r = this.prisma.forTenant(tenantId, tx);
+        const prev = await r.findProjectUsage();
+        const m = await r.measureStorage({ statementTimeoutMs: STORAGE_MEASURE_STATEMENT_TIMEOUT_MS });
+        const buckets = await r.measureStorageBuckets();
+        return { prev, m, buckets };
+      },
       { timeout: STORAGE_MEASURE_TX_TIMEOUT_MS, maxWait: STORAGE_MEASURE_TX_MAX_WAIT_MS },
     );
     const bloatFactor = bloatFactorFrom(m.totalBytes, m.bodyRawBytes);
     const prevLevel = parseStorageLevel(prev?.level);
     const quotaBytes = quotaBytesFor((project as { storageQuotaMb?: number | null }).storageQuotaMb, this.defaultQuotaMb);
     const level = levelFor(m.totalBytes, quotaBytes, prevLevel);
-    await repo.saveStorageCalibration({ calibratedBytes: m.totalBytes, bloatFactor, bySource: m.bySource, level });
+    await repo.saveStorageCalibration({
+      calibratedBytes: m.totalBytes,
+      bloatFactor,
+      bySource: m.bySource,
+      level,
+      byBucket: buckets,
+      freedBaseline: Number(prev?.freedSinceCalibration ?? 0) || 0,
+    });
     const accumulated = prev ? Number(prev.usedBytes) : null;
     logger.info(
       {
@@ -317,7 +335,7 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       },
       'Storage: hiệu chỉnh (quét thật) — so số cộng dồn với số quét',
     );
-    if (level !== prevLevel) await this.notifyChange({ tenantId, from: prevLevel, to: level, usedBytes: m.totalBytes, quotaBytes });
+    if (level !== prevLevel) await this.reportLevelChange({ tenantId, from: prevLevel, to: level, usedBytes: m.totalBytes, quotaBytes });
   }
 
   private scheduleLevel(delayMs: number) {

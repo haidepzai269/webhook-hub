@@ -13,8 +13,8 @@ import { Prisma } from '@prisma/client';
  */
 export type NormalizeErrorKind = 'transient' | 'permanent';
 
-/** Số lần thử lại tối đa qua hàng đợi 30s trước khi vào DLQ (5 × 30s ≈ 2,5 phút). */
-export const NORMALIZE_MAX_RETRIES = 5;
+/** Số lần thử lại tối đa qua hàng đợi 30s trước khi vào DLQ — nguồn ở @hub/messaging (retry-window.ts, QT4). */
+export { NORMALIZE_MAX_RETRIES } from '@hub/messaging';
 export const NORMALIZE_RETRY_HEADER = 'x-normalize-retry';
 
 // P2028 = Transaction API error (timeout giữ/chờ transaction khi DB chậm) — hạ tầng, thử lại là khỏi.

@@ -39,9 +39,10 @@ const run = async (p: Promise<unknown>) => {
 describe('ROLE_SCOPES (SPEC-auth §2.2) — MỘT hằng số cho guard, web, docs', () => {
   it('viewer chỉ đọc; developer thêm ghi; owner thêm members/project; key không bao giờ được manage:keys/members/project', () => {
     expect(ROLE_SCOPES.viewer).toEqual(['read:project', 'read:events']);
-    expect(ROLE_SCOPES.developer).toEqual(['read:project', 'read:events', 'publish:events', 'manage:endpoints', 'manage:sources', 'replay:deliveries', 'manage:keys']);
-    expect(ROLE_SCOPES.owner).toEqual([...ROLE_SCOPES.developer, 'manage:members', 'manage:project', 'traffic:read']);
-    expect(KEY_GRANTABLE_SCOPES).toEqual(['publish:events', 'read:events', 'manage:endpoints', 'manage:sources']);
+    expect(ROLE_SCOPES.developer).toEqual(['read:project', 'read:events', 'publish:events', 'manage:endpoints', 'manage:sources', 'replay:deliveries', 'manage:keys', 'storage:read']);
+    expect(ROLE_SCOPES.owner).toEqual([...ROLE_SCOPES.developer, 'manage:members', 'manage:project', 'traffic:read', 'storage:write']);
+    // QT4 (§5.6): key có `storage:write` gọi được `apply` gợi ý dọn; chỉ owner cấp được (role phải có scope mới cấp).
+    expect(KEY_GRANTABLE_SCOPES).toEqual(['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'storage:read', 'storage:write']);
   });
 });
 

@@ -135,13 +135,25 @@ describe('QT2 StorageJob (E2, §6)', () => {
           if (tenantId === 'p2') throw new Error('timeout');
           return { totalBytes: 1.05 * MB, bodyRawBytes: 0.5 * MB, bySource: { s1: 1.05 * MB } };
         }),
+        measureStorageBuckets: jest.fn(async () => [{ sourceId: 's1', importance: 'low', ageDays: 4, events: 3, bytes: 900 }]),
         saveStorageCalibration: jest.fn(async (m: any) => saved.push({ tenantId, ...m })),
       }),
     });
     const job = new StorageJob(prisma, sharedRedis());
     const r = await job.calibrateTick(['p1', 'p2']);
     expect(r).toEqual({ skipped: false, calibrated: ['p1'], failed: ['p2'] });
-    expect(saved).toEqual([{ tenantId: 'p1', calibratedBytes: 1.05 * MB, bloatFactor: 2.1, bySource: { s1: 1.05 * MB }, level: 'LOCKED' }]);
+    // QT4: + by_bucket (§7) và mốc freed đọc NGAY TRƯỚC khi quét (lô dọn COMMIT trong lúc quét không bị xoá mất)
+    expect(saved).toEqual([
+      {
+        tenantId: 'p1',
+        calibratedBytes: 1.05 * MB,
+        bloatFactor: 2.1,
+        bySource: { s1: 1.05 * MB },
+        level: 'LOCKED',
+        byBucket: [{ sourceId: 's1', importance: 'low', ageDays: 4, events: 3, bytes: 900 }],
+        freedBaseline: 0,
+      },
+    ]);
     // hạn hiệu chỉnh truyền xuống truy vấn = now − min(24h, (TRAFFIC_RETENTION_DAYS−1) ngày)
     const due: Date = prisma.storageProjectsDueForCalibrationAcrossTenants.mock.calls[0][0];
     expect(Math.abs(Date.now() - 86_400_000 - due.getTime())).toBeLessThan(5_000);
@@ -181,6 +193,7 @@ describe('QT2 StorageJob (E2, §6)', () => {
           if (tenantId === 'big') throw Object.assign(new Error('canceling statement due to statement timeout'), { code: 'P2010', meta: { code: '57014' } });
           return { totalBytes: 10, bodyRawBytes: 10, bySource: {} };
         }),
+        measureStorageBuckets: jest.fn(async () => []),
         saveStorageCalibration: jest.fn(async () => 1),
       }),
     });
@@ -230,6 +243,20 @@ describe('QT2 StorageJob (E2, §6)', () => {
     const ok = await job.levelTick();
     expect(ok.updated).toBe(1);
     expect(seen).toEqual(['OK->HARD_LOCKED']);
+  });
+
+  it('[QT:T33] (phần c) lượt nấc ghi kèm freedToken (freed_since_calibration đã đọc): lô dọn vừa hạ nấc NGAY xen giữa -> 0 dòng, không ghi đè số cũ', async () => {
+    const sent: any[] = [];
+    const { prisma } = fakePrisma([tickRow({ tenantId: 't-clean', calibratedBytes: 1.2 * MB, freedSinceCalibration: 4321, level: 'OK' })]);
+    prisma.forTenant = () => ({
+      updateStorageUsage: jest.fn(async (m: any) => {
+        sent.push(m);
+        return 0; // DB giả: freed đã đổi (lô dọn COMMIT giữa lúc đọc và ghi)
+      }),
+    });
+    const r = await new StorageJob(prisma, sharedRedis()).levelTick();
+    expect(sent[0]).toMatchObject({ freedToken: 4321 });
+    expect(r).toMatchObject({ updated: 0, changes: [] });
   });
 
   it('[QT:T12] (phần b) stop() khi đang có lượt chạy dở: trả về ngay (không chờ lượt bay), không hẹn lượt mới, vòng hiệu chỉnh dừng trước project kế (review L5)', async () => {

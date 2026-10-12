@@ -629,6 +629,10 @@ export class ApiController {
     if (delivery.status !== 'DEAD') {
       throw new ConflictException(`Chỉ replay được delivery DEAD (hiện tại: ${delivery.status})`);
     }
+    // QT:T20 (ADR-184): event đã "Dọn" chỉ còn dòng gầy (data = null) — replay sẽ gửi rỗng. Nói thật thay vì gửi.
+    if ((delivery.event as { trimmedAt?: Date | null } | undefined)?.trimmedAt) {
+      throw hubError('event_trimmed', {}, 'Nội dung event đã được dọn — không replay được');
+    }
     // ADR-161 (T3): đích / subscription đã lưu trữ hoặc đích đang "Ngắt" -> replay không có nơi nhận.
     const dst = delivery.subscription?.destination as { id: string; isActive?: boolean; archivedAt?: Date | null } | undefined;
     if (delivery.subscription?.archivedAt || dst?.archivedAt) {

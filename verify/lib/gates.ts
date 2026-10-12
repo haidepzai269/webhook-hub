@@ -174,9 +174,17 @@ export const GATES: Gate[] = [
   },
   {
     id: 'storage-cross-tenant',
-    rule: 'Escape hatch đo dung lượng xuyên project `storage…AcrossTenants(` (systemTx) chỉ được gọi ở apps/hub-worker/src/scheduler/storage.job.ts và khai ở prisma.service.ts',
-    source: 'SPEC-han-muc-dung-luong ĐÍNH CHÍNH E2, ADR-183',
-    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && f !== 'apps/hub-worker/src/scheduler/storage.job.ts',
+    rule:
+      'Escape hatch dung lượng xuyên project `storage…AcrossTenants(` (systemTx) chỉ được gọi ở job của hub-worker (storage.job.ts — đo; storage-clean.runner.ts — nhận lệnh dọn; cleanup.job.ts — dọn tự động/retention) và khai ở prisma.service.ts',
+    source: 'SPEC-han-muc-dung-luong ĐÍNH CHÍNH E2 + §5.4/§5.5, ADR-183/184',
+    include: (f) =>
+      isSrc(f) &&
+      ![
+        'libs/database/src/prisma.service.ts',
+        'apps/hub-worker/src/scheduler/storage.job.ts',
+        'apps/hub-worker/src/scheduler/storage-clean.runner.ts',
+        'apps/hub-worker/src/scheduler/cleanup.job.ts',
+      ].includes(f),
     check: grepLines(/\bstorage\w*AcrossTenants\s*\(/),
   },
   {

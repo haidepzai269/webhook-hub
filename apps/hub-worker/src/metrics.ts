@@ -171,3 +171,21 @@ export const storageNearFull = new Gauge({
   help: '1 khi database vượt 80% DB_DISK_BUDGET_MB (chốt toàn cục cho người vận hành), 0 nếu không',
   registers: [workerRegistry],
 });
+
+// ---------------------------------------------------------------- QT4/QT5 dọn dẹp (ADR-184/186)
+
+/** Byte giải phóng (công thức §2) theo đường dọn: manual (lệnh tay / áp gợi ý) | auto (policy) | retention (7 ngày). */
+export const storageCleanFreedBytes = new Counter({
+  name: 'hub_storage_clean_freed_bytes_total',
+  help: 'Byte dung lượng (ước tính §2) đã giải phóng theo đường dọn',
+  labelNames: ['trigger'] as const,
+  registers: [workerRegistry],
+});
+
+/** Số lô dọn đã chạy — result: ok | error. */
+export const storageCleanBatches = new Counter({
+  name: 'hub_storage_clean_batches_total',
+  help: 'Số lô dọn (mỗi lô một transaction ngắn) theo đường dọn và kết quả',
+  labelNames: ['trigger', 'result'] as const,
+  registers: [workerRegistry],
+});

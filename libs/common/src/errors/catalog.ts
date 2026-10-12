@@ -277,6 +277,12 @@ export const ERROR_CATALOG = {
     fix: () => 'Reconnect with POST /api/v1/sources/:id/connection/retry and the credentials in the body.',
   },
   // ---- hạn mức dung lượng (SPEC-han-muc-dung-luong §4 + E1/E4, ADR-182/189) ----
+  // QT:T20 (§5.1, ADR-184): event đã "Dọn" — dòng gầy giữ chống trùng, không còn nội dung để replay.
+  event_trimmed: {
+    status: 409,
+    message: 'The content of this event was cleaned up to free storage; it can no longer be replayed.',
+    fix: () => 'Trimmed events keep only their dedup key, type and timestamps. Replay is not possible; ask the sender to resend if you still need the data.',
+  },
   // 507 Insufficient Storage: KHÔNG 2xx (BB-3 giữ, provider tự gửi lại). Trả TRƯỚC verify/rate limit — 0 HMAC, 0 Redis.
   project_storage_full: {
     status: 507,

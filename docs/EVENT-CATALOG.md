@@ -121,6 +121,10 @@ Không chép email của author vào phần chung (dữ liệu cá nhân); email
 **COMMIT** (poll_seq) — dùng đúng giá trị `nextCursor` / `cursor` làm `after` lần sau. **Không** dùng `seq` thấy trên
 dashboard (`/api/v1/events?after=<seq>` là thứ tự INSERT, chỉ để xem) — hai dãy số khác nhau.
 
+**Event đã "Dọn"** (hạn mức dung lượng, ADR-184): mỗi event polling có `trimmed: boolean`. `trimmed: true` nghĩa là nội
+dung đã được dọn để giải phóng dung lượng — `data` là `null`, các trường khác (id, cursor, type, source, sourceId, subject,
+thời gian) giữ nguyên; dòng vẫn được trả để cursor không có lỗ. Event đã dọn không replay được (409 `event_trimmed`).
+
 `after=latest` (DX3, ADR-132) trả `{ events: [], nextCursor: "<cursor cuối đã cấp>" }` — bắt đầu từ "bây giờ" (dùng cho
 `hub listen`). `after` không phải số và không phải `latest` → **400** `invalid_cursor`.
 

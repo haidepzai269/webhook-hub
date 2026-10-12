@@ -283,6 +283,17 @@ Hoặc nhờ người vận hành tăng hạn mức.
 curl -si -X POST $API/hooks/github/$SOURCE_KEY -H 'content-type: application/json' -d '{}'
 ```
 
+## event_trimmed
+
+**409 (console: replay delivery).** Nội dung của event đã được **"Dọn"** để giải phóng dung lượng (SPEC-han-muc-dung-luong
+§5.1, ADR-184): chỉ còn dòng gầy (khoá chống trùng, kiểu, thời gian, trạng thái giao) — `data` là `null`, polling trả
+`trimmed: true`. Không còn gì để gửi lại. Replay hàng loạt bỏ qua các delivery này với lý do `event_trimmed`.
+**Sửa:** không replay được event đã dọn. Cần dữ liệu thì nhờ bên gửi phát lại; lần sau gắn "Giữ lâu" cho source quan trọng
+hoặc tắt "Dọn" tự động cho mức tương ứng ở trang Dung lượng.
+```bash
+curl -si -X POST $API/api/v1/deliveries/$DELIVERY_ID/replay?projectId=$PROJECT -b cookies.txt -H "x-csrf-token: $CSRF"
+```
+
 ## source_limit
 
 **409 (console + `/v1/p/:project/sources` + tạo key có `publish:events`).** Project đã có tối đa `SOURCE_LIMIT_PER_PROJECT`

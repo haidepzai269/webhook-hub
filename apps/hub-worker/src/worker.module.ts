@@ -6,6 +6,7 @@ import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
 import { StorageJob } from './scheduler/storage.job';
+import { StorageCleanRunner } from './scheduler/storage-clean.runner';
 import { AlertEvaluator } from './scheduler/alert.evaluator';
 import { AlertEmailSender } from './scheduler/alert-email.sender';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
@@ -18,6 +19,7 @@ const PROVIDERS = [
   DeliverySweeper,
   CleanupJob,
   StorageJob, // QT2 (ADR-183): đo dung lượng project — cập nhật nấc 60s + hiệu chỉnh 24h, khoá Redis như cleanup
+  StorageCleanRunner, // QT4 (ADR-184): chạy lệnh dọn theo lô (SKIP LOCKED + lease, 0 lệnh Redis)
   AlertEvaluator,
   AlertEmailSender, // CB5: vòng gửi email cảnh báo (outbox theo người) — tách khỏi evaluator
   NormalizeConsumer,

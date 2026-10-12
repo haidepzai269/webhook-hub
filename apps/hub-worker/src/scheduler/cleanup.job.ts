@@ -1,12 +1,11 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
-import { NORMALIZE_RETRY_TTL_MS, RETRY_TIERS } from '@hub/messaging';
+import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
 import { fastFailRedisOptions, logger } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 import { hostname } from 'os';
 import { randomUUID } from 'crypto';
-import { NORMALIZE_MAX_RETRIES } from '../consumers/normalize-errors';
 
 /**
  * Job dọn dẹp (S1-4, ADR-045). Redis lock CHỈ dùng ở đây (ARCHITECTURE: "Redis lock chỉ dùng cho
@@ -28,12 +27,11 @@ const DAY_MS = 86_400_000;
 const DEFAULT_INTERVAL_MS = 3_600_000;
 
 /**
- * Tổng thời gian một message có thể còn "sống" trong hệ thống retry: 5 tầng delivery
- * (10s+1m+5m+30m+2h) + 5 lần normalize 30s. processed_messages/outbox phải sống LÂU HƠN thế,
- * nếu không một message retry muộn có thể bị xử lý lại vì chốt idempotency đã bị xoá.
+ * Tổng thời gian một message có thể còn "sống" trong hệ thống retry (5 tầng delivery + 5 lần normalize 30s).
+ * processed_messages/outbox phải sống LÂU HƠN thế. QT4 (ADR-184): nguồn chuyển sang @hub/messaging (retry-window.ts) để
+ * hub-api kiểm `olderThan` của lệnh dọn bằng CÙNG hằng số — re-export giữ API cũ.
  */
-export const TOTAL_RETRY_WINDOW_MS =
-  RETRY_TIERS.reduce((sum, t) => sum + t.ttlMs, 0) + NORMALIZE_RETRY_TTL_MS * NORMALIZE_MAX_RETRIES;
+export { TOTAL_RETRY_WINDOW_MS };
 
 export function assertRetentionSafe(retentionDays: number): void {
   if (!Number.isFinite(retentionDays) || retentionDays * DAY_MS <= TOTAL_RETRY_WINDOW_MS) {
