@@ -28,4 +28,6 @@ regexes = [
   '''apikey_123456''',
   # apps/shop/test/settings.spec.ts (SK2) — khoá PayOS giả dạng "<tên>-0123456789-SECRET" (đã xác minh 2026-10-12).
   '''(cid|apikey|checksum)-0123456789-SECRET''',
+  # libs/providers/test/canonical-github.spec.ts (ADR-162) — secret HMAC giả của fixture webhook GitHub (đã xác minh 2026-10-12).
+  '''gh-secret-adr162''',
 ]
