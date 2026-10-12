@@ -41,6 +41,11 @@ Hai domain tách bạch, giao tiếp **chỉ** qua outbound webhook có ký HMAC
 ```
 +-- DOMAIN A: HUB — hạ tầng generic ----------------------------+
 |                                                               |
+|   edge (nginx) cửa vào, KHÔNG trạng thái nghiệp vụ  ADR-175   |
+|                cầu chì IP /hooks /v1/p · trần body · timeout  |
+|                · ghi đè X-Forwarded-For bằng IP thật          |
+|        |  (EDGE_NGINX=1; tắt = hub-api nhận thẳng như cũ)     |
+|        v                                                      |
 |   hub-api      Ingest + REST + Socket.IO        scale ngang V |
 |   hub-worker   normalize+route | deliver        scale ngang V |
 |                + outbox relay (SKIP LOCKED)                   |
@@ -63,6 +68,27 @@ Hai domain tách bạch, giao tiếp **chỉ** qua outbound webhook có ký HMAC
    web (Next.js) --> hub-api   (dashboard quản trị)
                  --> shop-api  (storefront 3 trang)
 ```
+
+**Cửa vào khi deploy (EG1, ADR-175/176):**
+
+```
+Provider ──► proxy Render ──► [ container hub-all — supervisor docker/hub-all.js (PID 1) ]
+                                 edge   nginx :$PORT   cầu chì IP, giới hạn kết nối, timeout, cắt body, đệm body
+                                   │    127.0.0.1:4000 — X-Forwarded-For/X-Real-IP GHI ĐÈ bằng IP nginx đã đếm
+                                   ▼
+                                 api    hub-api (HOST=127.0.0.1, trust proxy 1) ─► ingest §3.1
+                                 worker hub-worker
+```
+
+- **Ba tiến trình, một container** — nginx là con thứ ba; hub-api và hub-worker vẫn là hai tiến trình (BB-4). Local:
+  service `edge` của compose, cùng file `docker/nginx/nginx.conf.template`, cổng hub-api vẫn mở cho k6.
+- **nginx chỉ làm việc rẻ, không cần ngữ cảnh** (đếm theo IP, trần body, timeout, lọc thô `sourceKey`); việc cần ngữ cảnh
+  (404 hay 401, tenant nào) ở hub-api. nginx **không bao giờ** trả 2xx thay hub-api (BB-3), không sửa body (HMAC trên
+  bytes gốc), không tham gia chống trùng (BB-2).
+- **Cầu chì IP chỉ ở `/hooks/*` và `/v1/p/*`** (không `/api/*`, `/auth/*`, `/socket.io/*`, `/health`); công tắc
+  `EDGE_IP_FUSE` **mặc định tắt** tới khi đo xong IP thật trên Render (ADR-176, `DEPLOYMENT.md` §3.6).
+- **Tắt máy:** nginx nhận `SIGQUIT` (trả nốt request đang proxy), hub-api nhận `SIGTERM` khi nginx đã thoát — trong ngân
+  sách 25 s.
 
 ### Tại sao tách (ADR-001)
 

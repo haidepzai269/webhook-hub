@@ -81,7 +81,7 @@ vẫn giữ — vẫn hai process, mỗi process một AMQP connection + một p
   rồi `exec node docker/hub-all.js` (PID 1) sinh hai con: `hub-api` (nghe `$PORT`) và `hub-worker` (`WORKER_METRICS_PORT=0`).
 - SIGTERM/SIGINT → chuyển cho cả hai; supervisor chờ tối đa `SHUTDOWN_TIMEOUT_MS` (25 s; Render SIGKILL ~30 s) rồi SIGKILL, con nhận hạn 22 s (D-6). Chỉ **worker** drain; **hub-api thoát ngay** (chưa có shutdown hook) — request đang dở bị cắt trước khi trả 2xx, provider gửi lại, BB-2/BB-3 bảo đảm không mất/không đôi (D-2).
   Một con thoát ngoài ý muốn → SIGTERM con kia → container thoát ≠ 0 → Render khởi động lại (không có trạng thái nửa sống).
-- Log: dòng JSON giữ nguyên + trường `"proc":"api"|"worker"|"supervisor"`.
+- Log: dòng JSON giữ nguyên + trường `"proc":"api"|"worker"|"supervisor"` (thêm `"edge"` khi `EDGE_NGINX=1`, §3.6).
 - Pool: supervisor đặt `connection_limit` trong `DATABASE_URL` cho từng con — `HUB_ALL_API_DB_CONNECTIONS` (mặc định 5) +
   `HUB_ALL_WORKER_DB_CONNECTIONS` (mặc định 5) = 10 kết nối client tới pooler Neon (PgBouncer, giới hạn hàng nghìn — dư).
 - RAM (đo hubv, `mem_limit: 512m`, sau smoke + một đơn Shop PAID): xem ADR-129. Heap mỗi con giới hạn bằng
@@ -89,6 +89,8 @@ vẫn giữ — vẫn hai process, mỗi process một AMQP connection + một p
 - Giờ instance free: Render cho 750 giờ/tháng/tài khoản. `hub-all` luôn thức (UptimeRobot ping `/health` 5 phút) ≈ 730 giờ;
   `shop` free để NGỦ khi không dùng (đánh thức ~1 phút) — đừng ping shop liên tục, không thì vượt 750 giờ.
 - Kiểm chứng: `bash scripts/hub-all-e2e.sh` (image thật trên hubv, `docker-compose.verify-allinone.yml`).
+- **EG1 (ADR-175):** `EDGE_NGINX=1` thêm con thứ ba `edge` = nginx nghe `$PORT`, hub-api lùi vào `127.0.0.1:4000`. Mặc định
+  **tắt** — không đặt biến thì container chạy y như trên. Chi tiết, biến và cách đo IP thật: §3.6.
 
 ### 3.3. `render.yaml` (Blueprint — hạ tầng bằng code, đưa vào phụ lục báo cáo)
 
@@ -140,6 +142,80 @@ Render gửi `SIGTERM` rồi `SIGKILL` sau ~30s. Timeout drain trong `ARCHITECTU
 - Phải nghe biến môi trường **`PORT`** của Render, không hardcode 4000.
 - `RENDER_EXTERNAL_URL` dùng để tự cấu hình CORS/callback.
 - Deploy từ GitHub, auto-deploy nhánh **`master`** (repo không có `main`).
+
+### 3.6. Cửa vào nginx trong container `hub-all` (EG1, ADR-175/176)
+
+`EDGE_NGINX=1` → supervisor `docker/hub-all.js` dựng `docker/nginx/nginx.conf.template` bằng `envsubst` (chỉ thay danh
+sách biến cố định, `docker/nginx/edge.js`) rồi chạy thêm con `edge` = `nginx -g 'daemon off;'`:
+
+```
+proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (HOST=127.0.0.1, TRUST_PROXY=1 tự đặt)
+                                   hub-worker (không đổi)
+```
+
+- **Rollback = một biến:** xoá `EDGE_NGINX` (hoặc đặt `0`) → Render khởi động lại → hub-api nghe thẳng `$PORT` như cũ.
+- **Health check** `/health` đi qua nginx, không bị cầu chì. Không cần đổi cấu hình health check của Render.
+- **Tắt máy:** nginx nhận `SIGQUIT` (trả nốt request đang proxy, tối đa 15 s — `worker_shutdown_timeout`), worker nhận
+  `SIGTERM` ngay, hub-api nhận `SIGTERM` khi nginx đã thoát (chậm nhất `EDGE_DRAIN_MS`) — hub-api thoát ngay khi nhận
+  SIGTERM (không drain HTTP), nên phải chờ nginx trả xong. Tổng vẫn trong 25 s.
+- **Log:** access log JSON của nginx (`ts, ip, peer, xff, method, uri_path, status, limit_req_status, limit_conn_status,
+  request_id, bytes, rt`) đi về supervisor qua syslog UDP 127.0.0.1 (stdout của tiến trình con là socket, nginx không mở
+  được `/dev/stdout`), in ra với `"proc":"edge"`. Lỗi nginx (kể cả dòng `limiting requests` khi cầu chì chặn) đi stderr
+  với tiền tố `[edge]`.
+- **RAM:** nginx 1 worker ≈ 7 MB (master) + 6 MB (worker) RSS, đo trong container `edge` của hubv.
+- **Lỗi cấu hình** (`EDGE_TRUSTED_PROXIES` sai khuôn, `EDGE_API_PORT` trùng `PORT`…) → supervisor in lỗi và thoát 1 ngay lúc
+  khởi động; nginx không chạy được (thiếu binary…) → coi như con chết ngoài ý muốn, cả nhóm dừng, Render khởi động lại.
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `EDGE_NGINX` | tắt | `1` = chạy nginx trước hub-api trong `hub-all`. Không ảnh hưởng `docker-entrypoint.sh hub-api` |
+| `EDGE_IP_FUSE` | **tắt** | `1` = bật cầu chì IP (`limit_req`) cho `/hooks/*` và `/v1/p/*`. **Chỉ bật sau khi đã đo IP thật (bên dưới)** — ADR-176 |
+| `EDGE_IP_RATE` | 50 | request/giây/IP của cầu chì (kẹp 1–100000). Phải đủ cho **TỔNG** lưu lượng một provider trên **mọi** tenant (GitHub, PayOS gửi từ chung dải IP) |
+| `EDGE_IP_BURST` | 500 | burst `nodelay` (kẹp 0–1000000) |
+| `EDGE_CONN_PER_IP` | 50 | kết nối đồng thời/IP cho `/hooks/*` (`limit_conn`, luôn bật khi có nginx) |
+| `EDGE_TRUSTED_PROXIES` | trống | IP/CIDR tin cậy cho `set_real_ip_from`, cách nhau dấu phẩy/khoảng trắng. Trống = không tin `X-Forwarded-For` (IP = địa chỉ kết nối TCP — trên Render đó là IP proxy, CHUNG cho mọi người) |
+| `EDGE_REAL_IP_RECURSIVE` | `on` | `real_ip_recursive`. `off` = lấy phần tử **cuối** của XFF |
+| `EDGE_API_PORT` | 4000 | cổng nội bộ của hub-api khi có nginx (phải khác `PORT`) |
+| `EDGE_DRAIN_MS` | 16000 | hub-api chờ nginx thoát tối đa chừng này khi tắt máy (kẹp để còn ≥ 6 s trước mốc SIGKILL) |
+| `HOST` | trống | địa chỉ hub-api nghe. `hub-all` tự đặt `127.0.0.1` khi `EDGE_NGINX=1`; trống = mọi interface như cũ. Không đặt tay trên Render |
+
+**Lần bật đầu tiên trên Render (Admin làm; phiên dev không có quyền Render):**
+
+1. Thêm env cho service `hub-all`: `EDGE_NGINX=1`, `EDGE_TRUSTED_PROXIES=0.0.0.0/0,::/0`, `EDGE_REAL_IP_RECURSIVE=off`.
+   Không đặt `EDGE_IP_FUSE`. Cấu hình này = **đúng hành vi `TRUST_PROXY=1` hôm nay**: tin chặng ngay trước (proxy Render —
+   chỉ nó gọi được vào container) và lấy phần tử **cuối** của `X-Forwarded-For`. Nếu đã đặt tay `PORT=4000` thì thêm
+   `EDGE_API_PORT=4001`.
+2. Chờ deploy xanh, mở `https://<hub>/health` → 200. Log Render có dòng `{"proc":"edge",…,"uri_path":"/health"}`.
+3. **Đo IP thật** (§3.2 của SPEC-chong-qua-tai). Từ máy của bạn:
+   ```bash
+   curl -s https://api.ipify.org; echo                                  # IP thật của bạn, gọi là MY_IP
+   curl -s -o /dev/null https://<hub>/health                            # lượt A: không header
+   curl -s -o /dev/null https://<hub>/health -H 'x-forwarded-for: 6.6.6.6' -H 'x-real-ip: 6.6.6.6'   # lượt B: IP giả
+   ```
+   Trong log Render tìm hai dòng `"proc":"edge"` của `/health` vừa rồi, đọc `ip`, `peer`, `xff`:
+   - **Đạt:** cả hai lượt có `ip` = `MY_IP`. `peer` là IP proxy Render (vd `10.x.x.x`), `xff` lượt B dạng `6.6.6.6, MY_IP`.
+   - `ip` = `6.6.6.6` ở lượt B → Render không ghi/không nối XFF như giả định. **Dừng:** đặt `EDGE_TRUSTED_PROXIES=` (trống),
+     **không** bật cầu chì, ghi lại vào bảng dưới + ADR-176.
+   - `ip` = `peer` hoặc một IP không phải của bạn (vd IP CDN) → mọi người sẽ trông như cùng IP. **Không** bật cầu chì; ghi lại.
+4. Lặp bước 3 từ một mạng khác (4G điện thoại) → `ip` phải đổi theo mạng.
+5. (Tuỳ chọn, chặt hơn) Nếu `peer` luôn nằm trong một dải cố định, thử `EDGE_TRUSTED_PROXIES=<dải đó>` +
+   `EDGE_REAL_IP_RECURSIVE=on`, đo lại bước 3–4. Chỉ giữ nếu vẫn đạt; `xff` có chặng lạ sau `MY_IP` thì quay lại bước 1.
+6. Đạt → đặt `EDGE_IP_FUSE=1`, deploy lại, ghi kết quả vào bảng dưới. Vài ngày đầu xem log `limit_req_status":"REJECTED"`
+   và trang "Recent Deliveries" của GitHub webhook: có 429 thật từ provider → tăng `EDGE_IP_RATE`/`EDGE_IP_BURST` (chỉ env).
+
+| Ngày | Cấu hình real IP | Lượt A `ip` | Lượt B `ip` | `peer` | Kết luận / `EDGE_IP_FUSE` |
+|---|---|---|---|---|---|
+| _chưa đo_ | | | | | cầu chì **tắt** |
+
+**Kiểm ở local (không cần Render):**
+- L0: `npx jest apps/hub-api/test/edge-nginx.spec.ts` (template, envsubst, regex sourceKey [EG:T3], supervisor [EG:T9] với
+  nginx giả).
+- nginx THẬT trong image: `docker build -t hub-edge . && docker run --rm --entrypoint node -e EDGE_NGINX_BIN=nginx hub-edge
+  node_modules/jest/bin/jest.js -w 1 --runTestsByPath apps/hub-api/test/edge-nginx.spec.ts` — test in `T9 nginx THẬT: 200 sau … ms, exit 0`.
+- L2 trên hubv: service `edge` (:18080 → hub-api, trần thấp 5 r/s burst 10) + `edge-sink` (:18090 → sink, chỉ hubv) —
+  `npm run verify:e2e -- --tag EG1` ([EG:T2], [EG:T10], [EG:T11]).
+- Compose dev: `edge` nghe :8080 (cầu chì bật, không có proxy phía trước nên IP kết nối là IP thật). k6 vẫn bắn thẳng
+  `hub-api:4000`; số đo bắn qua `edge` phải ghi rõ trong báo cáo.
 
 ---
 
@@ -424,6 +500,11 @@ DISCORD_WEBHOOK_URL=
 PORT=                    # Render cấp — không hardcode
 CORS_ORIGINS=            # domain Vercel production
 SHUTDOWN_TIMEOUT_MS=25000
+EDGE_NGINX=              # EG1 (ADR-175): 1 = nginx trước hub-api trong hub-all. Trống = như cũ. Bảng đủ biến EDGE_* + HOST: §3.6
+EDGE_IP_FUSE=            # ADR-176: cầu chì IP /hooks/* + /v1/p/*. CHỈ đặt 1 sau khi đo IP thật (§3.6 bước 3–6)
+EDGE_IP_RATE=50 EDGE_IP_BURST=500 EDGE_CONN_PER_IP=50   # trần cầu chì (r/s, burst) và kết nối đồng thời/IP — đổi không cần build
+EDGE_TRUSTED_PROXIES=    # set_real_ip_from (CIDR). Lần bật đầu: 0.0.0.0/0,::/0 + EDGE_REAL_IP_RECURSIVE=off (= TRUST_PROXY=1 hôm nay)
+HOST=                    # không đặt tay: hub-all tự đặt 127.0.0.1 cho hub-api khi EDGE_NGINX=1
 METRICS_TICK_MS=5000
 NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE); hub-api KHÔNG đăng ký /mock/* (ADR-054)
 CIRCUIT_MAX_DEFERRALS=30 # hub-worker: trần số lần hoãn liên tiếp vì circuit (≈30 phút) rồi tính là một lần thử thất bại (ADR-054)
