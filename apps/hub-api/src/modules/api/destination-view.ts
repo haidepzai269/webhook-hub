@@ -6,7 +6,6 @@ type DestinationRow = {
   type: string;
   rateLimitRps: number;
   circuitState: string;
-  alertOnOpen?: boolean;
   signingSecretEncrypted?: string | null;
   verification: string;
   verificationError?: string | null;
@@ -26,7 +25,6 @@ export function consoleDestination(d: DestinationRow) {
     type: d.type,
     rateLimitRps: d.rateLimitRps,
     circuitState: d.circuitState,
-    alertOnOpen: d.alertOnOpen ?? false,
     hasSigningSecret: !!d.signingSecretEncrypted,
     verification: d.verification,
     verificationError: d.verificationError ?? null,

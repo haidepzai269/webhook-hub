@@ -451,8 +451,8 @@ model Destination {
   signingSecretEncrypted String?              @map("signing_secret_encrypted") @db.Text
   rateLimitRps           Int                  @default(0) @map("rate_limit_rps")
   circuitState           CircuitState         @default(CLOSED) @map("circuit_state")
-  /// @deprecated CB1 (SPEC §3.3; ADR ghi ở CB7): cờ chết — không code nào đọc. Thay bằng luật `destination.circuit_open`
-  /// (luôn bật). CB7 bỏ khỏi view/UI; cột drop ở một migration sau. KHÔNG dùng mới.
+  /// @deprecated CB1/CB7 (SPEC §3.3, ADR-172): cờ chết — không code nào đọc. Thay bằng luật `destination.circuit_open`
+  /// (luôn bật). Đã bỏ khỏi view/UI (CB7); cột drop ở một migration sau. KHÔNG dùng mới.
   alertOnOpen            Boolean              @default(false) @map("alert_on_open")
   /// S6 (ADR-040): default VERIFIED cho dữ liệu cũ + telegram/discord; endpoint tạo qua API service bắt đầu PENDING.
   verification           EndpointVerification @default(VERIFIED)

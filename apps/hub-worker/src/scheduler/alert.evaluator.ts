@@ -292,7 +292,7 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     try {
       const rows = await repo.findOpenAlerts(OPEN_ALERTS_READ_LIMIT);
       openTruncated = rows.length >= OPEN_ALERTS_READ_LIMIT;
-      if (openTruncated) logger.warn({ tenantId, limit: OPEN_ALERTS_READ_LIMIT }, 'Alert evaluator: cảnh báo OPEN chạm trần đọc — đóng theo (rule, subject) cho đối tượng ngoài ảnh chụp');
+      if (openTruncated) logger.warn({ tenantId, limit: OPEN_ALERTS_READ_LIMIT }, 'Alert evaluator: cảnh báo OPEN chạm trần đọc — đọc bù OPEN theo luật cho đối tượng ngoài ảnh chụp (findOpenAlertsForSubjects), gauge giữ giá trị cũ');
       open = new Map(
         rows.map((a) => [
           key(a.rule, a.subjectId),

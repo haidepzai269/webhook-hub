@@ -282,6 +282,99 @@
           "legendFormat": "-> {{to}}"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Cảnh báo đang OPEN theo mức",
+      "description": "hub_alerts_open{severity} — đặt cuối mỗi lượt đánh giá trọn vẹn (60s). Mỗi worker tự đánh giá mọi project (không khoá, ADR-165) nên báo cùng con số: dùng max, không sum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "max by (severity) (hub_alerts_open)",
+          "legendFormat": "{{severity}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Cảnh báo đổi trạng thái / lỗi đánh giá",
+      "description": "hub_alert_transitions_total{rule,to}: lần chuyển OPEN/RESOLVED do chính worker ghi được. hub_alert_eval_errors_total{rule}: luật ném lỗi (các luật khác vẫn chạy) — khác 0 kéo dài là evaluator đang mù.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (rule, to) (increase(hub_alert_transitions_total[5m]))",
+          "legendFormat": "{{rule}} -> {{to}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "sum by (rule) (increase(hub_alert_eval_errors_total[5m]))",
+          "legendFormat": "lỗi {{rule}}"
+        }
+      ]
     }
   ]
 }

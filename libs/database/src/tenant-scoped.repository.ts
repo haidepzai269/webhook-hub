@@ -1070,18 +1070,6 @@ export class TenantScopedRepository {
   }
 
   /**
-   * Đóng cảnh báo OPEN của (rule, subject). `factsPatch` gộp vào facts (vd `{ reason: 'archived' }`). Không có dòng OPEN
-   * (đã đóng / evaluator khác đóng trước) -> null: người gọi KHÔNG publish lần nữa.
-   */
-  async resolveAlert(rule: string, subjectId: string, now: Date, factsPatch: Record<string, unknown> = {}): Promise<AlertRow | null> {
-    const [row] = await this.prisma.$queryRaw<AlertRow[]>(Prisma.sql`
-      UPDATE hub.alerts SET state = 'RESOLVED', resolved_at = ${now}, facts = facts || ${JSON.stringify(factsPatch)}::jsonb
-      WHERE tenant_id = ${this.tenantId}::uuid AND rule = ${rule} AND subject_id = ${subjectId}::uuid AND state = 'OPEN'
-      RETURNING ${ALERT_RETURNING}`);
-    return row ?? null;
-  }
-
-  /**
    * CB2: đóng ĐÚNG dòng đã đọc ở ảnh chụp (theo id, chỉ khi còn OPEN) — không đóng nhầm một dòng OPEN MỚI của cùng
    * (rule, subject) mà evaluator khác vừa mở sau ảnh chụp. Không còn OPEN -> null (không publish lần hai).
    */
@@ -1136,11 +1124,13 @@ export class TenantScopedRepository {
    */
   async ackAlertsByIds(ids: string[], userId: string, now: Date): Promise<string[]> {
     if (ids.length === 0) return [];
-    const where = { tenantId: this.tenantId, id: { in: ids }, state: 'OPEN' as const, acknowledgedAt: null };
-    const hit = (await this.prisma.alert.findMany({ where, select: { id: true }, orderBy: { id: 'asc' } })).map((r) => r.id);
-    if (hit.length === 0) return [];
-    await this.prisma.alert.updateMany({ where: { ...where, id: { in: hit } }, data: { acknowledgedAt: now, acknowledgedBy: userId } });
-    return hit;
+    // MỘT câu UPDATE … RETURNING (CB7, review CB4): id trả về = ĐÚNG các dòng lần gọi này đã ghi — không có khe giữa đọc
+    // và ghi (findMany + updateMany cũ: một lượt ack song song chen giữa thì audit liệt kê id mà lần này không ghi).
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+      UPDATE hub.alerts SET acknowledged_at = ${now}, acknowledged_by = ${userId}::uuid
+      WHERE tenant_id = ${this.tenantId}::uuid AND id = ANY(${ids}::uuid[]) AND state = 'OPEN' AND acknowledged_at IS NULL
+      RETURNING id`);
+    return rows.map((r) => r.id).sort();
   }
 
   /**

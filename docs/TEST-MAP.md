@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T06:15:01.327Z, commit f408e8f).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T06:24:44.688Z, commit e40bd5b).
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 323 mã khai báo · 254 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 323 mã khai báo · 255 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -28,7 +28,7 @@ Tổng: 323 mã khai báo · 254 mã có test · 0 mồ côi · 24 mồ côi có
 | `AF:#18` | REVIEW-CHECKLIST.md · S1-3 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:204 | chưa chạy |
 | `AF:#19` | REVIEW-CHECKLIST.md · S1-3 | L1 | apps/hub-worker/test/delivery-lease-sweeper.spec.ts:87 | ✅ pass |
 | `AF:#20` | REVIEW-CHECKLIST.md · S1-4 | L2 | verify/scenarios/chaos-l3.ts:217 | chưa chạy |
-| `AF:#21` | REVIEW-CHECKLIST.md · S1-4 | L0 | apps/hub-worker/test/cleanup-job.spec.ts:43 | chưa chạy |
+| `AF:#21` | REVIEW-CHECKLIST.md · S1-4 | L0 | apps/hub-worker/test/cleanup-job.spec.ts:44 | chưa chạy |
 | `AF:#22` | REVIEW-CHECKLIST.md · S1-5 | L0 | apps/hub-worker/test/normalize-consumer.spec.ts:196 | chưa chạy |
 | `AF:#23` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:175 | ✅ pass |
 | `AF:#24` | REVIEW-CHECKLIST.md · S2-1 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:151 | ✅ pass |
@@ -141,14 +141,15 @@ Tổng: 323 mã khai báo · 254 mã có test · 0 mồ côi · 24 mồ côi có
 | `BB:5` | spec-sources.json | L1 | libs/database/test/alerts-db.spec.ts:92<br>libs/database/test/project-schema-db.spec.ts:41<br>libs/database/test/rls-db.spec.ts:42<br>libs/database/test/rls-db.spec.ts:72 | ✅ pass |
 | `CB:T1` | SPEC-canh-bao-nhan-dinh.md · CB1 | L0 | libs/common/test/alert-rules.spec.ts:57<br>libs/common/test/alert-rules.spec.ts:97<br>libs/common/test/alert-rules.spec.ts:105<br>libs/common/test/alert-rules.spec.ts:142<br>libs/common/test/alert-rules.spec.ts:151<br>libs/common/test/alert-rules.spec.ts:165<br>libs/common/test/alert-rules.spec.ts:177<br>libs/common/test/alert-rules.spec.ts:200<br>libs/common/test/alert-rules.spec.ts:222<br>libs/common/test/alert-rules.spec.ts:229 | chưa chạy |
 | `CB:T2` | SPEC-canh-bao-nhan-dinh.md · CB1 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:116<br>libs/database/test/alerts-db.spec.ts:42 | ✅ pass |
-| `CB:T3` | SPEC-canh-bao-nhan-dinh.md · CB2 | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:180 | chưa chạy |
+| `CB:T3` | SPEC-canh-bao-nhan-dinh.md · CB2 | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:174 | chưa chạy |
 | `CB:T4` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:76 | ✅ pass |
 | `CB:T5` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:178 | ✅ pass |
-| `CB:T6` | SPEC-canh-bao-nhan-dinh.md · CB2 | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:201 | chưa chạy |
-| `CB:T7` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1,L0 | apps/hub-worker/test/alert-evaluator-db.spec.ts:76<br>apps/hub-worker/test/alert-evaluator.spec.ts:229 | ✅ pass |
+| `CB:T6` | SPEC-canh-bao-nhan-dinh.md · CB2 | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:195 | chưa chạy |
+| `CB:T7` | SPEC-canh-bao-nhan-dinh.md · CB2 | L1,L0 | apps/hub-worker/test/alert-evaluator-db.spec.ts:76<br>apps/hub-worker/test/alert-evaluator.spec.ts:223 | ✅ pass |
 | `CB:T10` | SPEC-canh-bao-nhan-dinh.md · CB3 | L1,L0 | apps/hub-api/test/alerts-api-db.spec.ts:99<br>apps/hub-api/test/alerts-api.spec.ts:44<br>apps/hub-api/test/alerts-api.spec.ts:259 | ✅ pass |
-| `CB:T11` | SPEC-canh-bao-nhan-dinh.md | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:143 | chưa chạy |
+| `CB:T11` | SPEC-canh-bao-nhan-dinh.md | L0 | apps/hub-worker/test/alert-evaluator.spec.ts:137 | chưa chạy |
 | `CB:T12` | SPEC-canh-bao-nhan-dinh.md · CB3 | L1 | apps/hub-api/test/alerts-api-db.spec.ts:49 | ✅ pass |
+| `CB:T14` | SPEC-canh-bao-nhan-dinh.md · CB7 | L0 | apps/hub-api/test/destination-view.spec.ts:47 | chưa chạy |
 | `CB:T15` | SPEC-canh-bao-nhan-dinh.md · CB4 | L0 | apps/web/src/lib/alerts/notify-logic.spec.ts:104 | chưa chạy |
 | `CB:T16` | SPEC-canh-bao-nhan-dinh.md · CB6 | L0 | libs/common/test/insights.spec.ts:25 | chưa chạy |
 | `CB:T17` | DINH-CHINH-2026-10-12.md · CB2 | L1 | apps/hub-worker/test/alert-evaluator-db.spec.ts:134 | ✅ pass |
@@ -211,7 +212,7 @@ Tổng: 323 mã khai báo · 254 mã có test · 0 mồ côi · 24 mồ côi có
 | `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:124<br>apps/hub-api/test/service-resources.spec.ts:131<br>apps/hub-api/test/service-resources.spec.ts:149 | chưa chạy |
 | `MS:T9` | SPEC-hub-multi-service.md · S8 | L0 | apps/hub-api/test/ingest-generic.spec.ts:34<br>apps/hub-api/test/ingest-generic.spec.ts:41<br>apps/hub-api/test/service-sources.spec.ts:48<br>apps/hub-api/test/service-sources.spec.ts:62<br>apps/hub-api/test/service-sources.spec.ts:102 | chưa chạy |
 | `MS:T10` | SPEC-hub-multi-service.md · S10 | L0 | apps/hub-worker/test/delivery-timeout.spec.ts:29 | chưa chạy |
-| `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:74<br>libs/database/test/retention-db.spec.ts:52 | ✅ pass |
+| `MS:T13` | SPEC-hub-multi-service.md · S7 | L0,L1 | apps/hub-worker/test/cleanup-job.spec.ts:75<br>libs/database/test/retention-db.spec.ts:52 | ✅ pass |
 | `MS:T14` | SPEC-hub-multi-service.md · S12 | L1 | libs/database/test/seed-demo-db.spec.ts:16 | ✅ pass |
 | `MS:U1` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:16 | chưa chạy |
 | `MS:U2` | SPEC-hub-multi-service.md · S6 | L0 | libs/crypto/test/standard-webhooks.spec.ts:20 | chưa chạy |
@@ -287,6 +288,6 @@ Tổng: 323 mã khai báo · 254 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (177 file, 1151 khai báo it/test)
+## File test (178 file, 1159 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

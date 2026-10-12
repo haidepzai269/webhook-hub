@@ -1720,6 +1720,19 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 ---
 
+## ADR-172 — Bỏ `alertOnOpen` khỏi API/UI, thay bằng luật `destination.circuit_open`; ack-all ghi bằng MỘT câu `UPDATE … RETURNING` (CB7, 2026-10-12)
+
+**Vấn đề:** `Destination.alertOnOpen` là cờ chết: `consoleDestination` vẫn trả ra (`/api/v1/destinations`) nhưng không code nào đọc nó, nên ai thấy cờ này sẽ tưởng hub báo khi circuit OPEN (SPEC CB §3.3, §12 mục 3). Review CB2/CB4 còn để lại ba chỗ chưa gọn: câu log khi ảnh chụp OPEN chạm trần vẫn tả cách cũ, `resolveAlert(rule, subject)` chỉ còn test gọi, và `ackAlertsByIds` đọc (`findMany`) rồi mới ghi (`updateMany`), để hở một khe TOCTOU.
+**Chọn:**
+- `consoleDestination` không trả `alertOnOpen` nữa (CB:T14). Web chưa từng hiện cờ này, nên không phải sửa UI. Cột `alert_on_open` vẫn giữ, có `@deprecated` trong schema, và sẽ drop ở một migration sau. Circuit OPEN giờ do luật `destination.circuit_open` (warning) lo: luật luôn bật, muốn tắt email thì vào tuỳ chọn của từng người (ADR-166).
+- `ackAlertsByIds` dùng một câu `UPDATE hub.alerts … WHERE tenant_id = $t AND id = ANY($ids::uuid[]) AND state = 'OPEN' AND acknowledged_at IS NULL RETURNING id`, đi qua đường raw có scope. Danh sách id cùng `count` ghi vào audit `alert.acknowledged_all` vì thế khớp đúng những dòng mà lần gọi này đã ghi.
+- Xoá `TenantScopedRepository.resolveAlert`. Evaluator chỉ đóng theo id của ảnh chụp (`resolveAlertById`, ADR-168), và test cũng chuyển sang dùng hàm này.
+- **Đính chính ADR-168:** khi ảnh chụp OPEN chạm trần, evaluator đọc bù dòng OPEN của từng luật (`findOpenAlertsForSubjects`) rồi vẫn đóng theo id. Câu "đóng theo (rule, subject)" trong phần bổ sung của ADR-168 là cách cũ. Câu log đã sửa cho khớp.
+- Grafana có thêm panel 7 (`max by (severity) (hub_alerts_open)`) và panel 8 (transitions + `hub_alert_eval_errors_total`). Đã đưa vào checklist `- [x] CBn` của SPEC để `verify:map` đòi test. CB:T13 (email lỗi → FAILED) chuyển sang nhóm CB5, vì gửi email là outbox của CB5.
+**Đánh đổi:** Client ngoài nào còn đọc `alertOnOpen` sẽ nhận `undefined`. Trường này chưa từng có tác dụng nên đây không phải hồi quy. Câu UPDATE raw không qua kiểu của Prisma, nên khi đổi tên cột phải sửa tay. Test DB `[CB:T2]` và `alerts-db` sẽ bắt lỗi nếu quên.
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

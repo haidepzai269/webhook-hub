@@ -141,7 +141,7 @@ Không phải nghĩa A ("có UI, bấm nút thì có chuyện xảy ra"). Nghĩa
 ### Ngày 12 — Siết + khép khoảng cách với Svix (ADR-016, ~2,5h)
 - [ ] ⭐ **Outbound throttle per destination** (~1h) — token bucket Redis, dùng lại code rate limit inbound, đổi key. `destinations.rate_limit_rps`
 - [ ] ⭐ **Polling endpoint** `GET /api/v1/events?after=<cursor>` (~1h) — cursor = `events.id` (ULID), scope theo tenant
-- [ ] ⭐ **Tự cảnh báo** (~30') — circuit OPEN → hub bắn Telegram bằng chính `telegram.sender` của nó
+- [x] ⭐ **Tự cảnh báo** — *làm khác kế hoạch* (2026-10-12, CB1–CB7, ADR-165..171): không bắn Telegram qua pipeline của chính nó (pipeline cháy thì cháy theo) mà là cảnh báo cho người vận hành — evaluator trong `hub-worker` → `hub.alerts` → chuông/banner console + email; circuit OPEN = luật `destination.circuit_open` (thay `alert_on_open`). ARCHITECTURE §5.4c
 - [ ] "Send Example" payload mẫu theo event type trên trang Destinations
 - [ ] Xoay secret inbound (`source_secrets` nhiều version) + outbound (2 chữ ký)
 - [ ] `audit_logs` cho mọi replay / sửa cấu hình

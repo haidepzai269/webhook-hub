@@ -295,7 +295,23 @@ Cùng script Lua với rate limit inbound (cửa sổ 60s), chỉ đổi key và
 | **Jitter ở tầng retry delivery** | Retry dùng TTL của **queue** (mỗi tầng một queue, §4) — RabbitMQ không cho TTL ngẫu nhiên theo từng message mà không quay về head-of-line blocking | Relay ±100ms, sweeper ±10s, cleanup ±10%; circuit breaker chặn retry storm vào đích chết |
 | **Token bucket** cho rate limit / throttle | Cửa sổ cố định 1 lệnh Redis, đủ để chống spam/bảo vệ đích | Sai số tối đa 2× ở mép cửa sổ (§5.4b) |
 | **DLQ broker là nguồn sự thật** | Broker không truy vấn/lọc được, có trần policy (ADR-052) | Postgres `deliveries.status='DEAD'` + `raw_events` là nguồn; trang DLQ và replay đọc DB |
-| **Tự cảnh báo Telegram khi circuit OPEN** | Kênh `hub:alerts` đã bỏ ở ADR-048; chưa làm lại | `circuit.changed` realtime trên dashboard + metric `hub_circuit_transitions_total` |
+| **Tự cảnh báo qua Telegram/Slack** (gửi bằng chính pipeline delivery) | Pipeline cháy thì kênh báo cháy theo; kênh `hub:alerts` cũ đã bỏ ở ADR-048 | Cảnh báo cho người vận hành (bên dưới): chuông console + email, đi đường riêng không qua RabbitMQ |
+
+**Cảnh báo cho người vận hành (CB, ADR-165..171)** — thay cho "tự cảnh báo" ⭐ cũ và cờ chết `alert_on_open`:
+
+- **Evaluator trong `hub-worker`** (ADR-020, BB-4 — không tiến trình mới), mỗi 60s (`ALERT_EVAL_INTERVAL_MS`). Luật = hàm thuần
+  `libs/common/src/alerts/rules.ts` + một truy vấn tổng hợp có cửa sổ/LIMIT qua `TenantScopedRepository` (BB-5); không luật nào
+  biết đơn hàng (BB-1) hay `provider === …`. Bảng phân loại HTTP dùng chung với `delivery.consumer` (`http-outcome.ts`).
+- **Trọng tài là Postgres:** `hub.alerts` (tenant_id + RLS), unique index MỘT PHẦN `(tenant_id, rule, subject_id) WHERE state='OPEN'`
+  + `INSERT … ON CONFLICT`. **Không khoá** (không advisory, không Redis lock — Redis lock chỉ dành cho cleanup): N worker cùng
+  đánh giá chỉ tốn thêm truy vấn, vẫn đúng một dòng OPEN. Đóng theo `id` của ảnh chụp. Redis mất → mất realtime, cảnh báo vẫn đúng (BB-2).
+- **Email = outbox theo NGƯỜI** `hub.alert_emails(alert_id, user_id, kind)`: dòng PENDING tạo cùng transaction đổi trạng thái,
+  vòng gửi `SKIP LOCKED` (CB5), trần 6/giờ/người, chống flapping 30 phút; tuỳ chọn `alert_preferences` gắn người (ADR-166/167).
+- **Realtime:** chỉ khi trạng thái ĐỔI mới `PUBLISH hub:realtime:alerts` → `alert.changed` vào room `project:<id>:ops` (chỉ operator).
+  Chuông xuyên project = `GET /api/v1/alerts/summary` poll 30s qua escape hatch có tên (ADR-169/170). Không nằm trên đường nóng:
+  ngân sách Redis R1 không đổi.
+- **Nhận định (insight) tính lúc đọc** ở `hub-api` (`GET /projects/:p/insights`), không lưu, dùng lại đúng hàm của luật (ADR-171).
+- Metric `hub_alerts_open{severity}` · `hub_alert_transitions_total{rule,to}` · `hub_alert_eval_errors_total{rule}` (panel Grafana 7–8).
 
 ### 5.5. Máy trạng thái
 
@@ -435,7 +451,7 @@ CREATE TYPE hub.circuit_state    AS ENUM ('CLOSED','OPEN','HALF_OPEN');
 | `signing_secret_encrypted` | text | cho type `webhook` |
 | `rate_limit_rps` | int default 0 ⭐ MỚI | outbound throttle, 0 = không giới hạn (§5.4b) |
 | `circuit_state` | circuit_state | đồng bộ từ Redis để hiển thị |
-| `alert_on_open` | boolean ⭐ MỚI | bật cảnh báo Telegram khi circuit OPEN |
+| `alert_on_open` | boolean — **@deprecated** | cờ chết, không còn trong API/UI; thay bằng luật `destination.circuit_open` (§5.4c). Drop ở migration sau |
 
 **`subscriptions`**
 
@@ -555,10 +571,10 @@ Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong m�
 |---|---|---|
 | **Correlation ID** | `correlation_id = raw_event.id`, truyền qua AMQP `properties.headers['x-correlation-id']`, gắn vào mọi log | Tra được toàn bộ hành trình một sự kiện qua mọi tiến trình |
 | Log | `pino`, JSON có cấu trúc | |
-| Metrics | `prom-client`, đếm trong bộ nhớ (0 lệnh Redis). hub-api `GET /metrics` (không JWT; `METRICS_TOKEN` nếu đặt); hub-worker http tối giản `:9101/metrics` (chỉ mạng nội bộ) — S3-4, ADR-061 | api: `hub_ingest_requests_total{provider,outcome}` · `hub_ingest_duration_seconds{provider}` · worker: `hub_deliveries_total{destination_type,status}` · `hub_delivery_duration_seconds` · `hub_circuit_transitions_total{to}` · `hub_outbox_lag_seconds` · `hub_normalize_retries_total` · `hub_normalize_schema_errors_total{source}` · default process metrics |
-| Grafana | provisioning trong repo `infra/grafana/provisioning` (datasource + dashboard "Webhook Hub" 6 panel); Prometheus/Grafana ghim phiên bản | Đo bằng `k6/ingest-github.js` (`k6/README.md`) |
+| Metrics | `prom-client`, đếm trong bộ nhớ (0 lệnh Redis). hub-api `GET /metrics` (không JWT; `METRICS_TOKEN` nếu đặt); hub-worker http tối giản `:9101/metrics` (chỉ mạng nội bộ) — S3-4, ADR-061 | api: `hub_ingest_requests_total{provider,outcome}` · `hub_ingest_duration_seconds{provider}` · worker: `hub_deliveries_total{destination_type,status}` · `hub_delivery_duration_seconds` · `hub_circuit_transitions_total{to}` · `hub_outbox_lag_seconds` · `hub_normalize_retries_total` · `hub_normalize_schema_errors_total{source}` · `hub_alerts_open{severity}` · `hub_alert_transitions_total{rule,to}` · `hub_alert_eval_errors_total{rule}` · default process metrics |
+| Grafana | provisioning trong repo `infra/grafana/provisioning` (datasource + dashboard "Webhook Hub" 8 panel — 7–8 là cảnh báo); Prometheus/Grafana ghim phiên bản | Đo bằng `k6/ingest-github.js` (`k6/README.md`) |
 | Health | `/health` kiểm Postgres · Redis · RabbitMQ | |
-| **Tự cảnh báo** | *Chưa làm* (bỏ cùng kênh `hub:alerts`, ADR-048) — xem §5.4c | Hiện có `circuit.changed` realtime + metric |
+| **Tự cảnh báo** | Cảnh báo cho người vận hành: evaluator trong `hub-worker` → `hub.alerts` → chuông/banner console + email (§5.4c, ADR-165..171) | 9 luật, `destination.circuit_open` thay `alert_on_open` |
 
 ### 8.1. Polling (A) — cho service không nhận được push (ADR-016, ADR-077)
 

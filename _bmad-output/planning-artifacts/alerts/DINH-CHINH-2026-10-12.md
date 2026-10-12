@@ -13,3 +13,5 @@
 | D7 | Thứ tự làm | Code CB chạy trên **worktree/nhánh riêng** tách từ commit đã push của lô A/B/C/F/G (ghi chú Nhật ký, thùng rác ADR-161, i18n, GitHub ADR-162, phân trang). Nav (`lib/i18n/messages/nav.ts`, `sidebar-items.ts`) và trang Tổng quan sẽ bị agent dịch trang (E) sửa song song ở cây chính → khi gộp, giữ cả hai. | Tránh lẫn spec. |
 | D9 | `delivery.dead_spike` (§4), `I-dead` (§7) đếm mọi delivery DEAD | **Loại** delivery DEAD vì đích bị lưu trữ: `last_error LIKE 'destination_archived:%'` hoặc subscription/destination có `archived_at`. Thêm test CB:T17: lưu trữ đích có ≥10 delivery đang chờ → không mở `dead_spike`. | ADR-161 (bổ sung): worker đánh DEAD delivery tới đích đã lưu trữ → xoá một đích đang có hàng chờ sẽ bắn cảnh báo critical giả, và nút "Phát lại hàng loạt" lại chọn 0. |
 | D8 | ADR | Grep số ADR cao nhất ngay trước khi ghi (161, 162 đã dùng; lô phân trang có thể dùng tiếp). | Log append-only. |
+
+Tiến độ (`verify:map` đọc dòng này cho CB:T17): - [x] CB2

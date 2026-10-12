@@ -64,12 +64,6 @@ function world() {
       alerts.push(row);
       return { alert: row, opened: true };
     },
-    async resolveAlert(rule: string, subjectId: string, now: Date, patch: any) {
-      const cur = alerts.find((a) => a.rule === rule && a.subjectId === subjectId && a.state === 'OPEN');
-      if (!cur) return null;
-      Object.assign(cur, { state: 'RESOLVED', resolvedAt: now, facts: { ...cur.facts, ...patch } });
-      return cur;
-    },
     async findOpenAlertsForSubjects(rule: string, ids: string[]) {
       return alerts.filter((a) => a.state === 'OPEN' && a.rule === rule && ids.includes(a.subjectId));
     },
@@ -317,7 +311,7 @@ describe('CB2 AlertEvaluator (đi dây, repo giả)', () => {
     const origFind = repo.findOpenAlerts;
     repo.findOpenAlerts = async () => {
       const snap = (await origFind()).map((a: any) => ({ ...a }));
-      await repo.resolveAlert('destination.auth_rejected', DEST, at(MIN), {}); // evaluator khác đóng
+      await repo.resolveAlertById(snap.find((a: any) => a.rule === 'destination.auth_rejected').id, at(MIN), {}); // evaluator khác đóng
       await repo.upsertOpenAlert({ rule: 'destination.auth_rejected', severity: 'critical', subjectType: 'destination', subjectId: DEST, facts: {}, now: at(MIN) }); // rồi mở lại
       return snap;
     };

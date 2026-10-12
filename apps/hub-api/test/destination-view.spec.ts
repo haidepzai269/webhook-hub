@@ -44,6 +44,12 @@ describe('consoleDestination — bản công khai của đích cho console (P2)'
     expect(ok.managedByService).toBe(false);
   });
 
+  it('[CB:T14] không còn `alertOnOpen` trong response (cờ chết — thay bằng luật destination.circuit_open)', () => {
+    const v = consoleDestination({ ...row, alertOnOpen: true } as Parameters<typeof consoleDestination>[0]);
+    expect(v).not.toHaveProperty('alertOnOpen');
+    expect(JSON.stringify(v)).not.toContain('alertOnOpen');
+  });
+
   it('PENDING giữ nguyên (đang chờ challenge)', () => {
     expect(consoleDestination({ ...row, verification: 'PENDING', verificationError: null }).verification).toBe('PENDING');
   });

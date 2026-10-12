@@ -215,15 +215,15 @@
         "checklist": "\\[x\\] (CB\\d+)",
         "groups": {
           "CB1": "T1,T2",
-          "CB2": "T3-T7,T13",
+          "CB2": "T3-T7",
           "CB3": "T10,T12",
           "CB4": "T15",
-          "CB5": "T8,T9",
+          "CB5": "T8,T9,T13",
           "CB6": "T16",
           "CB7": "T14"
         }
       },
-      "note": "SPEC-canh-bao-nhan-dinh §10 (CB1–CB7). CB:T11 = redis-budget.spec.ts không đổi (mọi story). Chưa có checklist [x] trong SPEC: phiên dev ghi tiến độ ở báo cáo; thêm dòng `- [x] CBn` vào SPEC khi story được duyệt."
+      "note": "SPEC-canh-bao-nhan-dinh §10 (CB1–CB7). CB:T11 = redis-budget.spec.ts không đổi (mọi story). Checklist `- [x] CBn` ở cuối §11 SPEC (CB7). CB:T13 (gửi email lỗi -> FAILED sau 3 lần) thuộc CB5 vì gửi email là outbox của CB5 (DINH-CHINH D1), không phải evaluator CB2."
     },
     {
       "ns": "CB",
@@ -235,7 +235,7 @@
           "CB2": "T17"
         }
       },
-      "note": "DINH-CHINH D9: CB:T17 (lưu trữ đích có ≥10 delivery chờ -> không mở dead_spike)."
+      "note": "DINH-CHINH D9: CB:T17 (lưu trữ đích có ≥10 delivery chờ -> không mở dead_spike). Checklist đọc từ chính file này: dòng `- [x] CB2` cuối file."
     }
   ],
   "inline": [

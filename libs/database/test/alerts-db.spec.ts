@@ -51,7 +51,7 @@ describeDb('CB1 alerts (Postgres, hub_app)', () => {
     expect(rows[0].openedAt.getTime()).toBeLessThanOrEqual(rows[0].lastSeenAt.getTime());
 
     // đóng song song: chỉ MỘT lượt thấy dòng OPEN (lượt kia null -> không publish lần hai)
-    const closed = await Promise.all([w1, w2].map((s) => s.forTenant(A).resolveAlert('destination.auth_rejected', destA, now, { reason: 'archived' })));
+    const closed = await Promise.all([w1, w2].map((s) => s.forTenant(A).resolveAlertById(rows[0].id, now, { reason: 'archived' })));
     expect(closed.filter(Boolean)).toHaveLength(1);
     const r = closed.find(Boolean)!;
     expect(r).toMatchObject({ state: 'RESOLVED', resolvedAt: now, tenantId: A });
@@ -102,7 +102,7 @@ describeDb('CB1 alerts (Postgres, hub_app)', () => {
     expect(await repoB.findAlertById(alertA.id)).toBeNull();
     expect(await repoB.findOpenAlerts()).toEqual([]);
     expect(await repoB.ackAlert(alertA.id, randomUUID(), now)).toEqual({ found: false, changed: false });
-    expect(await repoB.resolveAlert(alertA.rule, alertA.subjectId, now)).toBeNull();
+    expect(await repoB.resolveAlertById(alertA.id, now)).toBeNull();
     // khoá ngoại ghép (alert_id, tenant_id): B không gắn được email vào alert của A
     await expect(repoB.enqueueAlertEmails(alertA.id, 'OPEN', [users[0]])).rejects.toThrow();
     // alert của A ĐÃ có (users[0], OPEN): ON CONFLICT DO NOTHING bỏ dòng trước khi kiểm khoá ngoại -> 0, dòng của A không đổi
