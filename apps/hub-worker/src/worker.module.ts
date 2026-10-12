@@ -5,6 +5,7 @@ import { CircuitBreakerService } from './circuit/circuit-breaker.service';
 import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
+import { AlertEvaluator } from './scheduler/alert.evaluator';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 
@@ -14,6 +15,7 @@ const PROVIDERS = [
   OutboxRelay,
   DeliverySweeper,
   CleanupJob,
+  AlertEvaluator,
   NormalizeConsumer,
   DeliveryConsumer,
 ];

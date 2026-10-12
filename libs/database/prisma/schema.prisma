@@ -500,6 +500,8 @@ model Delivery {
   @@unique([eventId, subscriptionId, attemptGeneration])
   @@index([tenantId, status, nextAttemptAt])
   @@index([tenantId, createdAt(sort: Desc)]) // danh sách deliveries/DLQ/timeseries: lọc tenant + ORDER BY created_at DESC (ADR-033)
+  // CB2: + index MỘT PHẦN `deliveries_dead_tenant_updated_idx (tenant_id, updated_at DESC) WHERE status='DEAD'` — chỉ ở migration
+  // 20261012060000_alert_eval_indexes (Prisma 6 không khai được WHERE).
   @@map("deliveries")
   @@schema("hub")
 }
@@ -518,6 +520,7 @@ model DeliveryAttempt {
   delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
 
   @@index([deliveryId])
+  @@index([createdAt]) // CB2: cửa sổ attempt của AlertEvaluator (migration 20261012060000_alert_eval_indexes)
   @@map("delivery_attempts")
   @@schema("hub")
 }

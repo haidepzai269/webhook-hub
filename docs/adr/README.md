@@ -1643,6 +1643,19 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 ---
 
+## ADR-168 — AlertEvaluator: đầu vào theo cửa sổ + hai index mới, chống flapping theo cảnh báo, đối tượng biến mất = lưu trữ (CB2, 2026-10-12)
+
+**Vấn đề:** Evaluator (ADR-165) chạy mỗi 60s cho mọi project, cần đọc attempt 15–30 phút và delivery DEAD 1 giờ mà không quét cả bảng; phải quyết khi nào KHÔNG gửi email lần nữa (flapping §6), xử lý cảnh báo OPEN của đối tượng đã bị xoá cứng, và báo số OPEN khi nhiều worker cùng chạy (D4, không khoá).
+**Chọn:**
+- **Index (migration `20261012060000_alert_eval_indexes`, chỉ DDL):** `delivery_attempts(created_at)` (bảng chỉ INSERT) cho luật chuỗi + `destination.failing`; index MỘT PHẦN `deliveries(tenant_id, updated_at DESC) WHERE status='DEAD'` cho `dead_spike` + `facts.dead` (chỉ tốn ghi khi delivery vào DEAD). Mọi truy vấn đầu vào là phương thức có tên của `TenantScopedRepository` (lọc `tenant_id`, RLS), có cửa sổ thời gian theo `now` tiêm vào và LIMIT; `auth_rejected`/`client_error` dùng CHUNG một truy vấn attempt (≤ 50 attempt mới nhất mỗi đích). Probe loại ở SQL (`events.probe`; raw ký sai không có event nên luôn tính). `source.silent` đọc ≤ 500 mốc gần nhất mỗi source, chỉ `origin='webhook'` (replay/đối soát không phải "provider còn gửi").
+- **Email (D1):** OPEN — người đủ điều kiện §6, TRỪ khi cùng (rule, subject) có cảnh báo RESOLVED trong 30 phút (kiểm ở mức cảnh báo, cùng transaction): chuỗi mở/đóng liên tục < 30 phút chỉ gửi email đầu. RESOLVED — chỉ người chọn `email_on_resolve` VÀ đã có dòng OPEN của chính cảnh báo đó (không báo "đã ổn" cho tin chưa từng gửi). Lỗi đọc người nhận -> lượt đó không email, cảnh báo vẫn chạy.
+- **Đối tượng có cảnh báo OPEN mà không còn trong DB** (xoá cứng) -> RESOLVED `reason='archived'`. Truy vấn đối tượng luôn kèm id của cảnh báo đang mở để đối tượng đã lưu trữ vẫn được đóng với lý do.
+- **Realtime:** `hub:realtime:alerts` mang `{id, tenantId, rule, severity, state, titleKey}` (`titleKey = alerts.rules.<rule>.title`, web dịch). D5: `providerLabel` = mã provider của kết nối (dữ liệu), web dịch thành tên.
+- **Metric:** `hub_alerts_open{severity}` đặt cuối mỗi lượt trọn vẹn — N worker báo cùng con số, panel dùng `max`; `hub_alert_transitions_total` chỉ đếm lần chuyển chính worker đó ghi được.
+**Đánh đổi:** Thêm hai index trên đường giao (INSERT attempt, chuyển DEAD) — nhỏ nhưng có. Cửa sổ attempt quét mọi tenant trong 30 phút rồi lọc tenant (attempt không mang `tenant_id`); chấp nhận ở quy mô đồ án, đo lại nếu k6 thấy ảnh hưởng. Chống flapping theo cảnh báo (không theo người): người vừa bật email trong lúc flapping có thể lỡ một email OPEN. Chu kỳ khác 60s qua env không tự đổi `CALM_MIN_SPACING_MS` (hằng tính từ mặc định).
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

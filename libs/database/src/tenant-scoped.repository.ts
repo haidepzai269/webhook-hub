@@ -1131,6 +1131,168 @@ export class TenantScopedRepository {
     return r.count;
   }
 
+  /**
+   * CB2 chống flapping (§6, D1): có cảnh báo cùng (rule, subject) đã RESOLVED từ `since` trở đi không. Có -> lần mở lại
+   * này KHÔNG tạo email OPEN. Dùng index `(tenant_id, state, opened_at DESC)` (lọc tenant + state), LIMIT 1.
+   */
+  async hasAlertResolvedSince(rule: string, subjectId: string, since: Date): Promise<boolean> {
+    const rows = await this.prisma.$queryRaw<{ x: number }[]>(Prisma.sql`
+      SELECT 1 AS x FROM hub.alerts
+      WHERE tenant_id = ${this.tenantId}::uuid AND state = 'RESOLVED' AND rule = ${rule}
+        AND subject_id = ${subjectId}::uuid AND resolved_at >= ${since}
+      LIMIT 1`);
+    return rows.length > 0;
+  }
+
+  /** Người đã có dòng outbox `kind` cho cảnh báo này (CB2: email RESOLVED chỉ gửi cho người đã nhận email OPEN). */
+  async findAlertEmailUserIds(alertId: string, kind: 'OPEN' | 'RESOLVED'): Promise<string[]> {
+    const rows = await this.prisma.alertEmail.findMany({
+      where: { tenantId: this.tenantId, alertId, kind },
+      select: { userId: true },
+    });
+    return rows.map((r) => r.userId);
+  }
+
+  // --- Đầu vào của AlertEvaluator (CB2, SPEC §4/§5.1): mỗi câu một truy vấn tổng hợp, có cửa sổ thời gian + LIMIT ---
+
+  /**
+   * Đích của project để đánh giá luật destination.*: còn dùng (`archived_at IS NULL`) + đích đã lưu trữ đang có cảnh báo
+   * OPEN (`includeIds`, để đóng với lý do). Cũng là đầu vào của `destination.circuit_open` (cột `circuit_state`).
+   */
+  async findAlertDestinations(includeIds: string[], limit = ALERT_INPUT_LIMIT): Promise<AlertDestinationRow[]> {
+    return this.prisma.$queryRaw<AlertDestinationRow[]>(Prisma.sql`
+      SELECT id, is_active AS "isActive", archived_at AS "archivedAt", circuit_state::text AS "circuitState"
+      FROM hub.destinations
+      WHERE tenant_id = ${this.tenantId}::uuid AND (archived_at IS NULL OR id = ANY(${uuidArray(includeIds)}))
+      ORDER BY created_at
+      LIMIT ${limit}`);
+  }
+
+  /**
+   * Source của project + kết nối hub->provider (nếu có) — đầu vào lifecycle cho source.* và của `source.connection_broken`
+   * (`status`, `updated_at`, `provider` làm nhãn — D5). Cùng quy tắc `includeIds` như đích.
+   */
+  async findAlertSources(includeIds: string[], limit = ALERT_INPUT_LIMIT): Promise<AlertSourceRow[]> {
+    return this.prisma.$queryRaw<AlertSourceRow[]>(Prisma.sql`
+      SELECT s.id, s.is_active AS "isActive", s.archived_at AS "archivedAt", s.provider::text AS provider,
+             c.status::text AS "connectionStatus", c.last_error AS "connectionLastError", c.last_fix AS "connectionLastFix",
+             c.updated_at AS "connectionUpdatedAt", c.provider::text AS "connectionProvider"
+      FROM hub.sources s
+      LEFT JOIN hub.source_connections c ON c.source_id = s.id AND c.tenant_id = s.tenant_id
+      WHERE s.tenant_id = ${this.tenantId}::uuid AND (s.archived_at IS NULL OR s.id = ANY(${uuidArray(includeIds)}))
+      ORDER BY s.created_at
+      LIMIT ${limit}`);
+  }
+
+  /**
+   * Attempt gần nhất của từng đích từ `since` (mới nhất trước), tối đa `perDestination` mỗi đích — đầu vào hai luật chuỗi
+   * (`auth_rejected`, `client_error`). Lái từ index `delivery_attempts(created_at)` (migration CB2), nối delivery theo PK.
+   */
+  async findRecentAttemptsByDestination(since: Date, perDestination: number, limit = ALERT_ATTEMPT_ROWS_LIMIT): Promise<AlertAttemptRow[]> {
+    return this.prisma.$queryRaw<AlertAttemptRow[]>(Prisma.sql`
+      SELECT "destinationId", status, at FROM (
+        SELECT s.destination_id AS "destinationId", a.response_status AS status, a.created_at AS at,
+               row_number() OVER (PARTITION BY s.destination_id ORDER BY a.created_at DESC, a.id DESC) AS rn
+        FROM hub.delivery_attempts a
+        JOIN hub.deliveries d ON d.id = a.delivery_id
+        JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+        WHERE d.tenant_id = ${this.tenantId}::uuid AND a.created_at >= ${since}
+      ) x
+      WHERE rn <= ${perDestination}
+      ORDER BY "destinationId", at DESC
+      LIMIT ${limit}`);
+  }
+
+  /** Số attempt theo (đích, HTTP status) từ `since` — đầu vào `destination.failing` (phân loại ở hàm chung, không ở SQL). */
+  async countAttemptStatusesByDestination(since: Date, limit = ALERT_ATTEMPT_ROWS_LIMIT): Promise<AlertStatusCountRow[]> {
+    const rows = await this.prisma.$queryRaw<(Omit<AlertStatusCountRow, 'n'> & { n: bigint })[]>(Prisma.sql`
+      SELECT s.destination_id AS "destinationId", a.response_status AS status, count(*) AS n
+      FROM hub.delivery_attempts a
+      JOIN hub.deliveries d ON d.id = a.delivery_id
+      JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+      WHERE d.tenant_id = ${this.tenantId}::uuid AND a.created_at >= ${since}
+      GROUP BY 1, 2
+      LIMIT ${limit}`);
+    return rows.map((r) => ({ ...r, n: Number(r.n) }));
+  }
+
+  /**
+   * Delivery thành DEAD từ `since`, đếm theo đích (`facts.dead` của luật chuỗi). Dùng index một phần
+   * `deliveries(tenant_id, updated_at DESC) WHERE status='DEAD'` (migration CB2).
+   */
+  async countDeadDeliveriesByDestination(since: Date, limit = ALERT_INPUT_LIMIT): Promise<{ destinationId: string; n: number }[]> {
+    const rows = await this.prisma.$queryRaw<{ destinationId: string; n: bigint }[]>(Prisma.sql`
+      SELECT s.destination_id AS "destinationId", count(*) AS n
+      FROM hub.deliveries d
+      JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+      WHERE d.tenant_id = ${this.tenantId}::uuid AND d.status = 'DEAD' AND d.updated_at >= ${since}
+      GROUP BY 1
+      LIMIT ${limit}`);
+    return rows.map((r) => ({ destinationId: r.destinationId, n: Number(r.n) }));
+  }
+
+  /**
+   * `delivery.dead_spike`: số delivery thành DEAD từ `since` trong project, ĐÃ loại D9 (DEAD vì đích lưu trữ: `last_error`
+   * có tiền tố `archivedErrorPrefix`, hoặc subscription / đích có `archived_at`), dừng đếm ở `cap`. Cùng index một phần.
+   */
+  async countDeadForSpike(since: Date, archivedErrorPrefix: string, cap: number): Promise<number> {
+    const [row] = await this.prisma.$queryRaw<{ n: bigint }[]>(Prisma.sql`
+      SELECT count(*) AS n FROM (
+        SELECT 1 FROM hub.deliveries d
+        JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+        JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
+        WHERE d.tenant_id = ${this.tenantId}::uuid AND d.status = 'DEAD' AND d.updated_at >= ${since}
+          AND s.archived_at IS NULL AND dst.archived_at IS NULL
+          AND (d.last_error IS NULL OR left(d.last_error, ${archivedErrorPrefix.length}::int) <> ${archivedErrorPrefix})
+        LIMIT ${cap}
+      ) x`);
+    return Number(row?.n ?? 0);
+  }
+
+  /**
+   * Request tới từng source từ `since` (KHÔNG tính probe: raw có event `probe=true` — PayOS confirm ADR-159, GitHub ping
+   * ADR-162; request ký sai không có event nên luôn tính) và số ký sai. Index `raw_events(received_at DESC)`; scope tenant
+   * qua `sources.tenant_id` (raw_events không có cột tenant).
+   */
+  async countSignatureBySource(since: Date, limit = ALERT_INPUT_LIMIT): Promise<{ sourceId: string; requests: number; invalid: number }[]> {
+    const rows = await this.prisma.$queryRaw<{ sourceId: string; requests: bigint; invalid: bigint }[]>(Prisma.sql`
+      SELECT r.source_id AS "sourceId", count(*) AS requests, count(*) FILTER (WHERE NOT r.signature_valid) AS invalid
+      FROM hub.raw_events r
+      JOIN hub.sources s ON s.id = r.source_id
+      LEFT JOIN hub.events e ON e.raw_event_id = r.id
+      WHERE s.tenant_id = ${this.tenantId}::uuid AND r.received_at >= ${since} AND e.probe IS NOT TRUE
+      GROUP BY 1
+      LIMIT ${limit}`);
+    return rows.map((r) => ({ sourceId: r.sourceId, requests: Number(r.requests), invalid: Number(r.invalid) }));
+  }
+
+  /**
+   * Nhịp của từng source trong baseline (`source.silent`): sự kiện webhook KHÔNG probe từ `since`, tối đa `perSource` mốc
+   * gần nhất mỗi source -> số mốc khác nhau, mốc cuối, trung vị khoảng cách (ms; bỏ khoảng 0 của nhiều event cùng một
+   * request). Index `events(tenant_id, received_at DESC)`.
+   */
+  async findSourceActivity(sourceIds: string[], since: Date, perSource: number): Promise<AlertSourceActivityRow[]> {
+    if (sourceIds.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<{ sourceId: string; n: bigint; lastAt: Date | null; medianGapMs: number | null }[]>(Prisma.sql`
+      SELECT src.id AS "sourceId", x.n, x.last_at AS "lastAt", x.median_gap AS "medianGapMs"
+      FROM unnest(${uuidArray(sourceIds)}) AS src(id)
+      CROSS JOIN LATERAL (
+        SELECT count(DISTINCT t) AS n, max(t) AS last_at,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY gap) FILTER (WHERE gap > 0) AS median_gap
+        FROM (
+          SELECT t, EXTRACT(EPOCH FROM (t - lag(t) OVER (ORDER BY t))) * 1000 AS gap
+          FROM (
+            SELECT e.received_at AS t FROM hub.events e
+            WHERE e.tenant_id = ${this.tenantId}::uuid AND e.source_id = src.id AND e.received_at >= ${since}
+              AND NOT e.probe AND e.origin = 'webhook'
+            ORDER BY e.received_at DESC
+            LIMIT ${perSource}
+          ) recent
+        ) g
+      ) x`);
+    return rows.map((r) => ({ sourceId: r.sourceId, n: Number(r.n), lastAt: r.lastAt, medianGapMs: r.medianGapMs === null ? null : Number(r.medianGapMs) }));
+  }
+
   // --- Stats (dashboard) ---
 
   /**
@@ -1286,6 +1448,53 @@ export interface AlertUpsertInput {
   subjectId: string;
   facts?: Record<string, unknown>;
   now: Date;
+}
+
+/** CB2: trần dòng đầu vào của evaluator (đích/source mỗi project; dòng attempt mỗi truy vấn). */
+export const ALERT_INPUT_LIMIT = 1000;
+export const ALERT_ATTEMPT_ROWS_LIMIT = 20_000;
+
+/** Mảng uuid cho `= ANY(...)` / `unnest(...)` (rỗng vẫn đúng kiểu). */
+function uuidArray(ids: string[]): Prisma.Sql {
+  return ids.length === 0 ? Prisma.sql`ARRAY[]::uuid[]` : Prisma.sql`ARRAY[${Prisma.join(ids.map((i) => Prisma.sql`${i}::uuid`))}]`;
+}
+
+export interface AlertDestinationRow {
+  id: string;
+  isActive: boolean;
+  archivedAt: Date | null;
+  circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+}
+
+export interface AlertSourceRow {
+  id: string;
+  isActive: boolean;
+  archivedAt: Date | null;
+  provider: string;
+  connectionStatus: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DRIFTED' | 'DISCONNECTED' | null;
+  connectionLastError: string | null;
+  connectionLastFix: string | null;
+  connectionUpdatedAt: Date | null;
+  connectionProvider: string | null;
+}
+
+export interface AlertAttemptRow {
+  destinationId: string;
+  status: number | null;
+  at: Date;
+}
+
+export interface AlertStatusCountRow {
+  destinationId: string;
+  status: number | null;
+  n: number;
+}
+
+export interface AlertSourceActivityRow {
+  sourceId: string;
+  n: number;
+  lastAt: Date | null;
+  medianGapMs: number | null;
 }
 
 const ALERT_RETURNING = Prisma.sql`id, tenant_id AS "tenantId", rule, severity::text AS severity, subject_type::text AS "subjectType",

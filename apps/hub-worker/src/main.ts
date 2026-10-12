@@ -6,6 +6,7 @@ import { assertAppRoleNotPrivileged, assertDatabaseLib, PrismaService } from '@h
 import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
+import { AlertEvaluator } from './scheduler/alert.evaluator';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 import { InFlightTracker } from './consumers/in-flight';
@@ -74,6 +75,7 @@ async function bootstrap() {
   const outboxRelay = app.get(OutboxRelay);
   const sweeper = app.get(DeliverySweeper);
   const cleanup = app.get(CleanupJob);
+  const alertEvaluator = app.get(AlertEvaluator);
 
   const amqpUrl = process.env.RABBITMQ_URL || 'amqp://hub_admin:hub_secret@localhost:5672';
   logger.info({ amqpUrl: redactAmqpUrl(amqpUrl) }, 'Đang kết nối tới RabbitMQ broker...');
@@ -98,6 +100,7 @@ async function bootstrap() {
     outboxRelay.stop();
     sweeper.stop();
     cleanup.stop();
+    void alertEvaluator.stop();
     process.exit(1);
   });
 
@@ -150,6 +153,8 @@ async function bootstrap() {
     outboxRelay.stop();
     sweeper.stop();
     cleanup.stop();
+    // CB2: không hẹn lượt cảnh báo mới; lượt đang chạy dừng ở ranh giới luật (chờ nó trong ngân sách bên dưới).
+    const alertsStopped = alertEvaluator.stop();
 
     try {
       await Promise.race([
@@ -158,6 +163,7 @@ async function bootstrap() {
           // Chừa ~5s cuối cho việc đóng kết nối, trong ngân sách SHUTDOWN_TIMEOUT_MS (25s < SIGKILL 30s của Render).
           await normalizeChannel.cancel(normalizeTag.consumerTag).catch(() => {});
           await deliveryChannel.cancel(deliveryTag.consumerTag).catch(() => {});
+          await alertsStopped;
           const idle = await inFlight.waitIdle(Math.max(0, shutdownTimeoutMs - 5_000));
           logger.info({ idle, stillRunning: inFlight.count }, 'Đã chờ handler đang chạy trước khi đóng channel');
           await normalizeChannel.close();

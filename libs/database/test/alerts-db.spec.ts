@@ -39,7 +39,7 @@ describeDb('CB1 alerts (Postgres, hub_app)', () => {
   const upsert = (svc: PrismaService, facts: Record<string, unknown>, at = now) =>
     svc.forTenant(A).upsertOpenAlert({ rule: 'destination.auth_rejected', severity: 'critical', subjectType: 'destination', subjectId: destA, facts, now: at });
 
-  it('[CB:T2] hai evaluator song song upsert cùng (tenant, rule, subject) -> đúng MỘT dòng OPEN, đúng MỘT lần "opened"; đóng rồi mở lại -> dòng OPEN mới', async () => {
+  it('[CB:T2] (phần a) hai evaluator song song upsert cùng (tenant, rule, subject) -> đúng MỘT dòng OPEN, đúng MỘT lần "opened"; đóng rồi mở lại -> dòng OPEN mới', async () => {
     const results = await Promise.all(Array.from({ length: 12 }, (_, i) => upsert(i % 2 ? w1 : w2, { count: i }, new Date(now.getTime() + i))));
     expect(results.filter((r) => r.opened)).toHaveLength(1);
     expect(new Set(results.map((r) => r.alert.id)).size).toBe(1);
@@ -92,7 +92,9 @@ describeDb('CB1 alerts (Postgres, hub_app)', () => {
     expect(who).toEqual({ current_user: 'hub_app', rolsuper: false, rolbypassrls: false });
     expect(await owner.alert.count({ where: { tenantId: A } })).toBeGreaterThan(0); // "0 dòng" dưới đây không phải vì bảng rỗng
 
-    const alertA = (await owner.alert.findFirst({ where: { tenantId: A, state: 'OPEN' } }))!;
+    // CB2: chọn ĐÚNG alert chưa có email nào của users[0] — alert normalize.backlog đã có (u1, OPEN): ON CONFLICT DO NOTHING
+    // bỏ dòng TRƯỚC khi kiểm khoá ngoại -> 0 thay vì lỗi, test từng xanh/đỏ tuỳ thứ tự vật lý findFirst trả về.
+    const alertA = (await owner.alert.findFirst({ where: { tenantId: A, state: 'OPEN', rule: 'destination.auth_rejected' } }))!;
     const repoB = w1.forTenant(B);
     expect(await repoB.findAlertById(alertA.id)).toBeNull();
     expect(await repoB.findOpenAlerts()).toEqual([]);

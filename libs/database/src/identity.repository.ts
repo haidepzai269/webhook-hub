@@ -479,6 +479,15 @@ export class IdentityRepository {
   }
 
   /**
+   * CB2: id mọi project cho job xuyên project (AlertEvaluator lặp rồi đánh giá TỪNG project qua TenantScopedRepository).
+   * `projects` là bảng gốc (id = tenant_id), không mang dữ liệu nghiệp vụ. Thứ tự ổn định (created_at) để log dễ đọc.
+   */
+  async listProjectIds(): Promise<string[]> {
+    const rows = await this.db.project.findMany({ select: { id: true }, orderBy: { createdAt: 'asc' } });
+    return rows.map((r) => r.id);
+  }
+
+  /**
    * Người nhận email cảnh báo (§6): operator, email đã xác minh, đã bật email. Lọc `email_rules`/`muted_projects` theo
    * từng cảnh báo là việc của evaluator (hàm thuần) — ở đây chỉ trả dữ liệu của người dùng.
    */

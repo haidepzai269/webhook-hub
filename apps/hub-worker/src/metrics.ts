@@ -67,6 +67,33 @@ export const normalizeRetries = new Counter({
 });
 
 /**
+ * CB2 (SPEC §5.1): số cảnh báo OPEN theo mức — đặt ở CUỐI mỗi lượt đánh giá trọn vẹn (tổng các project). Nhiều worker cùng
+ * báo cùng một con số (mỗi worker tự đánh giá mọi project, D4) -> panel dùng `max`, không `sum`.
+ */
+export const alertsOpen = new Gauge({
+  name: 'hub_alerts_open',
+  help: 'Số cảnh báo đang OPEN theo mức (lượt đánh giá gần nhất của worker này)',
+  labelNames: ['severity'] as const,
+  registers: [workerRegistry],
+});
+
+/** CB2: chỉ đếm lần chuyển mà CHÍNH worker này ghi được (upsert tạo dòng mới / resolve đổi được dòng OPEN). */
+export const alertTransitions = new Counter({
+  name: 'hub_alert_transitions_total',
+  help: 'Số lần cảnh báo đổi trạng thái theo luật',
+  labelNames: ['rule', 'to'] as const,
+  registers: [workerRegistry],
+});
+
+/** CB2: một luật ném lỗi (truy vấn/ghi) — log + đếm, các luật khác vẫn chạy. */
+export const alertEvalErrors = new Counter({
+  name: 'hub_alert_eval_errors_total',
+  help: 'Số lần đánh giá một luật cảnh báo bị lỗi',
+  labelNames: ['rule'] as const,
+  registers: [workerRegistry],
+});
+
+/**
  * HTTP server tối giản chỉ phục vụ `/metrics` (S3-4) — worker không có Nest HTTP. Cổng
  * `WORKER_METRICS_PORT` (mặc định 9101; `0` = tắt). Chỉ mở trong mạng nội bộ compose, không publish ra host.
  */
