@@ -1047,6 +1047,90 @@ export class TenantScopedRepository {
     return { actions: actions.map((r) => r.v), entityTypes: entityTypes.map((r) => r.v), actors: actors.map((r) => r.v) };
   }
 
+  // --- Alerts (CB1, SPEC-canh-bao-nhan-dinh §3.1, ADR-165) ---
+  // Postgres là TRỌNG TÀI: unique index một phần `alerts_open_unique (tenant_id, rule, subject_id) WHERE state='OPEN'`.
+  // Không khoá (DINH-CHINH D4): hai evaluator cùng chạy chỉ tốn thêm truy vấn, vẫn đúng MỘT dòng OPEN (CB:T2).
+
+  /**
+   * Mở (hoặc làm mới) cảnh báo OPEN của (rule, subject) trong MỘT câu `INSERT … ON CONFLICT … WHERE state='OPEN' DO UPDATE`.
+   * `opened` = true khi dòng vừa được TẠO (xmax = 0) — chỉ khi đó evaluator mới publish realtime / tạo email PENDING.
+   * Dòng đã có: cập nhật `last_seen_at` (không lùi) + `facts`; `opened_at`, ack giữ nguyên.
+   */
+  async upsertOpenAlert(input: AlertUpsertInput): Promise<{ alert: AlertRow; opened: boolean }> {
+    const facts = JSON.stringify(input.facts ?? {});
+    const [row] = await this.prisma.$queryRaw<(AlertRow & { inserted: boolean })[]>(Prisma.sql`
+      INSERT INTO hub.alerts AS a (id, tenant_id, rule, severity, subject_type, subject_id, state, opened_at, last_seen_at, facts)
+      VALUES (gen_random_uuid(), ${this.tenantId}::uuid, ${input.rule}, ${input.severity}::"hub"."AlertSeverity",
+              ${input.subjectType}::"hub"."AlertSubjectType", ${input.subjectId}::uuid, 'OPEN', ${input.now}, ${input.now}, ${facts}::jsonb)
+      ON CONFLICT (tenant_id, rule, subject_id) WHERE state = 'OPEN'
+      DO UPDATE SET last_seen_at = GREATEST(a.last_seen_at, EXCLUDED.last_seen_at), facts = EXCLUDED.facts
+      RETURNING ${ALERT_RETURNING}, (xmax = 0) AS inserted`);
+    const { inserted, ...alert } = row;
+    return { alert, opened: inserted };
+  }
+
+  /**
+   * Đóng cảnh báo OPEN của (rule, subject). `factsPatch` gộp vào facts (vd `{ reason: 'archived' }`). Không có dòng OPEN
+   * (đã đóng / evaluator khác đóng trước) -> null: người gọi KHÔNG publish lần nữa.
+   */
+  async resolveAlert(rule: string, subjectId: string, now: Date, factsPatch: Record<string, unknown> = {}): Promise<AlertRow | null> {
+    const [row] = await this.prisma.$queryRaw<AlertRow[]>(Prisma.sql`
+      UPDATE hub.alerts SET state = 'RESOLVED', resolved_at = ${now}, facts = facts || ${JSON.stringify(factsPatch)}::jsonb
+      WHERE tenant_id = ${this.tenantId}::uuid AND rule = ${rule} AND subject_id = ${subjectId}::uuid AND state = 'OPEN'
+      RETURNING ${ALERT_RETURNING}`);
+    return row ?? null;
+  }
+
+  /** Cảnh báo đang OPEN của project (evaluator đọc để áp hysteresis / đóng). Dùng index (tenant_id, state, opened_at DESC). */
+  async findOpenAlerts(limit = 500) {
+    return this.prisma.alert.findMany({
+      where: { tenantId: this.tenantId, state: 'OPEN' },
+      orderBy: { openedAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  async findAlertById(id: string) {
+    return this.prisma.alert.findFirst({ where: { id, tenantId: this.tenantId } });
+  }
+
+  /**
+   * "Đã xem" (idempotent): chỉ ghi lần ĐẦU (`acknowledged_at IS NULL`), không đóng cảnh báo. Trả `found` (alert thuộc
+   * project này) và `changed` (lần này mới ghi). Alert của project khác -> found=false (route trả 404 giống hệt).
+   */
+  async ackAlert(id: string, userId: string, now: Date): Promise<{ found: boolean; changed: boolean }> {
+    const r = await this.prisma.alert.updateMany({
+      where: { id, tenantId: this.tenantId, acknowledgedAt: null },
+      data: { acknowledgedAt: now, acknowledgedBy: userId },
+    });
+    if (r.count === 1) return { found: true, changed: true };
+    const exists = await this.prisma.alert.count({ where: { id, tenantId: this.tenantId } });
+    return { found: exists === 1, changed: false };
+  }
+
+  /** "Đánh dấu đã xem tất cả" của project: mọi cảnh báo OPEN chưa xem. Trả số dòng vừa ghi. */
+  async ackAllOpenAlerts(userId: string, now: Date): Promise<number> {
+    const r = await this.prisma.alert.updateMany({
+      where: { tenantId: this.tenantId, state: 'OPEN', acknowledgedAt: null },
+      data: { acknowledgedAt: now, acknowledgedBy: userId },
+    });
+    return r.count;
+  }
+
+  /**
+   * D1: outbox email theo NGƯỜI — một dòng PENDING cho mỗi (alert, user, kind); trùng thì bỏ qua (unique). Gọi bằng repo
+   * dựng trên `tx` để nằm CÙNG transaction đổi trạng thái cảnh báo. Khoá ngoại ghép (alert_id, tenant_id) chặn alert của
+   * project khác. Trả số dòng tạo mới.
+   */
+  async enqueueAlertEmails(alertId: string, kind: 'OPEN' | 'RESOLVED', userIds: string[]): Promise<number> {
+    if (userIds.length === 0) return 0;
+    const r = await this.prisma.alertEmail.createMany({
+      data: [...new Set(userIds)].map((userId) => ({ tenantId: this.tenantId, alertId, userId, kind })),
+      skipDuplicates: true,
+    });
+    return r.count;
+  }
+
   // --- Stats (dashboard) ---
 
   /**
@@ -1177,6 +1261,36 @@ const TIMESERIES_SPECS: Record<TimeseriesRange, { unit: string; step: string; sp
   '24h': { unit: 'hour', step: '1 hour', span: '23 hours' },
   '7d': { unit: 'day', step: '1 day', span: '6 days' },
 };
+
+/** CB1: một dòng `hub.alerts` (đọc qua RETURNING thô — cùng hình với model Prisma `Alert`). */
+export interface AlertRow {
+  id: string;
+  tenantId: string;
+  rule: string;
+  severity: 'critical' | 'warning' | 'info';
+  subjectType: 'destination' | 'source' | 'project';
+  subjectId: string;
+  state: 'OPEN' | 'RESOLVED';
+  openedAt: Date;
+  lastSeenAt: Date;
+  resolvedAt: Date | null;
+  facts: Record<string, unknown>;
+  acknowledgedAt: Date | null;
+  acknowledgedBy: string | null;
+}
+
+export interface AlertUpsertInput {
+  rule: string;
+  severity: AlertRow['severity'];
+  subjectType: AlertRow['subjectType'];
+  subjectId: string;
+  facts?: Record<string, unknown>;
+  now: Date;
+}
+
+const ALERT_RETURNING = Prisma.sql`id, tenant_id AS "tenantId", rule, severity::text AS severity, subject_type::text AS "subjectType",
+  subject_id AS "subjectId", state::text AS state, opened_at AS "openedAt", last_seen_at AS "lastSeenAt", resolved_at AS "resolvedAt",
+  facts, acknowledged_at AS "acknowledgedAt", acknowledged_by AS "acknowledgedBy"`;
 
 export interface AuditLogInput {
   action: string;

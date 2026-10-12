@@ -1592,6 +1592,47 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Shop đang ở trần 600 dòng, nên việc tích hợp vào Shop chờ Admin chọn (SPEC §12 Q1).
 **Admin chốt (2026-10-12, append):** Q1 — Shop **chuyển sang tạo link PayOS qua hub** làm mặc định. Gọi thẳng chỉ còn khi Shop có đủ 3 key. Không bao giờ thử chế độ này rồi rơi sang chế độ kia trong cùng một lần tạo link, vì có thể ra hai link trả được tiền (SPEC §9). Được nâng trần `apps/shop/src` bằng ADR riêng ghi cùng commit. Q2 — AC6 để sau. Q3 — lease 30 s. Chưa code.
 
+---
+
+## ADR-165 — Cảnh báo = bảng Postgres `hub.alerts` + evaluator trong `hub-worker`; trọng tài là unique index một phần, KHÔNG khoá (CB1, 2026-10-12)
+
+> Số 164 đã được lô Actions dùng ở cây chính (chưa gộp) — CB lấy từ 165.
+
+**Vấn đề:** Hub cần tự báo cho người vận hành (endpoint 401 làm sự kiện DEAD im lặng, nguồn ký sai, kết nối provider bị gỡ…). Hai instance worker cùng đánh giá không được đẻ hai cảnh báo cho cùng một chuyện, và Redis mất dữ liệu không được làm cảnh báo sai (tinh thần BB-2). SPEC §5.1 đề xuất `pg_try_advisory_xact_lock`, nhưng khoá mức transaction nhả ngay khi transaction ngắn kết thúc nên không che được cả lượt đánh giá, còn khoá mức session thì pgbouncer transaction mode của Neon cấm (DINH-CHINH D4).
+
+**Chọn:** Bảng `hub.alerts` mang `tenant_id`, có RLS, đi qua `TenantScopedRepository` (BB-5). Bất biến chống trùng là `UNIQUE (tenant_id, rule, subject_id) WHERE state='OPEN'` cộng `INSERT … ON CONFLICT … DO UPDATE` (`upsertOpenAlert`, `xmax = 0` cho biết dòng vừa tạo). **Không khoá nào cả**: không advisory lock, không Redis lock. Evaluator chạy trong `hub-worker` (ADR-020, không thêm tiến trình — BB-4). Luật là hàm thuần trong `libs/common/src/alerts/rules.ts`, ngưỡng là hằng số có tên. Bảng phân loại HTTP tách thành `libs/common/src/http-outcome.ts` và được dùng chung cho `delivery.consumer` lẫn luật, để không có bản thứ hai.
+
+**Đánh đổi:** Hai worker cùng chạy sẽ làm cùng một việc hai lần (gấp đôi truy vấn tổng hợp mỗi 60s), nhưng kết quả vẫn đúng một dòng OPEN (CB:T2). Prisma 6 không khai được index có `WHERE`, nên index này chỉ có ở migration `20261012050000_alerts` và `schema.prisma` chỉ ghi chú lại. Hysteresis (ví dụ "< 20% trong 2 lượt liền") được lưu trong `facts.calmStreak` của chính dòng OPEN, không cần bảng trạng thái riêng.
+
+---
+
+## ADR-166 — `alert_preferences` gắn người dùng nên đi qua `IdentityRepository`, không có `tenant_id` — có chủ ý, không phải lỗ BB-5 (CB1, 2026-10-12)
+
+**Vấn đề:** Tuỳ chọn "Gửi cảnh báo về email của tôi" (bật/tắt, luật nào được gửi, gửi khi đóng, project bị tắt tiếng) là của **một người** và áp cho mọi project. Nhét `tenant_id` vào thì phải nhân bản tuỳ chọn theo project, hoặc chọn bừa một project.
+
+**Chọn:** `hub.alert_preferences(user_id PK → users, email_enabled, email_rules[], email_on_resolve, muted_projects[], updated_at)` không có `tenant_id` và không bật RLS. Bảng này cùng loại với `users`/`auth_sessions` nên chỉ đi qua `IdentityRepository` (`findAlertPreferences`, `upsertAlertPreferences`, `listAlertEmailRecipients`). Dòng mới nhận mặc định `DEFAULT_EMAIL_RULES` (mọi luật critical). Gate `bb5` thêm model `alert`/`alertEmail`/`alertPreference` vào danh sách cấm gọi `prisma.<model>.` ngoài `libs/database/src`. Gate `data-migration-rls` thêm `alerts`/`alert_emails`.
+
+**Đánh đổi:** `muted_projects` là mảng uuid không có khoá ngoại: project bị xoá để lại id mồ côi, vô hại vì chỉ dùng để lọc. Kiểm "chỉ operator" nằm ở route (CB3), repo không đoán quyền.
+
+---
+
+## ADR-167 — Email cảnh báo là outbox theo NGƯỜI `hub.alert_emails`, không phải cột trên `alerts`; ngôn ngữ email lấy từ `users.locale` (CB1, DINH-CHINH D1/D2/D3, 2026-10-12)
+
+**Vấn đề:** SPEC §3.1 đặt `email_state`/`email_attempts` trên dòng cảnh báo. Nhưng một cảnh báo gửi cho nhiều operator, mỗi người có kết quả riêng (gửi được, bị trần 6/giờ chặn, lỗi), và một ô trạng thái không chứa nổi chừng đó. Ngoài ra ngôn ngữ người dùng chọn hiện chỉ nằm trong cookie trình duyệt, nên worker không đọc được.
+
+**Chọn:**
+- **`alert_emails`:** cấu trúc `hub.alert_emails(id, tenant_id, alert_id, user_id, kind OPEN|RESOLVED, state PENDING|SENT|SUPPRESSED|FAILED, attempts, created_at, sent_at)`, ràng buộc `UNIQUE (alert_id, user_id, kind)`.
+  - Mang `tenant_id` và có RLS (D2). Khoá ngoại ghép `(alert_id, tenant_id) → alerts(id, tenant_id)` nên DB từ chối gắn email vào cảnh báo của project khác.
+  - Evaluator tạo các dòng PENDING bằng `enqueueAlertEmails` trong **cùng transaction** đổi trạng thái cảnh báo.
+  - Trần 6/giờ/người và chống flapping 30 phút được đếm trên bảng này, theo index `(user_id, created_at DESC)`.
+  - Vòng gửi xuyên project là việc của CB5 và đi qua escape hatch có tên.
+- **`users.locale`:** thêm cột `hub."UserLocale"` (`vi|en`), mặc định `vi`, ghi bằng `IdentityRepository.setUserLocale`.
+- **`Destination.alertOnOpen`:** đánh dấu `@deprecated` trong schema, cột vẫn giữ. Việc bỏ khỏi view/UI và ADR thay bằng luật `destination.circuit_open` thuộc CB7.
+
+**Đánh đổi:** Mỗi lần cảnh báo đổi trạng thái sinh thêm N dòng (N = số operator đủ điều kiện, thực tế 1–3). Vì có thêm một bảng nên đếm trần phải dùng truy vấn thay vì đọc một cột. Đổi lại, mỗi người có trạng thái riêng, vòng gửi dùng được `SKIP LOCKED` theo từng dòng, và gửi lỗi cho người này không chặn người kia.
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

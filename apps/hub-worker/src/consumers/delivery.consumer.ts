@@ -17,6 +17,8 @@ import {
   parseDeliveryMessage,
   renderTemplate,
   fastFailRedisOptions,
+  countsTowardCircuit,
+  isNonRetryableHttpStatus,
 } from '@hub/common';
 import { aesGcmDecrypt } from '@hub/crypto';
 import * as amqp from 'amqplib';
@@ -41,14 +43,10 @@ export function maxCircuitDeferrals(env: string | undefined = process.env.CIRCUI
 }
 
 /**
- * Review SPEC-2 #3 (ADR-054): chỉ lỗi cho thấy ĐÍCH đang hỏng mới tính vào circuit — 5xx, 408, 429 và
- * không có phản hồi (sender trả 500 khi lỗi mạng/timeout; status < 100 phòng hờ). 4xx khác là lỗi cấu
- * hình/nội dung của CHÍNH ta (404 sai URL, 400 payload, 401 sai token): đích vẫn sống, mở circuit vì
- * chúng sẽ hoãn oan mọi delivery khác của đích đó.
+ * Review SPEC-2 #3 (ADR-054): chỉ lỗi cho thấy ĐÍCH đang hỏng mới tính vào circuit. CB1: bảng phân loại HTTP đã tách ra
+ * `libs/common/src/http-outcome.ts` (luật cảnh báo dùng CHÍNH hàm đó) — re-export để chỗ import cũ không đổi.
  */
-export function countsTowardCircuit(status: number): boolean {
-  return status >= 500 || status === 408 || status === 429 || status < 100;
-}
+export { countsTowardCircuit };
 
 /**
  * Đánh dấu CHÍNH XÁC lỗi P2002 (unique-violation) xảy ra ở bước ghi
@@ -371,7 +369,7 @@ export class DeliveryConsumer {
       }
 
       // 4xx (trừ 408, 429) -> lỗi cấu hình/client -> DEAD ngay (§7.3)
-      const isNonRetryable = result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429;
+      const isNonRetryable = isNonRetryableHttpStatus(result.status);
       const nextQueue = isNonRetryable ? null : getNextRetryQueue(currentAttemptNo);
 
       if (nextQueue) {

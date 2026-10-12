@@ -93,6 +93,55 @@ enum CircuitState {
   @@schema("hub")
 }
 
+/// CB1 (SPEC-canh-bao-nhan-dinh §3.1, ADR-165): cảnh báo cho người vận hành.
+enum AlertSeverity {
+  critical
+  warning
+  info
+
+  @@schema("hub")
+}
+
+enum AlertSubjectType {
+  destination
+  source
+  project
+
+  @@schema("hub")
+}
+
+enum AlertState {
+  OPEN
+  RESOLVED
+
+  @@schema("hub")
+}
+
+/// CB1 (DINH-CHINH D1): email theo NGƯỜI — một dòng outbox cho mỗi (alert, user, kind).
+enum AlertEmailKind {
+  OPEN
+  RESOLVED
+
+  @@schema("hub")
+}
+
+enum AlertEmailState {
+  PENDING
+  SENT
+  SUPPRESSED
+  FAILED
+
+  @@schema("hub")
+}
+
+/// CB1 (DINH-CHINH D3): ngôn ngữ người dùng — worker đọc để chọn mẫu email.
+enum UserLocale {
+  vi
+  en
+
+  @@schema("hub")
+}
+
 // ======================== SCHEMA HUB ========================
 
 /// S1 (ADR-038/041): biên cô lập dữ liệu. `projects.id` = giá trị `tenant_id` ở mọi bảng nghiệp vụ.
@@ -154,19 +203,23 @@ enum TokenPurpose {
 }
 
 model User {
-  id                String    @id @default(uuid()) @db.Uuid
-  email             String    @unique @db.VarChar(254) // luôn trim + lowercase
-  name              String    @db.VarChar(100)
-  passwordHash      String?   @map("password_hash") // null = chỉ đăng nhập GitHub
-  emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamptz(6)
-  githubId          String?   @unique @map("github_id") @db.VarChar(32) // id số của GitHub, không dùng login
-  googleSub         String?   @unique @map("google_sub") @db.VarChar(255) // AU5b: `sub` của ID token Google, không dùng email
-  isOperator        Boolean   @default(false) @map("is_operator")
-  passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamptz(6)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                String     @id @default(uuid()) @db.Uuid
+  email             String     @unique @db.VarChar(254) // luôn trim + lowercase
+  name              String     @db.VarChar(100)
+  passwordHash      String?    @map("password_hash") // null = chỉ đăng nhập GitHub
+  emailVerifiedAt   DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  githubId          String?    @unique @map("github_id") @db.VarChar(32) // id số của GitHub, không dùng login
+  googleSub         String?    @unique @map("google_sub") @db.VarChar(255) // AU5b: `sub` của ID token Google, không dùng email
+  isOperator        Boolean    @default(false) @map("is_operator")
+  /// CB1 (DINH-CHINH D3, ADR-167): ngôn ngữ console/email. Nút Ngôn ngữ ghi qua IdentityRepository.
+  locale            UserLocale @default(vi)
+  passwordChangedAt DateTime?  @map("password_changed_at") @db.Timestamptz(6)
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  memberships ProjectMember[]
-  sessions    AuthSession[]
+  memberships     ProjectMember[]
+  sessions        AuthSession[]
+  alertPreference AlertPreference?
+  alertEmails     AlertEmail[]
 
   @@map("users")
   @@schema("hub")
@@ -379,6 +432,8 @@ model Destination {
   signingSecretEncrypted String?              @map("signing_secret_encrypted") @db.Text
   rateLimitRps           Int                  @default(0) @map("rate_limit_rps")
   circuitState           CircuitState         @default(CLOSED) @map("circuit_state")
+  /// @deprecated CB1 (SPEC §3.3; ADR ghi ở CB7): cờ chết — không code nào đọc. Thay bằng luật `destination.circuit_open`
+  /// (luôn bật). CB7 bỏ khỏi view/UI; cột drop ở một migration sau. KHÔNG dùng mới.
   alertOnOpen            Boolean              @default(false) @map("alert_on_open")
   /// S6 (ADR-040): default VERIFIED cho dữ liệu cũ + telegram/discord; endpoint tạo qua API service bắt đầu PENDING.
   verification           EndpointVerification @default(VERIFIED)
@@ -401,19 +456,19 @@ model Destination {
 }
 
 model Subscription {
-  id            String   @id @default(uuid()) @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
   // tenant_id = project_id (ADR-038/041). Giữ tên cột để không đổi 40 file.
-  tenantId      String   @map("tenant_id") @db.Uuid
-  destinationId String   @map("destination_id") @db.Uuid
-  name          String   @db.VarChar(255)
-  eventTypes    String[] @map("event_types")
+  tenantId      String    @map("tenant_id") @db.Uuid
+  destinationId String    @map("destination_id") @db.Uuid
+  name          String    @db.VarChar(255)
+  eventTypes    String[]  @map("event_types")
   /// S5: rỗng = mọi source trong project; có giá trị = chỉ event từ các source này.
-  sourceIds     String[] @default([]) @map("source_ids") @db.Uuid
-  template      String?  @db.Text
-  isActive      Boolean  @default(true) @map("is_active")
+  sourceIds     String[]  @default([]) @map("source_ids") @db.Uuid
+  template      String?   @db.Text
+  isActive      Boolean   @default(true) @map("is_active")
   /// ADR-161: lưu trữ ("Xoá" trên bản đồ luồng) — luôn kèm is_active=false; không bao giờ khớp sự kiện mới.
   archivedAt    DateTime? @map("archived_at") @db.Timestamptz(6)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   // S1 (ADR-038): khoá ngoại GHÉP (destination_id, tenant_id) — DB từ chối subscription trỏ sang đích của
   // project khác, kể cả khi code quên kiểm. RESTRICT giữ ADR-054: đích còn subscription thì không xoá được.
@@ -464,6 +519,78 @@ model DeliveryAttempt {
 
   @@index([deliveryId])
   @@map("delivery_attempts")
+  @@schema("hub")
+}
+
+/// CB1 (SPEC §3.1, ADR-165): cảnh báo — bảng nghiệp vụ mang tenant_id, RLS, chỉ qua TenantScopedRepository (BB-5).
+/// Trọng tài chống trùng: unique index MỘT PHẦN `(tenant_id, rule, subject_id) WHERE state = 'OPEN'` (chỉ có ở migration
+/// 20261012050000_alerts — Prisma 6 không khai được `WHERE`). Redis không giữ gì của cảnh báo (BB-2).
+model Alert {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @map("tenant_id") @db.Uuid
+  rule           String           @db.VarChar(64)
+  severity       AlertSeverity
+  subjectType    AlertSubjectType @map("subject_type")
+  /// id đối tượng; cấp project thì = tenant_id.
+  subjectId      String           @map("subject_id") @db.Uuid
+  state          AlertState       @default(OPEN)
+  openedAt       DateTime         @default(now()) @map("opened_at") @db.Timestamptz(6)
+  /// lần cuối luật còn đúng.
+  lastSeenAt     DateTime         @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  resolvedAt     DateTime?        @map("resolved_at") @db.Timestamptz(6)
+  /// số liệu dựng câu — KHÔNG payload, secret, header.
+  facts          Json             @default("{}")
+  /// "Đã xem": chỉ tắt banner, KHÔNG đóng cảnh báo.
+  acknowledgedAt DateTime?        @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy String?          @map("acknowledged_by") @db.Uuid
+
+  emails AlertEmail[]
+
+  @@unique([id, tenantId]) // đích của khoá ngoại ghép alert_emails(alert_id, tenant_id)
+  @@index([tenantId, state, openedAt(sort: Desc)])
+  @@index([state, severity, openedAt(sort: Desc)])
+  @@map("alerts")
+  @@schema("hub")
+}
+
+/// CB1 (DINH-CHINH D1/D2, ADR-167): outbox email theo NGƯỜI. Mang tenant_id (= tenant của alert, khoá ngoại ghép) + RLS;
+/// vòng gửi xuyên project (CB5) đi qua escape hatch có tên. Trần 6/giờ/người và chống flapping đếm trên bảng này.
+model AlertEmail {
+  id        String          @id @default(uuid()) @db.Uuid
+  tenantId  String          @map("tenant_id") @db.Uuid
+  alertId   String          @map("alert_id") @db.Uuid
+  userId    String          @map("user_id") @db.Uuid
+  kind      AlertEmailKind
+  state     AlertEmailState @default(PENDING)
+  attempts  Int             @default(0)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt    DateTime?       @map("sent_at") @db.Timestamptz(6)
+
+  alert Alert @relation(fields: [alertId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, userId, kind])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([state, createdAt])
+  @@map("alert_emails")
+  @@schema("hub")
+}
+
+/// CB1 (SPEC §3.2, ADR-166): tuỳ chọn cảnh báo gắn NGƯỜI DÙNG, không gắn tenant -> KHÔNG tenant_id, KHÔNG RLS; chỉ qua
+/// IdentityRepository (như users/auth_sessions). Có chủ ý, không phải lỗ BB-5.
+model AlertPreference {
+  userId         String   @id @map("user_id") @db.Uuid
+  emailEnabled   Boolean  @default(false) @map("email_enabled")
+  /// luật được gửi email. Dòng mới tạo qua IdentityRepository nhận DEFAULT_EMAIL_RULES (mọi luật critical, SPEC §3.2).
+  emailRules     String[] @default([]) @map("email_rules")
+  emailOnResolve Boolean  @default(false) @map("email_on_resolve")
+  /// tắt EMAIL của các project này (chuông vẫn hiện).
+  mutedProjects  String[] @default([]) @map("muted_projects") @db.Uuid
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("alert_preferences")
   @@schema("hub")
 }
 

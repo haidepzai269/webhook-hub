@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { DEFAULT_EMAIL_RULES } from '@hub/common';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -22,6 +23,24 @@ export interface MembershipView {
   name: string;
   environment: 'test' | 'live';
   role: MemberRole;
+}
+
+export type UserLocaleCode = 'vi' | 'en';
+
+export interface AlertPreferencesInput {
+  emailEnabled?: boolean;
+  emailRules?: string[];
+  emailOnResolve?: boolean;
+  mutedProjects?: string[];
+}
+
+export interface AlertEmailRecipient {
+  userId: string;
+  email: string;
+  locale: UserLocaleCode;
+  emailRules: string[];
+  emailOnResolve: boolean;
+  mutedProjects: string[];
 }
 
 export interface SessionRow {
@@ -430,4 +449,50 @@ export class IdentityRepository {
   listAuthAudit(userId: string, limit = 50) {
     return this.db.authAudit.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: limit });
   }
+
+  // ---------------------------------------------------------------- cảnh báo (CB1, SPEC-canh-bao-nhan-dinh §3.2, ADR-166/166)
+  // `alert_preferences` + `users.locale` gắn NGƯỜI DÙNG, không gắn tenant -> ở đây, không qua TenantScopedRepository.
+
+  /** D3: ngôn ngữ console/email của người dùng (nút Ngôn ngữ gọi `PUT /me/locale`). 1 = đã ghi. */
+  async setUserLocale(userId: string, locale: UserLocaleCode): Promise<number> {
+    const r = await this.db.user.updateMany({ where: { id: userId }, data: { locale } });
+    return r.count;
+  }
+
+  /** Tuỳ chọn cảnh báo; chưa lưu -> null (service hiểu là mặc định: tắt email). */
+  findAlertPreferences(userId: string) {
+    return this.db.alertPreference.findUnique({ where: { userId } });
+  }
+
+  /**
+   * Ghi tuỳ chọn (một câu upsert). Dòng MỚI không truyền `emailRules` nhận `DEFAULT_EMAIL_RULES` (mọi luật critical, §3.2).
+   * Kiểm "chỉ operator" là việc của route (403 khuôn lỗi) — repo không đoán quyền.
+   */
+  upsertAlertPreferences(userId: string, data: AlertPreferencesInput) {
+    return this.db.alertPreference.upsert({
+      where: { userId },
+      create: { userId, ...data, emailRules: data.emailRules ?? [...DEFAULT_EMAIL_RULES] },
+      update: data,
+    });
+  }
+
+  /**
+   * Người nhận email cảnh báo (§6): operator, email đã xác minh, đã bật email. Lọc `email_rules`/`muted_projects` theo
+   * từng cảnh báo là việc của evaluator (hàm thuần) — ở đây chỉ trả dữ liệu của người dùng.
+   */
+  async listAlertEmailRecipients(): Promise<AlertEmailRecipient[]> {
+    const rows = await this.db.alertPreference.findMany({
+      where: { emailEnabled: true, user: { isOperator: true, emailVerifiedAt: { not: null } } },
+      include: { user: { select: { email: true, locale: true } } },
+    });
+    return rows.map((r) => ({
+      userId: r.userId,
+      email: r.user.email,
+      locale: r.user.locale,
+      emailRules: r.emailRules,
+      emailOnResolve: r.emailOnResolve,
+      mutedProjects: r.mutedProjects,
+    }));
+  }
+
 }

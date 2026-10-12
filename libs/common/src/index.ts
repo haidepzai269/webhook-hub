@@ -14,3 +14,5 @@ export * from './mail';
 export * from './webhook-body';
 export * from './errors/catalog';
 export * from './limits';
+export * from './http-outcome';
+export * from './alerts';

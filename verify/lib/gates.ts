@@ -81,7 +81,7 @@ function fixtureAccountCheck(text: string): { line: number; text: string }[] {
 }
 
 /** Bảng nghiệp vụ / bảng có lối thoát có tên — mọi truy vấn ngoài libs/database/src phải đi qua repo (BB-5). */
-const MODELS = ['source', 'sourceSecret', 'rawEvent', 'event', 'destination', 'subscription', 'delivery', 'deliveryAttempt', 'outbox', 'processedMessage', 'auditLog', 'user', 'projectMember', 'authSession', 'emailToken', 'authAudit'];
+const MODELS = ['source', 'sourceSecret', 'rawEvent', 'event', 'destination', 'subscription', 'delivery', 'deliveryAttempt', 'outbox', 'processedMessage', 'auditLog', 'user', 'projectMember', 'authSession', 'emailToken', 'authAudit', 'alert', 'alertEmail', 'alertPreference'];
 
 const ONLY = '\\.on' + 'ly\\(';
 const SKIPS = ['it', 'test', 'describe'].map((k) => `\\b${k}\\.sk` + 'ip\\(').join('|');
@@ -91,8 +91,8 @@ const NO_VERIFY = '--no-' + 'verify|--passWith' + 'NoTests';
 const RLS_SYSTEM = 'app\\.rls' + '_system';
 /** R-7: migration bật RLS; migration sau mốc này chạy dưới FORCE RLS khi owner không phải superuser (Neon). */
 const RLS_MIGRATION_TS = '20261011110000';
-/** Bảng có RLS (migration 20261011110000_rls_hub_app). Thêm bảng RLS mới -> thêm vào đây. */
-const RLS_TABLES = ['sources', 'events', 'destinations', 'subscriptions', 'deliveries', 'audit_logs', 'source_secrets', 'raw_events', 'delivery_attempts'];
+/** Bảng có RLS (migration 20261011110000_rls_hub_app; alerts/alert_emails: 20261012050000_alerts). Thêm bảng RLS mới -> thêm vào đây. */
+const RLS_TABLES = ['sources', 'events', 'destinations', 'subscriptions', 'deliveries', 'audit_logs', 'source_secrets', 'raw_events', 'delivery_attempts', 'alerts', 'alert_emails'];
 const DATA_DML_RLS = new RegExp(`\\b(UPDATE|INSERT\\s+INTO|DELETE\\s+FROM)\\s+("?hub"?\\s*\\.\\s*)?"?(${RLS_TABLES.join('|')})"?(\\s|;|\\(|$)`, 'i');
 const OWNER_URL = 'VERIFY_DB_' + 'OWNER_URL|MAIL_DRIVER.*capt' + 'ure';
 
