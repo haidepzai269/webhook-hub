@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 
 import { KeyRound } from "lucide-react";
 
+import { useT } from "@/lib/i18n/use-t";
+
 import { AuthShell } from "../_components/auth-shell";
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
@@ -19,6 +21,7 @@ import { AuthField } from "../_components/auth-field";
  */
 export default function VerifyEmailPage() {
   const router = useRouter();
+  const t = useT();
   const token = useRef<string | null>(null);
   const [state, setState] = useState<"pending" | "password" | "sending" | "ok" | "invalid">("pending");
   const [password, setPassword] = useState("");
@@ -48,7 +51,7 @@ export default function VerifyEmailPage() {
     if (data.error === "password_required") return setState("password");
     if (data.error === "token_invalid") return setState("invalid");
     setState("password");
-    setMessage(data.message ?? `Không kích hoạt được (HTTP ${r.status}).`);
+    setMessage(data.message ?? t("auth.verify.failed", { status: r.status }));
   };
 
   useEffect(() => {
@@ -61,54 +64,59 @@ export default function VerifyEmailPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (password !== confirm) return setMessage("Hai mật khẩu không khớp.");
+    if (password !== confirm) return setMessage(t("auth.validation.passwords-mismatch"));
     setMessage(null);
     setState("sending");
     await submit({ password, name: name.trim() }).catch((err) => {
       setState("password");
-      setMessage(`Không kết nối được hub-api: ${err instanceof Error ? err.message : String(err)}`);
+      setMessage(t("auth.network-error", { message: err instanceof Error ? err.message : String(err) }));
     });
   };
 
   return (
-    <AuthShell title="KÍCH HOẠT TÀI KHOẢN" footerText="Quay lại" footerLinkLabel="Đăng nhập" footerHref="/login" social={false}>
-      {state === "pending" && <p>Đang xác minh…</p>}
+    <AuthShell
+      title={t("auth.verify.title")}
+      footerText={t("auth.verify.footer")}
+      footerLinkLabel={t("auth.sign-in")}
+      footerHref="/login"
+      social={false}
+    >
+      {state === "pending" && <p>{t("auth.verify.pending")}</p>}
       {(state === "password" || state === "sending") && (
         <form noValidate onSubmit={onSubmit}>
           <p>
             <KeyRound size={18} aria-hidden style={{ verticalAlign: "text-bottom", marginRight: 6 }} />
-            Đặt mật khẩu để kích hoạt. Mật khẩu nhập lúc đăng ký không được dùng (chống chiếm tài khoản bằng đăng ký trước).
+            {t("auth.verify.intro")}
           </p>
-          <AuthField id="verify-name" label="TÊN HIỂN THỊ" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+          <AuthField id="verify-name" label={t("auth.field.name")} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
           <AuthField
             id="verify-password"
-            label="MẬT KHẨU"
+            label={t("auth.field.password")}
             type="password"
             autoComplete="new-password"
             autoFocus
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <AuthField id="verify-confirm" label="NHẬP LẠI" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          <AuthField id="verify-confirm" label={t("auth.field.confirm")} type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
           {message && (
             <p role="alert" className={styles.serverError}>
               {message}
             </p>
           )}
           <button className={styles.button} type="submit" disabled={state === "sending" || !password}>
-            {state === "sending" ? "ĐANG KÍCH HOẠT…" : "KÍCH HOẠT"}
+            {state === "sending" ? t("auth.verify.submitting") : t("auth.verify.submit")}
           </button>
         </form>
       )}
       {state === "ok" && (
         <p>
-          Email đã được xác minh. <Link href="/dashboard">Vào dashboard</Link>
+          {t("auth.verify.done")} <Link href="/dashboard">{t("auth.verify.go-dashboard")}</Link>
         </p>
       )}
       {state === "invalid" && (
         <p role="alert" className={styles.serverError}>
-          Link không hợp lệ, đã dùng hoặc đã hết hạn. Đăng ký lại bằng cùng email để nhận link mới, hoặc dùng{" "}
-          <Link href="/forgot-password">Quên mật khẩu</Link>.
+          {t("auth.verify.invalid")} <Link href="/forgot-password">{t("auth.forgot-short")}</Link>.
         </p>
       )}
     </AuthShell>

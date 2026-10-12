@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { HubColumn } from "@/components/admin/data-table";
 import { DeliveryStatusBadge } from "@/components/admin/status-badge";
 import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
 import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
+import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 /** Lần thử cuối (API không đảm bảo thứ tự attempts trong danh sách) — để hiện HTTP/ms. */
 function lastAttempt(d: Delivery): DeliveryAttempt | undefined {
@@ -25,6 +27,8 @@ function httpTone(status: number | null | undefined) {
 
 /** Đếm ngược tới `next_attempt_at` (S2-2) — tick mỗi giây, tự dừng khi đã tới giờ. */
 export function RetryCountdown({ iso }: { iso: string }) {
+  const t = useT();
+  const locale = useLocale();
   const target = new Date(iso).getTime();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -37,30 +41,31 @@ export function RetryCountdown({ iso }: { iso: string }) {
     return () => clearInterval(t);
   }, [target]);
   const left = Math.max(0, Math.round((target - now) / 1000));
-  if (left === 0) return <span className="text-muted-foreground text-xs">đang tới lượt…</span>;
+  if (left === 0) return <span className="text-muted-foreground text-xs">{t("page.deliveries.countdown.due")}</span>;
   const m = Math.floor(left / 60);
   const sec = left % 60;
   return (
     <span
       className="whitespace-nowrap font-mono text-amber-600 text-xs tabular-nums dark:text-amber-400"
-      title={formatDateTime(iso)}
+      title={formatDateTime(iso, locale)}
     >
       {m > 0 ? `${m}m ${String(sec).padStart(2, "0")}s` : `${sec}s`}
     </span>
   );
 }
 
-export const deliveryColumns: HubColumn<Delivery>[] = [
+/** Cột bảng lượt giao theo ngôn ngữ — header là chuỗi để menu ẩn/hiện cột của DataTable đọc được. */
+export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<Delivery>[] => [
   {
     id: "status",
-    header: "Trạng thái",
+    header: t("page.deliveries.col.status"),
     accessorFn: (d) => d.status,
     cell: ({ row }) => <DeliveryStatusBadge status={row.original.status} />,
     enableHiding: false,
   },
   {
     id: "destination",
-    header: "Đích",
+    header: t("page.deliveries.col.destination"),
     accessorFn: (d) => d.subscription?.destination?.name ?? d.subscription?.name ?? "",
     cell: ({ row }) => {
       const dest = row.original.subscription?.destination;
@@ -74,7 +79,7 @@ export const deliveryColumns: HubColumn<Delivery>[] = [
   },
   {
     id: "eventType",
-    header: "Sự kiện",
+    header: t("page.deliveries.col.event"),
     accessorFn: (d) => d.event?.type ?? "",
     cell: ({ row }) => (
       <div className="min-w-0">
@@ -87,23 +92,23 @@ export const deliveryColumns: HubColumn<Delivery>[] = [
   },
   {
     id: "generation",
-    header: "Gen",
+    header: t("page.deliveries.col.generation"),
     accessorFn: (d) => String(d.attemptGeneration),
     cell: ({ row }) => (
-      <span className="font-mono text-xs" title="attempt_generation — replay tạo generation mới">
+      <span className="font-mono text-xs" title={t("page.deliveries.col.generation-hint")}>
         {row.original.attemptGeneration}
       </span>
     ),
   },
   {
     id: "attempts",
-    header: "Lần thử",
+    header: t("page.deliveries.col.attempts"),
     accessorFn: (d) => String(d.attemptCount),
     cell: ({ row }) => <span className="font-mono text-xs">{row.original.attemptCount}</span>,
   },
   {
     id: "http",
-    header: "HTTP",
+    header: t("page.deliveries.col.http"),
     accessorFn: (d) => String(lastAttempt(d)?.responseStatus ?? ""),
     cell: ({ row }) => {
       const a = lastAttempt(row.original);
@@ -112,7 +117,7 @@ export const deliveryColumns: HubColumn<Delivery>[] = [
   },
   {
     id: "ms",
-    header: "ms",
+    header: t("page.deliveries.col.ms"),
     accessorFn: (d) => String(lastAttempt(d)?.durationMs ?? ""),
     cell: ({ row }) => {
       const a = lastAttempt(row.original);
@@ -121,7 +126,7 @@ export const deliveryColumns: HubColumn<Delivery>[] = [
   },
   {
     id: "nextAttemptAt",
-    header: "Thử lại lúc",
+    header: t("page.deliveries.col.next-attempt"),
     accessorFn: (d) => d.nextAttemptAt ?? "",
     cell: ({ row }) => {
       const d = row.original;
@@ -135,7 +140,7 @@ export const deliveryColumns: HubColumn<Delivery>[] = [
   },
   {
     id: "lastError",
-    header: "Lỗi gần nhất",
+    header: t("page.deliveries.col.last-error"),
     accessorFn: (d) => d.lastError ?? "",
     cell: ({ row }) =>
       row.original.lastError ? (
@@ -148,12 +153,18 @@ export const deliveryColumns: HubColumn<Delivery>[] = [
   },
   {
     id: "updatedAt",
-    header: "Cập nhật",
+    header: t("page.deliveries.col.updated"),
     accessorFn: (d) => d.updatedAt,
     cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.updatedAt)}>
-        {formatRelative(row.original.updatedAt)}
+      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.updatedAt, locale)}>
+        {formatRelative(row.original.updatedAt, undefined, locale)}
       </span>
     ),
   },
 ];
+
+export function useDeliveryColumns(): HubColumn<Delivery>[] {
+  const t = useT();
+  const locale = useLocale();
+  return useMemo(() => buildDeliveryColumns(t, locale), [t, locale]);
+}

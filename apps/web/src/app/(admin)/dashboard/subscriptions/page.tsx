@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus, Power, PowerOff, Trash2 } from "lucide-react";
@@ -18,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/hub/format";
-import { describeDeleteConflict } from "@/lib/hub/ui-logic";
 import {
   useCreateSubscription,
   useDeleteSubscription,
@@ -27,36 +26,49 @@ import {
   useSubscriptions,
 } from "@/lib/hub/queries";
 import type { Subscription } from "@/lib/hub/types";
+import { describeDeleteConflict } from "@/lib/hub/ui-logic";
+import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
-const schema = z.object({
-  name: z.string().trim().min(1, "Nhập tên subscription.").max(255),
-  destinationId: z.string().min(1, "Chọn một đích."),
-  eventTypes: z
-    .string()
-    .transform((s) =>
-      s
-        .split(/[\s,]+/)
-        .map((t) => t.trim())
-        .filter(Boolean),
-    )
-    .pipe(
-      z
-        .array(
-          // Cùng ngữ pháp với hub (libs/common/src/event-pattern.ts, S3-3).
-          z.string().regex(/^(\*|[a-z0-9_]+(\.[a-z0-9_]+)*(\.\*)?)$/, "Mẫu không hợp lệ (vd payment.*, repo.push, *)."),
-        )
-        .min(1, "Nhập ít nhất một loại sự kiện."),
-    ),
-  template: z.string(),
-});
-type FormIn = z.input<typeof schema>;
-type FormOut = z.output<typeof schema>;
+/** Câu dịch có chỗ chèn phần tử (`{wildcard}`…): tách theo `{tên}` và thay bằng node tương ứng. */
+function rich(template: string, nodes: Record<string, ReactNode>): ReactNode {
+  return template.split(/\{(\w+)\}/).map((part, i) =>
+    // biome-ignore lint/suspicious/noArrayIndexKey: các mảnh của một câu cố định, thứ tự không đổi
+    i % 2 === 1 && part in nodes ? <Fragment key={i}>{nodes[part]}</Fragment> : part,
+  );
+}
+
+const makeSchema = (t: TranslateFn) =>
+  z.object({
+    name: z.string().trim().min(1, t("page.subscriptions.form.name-required")).max(255),
+    destinationId: z.string().min(1, t("page.subscriptions.form.destination-required")),
+    eventTypes: z
+      .string()
+      .transform((s) =>
+        s
+          .split(/[\s,]+/)
+          .map((x) => x.trim())
+          .filter(Boolean),
+      )
+      .pipe(
+        z
+          .array(
+            // Cùng ngữ pháp với hub (libs/common/src/event-pattern.ts, S3-3).
+            z.string().regex(/^(\*|[a-z0-9_]+(\.[a-z0-9_]+)*(\.\*)?)$/, t("page.subscriptions.form.pattern-invalid")),
+          )
+          .min(1, t("page.subscriptions.form.types-required")),
+      ),
+    template: z.string(),
+  });
+type FormIn = z.input<ReturnType<typeof makeSchema>>;
+type FormOut = z.output<ReturnType<typeof makeSchema>>;
 
 /**
  * Tắt/Bật + Xoá (ADR-054). Xoá bị server chặn 409 khi còn delivery (lịch sử, kể cả DEAD) — toast giải
  * thích và đưa nút "Tắt" ngay trong toast: tắt mới là cách ngừng gửi đúng.
  */
 function SubscriptionActions({ sub }: { sub: Subscription }) {
+  const t = useT();
   const setActive = useSetSubscriptionActive();
   const del = useDeleteSubscription();
   const busy = setActive.isPending || del.isPending;
@@ -65,22 +77,25 @@ function SubscriptionActions({ sub }: { sub: Subscription }) {
     setActive.mutate(
       { id: sub.id, isActive },
       {
-        onSuccess: () => toast.success(isActive ? `Đã bật "${sub.name}"` : `Đã tắt "${sub.name}" — sự kiện mới không còn được giao`),
-        onError: (e) => toast.error(`Không đổi được trạng thái: ${e.message}`),
+        onSuccess: () =>
+          toast.success(
+            t(isActive ? "page.subscriptions.toast.enabled" : "page.subscriptions.toast.disabled", { name: sub.name }),
+          ),
+        onError: (e) => toast.error(t("page.subscriptions.toast.toggle-failed", { message: e.message })),
       },
     );
 
   const remove = () => {
-    if (!window.confirm(`Xoá subscription "${sub.name}"? Chỉ xoá được khi chưa có delivery nào.`)) return;
+    if (!window.confirm(t("page.subscriptions.delete-confirm", { name: sub.name }))) return;
     del.mutate(sub.id, {
-      onSuccess: () => toast.success(`Đã xoá "${sub.name}"`),
+      onSuccess: () => toast.success(t("page.subscriptions.toast.deleted", { name: sub.name })),
       onError: (e) => {
-        const conflict = describeDeleteConflict(e);
-        if (!conflict) return toast.error(`Xoá thất bại: ${e.message}`);
-        toast.warning("Không xoá được subscription", {
+        const conflict = describeDeleteConflict(e, t);
+        if (!conflict) return toast.error(t("page.subscriptions.toast.delete-failed", { message: e.message }));
+        toast.warning(t("page.subscriptions.toast.delete-blocked"), {
           description: conflict,
           duration: 10_000,
-          action: sub.isActive ? { label: "Tắt", onClick: () => toggle(false) } : undefined,
+          action: sub.isActive ? { label: t("common.disable"), onClick: () => toggle(false) } : undefined,
         });
       },
     });
@@ -89,40 +104,53 @@ function SubscriptionActions({ sub }: { sub: Subscription }) {
   return (
     <div className="flex justify-end gap-1">
       {sub.isActive ? (
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(false)} title="Ngừng gửi, giữ lịch sử">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => toggle(false)}
+          title={t("page.subscriptions.toggle-off-title")}
+        >
           <PowerOff />
-          Tắt
+          {t("common.disable")}
         </Button>
       ) : (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(true)}>
           <Power />
-          Bật
+          {t("common.enable")}
         </Button>
       )}
-      <Button size="sm" variant="ghost" disabled={busy} onClick={remove} aria-label={`Xoá ${sub.name}`} title="Xoá (bị chặn nếu đã có delivery)">
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={remove}
+        aria-label={t("page.subscriptions.delete-aria", { name: sub.name })}
+        title={t("page.subscriptions.delete-title")}
+      >
         <Trash2 />
       </Button>
     </div>
   );
 }
 
-const columns: HubColumn<Subscription>[] = [
+const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] => [
   {
     id: "name",
-    header: "Tên",
+    header: t("common.name"),
     accessorFn: (s) => s.name,
     cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
     enableHiding: false,
   },
   {
     id: "eventTypes",
-    header: "Loại sự kiện",
+    header: t("page.subscriptions.col.event-types"),
     accessorFn: (s) => s.eventTypes.join(" "),
     cell: ({ row }) => (
       <div className="flex flex-wrap gap-1">
-        {row.original.eventTypes.map((t) => (
-          <Badge key={t} variant="outline" className="font-mono text-[11px]">
-            {t}
+        {row.original.eventTypes.map((type) => (
+          <Badge key={type} variant="outline" className="font-mono text-[11px]">
+            {type}
           </Badge>
         ))}
       </div>
@@ -130,7 +158,7 @@ const columns: HubColumn<Subscription>[] = [
   },
   {
     id: "destination",
-    header: "→ Đích",
+    header: t("page.subscriptions.col.destination"),
     accessorFn: (s) => s.destination?.name ?? "",
     cell: ({ row }) => (
       <span className="text-sm">
@@ -143,7 +171,7 @@ const columns: HubColumn<Subscription>[] = [
   },
   {
     id: "template",
-    header: "Template",
+    header: t("page.subscriptions.col.template"),
     accessorFn: (s) => s.template ?? "",
     cell: ({ row }) =>
       row.original.template ? (
@@ -151,21 +179,25 @@ const columns: HubColumn<Subscription>[] = [
           {row.original.template}
         </span>
       ) : (
-        <span className="text-muted-foreground text-xs">mặc định (JSON)</span>
+        <span className="text-muted-foreground text-xs">{t("page.subscriptions.template-default")}</span>
       ),
   },
   {
     id: "isActive",
-    header: "Trạng thái",
+    header: t("common.status"),
     accessorFn: (s) => (s.isActive ? "active" : "inactive"),
     cell: ({ row }) =>
-      row.original.isActive ? <Badge variant="outline">Đang bật</Badge> : <Badge variant="destructive">Tắt</Badge>,
+      row.original.isActive ? (
+        <Badge variant="outline">{t("common.enabled")}</Badge>
+      ) : (
+        <Badge variant="destructive">{t("page.subscriptions.inactive")}</Badge>
+      ),
   },
   {
     id: "createdAt",
-    header: "Tạo lúc",
+    header: t("common.created-at"),
     accessorFn: (s) => s.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt)}</span>,
+    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
   },
   {
     id: "actions",
@@ -177,6 +209,10 @@ const columns: HubColumn<Subscription>[] = [
 ];
 
 export default function SubscriptionsPage() {
+  const t = useT();
+  const locale = useLocale();
+  const columns = useMemo(() => makeColumns(t, locale), [t, locale]);
+  const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSubscriptions();
   const destinations = useDestinations();
   const create = useCreateSubscription();
@@ -196,22 +232,22 @@ export default function SubscriptionsPage() {
       })
       .then(
         (s) => {
-          toast.success(`Đã tạo subscription "${s.name}"`);
+          toast.success(t("page.subscriptions.toast.created", { name: s.name }));
           form.reset();
           setOpen(false);
         },
-        (e: Error) => toast.error(`Tạo subscription thất bại: ${e.message}`),
+        (e: Error) => toast.error(t("page.subscriptions.toast.create-failed", { message: e.message })),
       );
 
   return (
     <>
       <PageHeader
-        title="Subscriptions"
-        description="Quy tắc định tuyến: sự kiện thuộc loại X → giao tới đích Y, tuỳ chọn qua template."
+        title={t("page.subscriptions.title")}
+        description={t("page.subscriptions.description")}
         actions={
           <Button onClick={() => setOpen(true)}>
             <Plus />
-            Thêm subscription
+            {t("page.subscriptions.add")}
           </Button>
         }
       />
@@ -221,14 +257,14 @@ export default function SubscriptionsPage() {
         getRowId={(s) => s.id}
         isLoading={isLoading}
         error={error}
-        searchPlaceholder="Lọc theo tên, loại sự kiện, đích…"
-        emptyText="Chưa có subscription nào — sự kiện sẽ không được giao đi đâu."
+        searchPlaceholder={t("page.subscriptions.search")}
+        emptyText={t("page.subscriptions.empty")}
       />
 
       <FormDialog
         open={open}
         onOpenChange={setOpen}
-        title="Thêm subscription"
+        title={t("page.subscriptions.add")}
         formId="subscription-form"
         submitting={create.isPending}
       >
@@ -239,11 +275,11 @@ export default function SubscriptionsPage() {
               name="name"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="sub-name">Tên</FieldLabel>
+                  <FieldLabel htmlFor="sub-name">{t("common.name")}</FieldLabel>
                   <Input
                     {...field}
                     id="sub-name"
-                    placeholder="VD: Thanh toán → Telegram"
+                    placeholder={t("page.subscriptions.form.name-placeholder")}
                     aria-invalid={fieldState.invalid}
                   />
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
@@ -255,10 +291,16 @@ export default function SubscriptionsPage() {
               name="destinationId"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel>Đích</FieldLabel>
+                  <FieldLabel>{t("page.subscriptions.form.destination")}</FieldLabel>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full" aria-invalid={fieldState.invalid}>
-                      <SelectValue placeholder={destinations.isLoading ? "Đang tải…" : "Chọn đích"} />
+                      <SelectValue
+                        placeholder={
+                          destinations.isLoading
+                            ? t("common.loading")
+                            : t("page.subscriptions.form.destination-placeholder")
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {(destinations.data ?? []).map((d) => (
@@ -269,7 +311,7 @@ export default function SubscriptionsPage() {
                     </SelectContent>
                   </Select>
                   {!destinations.isLoading && !destinations.data?.length && (
-                    <FieldDescription>Chưa có đích nào — tạo ở trang Đích trước.</FieldDescription>
+                    <FieldDescription>{t("page.subscriptions.form.no-destinations")}</FieldDescription>
                   )}
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
@@ -280,7 +322,7 @@ export default function SubscriptionsPage() {
               name="eventTypes"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="sub-types">Loại sự kiện</FieldLabel>
+                  <FieldLabel htmlFor="sub-types">{t("page.subscriptions.col.event-types")}</FieldLabel>
                   <Input
                     {...field}
                     id="sub-types"
@@ -289,8 +331,10 @@ export default function SubscriptionsPage() {
                     aria-invalid={fieldState.invalid}
                   />
                   <FieldDescription>
-                    Phân tách bằng dấu phẩy hoặc khoảng trắng. <code>payment.*</code> = mọi sự kiện thanh toán;{" "}
-                    <code>*</code> = mọi sự kiện.
+                    {rich(t("page.subscriptions.form.types-hint"), {
+                      wildcard: <code>payment.*</code>,
+                      all: <code>*</code>,
+                    })}
                   </FieldDescription>
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
@@ -301,15 +345,15 @@ export default function SubscriptionsPage() {
               name="template"
               render={({ field }) => (
                 <Field className="gap-1.5">
-                  <FieldLabel htmlFor="sub-template">Template (tuỳ chọn)</FieldLabel>
+                  <FieldLabel htmlFor="sub-template">{t("page.subscriptions.form.template")}</FieldLabel>
                   <Textarea
                     {...field}
                     id="sub-template"
                     rows={3}
                     className="font-mono text-xs"
-                    placeholder="Nhận {{data.amount}} {{data.currency}} — {{data.memo}}"
+                    placeholder={t("page.subscriptions.form.template-placeholder")}
                   />
-                  <FieldDescription>Để trống: gửi nguyên sự kiện dạng JSON.</FieldDescription>
+                  <FieldDescription>{t("page.subscriptions.form.template-hint")}</FieldDescription>
                 </Field>
               )}
             />

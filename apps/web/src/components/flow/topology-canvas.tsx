@@ -21,7 +21,6 @@ import {
   useNodesState,
 } from "@xyflow/react";
 import type { DestinationFlowNode, FlowEdge, FlowNode, FlowTopology, Health, SourceFlowNode, SubscriptionFlowNode, TopologyWindow } from "@hub/flow";
-import { HEALTH_LABELS } from "@hub/flow";
 import { CircleAlert, CircleCheck, CircleX, Gauge, LoaderCircle, Ellipsis, PowerOff, ShieldAlert, Unplug, Zap, ZapOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -38,6 +37,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { type FlowItemKind, useFlowArchive, useFlowSetActive } from "@/lib/hub/flow-queries";
 import { subscribeHubSocket } from "@/lib/hub/socket";
+import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 
 import { layoutLR } from "./layout";
 import {
@@ -91,16 +92,17 @@ function rawIdOf(node: FlowNode): string {
 }
 
 
-const KIND_NOUN: Record<FlowItemKind, string> = { source: "nguồn", destination: "đích", subscription: "subscription" };
-type EdgeData = { edge: FlowEdge; window: TopologyWindow; pulses: { id: number; tone: string }[]; caption?: string; live: LiveView };
+const KIND_NOUN: Record<FlowItemKind, MessageKey> = { source: "flow.kind.source", destination: "flow.kind.destination", subscription: "flow.kind.subscription" };
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+type EdgeData = { edge: FlowEdge; window: TopologyWindow; pulses: { id: number; tone: string }[]; caption?: string; captionOff?: boolean; live: LiveView };
 
 /** Tone của trạng thái sống trên chặng (live-activity). */
 const LIVE_TONE: Record<LiveResult | "running", Tone> = { running: "progress", ok: "healthy", warn: "warning", fail: "crashed" };
-const LIVE_BADGE: Record<LiveResult | "running", { label: string; Icon: typeof CircleCheck }> = {
-  running: { label: "Đang xử lý", Icon: LoaderCircle },
-  ok: { label: "Vừa xong", Icon: CircleCheck },
-  warn: { label: "Thử lại", Icon: CircleAlert },
-  fail: { label: "Lỗi", Icon: CircleX },
+const LIVE_BADGE: Record<LiveResult | "running", { label: MessageKey; Icon: typeof CircleCheck }> = {
+  running: { label: "flow.live.running", Icon: LoaderCircle },
+  ok: { label: "flow.live.ok", Icon: CircleCheck },
+  warn: { label: "flow.live.warn", Icon: CircleAlert },
+  fail: { label: "flow.live.fail", Icon: CircleX },
 };
 
 function fmtCount(n: number) {
@@ -117,17 +119,17 @@ function NodeIcon({ node }: { node: FlowNode }) {
   return I ? <I size={18} strokeWidth={ICON.strokeWidth} /> : null;
 }
 
-function subtitleOf(node: FlowNode): string {
+function subtitleOf(node: FlowNode, t: TranslateFn): string {
   switch (node.kind) {
     case "source":
       return (node as SourceFlowNode).provider.toUpperCase();
     case "gate":
-      return "verify · COMMIT · ACK";
+      return t("flow.node.subtitle.gate");
     case "normalize":
       return "q.normalize → events";
     case "subscription": {
       const sub = node as SubscriptionFlowNode;
-      const from = sub.sourceLabels?.length ? ` · chỉ từ ${sub.sourceLabels.join(", ")}` : "";
+      const from = sub.sourceLabels?.length ? ` · ${t("flow.node.only-from", { list: sub.sourceLabels.join(", ") })}` : "";
       return sub.eventTypes.join(", ") + from;
     }
     case "destination":
@@ -138,6 +140,7 @@ function subtitleOf(node: FlowNode): string {
 /** Thẻ node kiểu ảnh mẫu A: icon trong ô, tên, `● Healthy`; hàng dưới `● 99.1% | 105ms lat`. */
 const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<Node<CardData>>) {
   const { node, onBadge, onManage, live } = data;
+  const t = useT();
   // ADR-161: mục đã "Ngắt" — mờ, badge "ĐÃ NGẮT" thay mọi badge khác (không còn là "không dùng" hay sự cố).
   const disconnected = isDisconnected(node);
   const unused = data.unused && !disconnected;
@@ -148,7 +151,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
   const healthTone: Tone = quiet ? "idle" : HEALTH_TONE[node.health];
   const dst = node.kind === "destination" ? (node as DestinationFlowNode) : null;
   const src = node.kind === "source" ? (node as SourceFlowNode) : null;
-  const crashedBadge = quiet ? null : dst?.circuitState === "OPEN" ? "CIRCUIT OPEN" : node.health === "crashed" ? "CRASHED" : null;
+  const crashedBadge = quiet ? null : dst?.circuitState === "OPEN" ? t("flow.node.badge.circuit-open") : node.health === "crashed" ? t("flow.node.badge.crashed") : null;
   const liveBadge = !quiet && live !== "idle" ? LIVE_BADGE[live] : null;
 
   return (
@@ -161,10 +164,10 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
       title={
         disconnected
           ? manageKind
-            ? `Đã ngắt: ${KIND_NOUN[manageKind]} này không nhận/gửi sự kiện mới. Bấm nút ⋯ ở góc thẻ để kết nối lại.`
-            : "Đã ngắt: mọi subscription trong nhóm đã ngắt. Hiện cột Subscription (không gộp nhóm) để kết nối lại từng cái."
+            ? t("flow.node.disconnected-title", { noun: t(KIND_NOUN[manageKind]) })
+            : t("flow.node.group-disconnected-title")
           : unused
-            ? "Đích không dùng: không còn subscription nào đang bật trỏ tới. Bật lại hoặc xoá ở trang Đích."
+            ? t("flow.node.unused-title")
             : undefined
       }
     >
@@ -176,7 +179,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           style={{ ...toneStyle(LIVE_TONE[live]), background: "var(--flow-card-solid)" }}
         >
           <liveBadge.Icon {...ICON_SM} className={live === "running" ? "flow-spin" : undefined} aria-hidden />
-          {liveBadge.label}
+          {t(liveBadge.label)}
         </span>
       )}
       {disconnected && (
@@ -185,7 +188,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           style={{ ...toneStyle("idle"), background: "var(--flow-card-solid)" }}
         >
           <Unplug {...ICON_SM} aria-hidden />
-          ĐÃ NGẮT
+          {t("flow.node.badge.disconnected")}
         </span>
       )}
       {unused && (
@@ -194,7 +197,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           style={{ ...toneStyle("idle"), background: "var(--flow-card-solid)" }}
         >
           <PowerOff {...ICON_SM} aria-hidden />
-          KHÔNG DÙNG
+          {t("flow.node.badge.unused")}
         </span>
       )}
       {crashedBadge && (
@@ -218,22 +221,22 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
             {disconnected ? (
               <>
                 <Unplug {...ICON_SM} aria-hidden />
-                <span>Đã ngắt</span>
+                <span>{t("flow.node.disconnected")}</span>
               </>
             ) : unused ? (
               <>
                 <PowerOff {...ICON_SM} aria-hidden />
-                <span>Không dùng · chưa có subscription</span>
+                <span>{t("flow.node.unused")}</span>
               </>
             ) : (
               <>
                 <HealthGlyph health={node.health} small />
-                <span>{HEALTH_LABELS[node.health]}</span>
+                <span>{t(`flow.health.${node.health}`)}</span>
               </>
             )}
           </div>
-          <div className="mt-0.5 truncate text-[11.5px]" style={{ color: "var(--flow-text-dim)" }} title={subtitleOf(node)}>
-            {subtitleOf(node)}
+          <div className="mt-0.5 truncate text-[11.5px]" style={{ color: "var(--flow-text-dim)" }} title={subtitleOf(node, t)}>
+            {subtitleOf(node, t)}
           </div>
         </div>
       </div>
@@ -243,18 +246,18 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
       >
         {node.throughput === 0 && node.successPct === null ? (
           <span className="text-[12px]" style={{ color: "var(--flow-text-dim)" }}>
-            chưa có traffic
+            {t("flow.node.no-traffic")}
           </span>
         ) : (
           <>
             <span className="inline-flex items-center gap-1.5 font-medium">
               <span className="size-2 rounded-full" style={{ background: TONE_VAR[healthTone] }} />
-              {node.successPct === null ? `${fmtCount(node.throughput)} ev` : `${node.successPct}%`}
+              {node.successPct === null ? t("flow.node.throughput", { count: fmtCount(node.throughput) }) : `${node.successPct}%`}
             </span>
             {node.p95Ms !== null && (
               <>
                 <span className="h-3.5 w-px" style={{ background: "var(--flow-card-border)" }} />
-                <span style={{ color: "var(--flow-text-dim)" }}>{node.p95Ms}ms lat</span>
+                <span style={{ color: "var(--flow-text-dim)" }}>{t("flow.node.latency", { ms: node.p95Ms })}</span>
               </>
             )}
           </>
@@ -266,8 +269,11 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
           type="button"
           className="flow-manage-btn nodrag nopan absolute right-2 bottom-2 grid size-6 place-items-center rounded-md transition hover:bg-[var(--flow-card-border)]"
           style={{ color: "var(--flow-text-dim)" }}
-          aria-label={`${disconnected ? "Kết nối lại" : "Ngắt"} hoặc xoá ${KIND_NOUN[manageKind]} “${node.label}”`}
-          title={disconnected ? "Kết nối lại / Xoá" : "Ngắt / Xoá"}
+          aria-label={t(disconnected ? "flow.node.manage-aria-connect" : "flow.node.manage-aria-disconnect", {
+            noun: t(KIND_NOUN[manageKind]),
+            label: node.label,
+          })}
+          title={t(disconnected ? "flow.node.manage-title-connect" : "flow.node.manage-title-disconnect")}
           onClick={(e) => {
             e.stopPropagation();
             onManage(node);
@@ -287,13 +293,13 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
                   title={dst.verificationError ?? undefined}
                 >
                   <ShieldAlert {...ICON_SM} aria-hidden />
-                  {dst.verification === "FAILED" ? "XÁC MINH LỖI" : "CHƯA XÁC MINH"}
+                  {dst.verification === "FAILED" ? t("flow.node.verify-failed") : t("flow.node.unverified")}
                 </span>
               )}
               {dst.circuitState !== "CLOSED" && (
                 <span className="flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]" style={toneStyle(dst.circuitState === "OPEN" ? "crashed" : "warning")}>
                   {dst.circuitState === "OPEN" ? <ZapOff {...ICON_SM} aria-hidden /> : <Zap {...ICON_SM} aria-hidden />}
-                  {dst.circuitState}
+                  {dst.circuitState === "OPEN" ? t("flow.node.circuit.open") : dst.circuitState === "HALF_OPEN" ? t("flow.node.circuit.half-open") : dst.circuitState}
                 </span>
               )}
               {dst.throttleRps > 0 && (
@@ -311,7 +317,7 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
                     onBadge(`/dashboard/events?status=in_progress&destination=${dst.id.slice(4)}`);
                   }}
                 >
-                  {dst.retrying} RETRYING
+                  {t("flow.node.retrying", { count: dst.retrying })}
                 </button>
               )}
               {dst.dead > 0 && (
@@ -324,28 +330,24 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
                     onBadge(`/dashboard/events?status=failed&destination=${dst.id.slice(4)}`);
                   }}
                 >
-                  {dst.dead} DEAD
+                  {t("flow.node.dead", { count: dst.dead })}
                 </button>
               )}
             </>
           )}
-          {src && (
-            <>
-              {src.rejected > 0 && (
-                <button
-                  type="button"
-                  className="flow-pill nodrag inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]"
-                  style={toneStyle("crashed")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onBadge(`/dashboard/events?status=rejected&source=${src.id.slice(4)}`);
-                  }}
-                >
-                  <span className="size-1.5 rounded-full" style={{ background: "var(--flow-crashed)" }} />
-                  {src.rejected} từ chối
-                </button>
-              )}
-            </>
+          {src && src.rejected > 0 && (
+            <button
+              type="button"
+              className="flow-pill nodrag inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px]"
+              style={toneStyle("crashed")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onBadge(`/dashboard/events?status=rejected&source=${src.id.slice(4)}`);
+              }}
+            >
+              <span className="size-1.5 rounded-full" style={{ background: "var(--flow-crashed)" }} />
+              {t("flow.node.rejected", { count: src.rejected })}
+            </button>
           )}
         </div>
       )}
@@ -360,11 +362,12 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
  */
 const TopologyEdge = memo(function TopologyEdge(props: EdgeProps<Edge<EdgeData>>) {
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd } = props;
+  const t = useT();
   const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.35 });
   if (!data) return null;
-  const { edge, window, pulses, caption, live: view } = data;
+  const { edge, window, pulses, caption, captionOff, live: view } = data;
   // ADR-161: nhãn gộp có dòng "… đã ngắt" (disconnectedNote) thì luôn hiện, kể cả chưa có traffic.
-  const hasDisconnectedNote = Boolean(caption?.split(CAPTION_SEP).some((l) => l.endsWith("đã ngắt")));
+  const hasDisconnectedNote = Boolean(captionOff);
   const tone = HEALTH_TONE[edge.health];
   const color = TONE_VAR[tone];
   const width = Math.min(2 + Math.log2(edge.count + 1) * 0.6, 6);
@@ -404,14 +407,14 @@ const TopologyEdge = memo(function TopologyEdge(props: EdgeProps<Edge<EdgeData>>
             ))}
             {live ? (
               <div>
-                {fmtCount(edge.count)} ev/{WINDOW_SHORT[window]}
+                {t("flow.edge.rate", { count: fmtCount(edge.count), window: WINDOW_SHORT[window] })}
                 {edge.latencyMs !== null && <span className="font-medium opacity-80"> · {edge.latencyMs}ms</span>}
               </div>
             ) : (
-              <div className="font-medium opacity-70">chưa có traffic</div>
+              <div className="font-medium opacity-70">{t("flow.node.no-traffic")}</div>
             )}
-            {edge.failed > 0 && <div style={{ color: "var(--flow-crashed)" }}>{edge.failed} lỗi</div>}
-            {edge.failed === 0 && edge.retrying > 0 && <div style={{ color: "var(--flow-warning)" }}>{edge.retrying} đang thử lại</div>}
+            {edge.failed > 0 && <div style={{ color: "var(--flow-crashed)" }}>{t("flow.edge.failed", { count: edge.failed })}</div>}
+            {edge.failed === 0 && edge.retrying > 0 && <div style={{ color: "var(--flow-warning)" }}>{t("flow.edge.retrying", { count: edge.retrying })}</div>}
           </div>
         </EdgeLabelRenderer>
       )}
@@ -428,9 +431,13 @@ const edgeTypes = { flow: TopologyEdge };
  */
 const CAPTION_SEP = "|";
 const HEALTH_RANK: Record<Health, number> = { crashed: 3, warning: 2, healthy: 1, idle: 0 };
-function foldSubscriptions(topo: FlowTopology): { topo: FlowTopology; captions: Record<string, string> } {
+function foldSubscriptions(
+  topo: FlowTopology,
+  t: TranslateFn,
+): { topo: FlowTopology; captions: Record<string, string>; captionOff: Set<string> } {
   const subs = topo.nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription");
   const captions: Record<string, string> = {};
+  const captionOff = new Set<string>();
   const edges: FlowEdge[] = topo.edges.filter((e) => !e.source.startsWith("sub:") && !e.target.startsWith("sub:"));
   const byDest = new Map<string, SubscriptionFlowNode[]>();
   for (const s of subs) byDest.set(s.destinationId, [...(byDest.get(s.destinationId) ?? []), s]);
@@ -453,17 +460,18 @@ function foldSubscriptions(topo: FlowTopology): { topo: FlowTopology; captions: 
     // §6A: subscription chỉ nhận từ một số source (sourceIds) → ghi rõ trên nhãn cạnh.
     const from = [...new Set(group.flatMap((g) => g.sourceLabels ?? []))];
     // ADR-161: subscription đã ngắt gộp vào nhãn vẫn phải thấy được.
-    const off = disconnectedNote(group);
+    const off = disconnectedNote(group, t);
+    if (off) captionOff.add(id);
     captions[id] =
-      (group.length > 1 ? `${group.length} sub · ${patterns.join(", ")}` : patterns.join(", ")) +
-      (from.length ? `${CAPTION_SEP}chỉ từ: ${from.join(", ")}` : "") +
+      (group.length > 1 ? t("flow.edge.sub-group", { count: group.length, patterns: patterns.join(", ") }) : patterns.join(", ")) +
+      (from.length ? `${CAPTION_SEP}${t("flow.edge.only-from", { list: from.join(", ") })}` : "") +
       (off ? `${CAPTION_SEP}${off}` : "");
   }
-  return { topo: { ...topo, nodes: topo.nodes.filter((n) => n.kind !== "subscription"), edges }, captions };
+  return { topo: { ...topo, nodes: topo.nodes.filter((n) => n.kind !== "subscription"), edges }, captions, captionOff };
 }
 
 /** > 60 node: gộp các subscription cùng đích thành một node (SPEC §5). */
-function collapseIfLarge(topo: FlowTopology, force: boolean): FlowTopology {
+function collapseIfLarge(topo: FlowTopology, force: boolean, t: TranslateFn): FlowTopology {
   if (!force && topo.nodes.length <= 60) return topo;
   const subs = topo.nodes.filter((n): n is SubscriptionFlowNode => n.kind === "subscription");
   const byDest = new Map<string, SubscriptionFlowNode[]>();
@@ -476,7 +484,7 @@ function collapseIfLarge(topo: FlowTopology, force: boolean): FlowTopology {
     const worst = group.reduce((w, s) => (rank[s.health] > rank[w] ? s.health : w), "idle" as Health);
     const total = group.reduce((a, s) => a + s.deliveries, 0);
     // ADR-161: nhóm vẽ mờ "ĐÃ NGẮT" khi mọi subscription trong nhóm đã ngắt.
-    nodes.push({ ...group[0], id, label: `${group.length} subscription`, eventTypes: group.flatMap((g) => g.eventTypes), deliveries: total, throughput: total, health: worst, active: groupActive(group) });
+    nodes.push({ ...group[0], id, label: t("flow.node.sub-group", { count: group.length }), eventTypes: group.flatMap((g) => g.eventTypes), deliveries: total, throughput: total, health: worst, active: groupActive(group) });
     const inEdges = topo.edges.filter((e) => group.some((g) => e.target === g.id));
     const outEdges = topo.edges.filter((e) => group.some((g) => e.source === g.id));
     const sum = (es: FlowEdge[], k: "count" | "failed" | "retrying") => es.reduce((a, e) => a + e[k], 0);
@@ -509,6 +517,7 @@ export interface TopologyCanvasProps {
 
 export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilter, layoutVersion, showSubscriptions, showUnused }: TopologyCanvasProps) {
   const router = useRouter();
+  const tr = useT();
   const unused = useMemo(() => unusedDestinationIds(topology), [topology]);
   const topo = useMemo(() => {
     let t = topology;
@@ -525,14 +534,15 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
       t = { ...t, nodes: t.nodes.filter((n) => !hide(n.id)), edges: t.edges.filter((e) => !hide(e.target)) };
     }
     let captions: Record<string, string> = {};
-    if (showSubscriptions) t = collapseIfLarge(t, collapseSubs);
-    else ({ topo: t, captions } = foldSubscriptions(t));
+    let captionOff = new Set<string>();
+    if (showSubscriptions) t = collapseIfLarge(t, collapseSubs, tr);
+    else ({ topo: t, captions, captionOff } = foldSubscriptions(t, tr));
     if (sourceFilter) {
       const keep = (id: string) => !id.startsWith("src:") || id === `src:${sourceFilter}`;
       t = { ...t, nodes: t.nodes.filter((n) => keep(n.id)), edges: t.edges.filter((e) => keep(e.source)) };
     }
-    return { ...t, captions };
-  }, [topology, collapseSubs, sourceFilter, showSubscriptions, showUnused, unused]);
+    return { ...t, captions, captionOff };
+  }, [topology, collapseSubs, sourceFilter, showSubscriptions, showUnused, unused, tr]);
 
   const [pulses, setPulses] = useState<Record<string, { id: number; tone: string }[]>>({});
   const onBadge = useCallback((href: string) => router.push(href), [router]);
@@ -606,7 +616,7 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
           target: e.target,
           type: "flow",
           markerEnd: { type: MarkerType.ArrowClosed, color: markerColor, width: 16, height: 16 },
-          data: { edge: e, window: topo.window, pulses: pulses[e.id] ?? NO_PULSES, caption: topo.captions[e.id], live: view },
+          data: { edge: e, window: topo.window, pulses: pulses[e.id] ?? NO_PULSES, caption: topo.captions[e.id], captionOff: topo.captionOff.has(e.id), live: view },
         };
       }),
         (o, n) =>
@@ -780,17 +790,18 @@ export function TopologyCanvas({ topology, showPulses, collapseSubs, sourceFilte
  * thành "Kết nối lại". Xoá = LƯU TRỮ phía hub (biến khỏi bản đồ + danh sách) — nói thật: lịch sử vẫn giữ.
  */
 function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; topology: FlowTopology; onClose: () => void }) {
+  const t = useT();
   const setActive = useFlowSetActive();
   const archive = useFlowArchive();
   const kind = node ? manageableKind(node) : null;
   const disconnected = node ? isDisconnected(node) : false;
   const busy = setActive.isPending || archive.isPending;
-  const noun = kind ? KIND_NOUN[kind] : "";
+  const noun = kind ? t(KIND_NOUN[kind]) : "";
   const cascade =
     kind === "destination"
-      ? " Mọi subscription trỏ tới đích này cũng bị xoá theo."
+      ? ` ${t("flow.manage.cascade-destination")}`
       : kind === "source"
-        ? " Subscription chỉ nhận từ nguồn này cũng bị xoá theo; subscription lọc nhiều nguồn sẽ bỏ nguồn này khỏi bộ lọc."
+        ? ` ${t("flow.manage.cascade-source")}`
         : "";
   // L4: kết nối lại subscription mà đích của nó đang Ngắt -> vẫn chưa giao được gì.
   const dstOfSub =
@@ -808,10 +819,11 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
       { kind, id: rawIdOf(node), isActive: disconnected },
       {
         onSuccess: () => {
-          toast.success(disconnected ? `Đã kết nối lại “${node.label}”` : `Đã ngắt “${node.label}”`);
+          toast.success(t(disconnected ? "flow.toast.connected" : "flow.toast.disconnected", { label: node.label }));
           onClose();
         },
-        onError: (err) => toast.error(`${disconnected ? "Kết nối lại" : "Ngắt"} thất bại: ${err.message}`),
+        onError: (err) =>
+          toast.error(t(disconnected ? "flow.toast.connect-failed" : "flow.toast.disconnect-failed", { message: err.message })),
       },
     );
   };
@@ -821,11 +833,15 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
       { kind, id: rawIdOf(node) },
       {
         onSuccess: (r) => {
-          const extra = kind !== "subscription" && r.archivedSubscriptionIds.length ? ` (kèm ${r.archivedSubscriptionIds.length} subscription)` : "";
-          toast.success(`Đã xoá “${node.label}” khỏi bản đồ${extra}`);
+          const subs = kind !== "subscription" ? r.archivedSubscriptionIds.length : 0;
+          toast.success(
+            subs
+              ? t("flow.toast.deleted-with-subs", { label: node.label, count: subs })
+              : t("flow.toast.deleted", { label: node.label }),
+          );
           onClose();
         },
-        onError: (err) => toast.error(`Xoá thất bại: ${err.message}`),
+        onError: (err) => toast.error(t("flow.toast.delete-failed", { message: err.message })),
       },
     );
   };
@@ -835,53 +851,48 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {disconnected ? "Kết nối lại" : "Ngắt"} hoặc xoá {noun} “{node?.label}”?
+            {t(disconnected ? "flow.manage.title-connect" : "flow.manage.title-disconnect", { noun, label: node?.label ?? "" })}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
               <p>
-                <strong>{disconnected ? "Kết nối lại" : "Ngắt"}:</strong>{" "}
-                {disconnected
-                  ? `${noun} hoạt động trở lại với sự kiện MỚI (sự kiện tới trong lúc ngắt không được gửi bù).`
-                  : `${noun} ngừng nhận/gửi sự kiện mới nhưng vẫn nằm trên bản đồ (vẽ mờ) — kết nối lại bất cứ lúc nào.`}
+                <strong>{t(disconnected ? "flow.manage.connect" : "flow.manage.disconnect")}:</strong>{" "}
+                {t(disconnected ? "flow.manage.connect-desc" : "flow.manage.disconnect-desc", { noun: capitalize(noun) })}
               </p>
               <p>
-                <strong>Xoá:</strong> gỡ {noun} khỏi bản đồ luồng và danh sách, không nhận sự kiện mới, không hoàn tác được trên giao diện.
-                {cascade} Lịch sử sự kiện vẫn được giữ để đối soát.
+                <strong>{t("flow.manage.delete-label")}</strong> {t("flow.manage.delete-desc", { noun })}
+                {cascade} {t("flow.manage.history-kept")}
               </p>
               {node?.kind === "source" && (node as SourceFlowNode).providerConnected && (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
-                  <strong>Lưu ý:</strong> nguồn này đã được kết nối tự động với nhà cung cấp. Ngắt hay xoá ở đây đều KHÔNG gỡ URL webhook đã đăng ký
-                  bên đó. Nên ngắt kết nối provider trước (nút <strong>“Ngắt”</strong> trong mục kết nối của nguồn, ở{" "}
+                  <strong>{t("flow.manage.note")}</strong> {t("flow.manage.provider-note-1")}{" "}
+                  <strong>{t("flow.manage.provider-note-btn")}</strong> {t("flow.manage.provider-note-2")}{" "}
                   <a className="underline" href="/dashboard/sources">
-                    trang Nguồn
-                  </a>
-                  ) TRƯỚC khi Xoá — Xoá sẽ huỷ thông tin đăng nhập provider đã lưu, sau đó hub không gỡ hộ được nữa và bạn phải gỡ tay ở trang
-                  quản trị của nhà cung cấp (nếu không họ vẫn gửi tới, hub sẽ từ chối).
+                    {t("flow.manage.provider-note-link")}
+                  </a>{" "}
+                  {t("flow.manage.provider-note-3")}
                 </p>
               )}
               {destStillOff && (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
-                  <strong>Lưu ý:</strong> đích “{dstOfSub?.label}” của subscription này đang Ngắt — kết nối lại subscription vẫn chưa giao
-                  được gì cho tới khi kết nối lại cả đích.
+                  <strong>{t("flow.manage.note")}</strong> {t("flow.manage.dest-off-note", { label: dstOfSub?.label ?? "" })}
                 </p>
               )}
               {serviceManaged && (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
-                  <strong>Lưu ý:</strong> mục này do một service tạo qua API (vd Shop tự đăng ký endpoint). Service đó có thể tự tạo lại
-                  endpoint/subscription ở lần khởi động hoặc đồng bộ kế tiếp — muốn ngừng hẳn, gỡ cấu hình phía service.
+                  <strong>{t("flow.manage.note")}</strong> {t("flow.manage.service-note")}
                 </p>
               )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Huỷ</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>{t("common.cancel")}</AlertDialogCancel>
           <Button variant="outline" disabled={busy} onClick={toggle}>
-            {setActive.isPending ? "Đang lưu…" : disconnected ? "Kết nối lại" : "Ngắt"}
+            {setActive.isPending ? t("common.saving") : t(disconnected ? "flow.manage.connect" : "flow.manage.disconnect")}
           </Button>
           <Button variant="destructive" disabled={busy} onClick={remove}>
-            {archive.isPending ? "Đang xoá…" : "Xoá"}
+            {archive.isPending ? t("flow.manage.deleting") : t("common.delete")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

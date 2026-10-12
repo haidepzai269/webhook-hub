@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
+import { useT } from "@/lib/i18n/use-t";
 
 export type HubColumn<T extends RowData> = ColumnDef<DataTableFeatures, T>;
 
@@ -54,12 +55,13 @@ export function DataTable<T extends RowData>({
   isLoading,
   error,
   isStale,
-  emptyText = "Chưa có dữ liệu.",
+  emptyText,
   searchPlaceholder,
   pageSize = 20,
   onRowClick,
   toolbar,
 }: DataTableProps<T>) {
+  const t = useT();
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
@@ -121,11 +123,11 @@ export function DataTable<T extends RowData>({
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm">
                   <Columns3 />
-                  Cột
+                  {t("admin.table.columns")}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>Hiện cột</DropdownMenuLabel>
+                <DropdownMenuLabel>{t("admin.table.show-columns")}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {hideable.map((col) => (
                   <DropdownMenuCheckboxItem
@@ -168,7 +170,7 @@ export function DataTable<T extends RowData>({
             ) : error ? (
               <TableRow>
                 <TableCell colSpan={colCount} className="h-24 text-center text-destructive">
-                  Không tải được dữ liệu: {error.message}
+                  {t("common.load-error")}: {error.message}
                 </TableCell>
               </TableRow>
             ) : rows.length ? (
@@ -188,7 +190,7 @@ export function DataTable<T extends RowData>({
             ) : (
               <TableRow>
                 <TableCell colSpan={colCount} className="h-24 text-center text-muted-foreground">
-                  {emptyText}
+                  {emptyText ?? t("common.empty")}
                 </TableCell>
               </TableRow>
             )}
@@ -199,14 +201,14 @@ export function DataTable<T extends RowData>({
       {pageSize !== false && table.getPageCount() > 1 && (
         <div className="flex items-center justify-end gap-2 text-sm">
           <span className="text-muted-foreground">
-            Trang {table.state.pagination.pageIndex + 1}/{table.getPageCount()}
+            {t("admin.table.page", { page: table.state.pagination.pageIndex + 1, total: table.getPageCount() })}
           </span>
           <Button
             variant="outline"
             size="icon-sm"
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
-            aria-label="Trang trước"
+            aria-label={t("admin.table.prev-page")}
           >
             <ChevronLeft />
           </Button>
@@ -215,7 +217,7 @@ export function DataTable<T extends RowData>({
             size="icon-sm"
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
-            aria-label="Trang sau"
+            aria-label={t("admin.table.next-page")}
           >
             <ChevronRight />
           </Button>

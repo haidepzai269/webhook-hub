@@ -1,5 +1,6 @@
 import { hmacSha256Hex, signPayosBody } from "@/lib/hub/payos-sign";
 import type { Provider } from "@/lib/hub/types";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
 
 export interface BuiltRequest {
   headers: Record<string, string>;
@@ -86,7 +87,12 @@ export function samplePayload(provider: Provider): unknown {
  *           dựng lại body. Body trả về là chuỗi THỰC SỰ được gửi (có thể khác ô nhập).
  * Để trống secret ⇒ cố tình gửi chữ ký sai, để xem hub từ chối (401) thế nào.
  */
-export async function buildRequest(provider: Provider, body: string, secret: string): Promise<BuiltRequest> {
+export async function buildRequest(
+  provider: Provider,
+  body: string,
+  secret: string,
+  t: TranslateFn,
+): Promise<BuiltRequest> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   switch (provider) {
     case "github":
@@ -97,9 +103,9 @@ export async function buildRequest(provider: Provider, body: string, secret: str
       headers["X-Hub-Signature-256"] = `sha256=${secret ? await hmacSha256Hex(secret, body) : "0".repeat(64)}`;
       break;
     case "stripe": {
-      const t = Math.floor(Date.now() / 1000);
+      const ts = Math.floor(Date.now() / 1000);
       headers["Stripe-Signature"] =
-        `t=${t},v1=${secret ? await hmacSha256Hex(secret, `${t}.${body}`) : "0".repeat(64)}`;
+        `t=${ts},v1=${secret ? await hmacSha256Hex(secret, `${ts}.${body}`) : "0".repeat(64)}`;
       break;
     }
     case "sepay":
@@ -111,10 +117,10 @@ export async function buildRequest(provider: Provider, body: string, secret: str
       try {
         parsed = JSON.parse(body);
       } catch {
-        throw new Error("Body PayOS phải là JSON hợp lệ để ký");
+        throw new Error(t("page.playground.error.payos-json"));
       }
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Body PayOS phải là object JSON");
+        throw new Error(t("page.playground.error.payos-object"));
       }
       const signed = await signPayosBody(parsed as Record<string, unknown>, secret);
       return { headers, body: JSON.stringify(signed, null, 2) };

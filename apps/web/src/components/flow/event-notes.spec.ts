@@ -7,6 +7,10 @@ import {
   probeOf,
   stageHint,
 } from "./event-notes";
+import { createT } from "../../lib/i18n/dictionary";
+
+const t = createT("vi");
+const en = createT("en");
 
 const STAGES = ["received", "verified", "persisted", "normalized", "routed", "delivering"];
 
@@ -41,37 +45,36 @@ describe("describeType — sự kiện LÀ gì (theo docs/EVENT-CATALOG.md)", ()
     ["payment.sent", "Chuyển tiền đi (PayOS)"],
     ["payment.failed", "PayOS báo thanh toán thất bại"],
     ["payment.refunded", "Hoàn tiền (PayOS)"],
-    ["repo.push", "Push commit lên repo"],
+    ["repo.push", "Đẩy commit lên kho mã"],
     ["repo.pull_request.opened", "Mở pull request"],
-    ["repo.pull_request.merged", "Pull request được merge"],
+    ["repo.pull_request.merged", "Pull request được hợp nhất"],
     ["repo.pull_request.labeled", "Pull request: labeled"],
     ["repo.issue.opened", "Mở issue"],
     ["repo.issue.assigned", "Issue: assigned"],
     ["github.release.published", "PayOS: github.release.published"],
     ["menu.updated", "PayOS: menu.updated"],
   ])("%s -> %s", (type, text) => {
-    expect(describeType(type, "PayOS")).toBe(text);
+    expect(describeType(type, "PayOS", t)).toBe(text);
   });
 });
 
 describe("describeEvent — cột Ghi chú", () => {
   it("payos.webhook_test: nói rõ là request kiểm tra khi kết nối, dừng ở Normalize là ĐÚNG (tone expected)", () => {
-    const n = describeEvent(row({ type: "payos.webhook_test", summary: probeSummary }));
+    const n = describeEvent(row({ type: "payos.webhook_test", summary: probeSummary }), t);
     expect(n.tone).toBe("expected");
     expect(n.text).toContain("PayOS kiểm tra URL của hub khi bấm “Kết nối PayOS”");
     expect(n.text).toContain("không phải thanh toán, không phải tạo QR");
-    expect(n.text).toContain("dừng ở Normalize là đúng, không giao đi");
+    expect(n.text).toContain("dừng ở Chuẩn hoá là đúng, không giao đi");
   });
 
   it("github.ping: GitHub kiểm tra webhook", () => {
     const n = describeEvent(
-      row({ provider: "github", providerLabel: "GitHub", type: "github.ping", summary: probeSummary }),
-    );
+      row({ provider: "github", providerLabel: "GitHub", type: "github.ping", summary: probeSummary }), t);
     expect(n).toEqual({ text: expect.stringContaining("GitHub gửi ping kiểm tra webhook"), tone: "expected" });
   });
 
   it("thanh toán giao xong: mô tả + n/n đích", () => {
-    expect(describeEvent(row({ summary: summary({}, { okCount: 2, total: 2 }) }))).toEqual({
+    expect(describeEvent(row({ summary: summary({}, { okCount: 2, total: 2 }) }), t)).toEqual({
       text: "Nhận tiền (PayOS) — đã giao 2/2 đích",
       tone: "neutral",
     });
@@ -82,10 +85,10 @@ describe("describeEvent — cột Ghi chú", () => {
       stage: "verified",
       reason: { code: "signature_invalid", message: "Chữ ký không hợp lệ — hub trả 401, không lưu sự kiện" },
     };
-    const sig = describeEvent(row({ type: null, status: "rejected", failedAt }));
+    const sig = describeEvent(row({ type: null, status: "rejected", failedAt }), t);
     expect(sig).toEqual({ text: "Bị từ chối — Chữ ký không hợp lệ", tone: "error" });
     expect(sig.text).not.toContain("không lưu");
-    expect(describeEvent(row({ type: null, status: "rejected" }))).toEqual({ text: "Bị từ chối ở bước nhận", tone: "error" });
+    expect(describeEvent(row({ type: null, status: "rejected" }), t)).toEqual({ text: "Bị từ chối ở bước nhận", tone: "error" });
   });
 
   it("giao DEAD -> error, nêu đích + HTTP; đang thử lại -> attention", () => {
@@ -96,12 +99,10 @@ describe("describeEvent — cột Ghi chú", () => {
       httpStatus: 500,
     };
     const dead = describeEvent(
-      row({ status: "failed", failedAt, summary: summary({ delivering: "failed" }, { okCount: 0, total: 1 }) }),
-    );
+      row({ status: "failed", failedAt, summary: summary({ delivering: "failed" }, { okCount: 0, total: 1 }) }), t);
     expect(dead).toEqual({ text: "Nhận tiền (PayOS) — giao tới Discord (HTTP 500) thất bại", tone: "error" });
     const retry = describeEvent(
-      row({ status: "in_progress", failedAt, summary: summary({ delivering: "warning" }, { okCount: 0, total: 1 }) }),
-    );
+      row({ status: "in_progress", failedAt, summary: summary({ delivering: "warning" }, { okCount: 0, total: 1 }) }), t);
     expect(retry.tone).toBe("attention");
     expect(retry.text).toContain("đang chờ thử lại giao tới Discord");
   });
@@ -112,15 +113,15 @@ describe("describeEvent — cột Ghi chú", () => {
       reason: { code: "timeout", message: "Hết thời gian chờ (5s)" },
       destinationName: "Shop",
     };
-    const n = describeEvent(row({ type: "payos.webhook_test", status: "failed", failedAt }));
+    const n = describeEvent(row({ type: "payos.webhook_test", status: "failed", failedAt }), t);
     expect(n.tone).toBe("error");
     expect(n.text).not.toContain("là đúng");
   });
 
   it("không subscription nhận -> attention; kiểu chưa ánh xạ -> nhắc data dạng raw", () => {
     const s = summary({ routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 });
-    expect(describeEvent(row({ summary: s }))).toEqual({
-      text: "Nhận tiền (PayOS) — không subscription nào nhận",
+    expect(describeEvent(row({ summary: s }), t)).toEqual({
+      text: "Nhận tiền (PayOS) — không có đăng ký nhận nào khớp",
       tone: "attention",
     });
     const unmapped = describeEvent(
@@ -129,45 +130,59 @@ describe("describeEvent — cột Ghi chú", () => {
         providerLabel: "GitHub",
         type: "github.star.created",
         summary: summary({ normalized: "warning" }),
-      }),
-    );
-    expect(unmapped.text).toBe("GitHub: github.star.created — đã giao 1/1 đích · chưa có kiểu chuẩn (data dạng raw)");
+      }), t);
+    expect(unmapped.text).toBe("GitHub: github.star.created — đã giao 1/1 đích · chưa có kiểu chuẩn, dữ liệu dạng thô");
   });
 
   it("chưa có event: trùng / adapter bỏ qua / normalize DLQ / đang chờ", () => {
     const dup = describeEvent(
-      row({ type: null, summary: summary({ persisted: "skipped", normalized: "skipped", routed: "skipped" }) }),
-    );
+      row({ type: null, summary: summary({ persisted: "skipped", normalized: "skipped", routed: "skipped" }) }), t);
     expect(dup).toEqual({ text: expect.stringContaining("ACK trùng"), tone: "expected" });
-    const skipped = describeEvent(row({ type: null, summary: summary({ normalized: "skipped" }) }));
-    expect(skipped.text).toContain("adapter không sinh sự kiện");
+    const skipped = describeEvent(row({ type: null, summary: summary({ normalized: "skipped" }) }), t);
+    expect(skipped.text).toContain("bộ chuyển đổi không sinh sự kiện");
     const dlq = describeEvent(
       row({
         type: null,
         status: "failed",
         failedAt: { stage: "normalized", reason: { code: "normalize_dlq", message: "x" } },
-      }),
-    );
+      }), t);
     expect(dlq.tone).toBe("error");
     expect(
-      describeEvent(row({ type: null, status: "in_progress", summary: summary({ normalized: "in_progress" }) })).text,
-    ).toContain("đang chờ normalize");
+      describeEvent(row({ type: null, status: "in_progress", summary: summary({ normalized: "in_progress" }) }), t).text,
+    ).toContain("đang chờ chuẩn hoá");
   });
 
-  it("BB-1: ghi chú không bao giờ nói về đơn hàng", () => {
+  it.each([
+    ["vi", t],
+    ["en", en],
+  ])("BB-1 (%s): ghi chú không bao giờ nói về đơn hàng", (_locale, tr) => {
     const samples = [
-      describeEvent(row()),
-      describeEvent(row({ type: "payos.webhook_test", summary: probeSummary })),
-      describeEvent(row({ type: "payment.failed" })),
+      describeEvent(row(), tr),
+      describeEvent(row({ type: "payos.webhook_test", summary: probeSummary }), tr),
+      describeEvent(row({ type: "payment.failed" }), tr),
+      describeEvent(row({ type: "payment.refunded" }), tr),
+      describeEvent(row({ provider: "stripe", type: "stripe.ping", summary: probeSummary, probe: true }), tr),
+      describeEvent(row({ type: null, status: "in_progress", summary: summary({ normalized: "in_progress" }) }), tr),
     ];
     for (const n of samples) expect(n.text.toLowerCase()).not.toMatch(/đơn hàng|order/);
+  });
+
+  it("en: cùng logic, chữ tiếng Anh, không dấu tiếng Việt", () => {
+    expect(describeEvent(row({ summary: summary({}, { okCount: 2, total: 2 }) }), en)).toEqual({
+      text: "Money received (PayOS) — delivered to 2/2 destinations",
+      tone: "neutral",
+    });
+    expect(describeType("repo.pull_request.labeled", "GitHub", en)).toBe("Pull request: labeled");
+    const probe = describeEvent(row({ type: "payos.webhook_test", summary: probeSummary }), en);
+    expect(probe.tone).toBe("expected");
+    expect(probe.text).not.toMatch(/[à-ỹđ]/i);
   });
 });
 
 describe("probeOf / expectedProbe — MỘT bảng kiểu kiểm tra kết nối", () => {
   it("payos.webhook_test, github.ping -> nhãn 'Kiểm tra kết nối'; kiểu khác / tên thuộc tính Object -> null", () => {
-    expect(probeOf("payos.webhook_test")?.label).toBe("Kiểm tra kết nối");
-    expect(probeOf("github.ping")?.label).toBe("Kiểm tra kết nối");
+    expect(probeOf("payos.webhook_test")?.label).toBe("journey.probe.label");
+    expect(probeOf("github.ping")?.label).toBe("journey.probe.label");
     expect(probeOf("payment.received")).toBeNull();
     expect(probeOf("toString")).toBeNull();
     expect(probeOf(null)).toBeNull();
@@ -180,27 +195,27 @@ describe("probeOf / expectedProbe — MỘT bảng kiểu kiểm tra kết nối
   it("A1 chống giả: api-published github.ping, giao 1/1 -> KHÔNG phải probe", () => {
     const spoof = row({ provider: "api", providerLabel: "API", type: "github.ping", summary: summary() });
     expect(expectedProbe(spoof)).toBeNull();
-    expect(describeEvent(spoof)).toEqual({ text: "API: github.ping — đã giao 1/1 đích", tone: "neutral" });
-    expect(stageHint(spoof, { stage: "routed", status: "skipped" })).toBe("Không subscription nào nhận");
+    expect(describeEvent(spoof, t)).toEqual({ text: "API: github.ping — đã giao 1/1 đích", tone: "neutral" });
+    expect(stageHint(spoof, { stage: "routed", status: "skipped" }, t)).toBe("Không có đăng ký nhận nào khớp");
   });
   it("A1: đúng provider nhưng có delivery / không dừng ở định tuyến -> không phải probe", () => {
     expect(expectedProbe(row({ type: "payos.webhook_test", summary: summary() }))).toBeNull();
     expect(expectedProbe(row({ provider: "api", type: "payos.webhook_test", summary: probeSummary }))).toBeNull();
-    expect(expectedProbe(row({ type: "payos.webhook_test", summary: probeSummary }))?.label).toBe("Kiểm tra kết nối");
+    expect(expectedProbe(row({ type: "payos.webhook_test", summary: probeSummary }))?.label).toBe("journey.probe.label");
   });
 });
 
 describe("expectedProbe — cờ events.probe của server (ADR-159/163) thắng phỏng đoán", () => {
   it("probe: true + không delivery -> probe, không cần provider/kiểu khớp bảng (không đoán)", () => {
-    expect(expectedProbe(row({ provider: "api", type: "payos.webhook_test", summary: probeSummary, probe: true }))?.label).toBe("Kiểm tra kết nối");
+    expect(expectedProbe(row({ provider: "api", type: "payos.webhook_test", summary: probeSummary, probe: true }))?.label).toBe("journey.probe.label");
   });
   it("probe: true nhưng đã có delivery -> không phải probe đúng thiết kế", () => {
     expect(expectedProbe(row({ type: "payos.webhook_test", summary: summary(), probe: true }))).toBeNull();
   });
   it("probe: true với kiểu chưa có trong bảng -> câu chung trung tính", () => {
     const p = expectedProbe(row({ provider: "stripe", type: "stripe.ping", summary: probeSummary, probe: true }));
-    expect(p).toMatchObject({ provider: "stripe", label: "Kiểm tra kết nối" });
-    expect(describeEvent(row({ provider: "stripe", type: "stripe.ping", summary: probeSummary, probe: true })).tone).toBe("expected");
+    expect(p).toMatchObject({ provider: "stripe", label: "journey.probe.label" });
+    expect(describeEvent(row({ provider: "stripe", type: "stripe.ping", summary: probeSummary, probe: true }), t).tone).toBe("expected");
   });
   it("probe: false -> KHÔNG phải probe dù tên kiểu + summary khớp bảng (service tự publish trùng tên)", () => {
     expect(expectedProbe(row({ type: "payos.webhook_test", summary: probeSummary, probe: false }))).toBeNull();
@@ -210,18 +225,18 @@ describe("expectedProbe — cờ events.probe của server (ADR-159/163) thắng
   });
   it("vắng cờ (server cũ) -> vẫn phỏng đoán như trước", () => {
     expect(expectedProbe(row({ provider: "api", type: "payos.webhook_test", summary: probeSummary }))).toBeNull();
-    expect(expectedProbe(row({ type: "payos.webhook_test", summary: probeSummary }))?.label).toBe("Kiểm tra kết nối");
+    expect(expectedProbe(row({ type: "payos.webhook_test", summary: probeSummary }))?.label).toBe("journey.probe.label");
   });
 });
 
 describe("stageHint — dòng lý do trong tooltip chấm chặng", () => {
   it("probe: chấm Normalize vàng giải thích là cố ý; Định tuyến bỏ qua cũng vậy", () => {
     const i = { provider: "payos", type: "payos.webhook_test", failedAt: null, summary: probeSummary };
-    expect(stageHint(i, { stage: "normalized", status: "warning" })).toBe(
+    expect(stageHint(i, { stage: "normalized", status: "warning" }, t)).toBe(
       "PayOS kiểm tra URL khi kết nối — dừng ở đây là đúng, không giao đi",
     );
-    expect(stageHint(i, { stage: "routed", status: "skipped" })).toContain("cố ý không định tuyến");
-    expect(stageHint(i, { stage: "delivering", status: "skipped" })).toBe("Không chạy — dừng ở chặng trước");
+    expect(stageHint(i, { stage: "routed", status: "skipped" }, t)).toContain("cố ý không định tuyến");
+    expect(stageHint(i, { stage: "delivering", status: "skipped" }, t)).toBe("Không chạy — dừng ở chặng trước");
     expect(isProbeType("payos.webhook_test")).toBe(true);
     expect(isProbeType("payment.received")).toBe(false);
   });
@@ -234,15 +249,15 @@ describe("stageHint — dòng lý do trong tooltip chấm chặng", () => {
       httpStatus: 500,
     };
     const i = { provider: "payos", type: "payment.received", failedAt, summary: summary() };
-    expect(stageHint(i, { stage: "delivering", status: "failed" })).toBe("Discord (HTTP 500): HTTP 500 — Đích trả lỗi");
-    expect(stageHint(i, { stage: "verified", status: "ok" })).toBeNull();
+    expect(stageHint(i, { stage: "delivering", status: "failed" }, t)).toBe("Discord (HTTP 500): HTTP 500 — Đích trả lỗi");
+    expect(stageHint(i, { stage: "verified", status: "ok" }, t)).toBeNull();
   });
 
   it("kiểu chưa ánh xạ (không phải probe) -> nhắc catalog; trùng -> 'đã nhận trước đó'", () => {
     const i = { provider: "github", type: "github.star.created", failedAt: null, summary: summary() };
-    expect(stageHint(i, { stage: "normalized", status: "warning" })).toContain("chưa ánh xạ");
+    expect(stageHint(i, { stage: "normalized", status: "warning" }, t)).toContain("chưa ánh xạ");
     expect(
-      stageHint({ provider: "payos", type: null, failedAt: null, summary: summary() }, { stage: "persisted", status: "skipped" }),
+      stageHint({ provider: "payos", type: null, failedAt: null, summary: summary() }, { stage: "persisted", status: "skipped" }, t),
     ).toContain("Trùng");
   });
 });
@@ -256,10 +271,10 @@ describe("stageHint — chấm Lưu (persisted) bị bỏ qua (M1)", () => {
       summary: summary({ verified: "failed", persisted: "skipped", normalized: "skipped", routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 }),
       failedAt: { stage: "verified", reason: { code: "signature_invalid", message: "Chữ ký không hợp lệ" } },
     });
-    expect(stageHint(rejected, persisted)).toBe("Không chạy — dừng ở chặng trước");
+    expect(stageHint(rejected, persisted, t)).toBe("Không chạy — dừng ở chặng trước");
   });
   it("DUPLICATE (đã qua xác thực) -> 'Trùng — đã nhận trước đó'", () => {
     const dup = row({ type: null, summary: summary({ persisted: "skipped", normalized: "skipped", routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 }) });
-    expect(stageHint(dup, persisted)).toBe("Trùng — đã nhận trước đó, không lưu lại");
+    expect(stageHint(dup, persisted, t)).toBe("Trùng — đã nhận trước đó, không lưu lại");
   });
 });

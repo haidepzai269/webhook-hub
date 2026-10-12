@@ -4,6 +4,8 @@ import { type ReactNode, useMemo, useState } from "react";
 
 import { ChevronDown, ChevronRight } from "lucide-react";
 
+import { useT } from "@/lib/i18n/use-t";
+
 import { ICON_SM } from "./tokens";
 
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -13,6 +15,7 @@ type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
  * Mỗi dòng hiển thị là một <div> để đếm số dòng thật sau khi gập.
  */
 export function JsonViewer({ value, maxHeight = "26rem" }: { value: unknown; maxHeight?: string }) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const toggle = (path: string) =>
     setCollapsed((s) => {
@@ -44,7 +47,7 @@ export function JsonViewer({ value, maxHeight = "26rem" }: { value: unknown; max
         const open = isArr ? "[" : "{";
         const close = isArr ? "]" : "}";
         const isCollapsed = collapsed.has(path);
-        const count = `${entries.length} ${isArr ? "items" : "props"}`;
+        const count = t(isArr ? "journey.json.items" : "journey.json.props", { n: entries.length });
         out.push(
           <div key={`${path}:open`} className="flex items-center">
             {pad(depth)}
@@ -52,7 +55,7 @@ export function JsonViewer({ value, maxHeight = "26rem" }: { value: unknown; max
               type="button"
               onClick={() => toggle(path)}
               className="-ml-3.5 mr-0.5 inline-flex size-3.5 items-center justify-center text-muted-foreground hover:text-foreground"
-              aria-label={isCollapsed ? "Mở khối" : "Gập khối"}
+              aria-label={isCollapsed ? t("journey.json.expand") : t("journey.json.collapse")}
             >
               {isCollapsed ? <ChevronRight {...ICON_SM} /> : <ChevronDown {...ICON_SM} />}
             </button>
@@ -92,7 +95,7 @@ export function JsonViewer({ value, maxHeight = "26rem" }: { value: unknown; max
     };
     walk((value ?? null) as Json, 0, "$", null, true);
     return out;
-  }, [value, collapsed]);
+  }, [value, collapsed, t]);
 
   return (
     <div className="overflow-auto rounded-lg border bg-muted/30 font-mono text-xs leading-5" style={{ maxHeight }}>

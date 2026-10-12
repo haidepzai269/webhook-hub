@@ -35,6 +35,16 @@ import {
   Webhook,
 } from "lucide-react";
 
+import type { MessageKey } from "@/lib/i18n/dictionary";
+
+/**
+ * Khoá i18n cho nhãn chặng / trạng thái chặng / sức khoẻ — thay STAGE_LABELS, STAGE_STATUS_LABELS, HEALTH_LABELS
+ * (chữ vi cố định của @hub/flow) ở UI: `t(stageLabelKey(stage.key))`.
+ */
+export const stageLabelKey = (key: StageKey) => `flow.stage.${key}` as MessageKey;
+export const stageStatusKey = (status: StageStatus) => `journey.stage-status.${status.replace("_", "-")}` as MessageKey;
+export const healthKey = (health: Health) => `flow.health.${health}` as MessageKey;
+
 export const ICON = { size: 16, strokeWidth: 1.75 } as const;
 export const ICON_SM = { size: 13, strokeWidth: 1.75 } as const;
 

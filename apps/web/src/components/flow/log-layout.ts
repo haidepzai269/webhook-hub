@@ -3,16 +3,18 @@
  * Cột không phụ thuộc nội dung (rem hoặc minmax(rem,rem)) để hàng có "1/1" (chấm giao gộp) không đẩy lệch
  * cột của hàng khác — mỗi hàng là một grid riêng. minmax cho phép co khi ngăn hẹp; dưới `logMinWidth()`
  * thì cuộn ngang trong ngăn thay vì đè chữ. Cột cuối "Ghi chú" (event-notes.ts) ăn phần còn lại, cắt "…".
+ * Tiêu đề cột là KHOÁ i18n (`labelKey`) — component dịch bằng `t(c.labelKey)`.
  */
+import type { MessageKey } from "../../lib/i18n/dictionary";
 
 export const LOG_COLUMNS = [
-  { key: "time", label: "Thời gian", width: "6.5rem", min: 6.5 },
-  { key: "provider", label: "Provider", width: "minmax(4.5rem,8rem)", min: 4.5 },
-  { key: "stages", label: "Chặng", width: "11rem", min: 11 },
-  { key: "type", label: "Type", width: "minmax(7rem,13rem)", min: 7 },
-  { key: "result", label: "Kết quả", width: "minmax(5.5rem,10rem)", min: 5.5 },
-  { key: "note", label: "Ghi chú", width: "minmax(10rem,1fr)", min: 10 },
-] as const;
+  { key: "time", labelKey: "journey.col.time", width: "6.5rem", min: 6.5 },
+  { key: "provider", labelKey: "journey.col.provider", width: "minmax(4.5rem,8rem)", min: 4.5 },
+  { key: "stages", labelKey: "journey.col.stages", width: "11rem", min: 11 },
+  { key: "type", labelKey: "journey.col.type", width: "minmax(7rem,13rem)", min: 7 },
+  { key: "result", labelKey: "journey.col.result", width: "minmax(5.5rem,10rem)", min: 5.5 },
+  { key: "note", labelKey: "journey.col.note", width: "minmax(10rem,1fr)", min: 10 },
+] as const satisfies readonly { key: string; labelKey: MessageKey; width: string; min: number }[];
 
 export function logGridTemplate(): string {
   return LOG_COLUMNS.map((c) => c.width).join(" ");

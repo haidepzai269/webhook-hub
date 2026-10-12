@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback } from "react";
+import { Suspense, useCallback, useMemo } from "react";
 
 import { X } from "lucide-react";
 
@@ -18,6 +18,8 @@ import { AUDIT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
 import type { AuditLog } from "@/lib/hub/types";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
+import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 const ALL = "__all";
 const ACTOR_MAX = 128;
@@ -34,38 +36,38 @@ function actionTone(action: string) {
 }
 
 /** Tóm tắt metadata: số lượng (replay hàng loạt) hoặc danh sách trường đã sửa — không bao giờ có secret. */
-function metaSummary(meta: unknown): string {
+function metaSummary(meta: unknown, t: TranslateFn): string {
   if (!meta || typeof meta !== "object") return "";
   const m = meta as Record<string, unknown>;
-  if (typeof m.count === "number") return `${m.count} mục`;
-  if (Array.isArray(m.fields)) return `sửa: ${m.fields.join(", ")}`;
-  if (typeof m.generation === "number") return `→ gen ${m.generation}`;
+  if (typeof m.count === "number") return t("page.audit.meta.count", { count: m.count });
+  if (Array.isArray(m.fields)) return t("page.audit.meta.fields", { fields: m.fields.join(", ") });
+  if (typeof m.generation === "number") return t("page.audit.meta.generation", { generation: m.generation });
   if (typeof m.name === "string") return m.name;
   return "";
 }
 
-const columns: HubColumn<AuditLog>[] = [
+const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => [
   {
     id: "createdAt",
-    header: "Thời gian",
+    header: t("page.audit.col.time"),
     accessorFn: (a) => a.createdAt,
     cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.createdAt)}>
-        {formatDateTime(row.original.createdAt)}
-        <span className="block text-[11px] text-muted-foreground">{formatRelative(row.original.createdAt)}</span>
+      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.createdAt, locale)}>
+        {formatDateTime(row.original.createdAt, locale)}
+        <span className="block text-[11px] text-muted-foreground">{formatRelative(row.original.createdAt, undefined, locale)}</span>
       </span>
     ),
     enableHiding: false,
   },
   {
     id: "actor",
-    header: "Người làm",
+    header: t("page.audit.col.actor"),
     accessorFn: (a) => a.actor,
     cell: ({ row }) => <span className="font-medium text-sm">{row.original.actor}</span>,
   },
   {
     id: "action",
-    header: "Hành động",
+    header: t("page.audit.col.action"),
     accessorFn: (a) => a.action,
     cell: ({ row }) => (
       <Badge variant="outline" className={`font-mono text-[11px] ${actionTone(row.original.action)}`}>
@@ -75,11 +77,11 @@ const columns: HubColumn<AuditLog>[] = [
   },
   {
     id: "entity",
-    header: "Đối tượng",
+    header: t("page.audit.col.entity"),
     accessorFn: (a) => `${a.entityType} ${a.entityId}`,
     cell: ({ row }) => {
       const a = row.original;
-      const summary = metaSummary(a.metadata);
+      const summary = metaSummary(a.metadata, t);
       return (
         <div className="min-w-0">
           <div className="text-xs">
@@ -95,7 +97,7 @@ const columns: HubColumn<AuditLog>[] = [
   },
   {
     id: "reason",
-    header: "Lý do",
+    header: t("page.audit.col.reason"),
     accessorFn: (a) => a.reason ?? "",
     cell: ({ row }) =>
       row.original.reason ? (
@@ -114,6 +116,9 @@ const columns: HubColumn<AuditLog>[] = [
  * khoảng thời gian — tất cả trên URL.
  */
 function AuditView() {
+  const t = useT();
+  const locale = useLocale();
+  const columns = useMemo(() => buildColumns(t, locale), [t, locale]);
   const url = useUrlParams(AUDIT_PARAMS);
   const v = url.values;
   const facets = useAuditFacets();
@@ -128,18 +133,18 @@ function AuditView() {
   return (
     <>
       <PageHeader
-        title="Nhật ký thao tác"
-        description="Ai đã làm gì, lúc nào, vì sao: replay, replay hàng loạt, chuẩn hoá lại, tạo/sửa/xoá nguồn, đích, subscription."
+        title={t("page.audit.title")}
+        description={t("page.audit.description")}
       />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input
           value={actorInput}
           onChange={(e) => setActorInput(e.target.value)}
-          placeholder="Người làm (email…)"
+          placeholder={t("page.audit.filter.actor-placeholder")}
           maxLength={ACTOR_MAX}
           list="audit-actors"
           className="h-8 w-48 text-xs"
-          aria-label="Người làm"
+          aria-label={t("page.audit.filter.actor")}
         />
         <datalist id="audit-actors">
           {(facets.data?.actors ?? []).map((a) => (
@@ -147,11 +152,11 @@ function AuditView() {
           ))}
         </datalist>
         <Select value={v.action ?? ALL} onValueChange={(a) => url.setFilter({ action: a === ALL ? null : a })}>
-          <SelectTrigger size="sm" className="w-56" aria-label="Hành động">
+          <SelectTrigger size="sm" className="w-56" aria-label={t("page.audit.filter.action")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi hành động</SelectItem>
+            <SelectItem value={ALL}>{t("page.audit.filter.all-actions")}</SelectItem>
             {actionGroups.map((g) => (
               <SelectItem key={g} value={g} className="font-mono text-xs">
                 {g}*
@@ -170,11 +175,11 @@ function AuditView() {
           </SelectContent>
         </Select>
         <Select value={v.entityType ?? ALL} onValueChange={(e) => url.setFilter({ entityType: e === ALL ? null : e })}>
-          <SelectTrigger size="sm" className="w-48" aria-label="Loại đối tượng">
+          <SelectTrigger size="sm" className="w-48" aria-label={t("page.audit.filter.entity-type")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi loại đối tượng</SelectItem>
+            <SelectItem value={ALL}>{t("page.audit.filter.all-entity-types")}</SelectItem>
             {[...new Set([...(facets.data?.entityTypes ?? []), ...(v.entityType ? [v.entityType] : [])])].map((e) => (
               <SelectItem key={e} value={e} className="font-mono text-xs">
                 {e}
@@ -186,7 +191,7 @@ function AuditView() {
         {filtered && (
           <Button variant="ghost" size="sm" onClick={url.clear}>
             <X />
-            Bỏ lọc
+            {t("common.filters.clear")}
           </Button>
         )}
       </div>
@@ -198,8 +203,8 @@ function AuditView() {
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
-        searchPlaceholder="Lọc trong trang này…"
-        emptyText={filtered ? "Không có thao tác nào khớp bộ lọc." : "Chưa có hành động nào được ghi."}
+        searchPlaceholder={t("page.audit.search-placeholder")}
+        emptyText={t(filtered ? "page.audit.empty-filtered" : "page.audit.empty")}
         toolbar={
           <CursorPager
             next={data?.next}

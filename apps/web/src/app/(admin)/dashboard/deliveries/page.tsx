@@ -15,19 +15,29 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DELIVERY_PARAMS, DELIVERY_STATUS_VALUES, toApiQuery } from "@/lib/hub/list-url";
 import { useDeliveries, useDestinations } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
+import { deliveryStatusKey } from "@/components/admin/status-badge";
 
-import { deliveryColumns } from "./_components/delivery-columns";
+import { useDeliveryColumns } from "./_components/delivery-columns";
 
 const ALL = "__all";
 const CODE_PRESETS = ["2xx", "4xx", "5xx", "none"] as const;
 // Sender quy lỗi mạng / timeout về 500 -> lớp 5xx gồm cả lỗi mạng (ADR-163).
-const CODE_LABEL: Record<string, string> = { "2xx": "2xx", "4xx": "4xx", "5xx": "5xx / lỗi mạng", none: "Chưa có phản hồi" };
+const CODE_LABEL: Record<string, MessageKey | null> = {
+  "2xx": null,
+  "4xx": null,
+  "5xx": "page.deliveries.filter.code-5xx",
+  none: "page.deliveries.filter.code-none",
+};
 
 /**
  * Lượt giao (ADR-163): phân trang Trước/Sau theo cursor keyset, 50 dòng/trang. Bộ lọc trạng thái, đích, HTTP code
  * (lần thử cuối) và khoảng thời gian nằm trên URL — F5 / gửi link giữ nguyên trang đang xem.
  */
 function DeliveriesView() {
+  const t = useT();
+  const columns = useDeliveryColumns();
   const url = useUrlParams(DELIVERY_PARAMS);
   const v = url.values;
   const { data, isLoading, isPlaceholderData, error } = useDeliveries(toApiQuery(v));
@@ -46,29 +56,29 @@ function DeliveriesView() {
   return (
     <>
       <PageHeader
-        title="Lượt giao"
-        description="Mỗi lượt giao = một sự kiện × một subscription × một generation. Mới nhất trên cùng, 50 dòng mỗi trang."
+        title={t("page.deliveries.title")}
+        description={t("page.deliveries.description")}
       />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select value={v.status ?? ALL} onValueChange={(s) => url.setFilter({ status: s === ALL ? null : s })}>
-          <SelectTrigger size="sm" className="w-40" aria-label="Trạng thái">
+          <SelectTrigger size="sm" className="w-40" aria-label={t("page.deliveries.filter.status")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi trạng thái</SelectItem>
+            <SelectItem value={ALL}>{t("page.deliveries.filter.all-statuses")}</SelectItem>
             {DELIVERY_STATUS_VALUES.map((s) => (
-              <SelectItem key={s} value={s} className="font-mono text-xs">
-                {s}
+              <SelectItem key={s} value={s} title={s}>
+                {t(deliveryStatusKey(s))}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={v.destination ?? ALL} onValueChange={(d) => url.setFilter({ destination: d === ALL ? null : d })}>
-          <SelectTrigger size="sm" className="w-52" aria-label="Đích">
+          <SelectTrigger size="sm" className="w-52" aria-label={t("page.deliveries.filter.destination")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi đích</SelectItem>
+            <SelectItem value={ALL}>{t("page.deliveries.filter.all-destinations")}</SelectItem>
             {(destinations.data ?? []).map((d) => (
               <SelectItem key={d.id} value={d.id}>
                 {d.name}
@@ -77,14 +87,14 @@ function DeliveriesView() {
           </SelectContent>
         </Select>
         <Select value={CODE_PRESETS.includes(v.code as never) ? (v.code as string) : ALL} onValueChange={(c) => url.setFilter({ code: c === ALL ? null : c })}>
-          <SelectTrigger size="sm" className="w-40" aria-label="HTTP code">
-            <SelectValue placeholder="HTTP code" />
+          <SelectTrigger size="sm" className="w-40" aria-label={t("page.deliveries.filter.code")}>
+            <SelectValue placeholder={t("page.deliveries.filter.code")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi HTTP code</SelectItem>
+            <SelectItem value={ALL}>{t("page.deliveries.filter.all-codes")}</SelectItem>
             {CODE_PRESETS.map((c) => (
               <SelectItem key={c} value={c}>
-                {CODE_LABEL[c]}
+                {CODE_LABEL[c] ? t(CODE_LABEL[c] as MessageKey) : c}
               </SelectItem>
             ))}
           </SelectContent>
@@ -94,28 +104,28 @@ function DeliveriesView() {
           onChange={(e) => setCodeInput(e.target.value)}
           onBlur={(e) => commitCode(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && commitCode(codeInput)}
-          placeholder="Mã cụ thể, vd 404"
+          placeholder={t("page.deliveries.filter.code-exact")}
           className="h-8 w-36 font-mono text-xs"
-          aria-label="Mã HTTP cụ thể"
+          aria-label={t("page.deliveries.filter.code-exact-aria")}
         />
         <TimeRange key={url.resetToken} from={v.from} to={v.to} onChange={(r) => url.setFilter(r)} />
         {filtered && (
           <Button variant="ghost" size="sm" onClick={url.clear}>
             <X />
-            Bỏ lọc
+            {t("common.filters.clear")}
           </Button>
         )}
       </div>
       <DataTable
         data={data?.items}
-        columns={deliveryColumns}
+        columns={columns}
         getRowId={(d) => d.id}
         isLoading={isLoading}
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
-        searchPlaceholder="Lọc trong trang này…"
-        emptyText={filtered ? "Không có lượt giao nào khớp bộ lọc." : "Chưa có lượt giao nào."}
+        searchPlaceholder={t("page.deliveries.search")}
+        emptyText={filtered ? t("page.deliveries.no-match") : t("page.deliveries.empty")}
         toolbar={
           <CursorPager
             next={data?.next}

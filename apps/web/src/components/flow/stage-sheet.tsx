@@ -3,8 +3,8 @@
 import { useState } from "react";
 
 import type { FlowBranch, StageView } from "@hub/flow";
-import { STAGE_LABELS } from "@hub/flow";
 
+import { useT } from "@/lib/i18n/use-t";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 import { HeadersCard } from "./detail-cards";
@@ -19,6 +19,7 @@ type Tab = "in" | "out" | "detail";
  * "Ra" (event chuẩn — chặng normalized), "Chi tiết" (mọi thứ server gửi cho chặng đó).
  */
 export function StageSheet({ stage, branch, onClose }: { stage: StageView | null; branch?: FlowBranch; onClose: () => void }) {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("detail");
   const d = stage?.detail ?? {};
   const hasIn = stage?.key === "received" || stage?.key === "verified";
@@ -32,12 +33,16 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
           <>
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
-                <span className="text-muted-foreground text-xs uppercase tracking-wide">{STAGE_LABELS[stage.key]}</span>
+                <span className="text-muted-foreground text-xs uppercase tracking-wide">{t(`flow.stage.${stage.key}`)}</span>
                 <StatusPill status={stage.status} />
               </SheetTitle>
               <SheetDescription className="text-foreground text-sm">{stage.title}</SheetDescription>
               <p className="text-muted-foreground text-xs tabular-nums">
-                {stage.endedAt ? `kết thúc ${clock(stage.endedAt)}` : stage.startedAt ? `bắt đầu ${clock(stage.startedAt)}` : "chưa chạy"}
+                {stage.endedAt
+                  ? t("flow.sheet.ended", { time: clock(stage.endedAt) })
+                  : stage.startedAt
+                    ? t("flow.sheet.started", { time: clock(stage.startedAt) })
+                    : t("flow.sheet.not-run")}
                 {stage.durationMs !== null ? ` · ${fmtMs(stage.durationMs)}` : ""}
                 {branch ? ` · ${branch.destination.name}` : ""}
               </p>
@@ -54,9 +59,9 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
               <div className="inline-flex rounded-lg border p-0.5" role="tablist">
                 {(
                   [
-                    ["in", "Vào", hasIn],
-                    ["out", "Ra", hasOut],
-                    ["detail", "Chi tiết", true],
+                    ["in", t("flow.sheet.tab.in"), hasIn],
+                    ["out", t("flow.sheet.tab.out"), hasOut],
+                    ["detail", t("common.details"), true],
                   ] as const
                 ).map(([id, label, enabled]) => (
                   <button
@@ -76,7 +81,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
                 <>
                   <HeadersCard headers={d.headers as Record<string, unknown> | null} />
                   <div className="space-y-1">
-                    <h3 className="font-medium text-sm">Body {d.bodyTruncated ? "(đã cắt 16KB)" : ""}</h3>
+                    <h3 className="font-medium text-sm">{t(d.bodyTruncated ? "flow.sheet.body-truncated" : "flow.sheet.body")}</h3>
                     <JsonViewer value={d.body ?? null} maxHeight="20rem" />
                   </div>
                 </>
@@ -84,7 +89,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
               {effective === "out" && (
                 <div className="space-y-1">
                   <h3 className="font-medium text-sm">
-                    Event chuẩn · {d.normalized ? "chuẩn (catalog)" : "thô (chưa ánh xạ)"}
+                    {t(d.normalized ? "flow.sheet.normalized-catalog" : "flow.sheet.normalized-raw")}
                   </h3>
                   <JsonViewer value={d.data ?? null} maxHeight="24rem" />
                 </div>

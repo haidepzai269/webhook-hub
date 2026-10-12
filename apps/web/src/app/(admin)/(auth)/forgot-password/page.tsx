@@ -4,6 +4,8 @@ import { type FormEvent, useState } from "react";
 
 import { MailCheck } from "lucide-react";
 
+import { useT } from "@/lib/i18n/use-t";
+
 import { AuthShell } from "../_components/auth-shell";
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
@@ -13,6 +15,7 @@ import { AuthField } from "../_components/auth-field";
  * hay không (chống dò, SPEC-auth §5.2) nên trang chỉ nói "nếu có tài khoản thì đã gửi".
  */
 export default function ForgotPasswordPage() {
+  const t = useT();
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -30,36 +33,42 @@ export default function ForgotPasswordPage() {
       });
       if (res.status === 429) {
         setState("error");
-        setMessage(`Thử quá nhiều lần. Đợi ${res.headers.get("Retry-After") ?? "vài"} giây rồi thử lại.`);
+        setMessage(t("auth.rate-limited", { seconds: res.headers.get("Retry-After") ?? t("auth.rate-limited.some") }));
         return;
       }
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
         setState("error");
-        setMessage(data.message ?? `Không gửi được (HTTP ${res.status}).`);
+        setMessage(data.message ?? t("auth.forgot.failed", { status: res.status }));
         return;
       }
       setState("sent");
     } catch (err) {
       setState("error");
-      setMessage(`Không kết nối được hub-api: ${err instanceof Error ? err.message : String(err)}`);
+      setMessage(t("auth.network-error", { message: err instanceof Error ? err.message : String(err) }));
     }
   };
 
   return (
-    <AuthShell title="QUÊN MẬT KHẨU" footerText="Nhớ ra rồi?" footerLinkLabel="Đăng nhập" footerHref="/login" social={false}>
+    <AuthShell
+      title={t("auth.forgot.title")}
+      footerText={t("auth.forgot.footer")}
+      footerLinkLabel={t("auth.sign-in")}
+      footerHref="/login"
+      social={false}
+    >
       {state === "sent" ? (
         <p>
           <MailCheck size={18} aria-hidden style={{ verticalAlign: "text-bottom", marginRight: 6 }} />
-          Nếu email này có tài khoản, link đặt lại mật khẩu đã được gửi. Link chỉ dùng được một lần.
+          {t("auth.forgot.sent")}
         </p>
       ) : (
         <form noValidate onSubmit={onSubmit}>
           <AuthField
             id="forgot-email"
-            label="EMAIL"
+            label={t("auth.field.email")}
             type="email"
-            placeholder="ban@vi-du.com"
+            placeholder={t("auth.placeholder.email")}
             autoComplete="email"
             autoFocus
             value={email}
@@ -71,7 +80,7 @@ export default function ForgotPasswordPage() {
             </p>
           )}
           <button className={styles.button} type="submit" disabled={state === "sending" || !email.trim()}>
-            {state === "sending" ? "ĐANG GỬI…" : "GỬI LINK ĐẶT LẠI"}
+            {state === "sending" ? t("auth.forgot.submitting") : t("auth.forgot.submit")}
           </button>
         </form>
       )}

@@ -1,20 +1,24 @@
+"use client";
+
 import { Fragment } from "react";
 
 import type { ExecutionStatus, FlowFailedAt, FlowSummaryDot } from "@hub/flow";
-import { STAGE_LABELS, STAGE_STATUS_LABELS } from "@hub/flow";
 import { CircleAlert, CircleCheck, CircleX, Info, LoaderCircle, ShieldX } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 
 import { expectedProbe, type ProbeInfo, stageHint } from "./event-notes";
 import { TonePill } from "./pills";
-import { ICON_SM, STATUS_TONE, StatusGlyph, type Tone, TONE_VAR } from "./tokens";
+import { ICON_SM, STATUS_TONE, StatusGlyph, stageLabelKey, stageStatusKey, type Tone, TONE_VAR } from "./tokens";
 
-export const EXECUTION_LABEL: Record<ExecutionStatus, string> = {
-  succeeded: "Thành công",
-  failed: "Thất bại",
-  in_progress: "Đang chạy",
-  rejected: "Bị từ chối",
+/** Khoá nhãn kết quả một hành trình — `t(EXECUTION_LABEL_KEY[status])`. */
+export const EXECUTION_LABEL_KEY: Record<ExecutionStatus, MessageKey> = {
+  succeeded: "journey.exec.succeeded",
+  failed: "journey.exec.failed",
+  in_progress: "journey.exec.in-progress",
+  rejected: "journey.exec.rejected",
 };
 
 export const EXECUTION_TONE: Record<ExecutionStatus, Tone> = {
@@ -31,17 +35,18 @@ const EXECUTION_ICON = { succeeded: CircleCheck, failed: CircleX, in_progress: L
 
 /** `probe` (từ `expectedProbe`): request kiểm tra kết nối đúng thiết kế → pill trung tính, không "Thành công" xanh. */
 export function ExecutionStatusPill({ status, probe }: { status: ExecutionStatus; probe?: ProbeInfo | null }) {
+  const t = useT();
   if (probe) {
     return (
       <TonePill tone="idle" icon={<Info {...ICON_SM} aria-hidden />}>
-        {probe.label}
+        {t(probe.label)}
       </TonePill>
     );
   }
   const Icon = EXECUTION_ICON[status];
   return (
     <TonePill tone={EXECUTION_TONE[status]} icon={<Icon {...ICON_SM} className={status === "in_progress" ? "flow-spin" : undefined} aria-hidden />}>
-      {EXECUTION_LABEL[status]}
+      {t(EXECUTION_LABEL_KEY[status])}
     </TonePill>
   );
 }
@@ -71,6 +76,7 @@ export function MiniPipeline({
   context?: PipelineContext;
   decorative?: boolean;
 }) {
+  const t = useT();
   const probe = context ? expectedProbe({ ...context, summary }) : null;
   return (
     <div className="flex items-center" aria-hidden={decorative ? true : undefined}>
@@ -78,9 +84,11 @@ export function MiniPipeline({
         // Probe đúng thiết kế (ADR-159): chấm "!" ở Normalize vẽ trung tính (icon Info + nhãn probe), không vàng.
         const asProbe = probe !== null && d.stage === "normalized" && d.status === "warning";
         const color = asProbe ? TONE_VAR.idle : TONE_VAR[STATUS_TONE[d.status]];
-        const statusLabel = asProbe ? probe.label : STAGE_STATUS_LABELS[d.status];
+        const statusLabel = asProbe ? t(probe.label) : t(stageStatusKey(d.status));
         const dests = d.stage === "delivering" && d.total !== undefined && d.total > 0 ? `${d.okCount}/${d.total}` : null;
-        const hint = context ? stageHint({ ...context, summary }, d) : null;
+        const hint = context ? stageHint({ ...context, summary }, d, t) : null;
+        const stageLabel = t(stageLabelKey(d.stage));
+        const destsText = dests ? t("journey.pipeline.dests", { dests }) : null;
         return (
           <Fragment key={d.stage}>
             {i > 0 && <span className="h-px w-2.5" style={{ background: "var(--flow-card-border)" }} />}
@@ -88,7 +96,7 @@ export function MiniPipeline({
               <TooltipTrigger asChild>
                 <span className="inline-flex items-center gap-1" style={{ color }}>
                   {asProbe ? <Info {...ICON_SM} aria-hidden /> : <StatusGlyph status={d.status} small />}
-                  {!decorative && <span className="sr-only">{`${STAGE_LABELS[d.stage]}: ${statusLabel}${dests ? ` (${dests} đích)` : ""}`}</span>}
+                  {!decorative && <span className="sr-only">{`${stageLabel}: ${statusLabel}${destsText ? ` (${destsText})` : ""}`}</span>}
                   {dests && (
                     <span className="font-medium text-[11px] tabular-nums" aria-hidden>
                       {dests}
@@ -99,11 +107,11 @@ export function MiniPipeline({
               <TooltipContent side="top" className="font-sans">
                 <span className="flex flex-col gap-0.5">
                   <span>
-                    <span className="font-medium">{STAGE_LABELS[d.stage]}</span>
+                    <span className="font-medium">{stageLabel}</span>
                     <span className="opacity-80">
                       {" · "}
                       {statusLabel}
-                      {dests && ` · ${dests} đích`}
+                      {destsText && ` · ${destsText}`}
                     </span>
                   </span>
                   {hint && <span className="line-clamp-2 opacity-80">{hint}</span>}
@@ -118,19 +126,20 @@ export function MiniPipeline({
 }
 
 /** Cột "Hỏng ở": `Giao → Discord · HTTP 500 · lần 3/6`. */
-export function failedAtText(f: FlowFailedAt | null): string | null {
+export function failedAtText(f: FlowFailedAt | null, t: TranslateFn): string | null {
   if (!f) return null;
   if (f.stage === "delivering") {
-    const parts = [`Giao → ${f.destinationName ?? "?"}`];
+    const parts = [t("journey.failed.deliver", { dest: f.destinationName ?? "?" })];
     parts.push(f.httpStatus ? `HTTP ${f.httpStatus}` : f.reason.code);
-    if (f.attemptNo) parts.push(`lần ${f.attemptNo}/${f.maxAttempts}`);
+    if (f.attemptNo) parts.push(t("journey.failed.attempt", { n: f.attemptNo, max: f.maxAttempts ?? "?" }));
     return parts.join(" · ");
   }
-  return `${STAGE_LABELS[f.stage]} · ${f.reason.code}`;
+  return `${t(stageLabelKey(f.stage))} · ${f.reason.code}`;
 }
 
 export function FailedAt({ failedAt, status }: { failedAt: FlowFailedAt | null; status: ExecutionStatus }) {
-  const text = failedAtText(failedAt);
+  const t = useT();
+  const text = failedAtText(failedAt, t);
   if (!text) return <span className="text-muted-foreground text-xs">—</span>;
   const tone: Tone = status === "in_progress" ? "warning" : "crashed";
   const Icon = tone === "warning" ? CircleAlert : CircleX;

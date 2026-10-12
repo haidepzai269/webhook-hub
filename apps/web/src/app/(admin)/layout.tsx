@@ -4,19 +4,20 @@ import type { Metadata } from "next";
 
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { APP_CONFIG } from "@/config/app-config";
 import { fontVars } from "@/lib/fonts/registry";
 import { QueryProvider } from "@/lib/hub/query-provider";
+import { getT } from "@/lib/i18n/server";
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { ThemeBootScript } from "@/scripts/theme-boot";
 import { PreferencesStoreProvider } from "@/stores/preferences/preferences-provider";
 
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: APP_CONFIG.meta.title,
-  description: APP_CONFIG.meta.description,
-};
+// Tiêu đề/mô tả theo ngôn ngữ đang chọn (cookie `language`); bản gốc vi vẫn ở APP_CONFIG.meta.
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("admin.meta.title"), description: t("admin.meta.description") };
+}
 
 // ADR-025: root layout của admin (Tailwind v4 + shadcn). Storefront có root layout riêng ở (shop).
 export default function AdminRootLayout({ children }: Readonly<{ children: ReactNode }>) {

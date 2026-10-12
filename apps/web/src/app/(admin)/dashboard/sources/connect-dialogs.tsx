@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -20,6 +20,8 @@ import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
 import { connectionDialogMode } from "@/lib/hub/ui-logic";
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 
 /** KN2 (SPEC-ket-noi §4, ADR-138): form dựng từ `spec.fields` của connector — UI không biết provider nào có ô gì. */
 interface ConnectorInfo {
@@ -50,15 +52,33 @@ function useRefresh() {
   };
 }
 
+const CONNECTION_STATUS: Record<ConnectionView["status"], MessageKey> = {
+  PENDING: "page.sources.connect.status.pending",
+  CONNECTED: "page.sources.connect.status.connected",
+  FAILED: "page.sources.connect.status.failed",
+  DRIFTED: "page.sources.connect.status.drifted",
+  DISCONNECTED: "page.sources.connect.status.disconnected",
+};
+
+/** Câu dịch có chỗ chèn phần tử (`{both}`, `{code}`): tách theo `{tên}` và thay bằng node tương ứng. */
+function rich(template: string, nodes: Record<string, ReactNode>): ReactNode {
+  return template.split(/\{(\w+)\}/).map((part, i) =>
+    // biome-ignore lint/suspicious/noArrayIndexKey: các mảnh của một câu cố định, thứ tự không đổi
+    i % 2 === 1 && part in nodes ? <Fragment key={i}>{nodes[part]}</Fragment> : part,
+  );
+}
+
 function StatusLine({ c }: { c: ConnectionView }) {
-  if (c.status === "CONNECTED") return <p className="text-sm">✅ Đã kết nối · {c.display}</p>;
+  const t = useT();
+  if (c.status === "CONNECTED")
+    return <p className="text-sm">{t("page.sources.connect.connected", { display: c.display ?? "" })}</p>;
   return (
     <div className="flex flex-col gap-1 text-sm">
       <p>
-        {c.status === "PENDING" ? "⏳" : "❌"} {c.status}
+        {c.status === "PENDING" ? "⏳" : "❌"} <span title={c.status}>{t(CONNECTION_STATUS[c.status])}</span>
         {c.lastError ? ` · ${c.lastError}` : ""}
       </p>
-      {c.fix && <p className="text-muted-foreground text-xs">Sửa: {c.fix}</p>}
+      {c.fix && <p className="text-muted-foreground text-xs">{t("page.sources.connect.fix", { fix: c.fix })}</p>}
       {c.status === "DISCONNECTED" && c.manualDisconnect && (
         <p className="text-muted-foreground text-xs">{c.manualDisconnect}</p>
       )}
@@ -76,6 +96,7 @@ export function ConnectSourceDialog({
   onOpenChange: (o: boolean) => void;
   preset?: { provider: string; sourceId: string } | null;
 }) {
+  const t = useT();
   const connectors = useQuery({
     queryKey: ["connectors"],
     queryFn: () => hubFetch<ConnectorInfo[]>("/api/v1/connectors"),
@@ -125,7 +146,7 @@ export function ConnectSourceDialog({
           });
     },
     onSuccess: (r) => (setResult(r.connection), setSecretChanged(!!r.secretChanged)),
-    onError: (e) => toast.error(`Kết nối thất bại: ${e.message}`),
+    onError: (e) => toast.error(t("page.sources.connect.failed", { message: e.message })),
     onSettled: refresh,
   });
   const close = (o: boolean) => {
@@ -146,41 +167,38 @@ export function ConnectSourceDialog({
     spec &&
     sourcesReady &&
     (effMode === "existing" ? !!target : !!name.trim()) &&
-    spec.fields.every((f) => creds[f.name]?.trim() && !credentialError(f.label, creds[f.name])) &&
+    spec.fields.every((f) => creds[f.name]?.trim() && !credentialError(f.label, creds[f.name], t)) &&
     (!spec.overwriteWarning || ack);
 
   return (
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Kết nối provider</DialogTitle>
-          <DialogDescription>
-            Hub tạo nguồn, lưu secret, rồi tự đăng ký URL nhận webhook tại provider — không cần mở dashboard của họ.
-          </DialogDescription>
+          <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
+          <DialogDescription>{t("page.sources.connect.description")}</DialogDescription>
         </DialogHeader>
         {result ? (
           <div className="flex flex-col gap-2">
             <StatusLine c={result} />
             {secretChanged && (
               <p className="rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                ⚠️ Secret ký (vd checksumKey) khác key hiện tại — hub sẽ giữ <b>cả hai</b> cho tới khi webhook thật xác
-                minh bằng key mới. Nếu webhook thật chỉ khớp key cũ, mục kết nối của nguồn sẽ báo{" "}
-                <code>secret_mismatch</code>: nhập lại đúng key rồi bấm &quot;Thử lại&quot;.
+                {rich(t("page.sources.connect.secret-changed"), {
+                  both: <b>{t("page.sources.connect.secret-changed.both")}</b>,
+                  code: <code>secret_mismatch</code>,
+                })}
               </p>
             )}
           </div>
         ) : !connectors.data?.length ? (
           <p className="text-muted-foreground text-sm">
-            {connectors.isLoading
-              ? "Đang tải…"
-              : 'Chưa provider nào hỗ trợ tự kết nối — dùng "Thêm nguồn" rồi dán URL.'}
+            {connectors.isLoading ? t("common.loading") : t("page.sources.connect.no-connectors")}
           </p>
         ) : (
           // autoComplete off + tên ô riêng: trình duyệt không tự điền đăng nhập operator vào ô credential (lỗi production).
           <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
             <FieldGroup className="gap-4">
               <Field className="gap-1.5">
-                <FieldLabel>Provider</FieldLabel>
+                <FieldLabel>{t("page.sources.connect.provider")}</FieldLabel>
                 <div className="flex gap-2">
                   {connectors.data.map((c) => (
                     <Button
@@ -198,7 +216,7 @@ export function ConnectSourceDialog({
                 </div>
               </Field>
               <Field className="gap-1.5">
-                <FieldLabel>Nguồn</FieldLabel>
+                <FieldLabel>{t("page.sources.connect.source")}</FieldLabel>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -207,7 +225,7 @@ export function ConnectSourceDialog({
                     disabled={!candidates.length}
                     onClick={() => setMode("existing")}
                   >
-                    Kết nối nguồn có sẵn
+                    {t("page.sources.connect.use-existing")}
                   </Button>
                   <Button
                     type="button"
@@ -215,19 +233,19 @@ export function ConnectSourceDialog({
                     variant={effMode === "new" ? "default" : "outline"}
                     onClick={() => setMode("new")}
                   >
-                    Tạo nguồn mới
+                    {t("page.sources.connect.create-new")}
                   </Button>
                 </div>
                 {!sourcesReady ? (
                   <FieldDescription className="text-amber-600">
                     {sources.isError
-                      ? "Không tải được danh sách nguồn — tải lại trang. Chưa thể kết nối (tránh tạo nhầm nguồn mới)."
-                      : "Đang tải danh sách nguồn…"}
+                      ? t("page.sources.connect.sources-error")
+                      : t("page.sources.connect.sources-loading")}
                   </FieldDescription>
                 ) : effMode === "existing" && target ? (
                   <>
                     <select
-                      aria-label="Nguồn có sẵn"
+                      aria-label={t("page.sources.connect.existing-aria")}
                       className="border-input bg-background h-9 rounded-md border px-2 text-sm"
                       value={target.id}
                       onChange={(e) => setExistingId(e.target.value)}
@@ -238,35 +256,32 @@ export function ConnectSourceDialog({
                         </option>
                       ))}
                     </select>
+                    <FieldDescription>{t("page.sources.connect.existing-keeps-both")}</FieldDescription>
                     <FieldDescription>
-                      Secret ký nhập vào khác key nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh
-                      bằng key mới (không tự xoá key cũ).
-                    </FieldDescription>
-                    <FieldDescription>
-                      Hub đăng ký đúng URL của nguồn này (/hooks/{target.provider}/{target.sourceKey}) — service đang
-                      tin nguồn này (vd Shop ghim SHOP_PAYMENT_SOURCE_KEYS) vẫn nhận sự kiện.
+                      {t("page.sources.connect.existing-same-url", {
+                        path: `/hooks/${target.provider}/${target.sourceKey}`,
+                      })}
                     </FieldDescription>
                   </>
                 ) : (
                   <>
                     <Input
                       id="cn-name"
-                      aria-label="Tên nguồn"
+                      aria-label={t("page.sources.connect.name-aria")}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="Tên nguồn, VD: PayOS kênh cafe"
+                      placeholder={t("page.sources.connect.name-placeholder")}
                     />
                     <Input
                       id="cn-key"
-                      aria-label="sourceKey (tuỳ chọn)"
+                      aria-label={t("page.sources.connect.key-aria")}
                       value={sourceKey}
                       onChange={(e) => setSourceKey(e.target.value)}
-                      placeholder="sourceKey (tuỳ chọn, a-z 0-9 _) — bỏ trống để hub tự sinh"
+                      placeholder={t("page.sources.connect.key-placeholder")}
                     />
                     {candidates.length > 0 && (
                       <FieldDescription className="text-amber-600">
-                        Nguồn mới có URL mới: provider sẽ gửi vào nguồn mới, service đang ghim nguồn cũ sẽ KHÔNG nhận
-                        nữa.
+                        {t("page.sources.connect.new-url-warning")}
                       </FieldDescription>
                     )}
                   </>
@@ -278,11 +293,11 @@ export function ConnectSourceDialog({
                   <Input
                     {...credentialInputAttrs(spec.provider, f.name, f.secret)}
                     value={creds[f.name] ?? ""}
-                    aria-invalid={!!credentialError(f.label, creds[f.name] ?? "")}
+                    aria-invalid={!!credentialError(f.label, creds[f.name] ?? "", t)}
                     onChange={(e) => setCreds({ ...creds, [f.name]: e.target.value })}
                   />
-                  {credentialError(f.label, creds[f.name] ?? "") && (
-                    <p className="text-destructive text-xs">{credentialError(f.label, creds[f.name] ?? "")}</p>
+                  {credentialError(f.label, creds[f.name] ?? "", t) && (
+                    <p className="text-destructive text-xs">{credentialError(f.label, creds[f.name] ?? "", t)}</p>
                   )}
                   {f.help && <FieldDescription>{f.help}</FieldDescription>}
                 </Field>
@@ -292,7 +307,7 @@ export function ConnectSourceDialog({
                 <label className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
                   <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
                   <span>
-                    <b>Tôi hiểu URL cũ sẽ bị thay.</b> {spec.overwriteWarning}
+                    <b>{t("page.sources.connect.ack-overwrite")}</b> {spec.overwriteWarning}
                   </span>
                 </label>
               )}
@@ -301,10 +316,10 @@ export function ConnectSourceDialog({
         )}
         <DialogFooter>
           {result ? (
-            <Button onClick={() => close(false)}>Đóng</Button>
+            <Button onClick={() => close(false)}>{t("common.close")}</Button>
           ) : (
             <Button disabled={!ready || connect.isPending} onClick={() => connect.mutate()}>
-              {connect.isPending ? "Đang kết nối…" : "Kết nối"}
+              {connect.isPending ? t("page.sources.connect.submitting") : t("page.sources.connect.submit")}
             </Button>
           )}
         </DialogFooter>
@@ -323,6 +338,7 @@ export function ConnectionDialog({
   onClose: () => void;
   onConnect: (s: { id: string; provider: string }) => void;
 }) {
+  const t = useT();
   const sourceId = source?.id ?? null;
   const refresh = useRefresh();
   const connectors = useQuery({
@@ -367,25 +383,24 @@ export function ConnectionDialog({
     <Dialog open={Boolean(sourceId)} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Kết nối provider</DialogTitle>
+          <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
           <DialogDescription className="font-mono text-xs">{c?.ingestUrl ?? ""}</DialogDescription>
         </DialogHeader>
         {mode === "loading" || mode === "connect" ? (
-          <p className="text-sm">Đang tải…</p>
+          <p className="text-sm">{t("common.loading")}</p>
         ) : !c ? (
-          <p className="text-muted-foreground text-sm">
-            Nguồn này tạo bằng tay (dán URL ở dashboard provider) — không có kết nối do hub quản.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("page.sources.connection.manual")}</p>
         ) : (
           <div className="flex flex-col gap-3">
             <StatusLine c={c} />
             <p className="text-muted-foreground text-xs">
-              Credentials:{" "}
-              {c.hasCredentials
-                ? Object.entries(c.credentialHints)
-                    .map(([k, v]) => `${k} ${v}`)
-                    .join(" · ") || "đã lưu (mã hoá)"
-                : "đã xoá — kết nối lại phải nhập lại"}
+              {t("page.sources.connection.credentials", {
+                value: c.hasCredentials
+                  ? Object.entries(c.credentialHints)
+                      .map(([k, v]) => `${k} ${v}`)
+                      .join(" · ") || t("page.sources.connection.credentials-saved")
+                  : t("page.sources.connection.credentials-deleted"),
+              })}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -394,28 +409,27 @@ export function ConnectionDialog({
                 disabled={act.isPending || !c.hasCredentials}
                 onClick={() => act.mutate("retry")}
               >
-                Thử lại / Kết nối lại
+                {t("page.sources.connection.retry")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={act.isPending}
                 onClick={() =>
-                  window.confirm("Ngắt kết nối? Hub sẽ gỡ cấu hình ở provider nếu provider cho phép.") &&
-                  act.mutate("disconnect")
+                  window.confirm(t("page.sources.connection.disconnect-confirm")) && act.mutate("disconnect")
                 }
               >
-                Ngắt
+                {t("page.sources.connection.disconnect")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={act.isPending || !c.hasCredentials}
                 onClick={() =>
-                  window.confirm("Xoá credentials đã lưu? Nguồn và kết nối giữ nguyên.") && act.mutate("credentials")
+                  window.confirm(t("page.sources.connection.delete-credentials-confirm")) && act.mutate("credentials")
                 }
               >
-                Xoá credentials
+                {t("page.sources.connection.delete-credentials")}
               </Button>
             </div>
           </div>

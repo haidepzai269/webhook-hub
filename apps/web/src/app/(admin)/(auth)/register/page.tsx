@@ -1,15 +1,24 @@
 import type { Metadata } from "next";
 
+import { getT } from "@/lib/i18n/server";
+
 import { AuthShell } from "../_components/auth-shell";
 import { RegisterForm } from "./register-form";
 
-export const metadata: Metadata = {
-  title: "Đăng ký — Webhook Hub",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("auth.register.meta-title") };
+}
 
-export default function RegisterPage() {
+export default async function RegisterPage() {
+  const t = await getT();
   return (
-    <AuthShell title="ĐĂNG KÝ" footerText="Đã có tài khoản?" footerLinkLabel="Đăng nhập" footerHref="/login">
+    <AuthShell
+      title={t("auth.register.title")}
+      footerText={t("auth.register.footer")}
+      footerLinkLabel={t("auth.sign-in")}
+      footerHref="/login"
+    >
       <RegisterForm />
     </AuthShell>
   );

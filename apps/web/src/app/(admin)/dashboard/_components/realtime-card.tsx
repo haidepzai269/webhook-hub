@@ -6,19 +6,22 @@ import { RealtimeBadge } from "@/components/admin/realtime-badge";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer } from "@/components/ui/chart";
 import { useRealtimeStore } from "@/lib/hub/socket";
-
-const config = { eventsPerMin: { label: "sự kiện/phút", color: "var(--chart-2)" } } satisfies ChartConfig;
+import { useT } from "@/lib/i18n/use-t";
 
 /** Sparkline từ `metrics.tick` (5s/lần, hub đếm trong bộ nhớ — không chạm Redis). */
 export function RealtimeCard() {
   const ticks = useRealtimeStore((s) => s.ticks);
   const last = ticks.at(-1);
+  const t = useT();
+  const config = {
+    eventsPerMin: { label: t("page.dashboard.realtime.per-min"), color: "var(--chart-2)" },
+  } satisfies ChartConfig;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Realtime</CardTitle>
-        <CardDescription>metrics.tick · 5 phút gần nhất</CardDescription>
+        <CardTitle>{t("page.dashboard.realtime.title")}</CardTitle>
+        <CardDescription>{t("page.dashboard.realtime.desc")}</CardDescription>
         <CardAction>
           <RealtimeBadge />
         </CardAction>
@@ -27,13 +30,13 @@ export function RealtimeCard() {
         <div className="flex items-baseline gap-4">
           <div>
             <div className="font-semibold text-2xl tabular-nums">{last ? Math.round(last.eventsPerMin) : "—"}</div>
-            <div className="text-muted-foreground text-xs">sự kiện/phút</div>
+            <div className="text-muted-foreground text-xs">{t("page.dashboard.realtime.per-min")}</div>
           </div>
           <div>
             <div className="font-semibold text-2xl tabular-nums">
               {last && last.successRate !== null ? `${last.successRate.toFixed(0)}%` : "—"}
             </div>
-            <div className="text-muted-foreground text-xs">giao thành công (5s cuối)</div>
+            <div className="text-muted-foreground text-xs">{t("page.dashboard.realtime.success")}</div>
           </div>
         </div>
         {ticks.length > 1 ? (
@@ -51,7 +54,7 @@ export function RealtimeCard() {
             </LineChart>
           </ChartContainer>
         ) : (
-          <p className="text-muted-foreground text-xs">Đang chờ tick đầu tiên…</p>
+          <p className="text-muted-foreground text-xs">{t("page.dashboard.realtime.waiting")}</p>
         )}
       </CardContent>
     </Card>

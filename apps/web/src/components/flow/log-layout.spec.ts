@@ -11,10 +11,16 @@ import {
   stepLogHeight,
   writeLogHeight,
 } from "./log-layout";
+import { createT } from "../../lib/i18n/dictionary";
 
 describe("log-layout — lưới cột cố định của Nhật ký sự kiện", () => {
   it("6 cột theo thứ tự thời gian | provider | chặng | type | kết quả | ghi chú", () => {
     expect(LOG_COLUMNS.map((c) => c.key)).toEqual(["time", "provider", "stages", "type", "result", "note"]);
+  });
+
+  it("tiêu đề cột là khoá i18n, có chữ ở cả vi và en", () => {
+    expect(LOG_COLUMNS.map((c) => createT("vi")(c.labelKey))).toEqual(["Thời gian", "Nhà cung cấp", "Chặng", "Kiểu", "Kết quả", "Ghi chú"]);
+    expect(LOG_COLUMNS.map((c) => createT("en")(c.labelKey))).toEqual(["Time", "Provider", "Stages", "Type", "Outcome", "Note"]);
   });
 
   it("mọi cột trừ cột cuối KHÔNG phụ thuộc nội dung (rem hoặc minmax(rem,rem), không auto/fr) -> hàng có '1/1' không đẩy cột sau", () => {

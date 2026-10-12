@@ -41,19 +41,22 @@ import {
   SHOP_DEFAULT_SCOPES,
 } from "@/lib/hub/keys-logic";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 /** Hộp "Chỉ hiện một lần" — key thô chỉ sống trong state của hộp này; đóng là mất (SK1, SPEC §3). */
 function ConnectionStringOnce({ connectionString }: { connectionString: string }) {
   const line = envLine(connectionString);
+  const t = useT();
   return (
     <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-sm">
-      <p className="mb-2 font-medium">Chỉ hiện một lần — copy ngay. Hub không lưu key thô, không hiện lại được.</p>
+      <p className="mb-2 font-medium">{t("page.api-keys.once.title")}</p>
       <div className="flex items-center gap-2">
         <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">{line}</code>
-        <CopyButton value={line} label="Sao chép HUB_URL" />
+        <CopyButton value={line} label={t("page.api-keys.once.copy")} />
       </div>
       <p className="mt-2 text-muted-foreground text-xs">
-        Dán vào env của service, hoặc vào <b>Shop → Cài đặt kết nối</b> (ô HUB_URL, chỉ phần sau dấu =).
+        {t("page.api-keys.once.hint-before")} <b>{t("page.api-keys.once.hint-target")}</b>{" "}
+        {t("page.api-keys.once.hint-after")}
       </p>
     </div>
   );
@@ -61,6 +64,8 @@ function ConnectionStringOnce({ connectionString }: { connectionString: string }
 
 /** SK1 (SPEC-shop-ket-noi-project §3): API key của project ĐANG CHỌN — tạo (copy connection string một lần), thu hồi. */
 export default function ApiKeysPage() {
+  const t = useT();
+  const locale = useLocale();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const project = useProjects().data?.find((p) => p.id === projectId);
   const { data, isLoading, error } = useApiKeys(projectId);
@@ -88,7 +93,7 @@ export default function ApiKeysPage() {
       { serviceName: serviceName.trim(), scopes },
       {
         onSuccess: (k) => setConnectionString(k.connectionString),
-        onError: (err) => toast.error(`Tạo key thất bại: ${err.message}`),
+        onError: (err) => toast.error(t("page.api-keys.create-failed", { message: err.message })),
       },
     );
   };
@@ -96,46 +101,41 @@ export default function ApiKeysPage() {
   return (
     <>
       <PageHeader
-        title="API key"
+        title={t("page.api-keys.title")}
         description={
-          project ? (
-            <>
-              Key của project <b>{project.name}</b> (<span className="font-mono">{project.slug}</span>). Mỗi service một
-              key, scope tối thiểu.
-            </>
-          ) : (
-            "Đang tải project của bạn… (tài khoản mới có sẵn một project từ lúc đăng ký)."
-          )
+          project
+            ? t("page.api-keys.description", { name: project.name, slug: project.slug })
+            : t("page.api-keys.description-loading")
         }
         actions={
           <Button onClick={() => setOpen(true)} disabled={!projectId}>
             <Plus />
-            Tạo API key
+            {t("page.api-keys.create")}
           </Button>
         }
       />
-      {error && <p className="text-destructive text-sm">Không tải được API key: {error.message}</p>}
+      {error && <p className="text-destructive text-sm">{t("page.api-keys.load-error", { message: error.message })}</p>}
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Service</TableHead>
-            <TableHead>Scope</TableHead>
-            <TableHead>Key</TableHead>
-            <TableHead>Dùng lần cuối</TableHead>
-            <TableHead>Trạng thái</TableHead>
+            <TableHead>{t("page.api-keys.col.service")}</TableHead>
+            <TableHead>{t("page.api-keys.col.scopes")}</TableHead>
+            <TableHead>{t("page.api-keys.col.key")}</TableHead>
+            <TableHead>{t("page.api-keys.col.last-used")}</TableHead>
+            <TableHead>{t("common.status")}</TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={6}>Đang tải…</TableCell>
+              <TableCell colSpan={6}>{t("common.loading")}</TableCell>
             </TableRow>
           )}
           {!isLoading && (data ?? []).length === 0 && (
             <TableRow>
               <TableCell colSpan={6} className="text-muted-foreground">
-                Chưa có key nào.
+                {t("page.api-keys.empty")}
               </TableCell>
             </TableRow>
           )}
@@ -152,15 +152,15 @@ export default function ApiKeysPage() {
                 </div>
               </TableCell>
               <TableCell className="font-mono text-xs">…{prefixTail(k.keyPrefix)}</TableCell>
-              <TableCell className="text-xs">{k.lastUsedAt ? formatDateTime(k.lastUsedAt) : "chưa dùng"}</TableCell>
+              <TableCell className="text-xs">{k.lastUsedAt ? formatDateTime(k.lastUsedAt, locale) : t("page.api-keys.never-used")}</TableCell>
               <TableCell>
-                <Badge variant={k.revokedAt ? "destructive" : "outline"}>{keyStatus(k)}</Badge>
+                <Badge variant={k.revokedAt ? "destructive" : "outline"}>{t(keyStatus(k))}</Badge>
               </TableCell>
               <TableCell className="text-right">
                 {!k.revokedAt && (
-                  <Button size="sm" variant="ghost" onClick={() => setTarget(k)} title="Thu hồi key">
+                  <Button size="sm" variant="ghost" onClick={() => setTarget(k)} title={t("page.api-keys.revoke-title")}>
                     <Ban />
-                    Thu hồi
+                    {t("page.api-keys.revoke")}
                   </Button>
                 )}
               </TableCell>
@@ -172,8 +172,8 @@ export default function ApiKeysPage() {
       <Dialog open={open} onOpenChange={close}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Tạo API key</DialogTitle>
-            <DialogDescription>Key thô và connection string chỉ hiện MỘT lần ngay sau khi tạo.</DialogDescription>
+            <DialogTitle>{t("page.api-keys.create")}</DialogTitle>
+            <DialogDescription>{t("page.api-keys.dialog.description")}</DialogDescription>
           </DialogHeader>
           {connectionString ? (
             <ConnectionStringOnce connectionString={connectionString} />
@@ -181,7 +181,7 @@ export default function ApiKeysPage() {
             <form id="key-form" noValidate autoComplete="off" onSubmit={submit}>
               <FieldGroup className="gap-4">
                 <Field className="gap-1.5">
-                  <FieldLabel htmlFor="key-service">Tên service</FieldLabel>
+                  <FieldLabel htmlFor="key-service">{t("page.api-keys.field.service")}</FieldLabel>
                   <Input
                     id="key-service"
                     name="hub-key-service-name"
@@ -191,15 +191,15 @@ export default function ApiKeysPage() {
                   />
                 </Field>
                 <Field className="gap-1.5">
-                  <FieldLabel>Scope</FieldLabel>
-                  {KEY_SCOPES.map(({ scope, hint }) => (
+                  <FieldLabel>{t("page.api-keys.field.scopes")}</FieldLabel>
+                  {KEY_SCOPES.map(({ scope, hintKey }) => (
                     <label key={scope} className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={scopes.includes(scope)} onChange={() => toggle(scope)} />
                       <span className="font-mono text-xs">{scope}</span>
-                      <span className="text-muted-foreground text-xs">— {hint}</span>
+                      <span className="text-muted-foreground text-xs">— {t(hintKey)}</span>
                     </label>
                   ))}
-                  <FieldDescription>Mặc định cho Shop: manage:endpoints + read:events.</FieldDescription>
+                  <FieldDescription>{t("page.api-keys.field.scopes-hint")}</FieldDescription>
                 </Field>
               </FieldGroup>
             </form>
@@ -207,7 +207,7 @@ export default function ApiKeysPage() {
           <DialogFooter>
             {connectionString ? (
               <Button type="button" onClick={() => close(false)}>
-                Tôi đã copy, đóng
+                {t("page.api-keys.copied-close")}
               </Button>
             ) : (
               <Button
@@ -215,7 +215,7 @@ export default function ApiKeysPage() {
                 form="key-form"
                 disabled={create.isPending || !serviceName.trim() || scopes.length === 0}
               >
-                {create.isPending ? "Đang tạo…" : "Tạo key"}
+                {create.isPending ? t("common.creating") : t("page.api-keys.create-submit")}
               </Button>
             )}
           </DialogFooter>
@@ -225,14 +225,15 @@ export default function ApiKeysPage() {
       <AlertDialog open={Boolean(target)} onOpenChange={(o) => !o && !revoke.isPending && setTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Thu hồi key của “{target?.serviceName}”?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("page.api-keys.revoke-confirm", { service: target?.serviceName ?? "" })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Service đang dùng key …{target ? prefixTail(target.keyPrefix) : ""} sẽ nhận 401 ngay lập tức. Không hoàn
-              tác được — tạo key mới nếu cần.
+              {t("page.api-keys.revoke-warning", { tail: target ? prefixTail(target.keyPrefix) : "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoke.isPending}>Huỷ</AlertDialogCancel>
+            <AlertDialogCancel disabled={revoke.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               disabled={revoke.isPending}
               onClick={(e) => {
@@ -240,14 +241,14 @@ export default function ApiKeysPage() {
                 if (!target) return;
                 revoke.mutate(target.id, {
                   onSuccess: () => {
-                    toast.success("Đã thu hồi key");
+                    toast.success(t("page.api-keys.revoked"));
                     setTarget(null);
                   },
-                  onError: (err) => toast.error(`Thu hồi thất bại: ${err.message}`),
+                  onError: (err) => toast.error(t("page.api-keys.revoke-failed", { message: err.message })),
                 });
               }}
             >
-              Thu hồi
+              {t("page.api-keys.revoke")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

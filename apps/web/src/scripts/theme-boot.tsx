@@ -17,10 +17,13 @@ export function ThemeBootScript() {
         var REGISTRY = ${registry};
 
         function readCookie(name) {
-          var match = document.cookie.split("; ").find(function(c) {
+          // Cắt khoảng trắng như server (getPreference: .value.trim()) — lệch là boot script và SSR chọn khác nhau.
+          var match = document.cookie.split(";").map(function(c) {
+            return c.trim();
+          }).find(function(c) {
             return c.startsWith(name + "=");
           });
-          return match ? decodeURIComponent(match.split("=")[1]) : null;
+          return match ? decodeURIComponent(match.slice(name.length + 1)).trim() : null;
         }
 
         function readLocal(name) {

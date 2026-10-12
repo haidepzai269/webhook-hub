@@ -20,11 +20,13 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
-import { STAGE_LABELS } from "@hub/flow";
 import { Settings2, RotateCcw, Skull } from "lucide-react";
 
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
+
 import { ProviderIcon } from "./provider-icon";
-import { destinationIcon, ICON, ICON_SM, STATUS_TONE, StatusGlyph, stageIcon, TONE_VAR, toneStyle } from "./tokens";
+import { destinationIcon, ICON, ICON_SM, STATUS_TONE, StatusGlyph, stageIcon, stageLabelKey, TONE_VAR, toneStyle } from "./tokens";
 import { clock, countdown, fmtMs, useNow } from "./time";
 
 const W = 196;
@@ -53,11 +55,11 @@ interface DeliveryData {
   [k: string]: unknown;
 }
 
-const ACTION_LABEL: Record<StageAction, string> = {
-  replay_delivery: "Replay",
-  renormalize: "Renormalize",
-  open_dlq: "Mở DLQ",
-  open_config: "Cấu hình",
+const ACTION_LABEL: Record<StageAction, MessageKey> = {
+  replay_delivery: "journey.action.replay-delivery",
+  renormalize: "journey.action.renormalize",
+  open_dlq: "journey.action.open-dlq",
+  open_config: "journey.action.open-config",
 };
 const ACTION_ICON = { replay_delivery: RotateCcw, renormalize: RotateCcw, open_dlq: Skull, open_config: Settings2 } as const;
 
@@ -85,12 +87,14 @@ function NodeShell({ tone, selected, width, children, onClick }: { tone: string;
 /** Node một chặng: icon chặng, nhãn chặng, tiêu đề do server viết, icon + chữ trạng thái, lý do, nút hành động. */
 const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) {
   const { stage, provider, selected, onSelect, onAction, branch } = data;
+  const t = useT();
   const now = useNow(1000);
   const tone = STATUS_TONE[stage.status];
   const Icon = stageIcon(stage.key, stage.status);
   const nextAt = typeof stage.detail?.nextAttemptAt === "string" ? (stage.detail.nextAttemptAt as string) : null;
   const tier = typeof stage.detail?.tier === "string" ? (stage.detail.tier as string) : null;
-  const cd = countdown(nextAt, now);
+  const due = t("journey.due");
+  const cd = countdown(nextAt, now, due);
   const showTime = stage.key === "persisted" || stage.key === "received" || stage.key === "done";
   const destType = branch?.destination.type;
   return (
@@ -111,7 +115,7 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1 font-medium text-[11px] uppercase tracking-wide" style={{ color: TONE_VAR[tone] }}>
             <StatusGlyph status={stage.status} small />
-            {STAGE_LABELS[stage.key]}
+            {t(stageLabelKey(stage.key))}
           </div>
         </div>
       </div>
@@ -125,14 +129,15 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
       )}
       {showTime && stage.endedAt && (
         <div className="mt-0.5 font-mono text-[11.5px] tabular-nums" style={{ color: "var(--flow-text-dim)" }}>
-          lúc {clock(stage.endedAt)}
+          {t("journey.at", { time: clock(stage.endedAt) })}
         </div>
       )}
       {nextAt && (
         <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-[12px] tabular-nums" style={{ color: TONE_VAR[tone] }}>
-          <span className="font-semibold text-[14px]">{cd === "đến hạn" ? "đến hạn" : `còn ${cd}`}</span>
+          <span className="font-semibold text-[14px]">{cd === due ? due : t("journey.remaining", { time: cd ?? "" })}</span>
           <span>
-            {tier ? `tầng ${tier} · ` : ""}lúc {clock(nextAt, false)}
+            {tier ? `${t("journey.tier", { tier })} · ` : ""}
+            {t("journey.at", { time: clock(nextAt, false) })}
           </span>
         </div>
       )}
@@ -158,7 +163,7 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
                 style={primary ? undefined : toneStyle("idle")}
               >
                 <AI {...ICON_SM} aria-hidden />
-                {ACTION_LABEL[a]}
+                {t(ACTION_LABEL[a])}
               </button>
             );
           })}
@@ -171,6 +176,7 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
 /** Node một delivery: đích + chip từng lần thử (Lần 1 → Lần 2 → …), bấm chip mở panel attempt. */
 const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<DeliveryData>>) {
   const { branch, selectedId, onSelect } = data;
+  const t = useT();
   const queued = branch.stages[0];
   const attempts = branch.stages.filter((s) => s.id.includes(":attempt:"));
   const tone = attempts.length ? STATUS_TONE[attempts[attempts.length - 1].status] : STATUS_TONE[queued.status];
@@ -185,19 +191,19 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-[13.5px] leading-tight">{branch.destination.name}</div>
           <div className="text-[11.5px] leading-4" style={{ color: "var(--flow-text-dim)" }}>
-            {branch.subscription.name} · gen {branch.generation}
-            {circuit !== "CLOSED" ? ` · circuit ${circuit}` : ""}
+            {branch.subscription.name} · {t("journey.generation", { n: branch.generation })}
+            {circuit !== "CLOSED" ? ` · ${t("journey.circuit", { state: circuit })}` : ""}
           </div>
         </div>
       </div>
       <div className="nodrag mt-2 flex flex-wrap items-center gap-1">
         {attempts.length === 0 && (
           <span className="text-[11px]" style={{ color: "var(--flow-text-dim)" }}>
-            chưa gửi lần nào
+            {t("journey.no-attempts")}
           </span>
         )}
         {attempts.map((a, i) => {
-          const t = STATUS_TONE[a.status];
+          const aTone = STATUS_TONE[a.status];
           const http = a.detail?.httpStatus as number | null | undefined;
           return (
             <span key={a.id} className="inline-flex items-center gap-1">
@@ -209,7 +215,7 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
                   onSelect(a, branch);
                 }}
                 className={`flow-pill inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
-                style={toneStyle(t)}
+                style={toneStyle(aTone)}
                 title={`${a.title} · ${a.subtitle ?? ""}`}
               >
                 <StatusGlyph status={a.status} small />

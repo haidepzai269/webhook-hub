@@ -25,9 +25,16 @@ import { HubApiError } from "@/lib/hub/client";
 import { useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { projectCreateError, slugFromName } from "@/lib/hub/keys-logic";
 import { useCreateProject } from "@/lib/hub/project-queries";
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
+
+const ROLE_KEY: Record<string, MessageKey> = { owner: "page.projects.role.owner", member: "page.projects.role.member" };
+const ENV_KEY: Record<string, MessageKey> = { test: "page.projects.env.test", live: "page.projects.env.live" };
 
 /** SK1 (SPEC-shop-ket-noi-project §3): danh sách project của mình + tạo project (tên + slug). */
 export default function ProjectsPage() {
+  const t = useT();
+  const roleLabel = (role: string | undefined) => (role && ROLE_KEY[role] ? t(ROLE_KEY[role]) : (role ?? "—"));
   const { data, isLoading, error } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const setProjectId = useFlowProjectStore((s) => s.setProjectId);
@@ -57,12 +64,12 @@ export default function ProjectsPage() {
       {
         onSuccess: (p) => {
           setProjectId(p.id); // làm việc ngay trong project mới
-          toast.success(`Đã tạo project "${p.name}" — đang chọn project này`);
+          toast.success(t("page.projects.created", { name: p.name }));
           close(false);
         },
         onError: (err) =>
           setFormError(
-            err instanceof HubApiError ? projectCreateError(err.status, err.body, err.message) : String(err),
+            err instanceof HubApiError ? projectCreateError(err.status, err.body, err.message, t) : String(err),
           ),
       },
     );
@@ -71,50 +78,52 @@ export default function ProjectsPage() {
   return (
     <>
       <PageHeader
-        title="Project"
-        description="Tài khoản mới đã có sẵn một project (tạo lúc đăng ký) và console đang chọn nó — vào thẳng API key là dùng được. Tạo thêm project khi cần tách môi trường, sản phẩm hoặc thành viên (ADR-038)."
+        title={t("page.projects.title")}
+        description={t("page.projects.description")}
         actions={
           <Button variant="outline" onClick={() => setOpen(true)}>
             <Plus />
-            Tạo project
+            {t("page.projects.create")}
           </Button>
         }
       />
-      {error && <p className="text-destructive text-sm">Không tải được danh sách project: {error.message}</p>}
+      {error && <p className="text-destructive text-sm">{t("page.projects.load-error", { message: error.message })}</p>}
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Tên</TableHead>
-            <TableHead>Slug</TableHead>
-            <TableHead>Môi trường</TableHead>
-            <TableHead>Vai trò</TableHead>
+            <TableHead>{t("page.projects.col.name")}</TableHead>
+            <TableHead>{t("page.projects.col.slug")}</TableHead>
+            <TableHead>{t("page.projects.col.environment")}</TableHead>
+            <TableHead>{t("page.projects.col.role")}</TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={5}>Đang tải…</TableCell>
+              <TableCell colSpan={5}>{t("common.loading")}</TableCell>
             </TableRow>
           )}
           {(data ?? []).map((p) => (
             <TableRow key={p.id}>
               <TableCell className="font-medium">
-                {p.name} {p.id === projectId && <Badge variant="secondary">đang chọn</Badge>}
+                {p.name} {p.id === projectId && <Badge variant="secondary">{t("page.projects.selected")}</Badge>}
               </TableCell>
               <TableCell className="font-mono text-xs">{p.slug}</TableCell>
-              <TableCell>{p.environment}</TableCell>
-              <TableCell>{p.member === false ? "operator (không là thành viên)" : (p.role ?? "—")}</TableCell>
+              <TableCell>{ENV_KEY[p.environment] ? t(ENV_KEY[p.environment]) : p.environment}</TableCell>
+              <TableCell>
+                {p.member === false ? t("page.projects.role.operator") : roleLabel(p.role)}
+              </TableCell>
               <TableCell className="text-right">
                 {p.id !== projectId ? (
                   <Button size="sm" variant="outline" onClick={() => setProjectId(p.id)}>
-                    Chọn
+                    {t("page.projects.select")}
                   </Button>
                 ) : (
                   <Button size="sm" variant="ghost" asChild>
                     <Link href="/dashboard/api-keys">
                       <KeyRound />
-                      API key
+                      {t("page.projects.api-keys")}
                     </Link>
                   </Button>
                 )}
@@ -127,19 +136,19 @@ export default function ProjectsPage() {
       <Dialog open={open} onOpenChange={close}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Tạo project</DialogTitle>
+            <DialogTitle>{t("page.projects.create")}</DialogTitle>
             <DialogDescription>
-              Bạn là owner của project mới. Slug nằm trong connection string của service.
+              {t("page.projects.dialog.description")}
             </DialogDescription>
           </DialogHeader>
           <form id="project-form" noValidate onSubmit={submit}>
             <FieldGroup className="gap-4">
               <Field className="gap-1.5">
-                <FieldLabel htmlFor="pj-name">Tên</FieldLabel>
+                <FieldLabel htmlFor="pj-name">{t("page.projects.field.name")}</FieldLabel>
                 <Input
                   id="pj-name"
                   value={name}
-                  placeholder="VD: Cửa hàng của tôi"
+                  placeholder={t("page.projects.field.name-placeholder")}
                   onChange={(e) => {
                     setName(e.target.value);
                     if (!slugTouched) setSlug(slugFromName(e.target.value));
@@ -147,7 +156,7 @@ export default function ProjectsPage() {
                 />
               </Field>
               <Field className="gap-1.5">
-                <FieldLabel htmlFor="pj-slug">Slug</FieldLabel>
+                <FieldLabel htmlFor="pj-slug">{t("page.projects.field.slug")}</FieldLabel>
                 <Input
                   id="pj-slug"
                   className="font-mono"
@@ -157,15 +166,15 @@ export default function ProjectsPage() {
                     setSlug(e.target.value);
                   }}
                 />
-                <FieldDescription>Chữ thường, số, gạch ngang; 3–63 ký tự. Không đổi được sau khi tạo.</FieldDescription>
+                <FieldDescription>{t("page.projects.field.slug-hint")}</FieldDescription>
               </Field>
               <Field className="gap-1.5">
-                <FieldLabel>Môi trường</FieldLabel>
+                <FieldLabel>{t("page.projects.field.environment")}</FieldLabel>
                 <div className="flex gap-4 text-sm">
                   {(["test", "live"] as const).map((v) => (
                     <label key={v} className="flex items-center gap-1">
                       <input type="radio" name="pj-env" checked={env === v} onChange={() => setEnv(v)} />
-                      {v === "test" ? "test (hk_test_)" : "live (hk_live_, cần email đã xác minh)"}
+                      {t(v === "test" ? "page.projects.field.env-test" : "page.projects.field.env-live")}
                     </label>
                   ))}
                 </div>
@@ -175,10 +184,10 @@ export default function ProjectsPage() {
           </form>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => close(false)} disabled={create.isPending}>
-              Huỷ
+              {t("common.cancel")}
             </Button>
             <Button type="submit" form="project-form" disabled={create.isPending || !name.trim() || !slug.trim()}>
-              {create.isPending ? "Đang tạo…" : "Tạo"}
+              {create.isPending ? t("common.creating") : t("common.create")}
             </Button>
           </DialogFooter>
         </DialogContent>

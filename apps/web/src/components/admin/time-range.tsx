@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { isoToLocalInput, localInputToIso, localInputToIsoEnd, timeRangeError } from "@/lib/hub/list-url";
+import { useT } from "@/lib/i18n/use-t";
 
 /**
  * Khoảng thời gian (giờ máy người xem) — ghi URL dạng ISO UTC. "Đến" GỒM cả phút đã chọn (…:59.999).
@@ -19,6 +20,7 @@ export function TimeRange({
   to?: string;
   onChange: (r: { from?: string | null; to?: string | null }) => void;
 }) {
+  const t = useT();
   const [fromLocal, setFromLocal] = useState(isoToLocalInput(from));
   const [toLocal, setToLocal] = useState(isoToLocalInput(to));
   // URL đổi từ ngoài (Bỏ lọc, Back) -> ô theo URL; đổi do chính ô ghi -> bỏ qua.
@@ -42,11 +44,11 @@ export function TimeRange({
   useEffect(() => {
     // biome-ignore lint/suspicious/noUnnecessaryConditions: ref đổi trong onChange — biome không thấy
     if (!edited.current || error || (nextFrom === from && nextTo === to)) return;
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       written.current = { from: nextFrom, to: nextTo };
       onChangeRef.current({ from: nextFrom ?? null, to: nextTo ?? null });
     }, 500);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [nextFrom, nextTo, error, from, to]);
 
   return (
@@ -54,7 +56,7 @@ export function TimeRange({
       <div className="flex items-center gap-1 text-muted-foreground text-xs">
         <Input
           type="datetime-local"
-          aria-label="Từ"
+          aria-label={t("admin.time-range.from")}
           aria-invalid={Boolean(error)}
           className="h-8 w-48 text-xs"
           value={fromLocal}
@@ -66,7 +68,7 @@ export function TimeRange({
         <span>→</span>
         <Input
           type="datetime-local"
-          aria-label="Đến"
+          aria-label={t("admin.time-range.to")}
           aria-invalid={Boolean(error)}
           className="h-8 w-48 text-xs"
           value={toLocal}
@@ -78,7 +80,7 @@ export function TimeRange({
       </div>
       {error && (
         <p role="alert" className="text-destructive text-xs">
-          {error}
+          {t(error)}
         </p>
       )}
     </div>

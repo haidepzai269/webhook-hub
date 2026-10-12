@@ -6,6 +6,10 @@ import type { FlowBranch, StageView } from "@hub/flow";
 import { ChevronDown, ChevronRight, History, RotateCcw } from "lucide-react";
 
 import { CopyButton } from "@/components/admin/copy-button";
+import { deliveryStatusKey } from "@/components/admin/status-badge";
+import type { DeliveryStatus } from "@/lib/hub/types";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { JsonViewer } from "./json-viewer";
 import { HttpPill, StatusPill, TonePill } from "./pills";
@@ -46,34 +50,35 @@ function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange
 
 /** Card Payload: tab "Chuẩn hoá (data)" và "Gốc (raw)". Body > 16KB đã bị server cắt, có cờ. */
 export function PayloadCard({ data, raw, rawTruncated, dataTruncated }: { data: unknown; raw: unknown; rawTruncated?: boolean; dataTruncated?: boolean }) {
+  const t = useT();
   const hasData = data !== undefined && data !== null;
   const [tab, setTab] = useState<"data" | "raw">(hasData ? "data" : "raw");
   const value = tab === "data" ? data : raw;
   const truncated = tab === "data" ? dataTruncated : rawTruncated;
   return (
     <FlowCard
-      title="Payload"
+      title={t("flow.card.payload")}
       right={
         <div className="flex items-center gap-2">
           <Tabs
             value={tab}
             onChange={setTab}
             items={[
-              { id: "data", label: "Chuẩn hoá (data)", disabled: !hasData },
-              { id: "raw", label: "Gốc (raw)", disabled: raw === undefined || raw === null },
+              { id: "data", label: t("flow.card.payload.normalized"), disabled: !hasData },
+              { id: "raw", label: t("flow.card.payload.raw"), disabled: raw === undefined || raw === null },
             ]}
           />
-          <CopyButton value={typeof value === "string" ? value : JSON.stringify(value, null, 2)} label="Sao chép payload" />
+          <CopyButton value={typeof value === "string" ? value : JSON.stringify(value, null, 2)} label={t("flow.card.payload.copy")} />
         </div>
       }
     >
       {truncated && (
         <p className="mb-2 text-xs" style={{ color: "var(--flow-warning)" }}>
-          Body lớn hơn 16KB — chỉ hiện phần đầu (bản đầy đủ vẫn ở DB).
+          {t("flow.card.payload.truncated")}
         </p>
       )}
       {value === undefined || value === null ? (
-        <p className="text-muted-foreground text-sm">Không có dữ liệu.</p>
+        <p className="text-muted-foreground text-sm">{t("flow.card.no-data")}</p>
       ) : typeof value === "string" ? (
         <pre className="max-h-[26rem] overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs">{value}</pre>
       ) : (
@@ -87,11 +92,12 @@ const SENSITIVE = /^(authorization|cookie|set-cookie|x-api-key|apikey|x-.*-signa
 
 /** Card Headers: khoá–giá trị; header nhạy cảm (đã che ở server, ADR-051) hiện `***`. */
 export function HeadersCard({ headers }: { headers: Record<string, unknown> | null | undefined }) {
+  const t = useT();
   const entries = Object.entries(headers ?? {});
   return (
-    <FlowCard title="Headers" right={<CopyButton value={JSON.stringify(headers ?? {}, null, 2)} label="Sao chép headers" />}>
+    <FlowCard title={t("flow.card.headers")} right={<CopyButton value={JSON.stringify(headers ?? {}, null, 2)} label={t("flow.card.headers.copy")} />}>
       {entries.length === 0 ? (
-        <p className="text-muted-foreground text-sm">Không có header (raw event không lưu).</p>
+        <p className="text-muted-foreground text-sm">{t("flow.card.headers.empty")}</p>
       ) : (
         <div className="max-h-[26rem] overflow-auto rounded-lg border">
           {entries.map(([k, v]) => {
@@ -111,17 +117,18 @@ export function HeadersCard({ headers }: { headers: Record<string, unknown> | nu
 }
 
 function AttemptRow({ attempt }: { attempt: StageView }) {
+  const t = useT();
   const [open, setOpen] = useState<"response" | "request" | null>(null);
   const d = attempt.detail ?? {};
   const http = d.httpStatus as number | null | undefined;
-  const label = attempt.status === "ok" ? "success" : attempt.status === "in_progress" ? "đang gửi" : "failed";
+  const label = t(attempt.status === "ok" ? "flow.attempt.ok" : attempt.status === "in_progress" ? "flow.attempt.sending" : "flow.attempt.failed");
   return (
     <div className="rounded-lg border px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
         <span style={{ color: TONE_VAR[STATUS_TONE[attempt.status]] }}>
           <StatusGlyph status={attempt.status} />
         </span>
-        <span className="font-medium text-sm">Attempt #{String(d.attemptNo ?? "?")}</span>
+        <span className="font-medium text-sm">{t("flow.attempt.title", { no: String(d.attemptNo ?? "?") })}</span>
         <StatusPill status={attempt.status} label={label} />
         {attempt.status !== "in_progress" && <HttpPill status={http} />}
         {attempt.reason && <span className="truncate text-xs" style={{ color: TONE_VAR[STATUS_TONE[attempt.status]] }}>{attempt.reason.message}</span>}
@@ -136,7 +143,7 @@ function AttemptRow({ attempt }: { attempt: StageView }) {
               onClick={() => setOpen((o) => (o === k ? null : k))}
               aria-expanded={open === k}
             >
-              {k === "response" ? "Response" : "Payload"}
+              {t(k === "response" ? "flow.attempt.response" : "flow.attempt.request")}
               {open === k ? <ChevronDown {...ICON_SM} /> : <ChevronRight {...ICON_SM} />}
             </button>
           ))}
@@ -146,20 +153,17 @@ function AttemptRow({ attempt }: { attempt: StageView }) {
         <div className="mt-2">
           {open === "response" ? (
             <pre className="max-h-60 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11.5px]">
-              {String(d.response ?? d.error ?? "(trống)")}
+              {String(d.response ?? d.error ?? t("flow.attempt.empty"))}
             </pre>
           ) : (
             <div className="space-y-1.5">
               {d.request !== null && d.request !== undefined ? (
                 <JsonViewer value={d.request} maxHeight="16rem" />
               ) : (
-                <p className="text-muted-foreground text-xs">Không lưu body đã gửi cho lần này.</p>
+                <p className="text-muted-foreground text-xs">{t("flow.attempt.no-body")}</p>
               )}
               {/* §6A "header gửi đi": delivery_attempts chỉ lưu body đã gửi, KHÔNG lưu header — không bịa lại. */}
-              <p className="text-muted-foreground text-[11px]">
-                Header gửi đi (Standard Webhooks: webhook-id · webhook-timestamp · webhook-signature) không được lưu
-                theo từng lần thử — chỉ có body.
-              </p>
+              <p className="text-muted-foreground text-[11px]">{t("flow.attempt.headers-note")}</p>
             </div>
           )}
         </div>
@@ -168,20 +172,31 @@ function AttemptRow({ attempt }: { attempt: StageView }) {
   );
 }
 
+const DELIVERY_STATUSES = new Set(["PENDING", "DELIVERING", "RETRYING", "SUCCEEDED", "DEAD"]);
+/** Trạng thái của lượt cũ: mã DeliveryStatus thì dịch, lạ thì giữ nguyên. */
+function historyStatus(status: string, t: TranslateFn): string {
+  return DELIVERY_STATUSES.has(status) ? t(deliveryStatusKey(status as DeliveryStatus)) : status;
+}
+
 /** Card Delivery Attempts: mỗi đích một nhóm, mỗi lần thử một dòng; lần chờ có đếm ngược. */
 export function AttemptsCard({ branches, onReplay, replaying }: { branches: FlowBranch[]; onReplay: (b: FlowBranch) => void; replaying: string | null }) {
+  const t = useT();
   const now = useNow(1000);
   const total = branches.reduce((a, b) => a + b.stages.filter((s) => s.id.includes(":attempt:")).length, 0);
   return (
-    <FlowCard title="Delivery Attempts" right={<span className="text-muted-foreground text-xs tabular-nums">{total} tổng</span>}>
-      {branches.length === 0 && <p className="text-muted-foreground text-sm">Không có delivery nào (xem chặng Định tuyến).</p>}
+    <FlowCard
+      title={t("flow.attempts.title")}
+      right={<span className="text-muted-foreground text-xs tabular-nums">{t("flow.attempts.total", { count: total })}</span>}
+    >
+      {branches.length === 0 && <p className="text-muted-foreground text-sm">{t("flow.attempts.empty")}</p>}
       <div className="space-y-4">
         {branches.map((b) => {
           const done = b.stages[b.stages.length - 1];
           const attempts = b.stages.filter((s) => s.id.includes(":attempt:"));
           const D = destinationIcon(b.destination.type);
           const nextAt = typeof done.detail?.nextAttemptAt === "string" ? (done.detail.nextAttemptAt as string) : null;
-          const cd = countdown(nextAt, now);
+          const cd = countdown(nextAt, now, t("journey.due"));
+          const due = nextAt !== null && Date.parse(nextAt) <= now;
           const canReplay = done.actions?.includes("replay_delivery");
           return (
             <div key={b.deliveryId} className="space-y-1.5">
@@ -192,11 +207,14 @@ export function AttemptsCard({ branches, onReplay, replaying }: { branches: Flow
                 <span className="font-medium text-sm">{b.destination.name}</span>
                 <StatusPill status={done.status} label={done.title} />
                 <span className="text-muted-foreground text-xs">
-                  {b.subscription.name} · gen {b.generation}
+                  {b.subscription.name} · {t("flow.attempts.gen", { gen: b.generation })}
                 </span>
                 {b.history.length > 0 && (
                   <TonePill tone="idle" icon={<History {...ICON_SM} aria-hidden />}>
-                    {b.history.length} lượt cũ: {b.history.map((h) => `gen ${h.generation} ${h.status}`).join(", ")}
+                    {t("flow.attempts.history", {
+                      count: b.history.length,
+                      list: b.history.map((h) => `${t("flow.attempts.gen", { gen: h.generation })} ${historyStatus(h.status, t)}`).join(", "),
+                    })}
                   </TonePill>
                 )}
                 {canReplay && (
@@ -207,7 +225,7 @@ export function AttemptsCard({ branches, onReplay, replaying }: { branches: Flow
                     className="flow-replay-btn ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 font-medium text-xs disabled:opacity-60"
                   >
                     <RotateCcw {...ICON_SM} aria-hidden />
-                    Replay
+                    {t("flow.attempts.replay")}
                   </button>
                 )}
               </div>
@@ -219,8 +237,9 @@ export function AttemptsCard({ branches, onReplay, replaying }: { branches: Flow
                   <StatusGlyph status={done.status} small />
                   <span className="font-medium">{done.title}</span>
                   <span>
-                    thử lại {cd === "đến hạn" ? "đến hạn" : `sau ${cd}`}
-                    {typeof done.detail?.tier === "string" ? ` (tầng ${done.detail.tier})` : ""} · lúc {clock(nextAt, false)}
+                    {due ? t("flow.attempts.retry-due") : t("flow.attempts.retry-in", { countdown: cd ?? "" })}
+                    {typeof done.detail?.tier === "string" ? ` · ${t("flow.attempts.tier", { tier: done.detail.tier })}` : ""} ·{" "}
+                    {t("flow.attempts.at", { time: clock(nextAt, false) })}
                   </span>
                   {done.reason && <span className="text-muted-foreground">· {done.reason.message}</span>}
                 </div>
@@ -238,6 +257,8 @@ export function AttemptsCard({ branches, onReplay, replaying }: { branches: Flow
 
 /** Waterfall: mỗi chặng một thanh trên trục thời gian từ lúc nhận — nhìn là biết chậm ở đâu. */
 export function Waterfall({ stages, branches }: { stages: StageView[]; branches: FlowBranch[] }) {
+  const t = useT();
+  const locale = useLocale();
   const rows: { id: string; label: string; s: StageView }[] = [
     ...stages.map((s) => ({ id: s.id, label: s.title, s })),
     ...branches.flatMap((b) =>
@@ -251,8 +272,8 @@ export function Waterfall({ stages, branches }: { stages: StageView[]; branches:
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-[10.5px] text-muted-foreground tabular-nums">
-        <span>{fullDate(new Date(origin).toISOString())}</span>
-        <span>tổng {fmtMs(span)}</span>
+        <span>{fullDate(new Date(origin).toISOString(), locale)}</span>
+        <span>{t("flow.waterfall.total", { ms: fmtMs(span) })}</span>
       </div>
       {rows.map((r) => {
         const st = r.s.startedAt ? Date.parse(r.s.startedAt) : origin;

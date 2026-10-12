@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTopology } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { useT } from "@/lib/i18n/use-t";
 
 import { TraceFeed } from "../events/_components/trace-feed";
 
@@ -38,6 +39,7 @@ const WINDOW_BTN: Record<TopologyWindow, string> = { "15m": "15M", "1h": "1H", "
  * Normalize → Subscription → Destination. Sức khoẻ node/cạnh do server tính (healthOf); UI chỉ tô màu.
  */
 export default function FlowMapPage() {
+  const t = useT();
   const [window, setWindow] = useState<TopologyWindow>("15m");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [showPulses, setShowPulses] = useState(true);
@@ -66,21 +68,21 @@ export default function FlowMapPage() {
       <div className="flow-canvas relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border" style={{ borderColor: "var(--flow-card-border)" }}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: "var(--flow-card-border)", background: "color-mix(in oklch, var(--flow-card-solid) 70%, transparent)" }}>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-semibold text-lg tracking-tight">Bản đồ luồng</h1>
+            <h1 className="font-semibold text-lg tracking-tight">{t("nav.item.flow-map")}</h1>
             <div className="flex flex-wrap items-center gap-1.5">
-              {counts.crashed > 0 && <HealthPill health="crashed" label={`${counts.crashed} crashed`} />}
-              {counts.warning > 0 && <HealthPill health="warning" label={`${counts.warning} warning`} />}
-              <HealthPill health="healthy" label={`${counts.healthy} healthy`} />
-              <HealthPill health="idle" label={`${counts.idle} idle`} />
+              {counts.crashed > 0 && <HealthPill health="crashed" label={t("flow.health-count.crashed", { count: counts.crashed })} />}
+              {counts.warning > 0 && <HealthPill health="warning" label={t("flow.health-count.warning", { count: counts.warning })} />}
+              <HealthPill health="healthy" label={t("flow.health-count.healthy", { count: counts.healthy })} />
+              <HealthPill health="idle" label={t("flow.health-count.idle", { count: counts.idle })} />
               {unused.size > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowUnused((v) => !v)}
                   aria-pressed={!showUnused}
-                  title={showUnused ? "Đích không còn subscription đang bật — bấm để ẩn khỏi bản đồ" : "Đang ẩn — bấm để hiện trên bản đồ"}
+                  title={t(showUnused ? "flow.unused.hide-hint" : "flow.unused.show-hint")}
                 >
                   <TonePill tone="idle" icon={<PowerOff {...ICON_SM} aria-hidden />}>
-                    {unused.size} đích không dùng{showUnused ? "" : " (đang ẩn)"}
+                    {t(showUnused ? "flow.unused.count" : "flow.unused.count-hidden", { count: unused.size })}
                   </TonePill>
                 </button>
               )}
@@ -90,17 +92,17 @@ export default function FlowMapPage() {
             <ProjectPicker className="bg-[var(--flow-card)] backdrop-blur" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur" aria-label="Cửa sổ thời gian">
+                <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur" aria-label={t("flow.window.label")}>
                   {WINDOW_BTN[window]}
                   <ChevronDown {...ICON} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Cửa sổ thời gian</DropdownMenuLabel>
+                <DropdownMenuLabel>{t("flow.window.label")}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={window} onValueChange={(v) => setWindow(v as TopologyWindow)}>
                   {(Object.keys(TOPOLOGY_WINDOWS) as TopologyWindow[]).map((w) => (
                     <DropdownMenuRadioItem key={w} value={w}>
-                      {TOPOLOGY_WINDOWS[w].label}
+                      {t(`flow.window.${w}`)}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -109,12 +111,12 @@ export default function FlowMapPage() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur">
-                  {sourceName ?? "Tất cả source"}
+                  {sourceName ?? t("flow.filter.all-sources")}
                   <ChevronDown {...ICON} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setSourceFilter(null)}>Tất cả source</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setSourceFilter(null)}>{t("flow.filter.all-sources")}</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {sources.map((s) => (
                   <DropdownMenuItem key={s.id} onSelect={() => setSourceFilter(s.id.slice(4))}>
@@ -128,22 +130,22 @@ export default function FlowMapPage() {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur">
                   <SlidersHorizontal {...ICON} />
-                  Tuỳ chọn
+                  {t("flow.options")}
                   <ChevronDown {...ICON} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuCheckboxItem checked={showPulses} onCheckedChange={(v) => setShowPulses(Boolean(v))}>
-                  Chấm chạy theo sự kiện
+                  {t("flow.options.pulses")}
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={showSubscriptions} onCheckedChange={(v) => setShowSubscriptions(Boolean(v))}>
-                  Hiện cột Subscription (mặc định gộp vào nhãn cạnh)
+                  {t("flow.options.subscriptions")}
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={showUnused} onCheckedChange={(v) => setShowUnused(Boolean(v))}>
-                  Hiện đích không dùng (không còn subscription)
+                  {t("flow.options.unused")}
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={collapseSubs} onCheckedChange={(v) => setCollapseSubs(Boolean(v))}>
-                  Gộp subscription cùng đích
+                  {t("flow.options.collapse")}
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -154,7 +156,7 @@ export default function FlowMapPage() {
                     setLayoutVersion((v) => v + 1);
                   }}
                 >
-                  Sắp lại bố cục tự động
+                  {t("flow.options.relayout")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -166,7 +168,7 @@ export default function FlowMapPage() {
             <Skeleton className="h-40 w-2/3" />
           </div>
         ) : error ? (
-          <div className="grid h-full place-items-center text-destructive text-sm">Không tải được bản đồ: {error.message}</div>
+          <div className="grid h-full place-items-center text-destructive text-sm">{t("flow.load-error", { message: error.message })}</div>
         ) : data ? (
           <TopologyCanvas
             topology={data}

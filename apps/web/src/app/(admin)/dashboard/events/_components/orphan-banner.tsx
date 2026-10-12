@@ -18,12 +18,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useOrphanRawEvents, useRenormalizeRawEvents } from "@/lib/hub/queries";
+import { useT } from "@/lib/i18n/use-t";
 
 /**
  * S1-3: dải cảnh báo "N sự kiện thô chưa được chuẩn hoá". Nguồn là Postgres (raw_events ACCEPTED
  * không sinh event nào), không phải DLQ của RabbitMQ. Ẩn khi N = 0.
  */
 export function OrphanBanner() {
+  const t = useT();
   const { data } = useOrphanRawEvents();
   const renormalize = useRenormalizeRawEvents();
   const [open, setOpen] = useState(false);
@@ -37,13 +39,13 @@ export function OrphanBanner() {
       { reason: reason.trim() },
       {
         onSuccess: (res) => {
-          toast.success(`Đã xếp ${res.queued} sự kiện thô vào hàng chuẩn hoá lại`, {
-            description: "Worker xử lý qua outbox như lần đầu. Danh sách sẽ tự làm mới.",
+          toast.success(t("page.events.orphan.queued", { count: res.queued }), {
+            description: t("page.events.orphan.queued-hint"),
           });
           setOpen(false);
           setReason("");
         },
-        onError: (e) => toast.error(`Chuẩn hoá lại thất bại: ${e.message}`),
+        onError: (e) => toast.error(t("page.events.orphan.failed", { message: e.message })),
       },
     );
   };
@@ -54,32 +56,31 @@ export function OrphanBanner() {
         <div className="flex items-center gap-2">
           <TriangleAlert className="size-4 text-amber-600" />
           <span>
-            <span className="font-medium">{total}</span> sự kiện thô chưa được chuẩn hoá (đã nhận và lưu, nhưng chưa
-            sinh event).
+            <span className="font-medium">{total}</span> {t("page.events.orphan.banner")}
           </span>
         </div>
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
           <RotateCcw />
-          Chuẩn hoá lại
+          {t("page.events.orphan.action")}
         </Button>
       </div>
 
       <AlertDialog open={open} onOpenChange={(o) => !renormalize.isPending && setOpen(o)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Chuẩn hoá lại {Math.min(total, 500)} sự kiện thô?</AlertDialogTitle>
+            <AlertDialogTitle>{t("page.events.orphan.confirm-title", { count: Math.min(total, 500) })}</AlertDialogTitle>
             <AlertDialogDescription>
-              Hub ghi lại outbox <span className="font-mono">event.received</span> cho từng raw event mồ côi (tối đa 500
-              mỗi lần). Hành động được ghi vào audit log kèm lý do.
+              {t("page.events.orphan.confirm-before")} <span className="font-mono">event.received</span>{" "}
+              {t("page.events.orphan.confirm-after")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Textarea
-            placeholder="Lý do (bắt buộc), vd: Postgres chập chờn lúc 10:05"
+            placeholder={t("page.events.orphan.reason-placeholder")}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={renormalize.isPending}>Huỷ</AlertDialogCancel>
+            <AlertDialogCancel disabled={renormalize.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               disabled={renormalize.isPending || reason.trim() === ""}
               onClick={(e) => {
@@ -87,7 +88,7 @@ export function OrphanBanner() {
                 submit();
               }}
             >
-              {renormalize.isPending ? "Đang xếp hàng…" : "Chuẩn hoá lại"}
+              {renormalize.isPending ? t("page.events.orphan.queuing") : t("page.events.orphan.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

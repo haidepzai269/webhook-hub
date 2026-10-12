@@ -6,8 +6,11 @@ import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/use-t";
 
-export function CopyButton({ value, label = "Sao chép" }: { value: string; label?: string }) {
+export function CopyButton({ value, label }: { value: string; label?: string }) {
+  const t = useT();
+  const text = label ?? t("common.copy");
   const [done, setDone] = useState(false);
   const copy = async () => {
     try {
@@ -15,7 +18,7 @@ export function CopyButton({ value, label = "Sao chép" }: { value: string; labe
       setDone(true);
       setTimeout(() => setDone(false), 1500);
     } catch {
-      toast.error("Trình duyệt chặn clipboard (cần HTTPS hoặc localhost).");
+      toast.error(t("admin.copy.blocked"));
     }
   };
   return (
@@ -27,8 +30,8 @@ export function CopyButton({ value, label = "Sao chép" }: { value: string; labe
         e.stopPropagation();
         void copy();
       }}
-      aria-label={label}
-      title={label}
+      aria-label={text}
+      title={text}
     >
       {done ? <Check /> : <Copy />}
     </Button>
@@ -36,11 +39,12 @@ export function CopyButton({ value, label = "Sao chép" }: { value: string; labe
 }
 
 export function JsonBlock({ value, maxHeight = "24rem" }: { value: unknown; maxHeight?: string }) {
+  const t = useT();
   const text = JSON.stringify(value, null, 2) ?? "null";
   return (
     <div className="relative rounded-md border bg-muted/40">
       <div className="absolute top-1 right-1">
-        <CopyButton value={text} label="Sao chép JSON" />
+        <CopyButton value={text} label={t("admin.copy.json")} />
       </div>
       <pre className="overflow-auto p-3 pr-9 font-mono text-xs leading-relaxed" style={{ maxHeight }}>
         {text}

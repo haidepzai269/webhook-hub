@@ -7,8 +7,8 @@ import { Activity, Cable, CircleCheck, Inbox, Send, Skull } from "lucide-react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverview } from "@/lib/hub/queries";
-
-const nf = new Intl.NumberFormat("vi-VN");
+import { INTL_LOCALE } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 /** `successRate = null` khi chưa có delivery nào (S2-2) — hiện "—", không bịa 100%. */
 function formatRate(rate: number | null): string {
@@ -17,21 +17,23 @@ function formatRate(rate: number | null): string {
 
 export function KpiCards() {
   const { data, isLoading, error } = useOverview();
+  const t = useT();
+  const nf = new Intl.NumberFormat(INTL_LOCALE[useLocale()]);
 
   const items = [
-    { label: "Nguồn", value: data?.totalSources, icon: Inbox, href: "/dashboard/sources" },
-    { label: "Đích", value: data?.totalDestinations, icon: Cable, href: "/dashboard/destinations" },
-    { label: "Sự kiện", value: data?.totalEvents, icon: Activity, href: "/dashboard/events" },
-    { label: "Deliveries", value: data?.totalDeliveries, icon: Send, href: "/dashboard/deliveries" },
+    { label: t("page.dashboard.kpi.sources"), value: data?.totalSources, icon: Inbox, href: "/dashboard/sources" },
+    { label: t("page.dashboard.kpi.destinations"), value: data?.totalDestinations, icon: Cable, href: "/dashboard/destinations" },
+    { label: t("page.dashboard.kpi.events"), value: data?.totalEvents, icon: Activity, href: "/dashboard/events" },
+    { label: t("page.dashboard.kpi.deliveries"), value: data?.totalDeliveries, icon: Send, href: "/dashboard/deliveries" },
     {
-      label: "DLQ (DEAD)",
+      label: t("page.dashboard.kpi.dead"),
       value: data?.deadDeliveries,
       icon: Skull,
       href: "/dashboard/dlq",
       tone: data && data.deadDeliveries > 0 ? "text-rose-600 dark:text-rose-400" : undefined,
     },
     {
-      label: "Tỉ lệ thành công",
+      label: t("page.dashboard.kpi.success-rate"),
       value: data ? formatRate(data.successRate) : undefined,
       icon: CircleCheck,
       href: "/dashboard/deliveries",
@@ -46,7 +48,7 @@ export function KpiCards() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-destructive text-base">Không tải được số liệu tổng quan</CardTitle>
+          <CardTitle className="text-destructive text-base">{t("page.dashboard.kpi.load-error")}</CardTitle>
           <CardDescription>{error.message}</CardDescription>
         </CardHeader>
       </Card>
@@ -56,7 +58,7 @@ export function KpiCards() {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 xl:grid-cols-6">
       {items.map((it) => (
-        <Link key={it.label} href={it.href} className="group">
+        <Link key={it.href + it.label} href={it.href} className="group">
           <Card className="h-full transition-colors group-hover:border-primary/40">
             <CardHeader className="gap-2">
               <CardDescription className="flex items-center gap-1.5">

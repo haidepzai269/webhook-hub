@@ -51,7 +51,13 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   };
 
   return (
-    <Sidebar {...props} variant={variant} collapsible={collapsible}>
+    <Sidebar
+      {...props}
+      variant={variant}
+      collapsible={collapsible}
+      mobileTitle={t("admin.sidebar.mobile-title")}
+      mobileDescription={t("admin.sidebar.mobile-description")}
+    >
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>

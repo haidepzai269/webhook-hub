@@ -6,6 +6,7 @@ import { DeliveryStatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/hub/format";
 import type { DeliveryAttempt, HubEventDetail } from "@/lib/hub/types";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { RetryCountdown } from "../../deliveries/_components/delivery-columns";
 
@@ -66,6 +67,8 @@ function httpTone(a: DeliveryAttempt): string {
  * invalidate query ["event", …] nên các nhánh cập nhật trực tiếp.
  */
 export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
+  const t = useT();
+  const locale = useLocale();
   const raw = ev.rawEvent;
   const deliveries = [...(ev.deliveries ?? [])].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.attemptGeneration - b.attemptGeneration,
@@ -77,35 +80,32 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
         <>
           <Step
             n="①"
-            title="Nhận & xác thực chữ ký"
+            title={t("page.events.trace.received")}
             tone={raw.signatureValid ? "ok" : "bad"}
-            time={formatDateTime(raw.receivedAt)}
+            time={formatDateTime(raw.receivedAt, locale)}
           >
             <div className="flex flex-wrap gap-1.5">
               <Badge variant={raw.signatureValid ? "secondary" : "destructive"}>
-                Chữ ký {raw.signatureValid ? "hợp lệ" : "KHÔNG hợp lệ"}
+                {raw.signatureValid ? t("page.events.sheet.signature-valid") : t("page.events.sheet.signature-invalid")}
               </Badge>
-              <Badge variant="outline">raw: {raw.status}</Badge>
+              <Badge variant="outline">{t("page.events.sheet.raw-status", { status: raw.status })}</Badge>
             </div>
           </Step>
-          <Step n="②" title="COMMIT raw_event + outbox → ACK 2xx" tone="ok">
-            <p className="text-muted-foreground">
-              Provider chỉ nhận 2xx SAU khi transaction COMMIT (BB-3). Bản trùng sau đó trả 200 nhưng không tạo sự kiện
-              mới.
-            </p>
+          <Step n="②" title={t("page.events.trace.commit")} tone="ok">
+            <p className="text-muted-foreground">{t("page.events.trace.commit-hint")}</p>
           </Step>
         </>
       ) : (
-        <Step n="①" title={`Không có raw event (origin: ${ev.origin})`} tone="muted" />
+        <Step n="①" title={t("page.events.trace.no-raw", { origin: ev.origin })} tone="muted" />
       )}
-      <Step n="③" title="Chuẩn hoá" tone="ok" time={formatDateTime(ev.receivedAt)}>
+      <Step n="③" title={t("page.events.trace.normalized")} tone="ok" time={formatDateTime(ev.receivedAt, locale)}>
         <p>
-          <span className="font-mono">{ev.type}</span> <span className="text-muted-foreground">từ {ev.source}</span>
+          <span className="font-mono">{ev.type}</span> <span className="text-muted-foreground">{t("page.events.trace.from-source", { source: ev.source })}</span>
         </p>
       </Step>
-      <Step n="④" title={`Toả ra ${deliveries.length} đích`} tone={fanoutTone(deliveries)}>
+      <Step n="④" title={t("page.events.trace.fanout", { count: deliveries.length })} tone={fanoutTone(deliveries)}>
         {deliveries.length === 0 ? (
-          <p className="text-muted-foreground">Không subscription nào khớp loại sự kiện này.</p>
+          <p className="text-muted-foreground">{t("page.events.trace.no-subscription")}</p>
         ) : (
           <ul className="mt-1 space-y-2">
             {deliveries.map((d) => {
@@ -121,14 +121,14 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                     <span className="flex items-center gap-2">
                       {d.attemptGeneration > 1 && (
                         <Badge variant="outline" className="font-mono text-[10px]">
-                          gen {d.attemptGeneration}
+                          {t("page.events.trace.generation", { n: d.attemptGeneration })}
                         </Badge>
                       )}
                       <DeliveryStatusBadge status={d.status} />
                     </span>
                   </div>
                   {attempts.length === 0 ? (
-                    <p className="mt-1 text-muted-foreground">Chưa có lần thử nào.</p>
+                    <p className="mt-1 text-muted-foreground">{t("page.events.trace.no-attempts")}</p>
                   ) : (
                     <ol className="mt-1.5 space-y-0.5 font-mono text-[11px]">
                       {attempts.map((a) => (
@@ -136,7 +136,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                           <span className="text-muted-foreground">#{a.attemptNo}</span>
                           <span className={httpTone(a)}>HTTP {a.responseStatus || "—"}</span>
                           <span>{a.durationMs ?? "—"}ms</span>
-                          <span className="text-muted-foreground">{formatDateTime(a.createdAt)}</span>
+                          <span className="text-muted-foreground">{formatDateTime(a.createdAt, locale)}</span>
                           {a.error && <span className="basis-full break-all text-rose-600">{a.error}</span>}
                         </li>
                       ))}
@@ -144,7 +144,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                   )}
                   {(d.status === "RETRYING" || d.status === "PENDING") && d.nextAttemptAt && (
                     <div className="mt-1 flex items-center gap-1 text-muted-foreground">
-                      Thử lại sau <RetryCountdown iso={d.nextAttemptAt} />
+                      {t("page.events.trace.retry-in")} <RetryCountdown iso={d.nextAttemptAt} />
                     </div>
                   )}
                   {d.status === "DEAD" && d.lastError && <p className="mt-1 break-all text-rose-600">{d.lastError}</p>}

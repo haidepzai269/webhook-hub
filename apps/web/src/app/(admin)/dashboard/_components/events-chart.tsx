@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
@@ -17,19 +17,32 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useTimeseries } from "@/lib/hub/queries";
 import type { TimeseriesRange } from "@/lib/hub/types";
+import { INTL_LOCALE } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
-const chartConfig = {
-  events: { label: "Sự kiện", color: "var(--chart-1)" },
-  succeeded: { label: "Giao thành công", color: "oklch(0.65 0.15 155)" },
-  retrying: { label: "Đang chờ/thử lại", color: "oklch(0.75 0.15 75)" },
-  dead: { label: "DEAD", color: "oklch(0.63 0.22 25)" },
-} satisfies ChartConfig;
+const SERIES = {
+  events: { labelKey: "page.dashboard.chart.events", color: "var(--chart-1)" },
+  succeeded: { labelKey: "page.dashboard.chart.succeeded", color: "oklch(0.65 0.15 155)" },
+  retrying: { labelKey: "page.dashboard.chart.retrying", color: "oklch(0.75 0.15 75)" },
+  dead: { labelKey: "page.dashboard.chart.dead", color: "oklch(0.63 0.22 25)" },
+} as const;
 
 const TZ = "Asia/Ho_Chi_Minh";
-const hourFmt = new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
-const dayFmt = new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", timeZone: TZ });
 
 export function EventsChart() {
+  const t = useT();
+  const locale = useLocale();
+  const chartConfig = useMemo<ChartConfig>(
+    () => Object.fromEntries(Object.entries(SERIES).map(([k, v]) => [k, { label: t(v.labelKey), color: v.color }])),
+    [t],
+  );
+  const [hourFmt, dayFmt] = useMemo(
+    () => [
+      new Intl.DateTimeFormat(INTL_LOCALE[locale], { hour: "2-digit", minute: "2-digit", timeZone: TZ }),
+      new Intl.DateTimeFormat(INTL_LOCALE[locale], { day: "2-digit", month: "2-digit", timeZone: TZ }),
+    ],
+    [locale],
+  );
   const [range, setRange] = useState<TimeseriesRange>("24h");
   const { data, isLoading, isPlaceholderData, error } = useTimeseries(range);
   // Định dạng nhãn theo range CỦA DỮ LIỆU đang vẽ, không theo nút vừa bấm — tránh vẽ bucket giờ bằng nhãn ngày.
@@ -42,9 +55,10 @@ export function EventsChart() {
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>Lưu lượng sự kiện &amp; delivery</CardTitle>
+        <CardTitle>{t("page.dashboard.chart.title")}</CardTitle>
         <CardDescription>
-          {range === "24h" ? "24 giờ qua, theo giờ" : "7 ngày qua, theo ngày"} · delivery tính theo trạng thái hiện tại
+          {t(range === "24h" ? "page.dashboard.chart.desc-24h" : "page.dashboard.chart.desc-7d")} ·{" "}
+          {t("page.dashboard.chart.desc-note")}
         </CardDescription>
         <CardAction>
           <ToggleGroup
@@ -54,14 +68,14 @@ export function EventsChart() {
             value={range}
             onValueChange={(v) => v && setRange(v as TimeseriesRange)}
           >
-            <ToggleGroupItem value="24h">24 giờ</ToggleGroupItem>
-            <ToggleGroupItem value="7d">7 ngày</ToggleGroupItem>
+            <ToggleGroupItem value="24h">{t("page.dashboard.chart.range-24h")}</ToggleGroupItem>
+            <ToggleGroupItem value="7d">{t("page.dashboard.chart.range-7d")}</ToggleGroupItem>
           </ToggleGroup>
         </CardAction>
       </CardHeader>
       <CardContent>
         {error ? (
-          <p className="text-destructive text-sm">Không tải được biểu đồ: {error.message}</p>
+          <p className="text-destructive text-sm">{t("page.dashboard.chart.load-error", { message: error.message })}</p>
         ) : isLoading && !data ? (
           <Skeleton className="h-64 w-full" />
         ) : (
@@ -71,7 +85,7 @@ export function EventsChart() {
           >
             <AreaChart data={data ?? []} margin={{ left: -16, right: 8 }}>
               <defs>
-                {(Object.keys(chartConfig) as (keyof typeof chartConfig)[]).map((k) => (
+                {(Object.keys(SERIES) as (keyof typeof SERIES)[]).map((k) => (
                   <linearGradient key={k} id={`fill-${k}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={`var(--color-${k})`} stopOpacity={0.5} />
                     <stop offset="95%" stopColor={`var(--color-${k})`} stopOpacity={0.05} />

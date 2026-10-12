@@ -29,16 +29,77 @@
  * File này và messages/* là TS thuần (không React, không alias `@/`) để jest gốc của repo import thẳng.
  */
 import { DEFAULT_LOCALE, LOCALES, type Locale } from "./locales";
+import { admin } from "./messages/admin";
+import { auth } from "./messages/auth";
 import { common } from "./messages/common";
+import { errors } from "./messages/errors";
+import { flow } from "./messages/flow";
 import { header } from "./messages/header";
+import { journey } from "./messages/journey";
 import { layout } from "./messages/layout";
 import { nav } from "./messages/nav";
+import { pageApiKeys } from "./messages/page-api-keys";
+import { pageAudit } from "./messages/page-audit";
+import { pageDashboard } from "./messages/page-dashboard";
+import { pageDeliveries } from "./messages/page-deliveries";
+import { pageDestinations } from "./messages/page-destinations";
+import { pageDlq } from "./messages/page-dlq";
+import { pageEvents } from "./messages/page-events";
+import { pagePlayground } from "./messages/page-playground";
+import { pageProjects } from "./messages/page-projects";
+import { pageSources } from "./messages/page-sources";
+import { pageSubscriptions } from "./messages/page-subscriptions";
+import { status } from "./messages/status";
 
-export { DEFAULT_LOCALE, LOCALES, type Locale } from "./locales";
+export { DEFAULT_LOCALE, INTL_LOCALE, LOCALES, type Locale } from "./locales";
 
 const NAMESPACES = {
-  vi: { ...common.vi, ...nav.vi, ...header.vi, ...layout.vi },
-  en: { ...common.en, ...nav.en, ...header.en, ...layout.en },
+  vi: {
+    ...common.vi,
+    ...nav.vi,
+    ...header.vi,
+    ...layout.vi,
+    ...admin.vi,
+    ...status.vi,
+    ...auth.vi,
+    ...errors.vi,
+    ...flow.vi,
+    ...journey.vi,
+    ...pageDashboard.vi,
+    ...pageEvents.vi,
+    ...pageDeliveries.vi,
+    ...pageDlq.vi,
+    ...pageSources.vi,
+    ...pageDestinations.vi,
+    ...pageSubscriptions.vi,
+    ...pageProjects.vi,
+    ...pageApiKeys.vi,
+    ...pagePlayground.vi,
+    ...pageAudit.vi,
+  },
+  en: {
+    ...common.en,
+    ...nav.en,
+    ...header.en,
+    ...layout.en,
+    ...admin.en,
+    ...status.en,
+    ...auth.en,
+    ...errors.en,
+    ...flow.en,
+    ...journey.en,
+    ...pageDashboard.en,
+    ...pageEvents.en,
+    ...pageDeliveries.en,
+    ...pageDlq.en,
+    ...pageSources.en,
+    ...pageDestinations.en,
+    ...pageSubscriptions.en,
+    ...pageProjects.en,
+    ...pageApiKeys.en,
+    ...pagePlayground.en,
+    ...pageAudit.en,
+  },
 } satisfies Record<Locale, unknown>;
 
 export type MessageKey = keyof (typeof NAMESPACES)["vi"];

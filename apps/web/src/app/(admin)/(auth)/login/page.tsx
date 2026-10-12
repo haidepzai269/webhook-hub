@@ -2,16 +2,25 @@ import { Suspense } from "react";
 
 import type { Metadata } from "next";
 
+import { getT } from "@/lib/i18n/server";
+
 import { AuthShell } from "../_components/auth-shell";
 import { LoginForm } from "./login-form";
 
-export const metadata: Metadata = {
-  title: "Đăng nhập — Webhook Hub",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("auth.login.meta-title") };
+}
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const t = await getT();
   return (
-    <AuthShell title="ĐĂNG NHẬP" footerText="Chưa có tài khoản?" footerLinkLabel="Đăng ký" footerHref="/register">
+    <AuthShell
+      title={t("auth.login.title")}
+      footerText={t("auth.login.footer")}
+      footerLinkLabel={t("auth.sign-up")}
+      footerHref="/register"
+    >
       <Suspense>
         <LoginForm />
       </Suspense>

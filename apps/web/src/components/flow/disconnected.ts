@@ -3,6 +3,8 @@
  * (cột Subscription, nhóm subscription gộp, nhãn cạnh gộp). Không có bộ lọc nào được ẩn nó. Kiểu cấu trúc tối thiểu
  * (không phụ thuộc @hub/flow) để test thuần được.
  */
+import type { TranslateFn } from "../../lib/i18n/dictionary";
+
 interface NodeLike {
   id: string;
   kind: string;
@@ -20,8 +22,8 @@ export function groupActive(group: readonly { active?: boolean }[]): boolean {
 }
 
 /** Nhãn cạnh gộp: số subscription đã ngắt trong nhóm (rỗng nếu không có) — gộp vào nhãn vẫn phải thấy được "đã ngắt". */
-export function disconnectedNote(group: readonly { active?: boolean }[]): string {
+export function disconnectedNote(group: readonly { active?: boolean }[], t: TranslateFn): string {
   const off = group.filter((g) => g.active === false).length;
   if (off === 0) return "";
-  return off === group.length ? "đã ngắt" : `${off} đã ngắt`;
+  return off === group.length ? t("flow.disconnected.all") : t("flow.disconnected.some", { count: off });
 }

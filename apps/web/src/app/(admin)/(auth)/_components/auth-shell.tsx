@@ -1,6 +1,10 @@
+"use client";
+
 import type { ReactNode } from "react";
 
 import Link from "next/link";
+
+import { useT } from "@/lib/i18n/use-t";
 
 import styles from "./auth.module.css";
 import { SocialLogin } from "./social-login";
@@ -16,6 +20,7 @@ interface AuthShellProps {
 }
 
 export function AuthShell({ title, children, footerText, footerLinkLabel, footerHref, social = true }: AuthShellProps) {
+  const t = useT();
   return (
     <main className={styles.page}>
       <div className={styles.container}>
@@ -23,7 +28,7 @@ export function AuthShell({ title, children, footerText, footerLinkLabel, footer
         {children}
         {social && (
           <>
-            <div className={styles.divider}>HOẶC</div>
+            <div className={styles.divider}>{t("auth.or")}</div>
             <SocialLogin />
           </>
         )}

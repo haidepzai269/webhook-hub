@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, Plus, Trash2, Webhook } from "lucide-react";
@@ -21,6 +21,8 @@ import { formatDateTime } from "@/lib/hub/format";
 import { useCreateDestination, useDeleteDestination, useDestinations } from "@/lib/hub/queries";
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
 import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
+import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { CreateEndpointDialog, EndpointDetailDialog } from "./endpoint-dialogs";
 
@@ -38,22 +40,27 @@ const CONFIG_TEMPLATE: Record<DestinationType, string> = {
   discord: '{\n  "webhookUrl": "https://discord.com/api/webhooks/…"\n}',
 };
 
-const schema = z.object({
-  name: z.string().trim().min(1, "Nhập tên đích.").max(255),
-  type: z.enum(FORM_TYPES),
-  config: z.string().refine((s) => {
-    try {
-      const v: unknown = JSON.parse(s);
-      return v !== null && typeof v === "object" && !Array.isArray(v);
-    } catch {
-      return false;
-    }
-  }, "Config phải là một object JSON hợp lệ."),
-  signingSecret: z.string(),
-  rateLimitRps: z.coerce.number<string>().int("Phải là số nguyên.").min(0, "Không âm.").max(1000),
-});
-type FormIn = z.input<typeof schema>;
-type FormOut = z.output<typeof schema>;
+const makeSchema = (t: TranslateFn) =>
+  z.object({
+    name: z.string().trim().min(1, t("page.destinations.form.name-required")).max(255),
+    type: z.enum(FORM_TYPES),
+    config: z.string().refine((s) => {
+      try {
+        const v: unknown = JSON.parse(s);
+        return v !== null && typeof v === "object" && !Array.isArray(v);
+      } catch {
+        return false;
+      }
+    }, t("page.destinations.form.config-invalid")),
+    signingSecret: z.string(),
+    rateLimitRps: z.coerce
+      .number<string>()
+      .int(t("page.destinations.form.int"))
+      .min(0, t("page.destinations.form.non-negative"))
+      .max(1000),
+  });
+type FormIn = z.input<ReturnType<typeof makeSchema>>;
+type FormOut = z.output<ReturnType<typeof makeSchema>>;
 
 const CIRCUIT_STYLE = {
   CLOSED: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
@@ -69,15 +76,16 @@ const VERIFY_STYLE = {
 
 /** P2 (ADR-140): đích FAILED (vd ssrf_blocked) phải thấy được — hub KHÔNG giao tới đích chưa VERIFIED. */
 function VerificationCell({ dest }: { dest: Destination }) {
-  const v = describeVerification(dest.verification, dest.verificationError);
+  const t = useT();
+  const v = describeVerification(dest.verification, dest.verificationError, t);
   return (
     <div className="flex max-w-xs flex-col gap-0.5">
       <Badge
         variant="outline"
         className={`w-fit font-mono text-[11px] ${VERIFY_STYLE[v.tone]}`}
-        title={dest.verificationFix ?? undefined}
+        title={dest.verificationFix ?? v.label}
       >
-        {v.label}
+        {t(v.labelKey)}
       </Badge>
       {v.reason && <span className="text-muted-foreground text-xs">{v.reason}</span>}
       {dest.verification === "FAILED" && dest.verificationError && (
@@ -89,24 +97,31 @@ function VerificationCell({ dest }: { dest: Destination }) {
 
 const CIRCUIT_DOT = { CLOSED: "bg-emerald-500", HALF_OPEN: "bg-amber-500", OPEN: "bg-rose-500" } as const;
 
-const CIRCUIT_HINT = {
-  CLOSED: "Bình thường — gửi như thường.",
-  HALF_OPEN: "Hết 60s OPEN — một worker được gửi thử (probe), số còn lại hoãn 1 phút.",
-  OPEN: "5 lỗi liên tiếp — hoãn mọi lần gửi 60s (không tính là một lần thử).",
-} as const;
+const CIRCUIT_LABEL: Record<keyof typeof CIRCUIT_DOT, MessageKey> = {
+  CLOSED: "page.destinations.circuit.closed",
+  HALF_OPEN: "page.destinations.circuit.half-open",
+  OPEN: "page.destinations.circuit.open",
+};
+
+const CIRCUIT_HINT: Record<keyof typeof CIRCUIT_DOT, MessageKey> = {
+  CLOSED: "page.destinations.circuit-hint.closed",
+  HALF_OPEN: "page.destinations.circuit-hint.half-open",
+  OPEN: "page.destinations.circuit-hint.open",
+};
 
 /** Xoá đích — server chặn 409 khi còn subscription trỏ vào (ADR-054); toast nói rõ phải tắt/xoá subscription trước. */
 function DestinationActions({ dest }: { dest: Destination }) {
+  const t = useT();
   const del = useDeleteDestination();
   const openDetail = useContext(OpenDetail);
   const remove = () => {
-    if (!window.confirm(`Xoá đích "${dest.name}"? Chỉ xoá được khi không còn subscription nào trỏ vào.`)) return;
+    if (!window.confirm(t("page.destinations.delete-confirm", { name: dest.name }))) return;
     del.mutate(dest.id, {
-      onSuccess: () => toast.success(`Đã xoá đích "${dest.name}"`),
+      onSuccess: () => toast.success(t("page.destinations.toast.deleted", { name: dest.name })),
       onError: (e) => {
-        const conflict = describeDeleteConflict(e);
-        if (!conflict) return toast.error(`Xoá thất bại: ${e.message}`);
-        toast.warning("Không xoá được đích", { description: conflict, duration: 10_000 });
+        const conflict = describeDeleteConflict(e, t);
+        if (!conflict) return toast.error(t("page.destinations.toast.delete-failed", { message: e.message }));
+        toast.warning(t("page.destinations.toast.delete-blocked"), { description: conflict, duration: 10_000 });
       },
     });
   };
@@ -117,8 +132,8 @@ function DestinationActions({ dest }: { dest: Destination }) {
           size="sm"
           variant="ghost"
           onClick={() => openDetail(dest.id)}
-          aria-label={`Chi tiết ${dest.name}`}
-          title="Chi tiết: delivery gần đây, verify lại, xoay secret"
+          aria-label={t("page.destinations.detail-aria", { name: dest.name })}
+          title={t("page.destinations.detail-title")}
         >
           <Eye />
         </Button>
@@ -128,8 +143,8 @@ function DestinationActions({ dest }: { dest: Destination }) {
         variant="ghost"
         disabled={del.isPending}
         onClick={remove}
-        aria-label={`Xoá ${dest.name}`}
-        title="Xoá (bị chặn nếu còn subscription)"
+        aria-label={t("page.destinations.delete-aria", { name: dest.name })}
+        title={t("page.destinations.delete-title")}
       >
         <Trash2 />
       </Button>
@@ -137,47 +152,47 @@ function DestinationActions({ dest }: { dest: Destination }) {
   );
 }
 
-const columns: HubColumn<Destination>[] = [
+const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] => [
   {
     id: "name",
-    header: "Tên",
+    header: t("common.name"),
     accessorFn: (d) => d.name,
     cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
     enableHiding: false,
   },
   {
     id: "type",
-    header: "Loại",
+    header: t("page.destinations.col.type"),
     accessorFn: (d) => d.type,
     cell: ({ row }) => <Badge variant="secondary">{row.original.type}</Badge>,
   },
   {
     id: "verification",
-    header: "Xác minh",
+    header: t("page.destinations.col.verification"),
     accessorFn: (d) => `${d.verification ?? "VERIFIED"} ${d.verificationError ?? ""}`,
     cell: ({ row }) => <VerificationCell dest={row.original} />,
   },
   {
     id: "circuit",
-    header: "Circuit breaker",
+    header: t("page.destinations.col.circuit"),
     accessorFn: (d) => d.circuitState,
     // Cập nhật trực tiếp: socket `circuit.changed` invalidate danh sách đích (S2-5).
     cell: ({ row }) => (
       <Badge
         variant="outline"
         className={`gap-1.5 font-mono text-[11px] ${CIRCUIT_STYLE[row.original.circuitState]}`}
-        title={CIRCUIT_HINT[row.original.circuitState]}
+        title={`${row.original.circuitState} — ${t(CIRCUIT_HINT[row.original.circuitState])}`}
       >
         <span
           className={`size-1.5 rounded-full ${CIRCUIT_DOT[row.original.circuitState]} ${row.original.circuitState === "OPEN" ? "animate-pulse" : ""}`}
         />
-        {row.original.circuitState}
+        {t(CIRCUIT_LABEL[row.original.circuitState])}
       </Badge>
     ),
   },
   {
     id: "rateLimit",
-    header: "Giới hạn (rps)",
+    header: t("page.destinations.col.rate-limit"),
     accessorFn: (d) => String(d.rateLimitRps),
     cell: ({ row }) => (
       <span className="font-mono text-xs">{row.original.rateLimitRps > 0 ? row.original.rateLimitRps : "∞"}</span>
@@ -185,20 +200,20 @@ const columns: HubColumn<Destination>[] = [
   },
   {
     id: "signing",
-    header: "Ký HMAC",
+    header: t("page.destinations.col.signing"),
     accessorFn: (d) => (d.hasSigningSecret ? "yes" : "no"),
     cell: ({ row }) =>
       row.original.hasSigningSecret ? (
-        <span className="text-xs">•••••• có</span>
+        <span className="text-xs">{t("page.destinations.signing.yes")}</span>
       ) : (
-        <span className="text-muted-foreground text-xs">không</span>
+        <span className="text-muted-foreground text-xs">{t("page.destinations.signing.no")}</span>
       ),
   },
   {
     id: "createdAt",
-    header: "Tạo lúc",
+    header: t("common.created-at"),
     accessorFn: (d) => d.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt)}</span>,
+    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
   },
   {
     id: "actions",
@@ -210,6 +225,10 @@ const columns: HubColumn<Destination>[] = [
 ];
 
 export default function DestinationsPage() {
+  const t = useT();
+  const locale = useLocale();
+  const columns = useMemo(() => makeColumns(t, locale), [t, locale]);
+  const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useDestinations();
   const create = useCreateDestination();
   const [open, setOpen] = useState(false);
@@ -237,27 +256,27 @@ export default function DestinationsPage() {
       })
       .then(
         (d) => {
-          toast.success(`Đã tạo đích "${d.name}"`);
+          toast.success(t("page.destinations.toast.created", { name: d.name }));
           form.reset();
           setOpen(false);
         },
-        (e: Error) => toast.error(`Tạo đích thất bại: ${e.message}`),
+        (e: Error) => toast.error(t("page.destinations.toast.create-failed", { message: e.message })),
       );
 
   return (
     <>
       <PageHeader
-        title="Đích (Destinations)"
-        description="Nơi hub giao sự kiện tới. Config và signing secret được mã hoá, không hiển thị lại sau khi tạo."
+        title={t("page.destinations.title")}
+        description={t("page.destinations.description")}
         actions={
           <div className="flex gap-2">
             <Button onClick={() => setEndpointOpen(true)}>
               <Webhook />
-              Tạo endpoint webhook
+              {t("page.destinations.create-endpoint")}
             </Button>
             <Button variant="outline" onClick={() => setOpen(true)}>
               <Plus />
-              Thêm đích Telegram/Discord
+              {t("page.destinations.add-chat")}
             </Button>
           </div>
         }
@@ -271,15 +290,15 @@ export default function DestinationsPage() {
           getRowId={(d) => d.id}
           isLoading={isLoading}
           error={error}
-          searchPlaceholder="Lọc theo tên, loại…"
-          emptyText="Chưa có đích nào."
+          searchPlaceholder={t("page.destinations.search")}
+          emptyText={t("page.destinations.empty")}
         />
       </OpenDetail.Provider>
 
       <FormDialog
         open={open}
         onOpenChange={setOpen}
-        title="Thêm đích giao"
+        title={t("page.destinations.form.title")}
         formId="destination-form"
         submitting={create.isPending}
       >
@@ -290,11 +309,11 @@ export default function DestinationsPage() {
               name="name"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="dst-name">Tên</FieldLabel>
+                  <FieldLabel htmlFor="dst-name">{t("common.name")}</FieldLabel>
                   <Input
                     {...field}
                     id="dst-name"
-                    placeholder="VD: Kênh Telegram kế toán"
+                    placeholder={t("page.destinations.form.name-placeholder")}
                     aria-invalid={fieldState.invalid}
                   />
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
@@ -306,7 +325,7 @@ export default function DestinationsPage() {
               name="type"
               render={({ field }) => (
                 <Field className="gap-1.5">
-                  <FieldLabel>Loại</FieldLabel>
+                  <FieldLabel>{t("page.destinations.col.type")}</FieldLabel>
                   <Select
                     value={field.value}
                     onValueChange={(v) => {
@@ -322,9 +341,9 @@ export default function DestinationsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {FORM_TYPES.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {t}
+                      {FORM_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -337,7 +356,7 @@ export default function DestinationsPage() {
               name="config"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="dst-config">Config (JSON)</FieldLabel>
+                  <FieldLabel htmlFor="dst-config">{t("page.destinations.form.config")}</FieldLabel>
                   <Textarea
                     {...field}
                     id="dst-config"
@@ -346,7 +365,7 @@ export default function DestinationsPage() {
                     spellCheck={false}
                     aria-invalid={fieldState.invalid}
                   />
-                  <FieldDescription>URL đích bị chặn nếu trỏ vào mạng nội bộ (SSRF guard ở worker).</FieldDescription>
+                  <FieldDescription>{t("page.destinations.form.config-hint")}</FieldDescription>
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}
@@ -356,9 +375,9 @@ export default function DestinationsPage() {
               name="signingSecret"
               render={({ field }) => (
                 <Field className="gap-1.5">
-                  <FieldLabel htmlFor="dst-secret">Signing secret (tuỳ chọn)</FieldLabel>
+                  <FieldLabel htmlFor="dst-secret">{t("page.destinations.form.secret")}</FieldLabel>
                   <Input {...field} id="dst-secret" type="password" autoComplete="off" />
-                  <FieldDescription>Có thì hub ký HMAC từng request gửi đi để đích xác thực.</FieldDescription>
+                  <FieldDescription>{t("page.destinations.form.secret-hint")}</FieldDescription>
                 </Field>
               )}
             />
@@ -367,7 +386,7 @@ export default function DestinationsPage() {
               name="rateLimitRps"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="dst-rps">Giới hạn tốc độ (request/giây)</FieldLabel>
+                  <FieldLabel htmlFor="dst-rps">{t("page.destinations.form.rps")}</FieldLabel>
                   <Input
                     {...field}
                     value={String(field.value ?? "")}
@@ -376,7 +395,7 @@ export default function DestinationsPage() {
                     min={0}
                     aria-invalid={fieldState.invalid}
                   />
-                  <FieldDescription>0 = không giới hạn.</FieldDescription>
+                  <FieldDescription>{t("page.destinations.form.rps-hint")}</FieldDescription>
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}

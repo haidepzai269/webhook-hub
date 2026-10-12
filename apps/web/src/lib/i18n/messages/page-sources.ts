@@ -1,0 +1,158 @@
+import { defineMessages } from "../locales";
+
+/** Trang Nguồn (app/(admin)/dashboard/sources) + hộp thoại kết nối nhà cung cấp (connect-dialogs.tsx). */
+export const pageSources = defineMessages("page.sources", {
+  vi: {
+    "page.sources.title": "Nguồn",
+    "page.sources.description":
+      "Mỗi nguồn là một địa chỉ nhận webhook của một nhà cung cấp. Khoá bí mật được mã hoá AES-256-GCM, không bao giờ hiển thị lại.",
+    "page.sources.connect-provider": "Kết nối nhà cung cấp",
+    "page.sources.add-manual": "Thêm nguồn (dán URL tay)",
+    "page.sources.search": "Lọc theo tên, nhà cung cấp…",
+    "page.sources.empty": "Chưa có nguồn nào.",
+    "page.sources.col.provider": "Nhà cung cấp",
+    "page.sources.col.webhook-url": "URL webhook (dán vào nhà cung cấp)",
+    "page.sources.col.secret": "Khoá bí mật",
+    "page.sources.copy-url": "Sao chép URL webhook",
+    "page.sources.inactive": "Đã tắt",
+    "page.sources.connection-button": "Kết nối nhà cung cấp (hub tự đăng ký URL)",
+    "page.sources.secret-hint.github":
+      "Khoá bí mật webhook đặt trong GitHub (HMAC-SHA256 trên nội dung gốc). Nên chọn kiểu nội dung application/json.",
+    "page.sources.secret-hint.sepay": "Khoá API của SePay (tiêu đề Authorization: Apikey …).",
+    "page.sources.secret-hint.payos": "Khoá checksum của PayOS.",
+    "page.sources.secret-hint.stripe": "Khoá ký Stripe cấp cho webhook (whsec_…).",
+    "page.sources.form.name-required": "Nhập tên nguồn.",
+    "page.sources.form.secret-min": "Khoá bí mật tối thiểu 8 ký tự.",
+    "page.sources.form.title": "Thêm nguồn webhook",
+    "page.sources.form.description": "Sau khi tạo, dán URL webhook vào trang cấu hình webhook của nhà cung cấp.",
+    "page.sources.form.name-placeholder": "VD: Kho GitHub chính",
+    "page.sources.toast.created": "Đã tạo nguồn “{name}”",
+    "page.sources.toast.created-url": "URL webhook: {url}",
+    "page.sources.toast.create-failed": "Tạo nguồn thất bại: {message}",
+    // connect-dialogs.tsx
+    "page.sources.connect.title": "Kết nối nhà cung cấp",
+    "page.sources.connect.description":
+      "Hub tạo nguồn, lưu khoá bí mật, rồi tự đăng ký URL nhận webhook tại nhà cung cấp — không cần mở trang quản trị của họ.",
+    "page.sources.connect.connected": "✅ Đã kết nối · {display}",
+    "page.sources.connect.fix": "Cách sửa: {fix}",
+    "page.sources.connect.status.pending": "Đang chờ",
+    "page.sources.connect.status.connected": "Đã kết nối",
+    "page.sources.connect.status.failed": "Thất bại",
+    "page.sources.connect.status.drifted": "Cấu hình bị lệch",
+    "page.sources.connect.status.disconnected": "Đã ngắt",
+    "page.sources.connect.secret-changed":
+      "⚠️ Khoá ký (vd checksumKey) khác khoá hiện tại — hub sẽ giữ {both} cho tới khi webhook thật xác minh bằng khoá mới. Nếu webhook thật chỉ khớp khoá cũ, mục kết nối của nguồn sẽ báo {code}: nhập lại đúng khoá rồi bấm “Thử lại”.",
+    "page.sources.connect.secret-changed.both": "cả hai",
+    "page.sources.connect.no-connectors": "Chưa nhà cung cấp nào hỗ trợ tự kết nối — dùng “Thêm nguồn” rồi dán URL.",
+    "page.sources.connect.provider": "Nhà cung cấp",
+    "page.sources.connect.source": "Nguồn",
+    "page.sources.connect.use-existing": "Kết nối nguồn có sẵn",
+    "page.sources.connect.create-new": "Tạo nguồn mới",
+    "page.sources.connect.sources-error":
+      "Không tải được danh sách nguồn — tải lại trang. Chưa thể kết nối (tránh tạo nhầm nguồn mới).",
+    "page.sources.connect.sources-loading": "Đang tải danh sách nguồn…",
+    "page.sources.connect.existing-aria": "Nguồn có sẵn",
+    "page.sources.connect.existing-keeps-both":
+      "Khoá ký nhập vào khác khoá nguồn đang dùng thì hub giữ cả hai cho tới khi webhook thật xác minh bằng khoá mới (không tự xoá khoá cũ).",
+    "page.sources.connect.existing-same-url":
+      "Hub đăng ký đúng URL của nguồn này ({path}) — dịch vụ đang tin nguồn này (vd Shop ghim SHOP_PAYMENT_SOURCE_KEYS) vẫn nhận sự kiện.",
+    "page.sources.connect.name-aria": "Tên nguồn",
+    "page.sources.connect.name-placeholder": "Tên nguồn, VD: PayOS kênh cà phê",
+    "page.sources.connect.key-aria": "Mã nguồn sourceKey, không bắt buộc",
+    "page.sources.connect.key-placeholder": "Mã nguồn sourceKey (không bắt buộc, a-z 0-9 _) — bỏ trống để hub tự sinh",
+    "page.sources.connect.new-url-warning":
+      "Nguồn mới có URL mới: nhà cung cấp sẽ gửi vào nguồn mới, dịch vụ đang ghim nguồn cũ sẽ KHÔNG nhận nữa.",
+    "page.sources.connect.ack-overwrite": "Tôi hiểu URL cũ sẽ bị thay.",
+    "page.sources.connect.submit": "Kết nối",
+    "page.sources.connect.submitting": "Đang kết nối…",
+    "page.sources.connect.failed": "Kết nối thất bại: {message}",
+    "page.sources.connection.manual":
+      "Nguồn này tạo bằng tay (dán URL ở trang quản trị của nhà cung cấp) — không có kết nối do hub quản lý.",
+    "page.sources.connection.credentials": "Thông tin xác thực: {value}",
+    "page.sources.connection.credentials-saved": "đã lưu (mã hoá)",
+    "page.sources.connection.credentials-deleted": "đã xoá — kết nối lại phải nhập lại",
+    "page.sources.connection.retry": "Thử lại / Kết nối lại",
+    "page.sources.connection.disconnect": "Ngắt",
+    "page.sources.connection.disconnect-confirm":
+      "Ngắt kết nối? Hub sẽ gỡ cấu hình ở nhà cung cấp nếu nhà cung cấp cho phép.",
+    "page.sources.connection.delete-credentials": "Xoá thông tin xác thực",
+    "page.sources.connection.delete-credentials-confirm": "Xoá thông tin xác thực đã lưu? Nguồn và kết nối giữ nguyên.",
+  },
+  en: {
+    "page.sources.title": "Sources",
+    "page.sources.description":
+      "Each source is a webhook receiving address for one provider. Secrets are encrypted with AES-256-GCM and never shown again.",
+    "page.sources.connect-provider": "Connect provider",
+    "page.sources.add-manual": "Add source (paste URL manually)",
+    "page.sources.search": "Filter by name, provider…",
+    "page.sources.empty": "No sources yet.",
+    "page.sources.col.provider": "Provider",
+    "page.sources.col.webhook-url": "Webhook URL (paste into provider)",
+    "page.sources.col.secret": "Secret",
+    "page.sources.copy-url": "Copy webhook URL",
+    "page.sources.inactive": "Disabled",
+    "page.sources.connection-button": "Connect provider (hub registers the URL itself)",
+    "page.sources.secret-hint.github":
+      "Webhook secret set in GitHub (HMAC-SHA256 over the raw body). Content type application/json is recommended.",
+    "page.sources.secret-hint.sepay": "SePay API key (Authorization header: Apikey …).",
+    "page.sources.secret-hint.payos": "PayOS checksum key.",
+    "page.sources.secret-hint.stripe": "Signing secret of the Stripe endpoint (whsec_…).",
+    "page.sources.form.name-required": "Enter a source name.",
+    "page.sources.form.secret-min": "Secret must be at least 8 characters.",
+    "page.sources.form.title": "Add webhook source",
+    "page.sources.form.description": "After creating it, paste the webhook URL into the provider's webhook settings.",
+    "page.sources.form.name-placeholder": "E.g. Main GitHub repo",
+    "page.sources.toast.created": "Source “{name}” created",
+    "page.sources.toast.created-url": "Webhook URL: {url}",
+    "page.sources.toast.create-failed": "Failed to create source: {message}",
+    "page.sources.connect.title": "Connect provider",
+    "page.sources.connect.description":
+      "The hub creates the source, stores the secret, then registers the webhook URL at the provider itself — no need to open their dashboard.",
+    "page.sources.connect.connected": "✅ Connected · {display}",
+    "page.sources.connect.fix": "Fix: {fix}",
+    "page.sources.connect.status.pending": "Pending",
+    "page.sources.connect.status.connected": "Connected",
+    "page.sources.connect.status.failed": "Failed",
+    "page.sources.connect.status.drifted": "Configuration drifted",
+    "page.sources.connect.status.disconnected": "Disconnected",
+    "page.sources.connect.secret-changed":
+      "⚠️ The signing secret (e.g. checksumKey) differs from the current key — the hub keeps {both} until a real webhook verifies with the new key. If real webhooks only match the old key, the source's connection will report {code}: re-enter the correct key and click “Retry”.",
+    "page.sources.connect.secret-changed.both": "both",
+    "page.sources.connect.no-connectors":
+      "No provider supports automatic connection yet — use “Add source” and paste the URL.",
+    "page.sources.connect.provider": "Provider",
+    "page.sources.connect.source": "Source",
+    "page.sources.connect.use-existing": "Connect existing source",
+    "page.sources.connect.create-new": "Create new source",
+    "page.sources.connect.sources-error":
+      "Couldn't load the source list — reload the page. Connecting is disabled (to avoid creating a new source by mistake).",
+    "page.sources.connect.sources-loading": "Loading sources…",
+    "page.sources.connect.existing-aria": "Existing source",
+    "page.sources.connect.existing-keeps-both":
+      "If the signing secret you enter differs from the source's current key, the hub keeps both until a real webhook verifies with the new key (the old key is not deleted automatically).",
+    "page.sources.connect.existing-same-url":
+      "The hub registers this source's exact URL ({path}) — services that trust this source (e.g. Shop pinning SHOP_PAYMENT_SOURCE_KEYS) keep receiving events.",
+    "page.sources.connect.name-aria": "Source name",
+    "page.sources.connect.name-placeholder": "Source name, e.g. PayOS cafe channel",
+    "page.sources.connect.key-aria": "sourceKey, optional",
+    "page.sources.connect.key-placeholder": "sourceKey (optional, a-z 0-9 _) — leave empty to let the hub generate one",
+    "page.sources.connect.new-url-warning":
+      "A new source has a new URL: the provider will send to the new source, and services pinned to the old source will NO LONGER receive events.",
+    "page.sources.connect.ack-overwrite": "I understand the old URL will be replaced.",
+    "page.sources.connect.submit": "Connect",
+    "page.sources.connect.submitting": "Connecting…",
+    "page.sources.connect.failed": "Connection failed: {message}",
+    "page.sources.connection.manual":
+      "This source was created manually (URL pasted in the provider's dashboard) — there is no hub-managed connection.",
+    "page.sources.connection.credentials": "Credentials: {value}",
+    "page.sources.connection.credentials-saved": "saved (encrypted)",
+    "page.sources.connection.credentials-deleted": "deleted — reconnecting requires entering them again",
+    "page.sources.connection.retry": "Retry / Reconnect",
+    "page.sources.connection.disconnect": "Disconnect",
+    "page.sources.connection.disconnect-confirm":
+      "Disconnect? The hub will remove the configuration at the provider if the provider allows it.",
+    "page.sources.connection.delete-credentials": "Delete credentials",
+    "page.sources.connection.delete-credentials-confirm":
+      "Delete the stored credentials? The source and connection stay as they are.",
+  },
+});

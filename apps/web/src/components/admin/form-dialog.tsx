@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/lib/i18n/use-t";
 
 /** Khung Dialog chung cho các form "Tạo mới" — form thật (RHF + Zod) do từng trang truyền vào. */
 export function FormDialog({
@@ -20,7 +21,7 @@ export function FormDialog({
   description,
   formId,
   submitting,
-  submitLabel = "Tạo",
+  submitLabel,
   children,
 }: {
   open: boolean;
@@ -32,6 +33,7 @@ export function FormDialog({
   submitLabel?: string;
   children: ReactNode;
 }) {
+  const t = useT();
   return (
     <Dialog open={open} onOpenChange={(o) => !submitting && onOpenChange(o)}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
@@ -42,10 +44,10 @@ export function FormDialog({
         {children}
         <DialogFooter>
           <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t("common.cancel")}
           </Button>
           <Button type="submit" form={formId} disabled={submitting}>
-            {submitting ? "Đang lưu…" : submitLabel}
+            {submitting ? t("common.saving") : (submitLabel ?? t("common.create"))}
           </Button>
         </DialogFooter>
       </DialogContent>

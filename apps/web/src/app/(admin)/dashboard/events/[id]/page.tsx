@@ -32,6 +32,7 @@ import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 
 
@@ -53,6 +54,8 @@ function InfoCard({ icon, label, children }: { icon: React.ReactNode; label: str
  */
 export default function EventJourneyPage() {
   const { id } = useParams<{ id: string }>();
+  const t = useT();
+  const locale = useLocale();
   // F7: project đang xem (chọn ở V2/V3, nhớ trong localStorage) → `?projectId=` cho mọi gọi của trang.
   useEffect(() => restoreFlowProject(), []);
   const router = useRouter();
@@ -67,15 +70,20 @@ export default function EventJourneyPage() {
     async (b: FlowBranch) => {
       setReplaying(b.deliveryId);
       try {
-        const r = await replay.mutateAsync({ id: b.deliveryId, reason: "Replay từ Hành trình sự kiện (V1)" });
-        toast.success(`Đã replay → ${b.destination.name} (generation ${r.generation ?? "mới"})`);
+        const r = await replay.mutateAsync({ id: b.deliveryId, reason: t("page.events.detail.replay-reason") });
+        toast.success(
+          t("page.events.detail.replayed", {
+            destination: b.destination.name,
+            generation: r.generation ?? t("page.events.detail.generation-new"),
+          }),
+        );
       } catch (e) {
-        toast.error(e instanceof HubApiError ? e.message : "Replay thất bại");
+        toast.error(e instanceof HubApiError ? e.message : t("page.events.detail.replay-failed"));
       } finally {
         setReplaying(null);
       }
     },
-    [replay],
+    [replay, t],
   );
 
   const onAction = useCallback(
@@ -83,29 +91,30 @@ export default function EventJourneyPage() {
       if (action === "replay_delivery" && branch) void doReplay(branch);
       else if (action === "renormalize" && data?.raw) {
         renormalize.mutate(
-          { reason: "Renormalize từ Hành trình sự kiện (V1)", ids: [data.raw.id] },
+          { reason: t("page.events.detail.renormalize-reason"), ids: [data.raw.id] },
           {
-            onSuccess: (r) => toast.success(r.queued ? "Đã xếp lại vào q.normalize" : "Raw event không còn mồ côi"),
+            onSuccess: (r) =>
+              toast.success(r.queued ? t("page.events.detail.requeued") : t("page.events.detail.not-orphan")),
             onError: (e) => toast.error(e.message),
           },
         );
       } else if (action === "open_dlq") router.push("/dashboard/dlq");
       else if (action === "open_config") router.push(_stage.key === "verified" ? "/dashboard/sources" : "/dashboard/subscriptions");
     },
-    [doReplay, renormalize, data, router],
+    [doReplay, renormalize, data, router, t],
   );
 
   const onSelect = useCallback((stage: StageView, branch?: FlowBranch) => setSelected({ stage, branch }), []);
 
   if (isLoading) return <Skeleton className="h-[70vh] w-full rounded-2xl" />;
-  if (error) return <p className="text-destructive text-sm">Không tải được: {error.message}</p>;
+  if (error) return <p className="text-destructive text-sm">{t("page.events.load-error", { message: error.message })}</p>;
   if (!data)
     return (
       <div className="space-y-3">
         <Link href="/dashboard/events" className="inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground">
-          <ArrowLeft {...ICON} /> Quay lại
+          <ArrowLeft {...ICON} /> {t("common.back")}
         </Link>
-        <p className="text-muted-foreground text-sm">Không tìm thấy hành trình trong project đang chọn (có thể thuộc project khác — đổi project ở Bản đồ luồng / Hành trình sự kiện).</p>
+        <p className="text-muted-foreground text-sm">{t("page.events.detail.not-found")}</p>
       </div>
     );
 
@@ -131,39 +140,39 @@ export default function EventJourneyPage() {
       {/* 1. Dòng trên cùng */}
       <div className="space-y-2">
         <Link href="/dashboard/events" className="inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground">
-          <ArrowLeft {...ICON} /> Quay lại Hành trình sự kiện
+          <ArrowLeft {...ICON} /> {t("page.events.detail.back")}
         </Link>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="font-semibold text-xl tracking-tight">Chi tiết sự kiện</h1>
+              <h1 className="font-semibold text-xl tracking-tight">{t("page.events.detail.title")}</h1>
               <ExecutionStatusPill status={data.executionStatus} />
             </div>
             <div className="mt-0.5 flex items-center gap-1 font-mono text-muted-foreground text-xs">
               <span className="truncate">{displayId}</span>
-              <CopyButton value={displayId} label="Sao chép id" />
+              <CopyButton value={displayId} label={t("page.events.detail.copy-id")} />
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={createFrom} disabled={!raw}>
               <WandSparkles {...ICON} />
-              Tạo từ event này
+              {t("page.events.detail.create-from")}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button type="button" className="flow-replay-btn inline-flex h-8 items-center gap-1.5 rounded-lg px-3 font-medium text-sm">
                   <RotateCcw {...ICON} />
-                  Replay
+                  {t("page.events.detail.replay")}
                   <ChevronDown {...ICON} />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-72">
-                <DropdownMenuLabel>Replay delivery DEAD (generation + 1)</DropdownMenuLabel>
+                <DropdownMenuLabel>{t("page.events.detail.replay-menu")}</DropdownMenuLabel>
                 <DropdownMenuItem
                   disabled={replayable.length === 0}
                   onSelect={() => replayable.forEach((b) => void doReplay(b))}
                 >
-                  Replay tất cả đích hỏng ({replayable.length})
+                  {t("page.events.detail.replay-all", { count: replayable.length })}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {branches.map((b) => {
@@ -171,11 +180,11 @@ export default function EventJourneyPage() {
                   return (
                     <DropdownMenuItem key={b.deliveryId} disabled={!ok} onSelect={() => void doReplay(b)}>
                       <span className="truncate">→ {b.destination.name}</span>
-                      <span className="ml-auto text-muted-foreground text-xs">{ok ? "DEAD" : b.stages[b.stages.length - 1].title}</span>
+                      <span className="ml-auto text-muted-foreground text-xs">{ok ? t("page.events.detail.dead") : b.stages[b.stages.length - 1].title}</span>
                     </DropdownMenuItem>
                   );
                 })}
-                {branches.length === 0 && <DropdownMenuItem disabled>Không có delivery</DropdownMenuItem>}
+                {branches.length === 0 && <DropdownMenuItem disabled>{t("page.events.detail.no-deliveries")}</DropdownMenuItem>}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -184,35 +193,36 @@ export default function EventJourneyPage() {
 
       {/* 2. Ba thẻ thông tin */}
       <div className="grid gap-3 md:grid-cols-3">
-        <InfoCard icon={<Tag {...ICON_SM} />} label="Event Type">
+        <InfoCard icon={<Tag {...ICON_SM} />} label={t("page.events.detail.event-type")}>
           <div className="flex flex-wrap items-center gap-1.5">
             <TonePill tone="idle" className="font-mono">
-              {event?.type ?? "— (chưa có event)"}
+              {event?.type ?? t("page.events.detail.no-event")}
             </TonePill>
             {event && (
-              <TonePill tone={event.normalized ? "healthy" : "warning"}>{event.normalized ? "chuẩn" : "thô"}</TonePill>
+              <TonePill tone={event.normalized ? "healthy" : "warning"}>{event.normalized ? t("page.events.detail.normalized") : t("page.events.detail.raw")}</TonePill>
             )}
           </div>
           {event?.subject && <div className="mt-1 truncate font-mono text-muted-foreground text-xs">{event.subject}</div>}
         </InfoCard>
-        <InfoCard icon={raw ? <ProviderIcon provider={raw.provider} size={13} /> : <Tag {...ICON_SM} />} label="Source">
+        <InfoCard icon={raw ? <ProviderIcon provider={raw.provider} size={13} /> : <Tag {...ICON_SM} />} label={t("page.events.detail.source")}>
           <div className="truncate font-medium text-sm">{raw ? `${raw.providerLabel} · ${raw.sourceName}` : (event?.source ?? "—")}</div>
-          <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs" title="Hub không lưu IP người gửi">
-            IP: không lưu · corr {event?.correlationId?.slice(0, 8) ?? "—"}
+          <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs" title={t("page.events.detail.no-ip")}>
+            {t("page.events.detail.ip-line", { id: event?.correlationId?.slice(0, 8) ?? "—" })}
           </div>
         </InfoCard>
-        <InfoCard icon={<CalendarClock {...ICON_SM} />} label="Received">
-          <div className="font-medium text-sm tabular-nums">{fullDate(raw?.receivedAt ?? event?.receivedAt)}</div>
+        <InfoCard icon={<CalendarClock {...ICON_SM} />} label={t("page.events.detail.received")}>
+          <div className="font-medium text-sm tabular-nums">{fullDate(raw?.receivedAt ?? event?.receivedAt, locale)}</div>
           <div className="mt-0.5 text-muted-foreground text-xs">
-            {raw ? `raw ${raw.status}` : "không có raw event"} · origin {event?.origin ?? "webhook"}
+            {raw ? t("page.events.detail.raw-status", { status: raw.status }) : t("page.events.detail.no-raw")} ·{" "}
+            {t("page.events.detail.origin", { origin: event?.origin ?? "webhook" })}
           </div>
         </InfoCard>
       </div>
 
       {/* 3. Dải hành trình */}
       <FlowCard
-        title="Hành trình"
-        right={<span className="text-muted-foreground text-xs">Bấm một node để xem Vào / Ra / Chi tiết</span>}
+        title={t("page.events.detail.journey")}
+        right={<span className="text-muted-foreground text-xs">{t("page.events.detail.journey-hint")}</span>}
       >
         <div className="flow-canvas overflow-hidden rounded-xl border" style={{ height: journeyHeight(branches.length) + 30, borderColor: "var(--flow-card-border)" }}>
           <JourneyCanvas

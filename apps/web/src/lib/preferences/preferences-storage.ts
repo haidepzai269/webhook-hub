@@ -11,13 +11,19 @@ import {
   type PreferenceValueMap,
 } from "./preferences-config";
 
-async function persistByMode(mode: PreferencePersistence, key: string, value: string): Promise<void> {
+/**
+ * Số ngày sống của cookie theo từng preference; vắng = mặc định của setClientCookie (7 ngày). Ngôn ngữ là lựa chọn
+ * lâu dài — hết hạn sau 7 ngày thì giao diện tự nhảy về tiếng Việt, người dùng tưởng lỗi.
+ */
+const COOKIE_DAYS: Partial<Record<PreferenceKey, number>> = { language: 365 };
+
+async function persistByMode(mode: PreferencePersistence, key: PreferenceKey, value: string): Promise<void> {
   switch (mode) {
     case "none":
       return;
 
     case "client-cookie":
-      setClientCookie(key, value);
+      setClientCookie(key, value, COOKIE_DAYS[key]);
       return;
 
     case "server-cookie":

@@ -23,11 +23,13 @@ import { EVENT_LOG_PARAMS, EXECUTION_STATUS_VALUES } from "@/lib/hub/list-url";
 import type { ExecutionsPage } from "@/lib/hub/flow-types";
 import { flowKeys, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
+import { INTL_LOCALE, type Locale } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 import { useUnroll } from "@/lib/ui/use-unroll";
 
 import { shouldAutoLoadMore, shouldResetHead } from "./event-log-logic";
 import { describeEvent, expectedProbe, type NoteTone } from "./event-notes";
-import { EXECUTION_LABEL, EXECUTION_TONE, FailedAt, failedAtText, MiniPipeline } from "./execution-bits";
+import { EXECUTION_LABEL_KEY, EXECUTION_TONE, FailedAt, failedAtText, MiniPipeline } from "./execution-bits";
 import {
   clampLogHeight,
   LOG_COLUMNS,
@@ -65,9 +67,9 @@ const NOTE_COLOR: Record<NoteTone, string> = {
   error: TONE_VAR.crashed,
 };
 
-function time(iso: string) {
+function time(iso: string, locale: Locale) {
   const d = new Date(iso);
-  return `${d.toLocaleTimeString("vi-VN", { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+  return `${d.toLocaleTimeString(INTL_LOCALE[locale], { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
 }
 
 /**
@@ -88,6 +90,8 @@ export function EventLog() {
 }
 
 function EventLogPanel() {
+  const t = useT();
+  const locale = useLocale();
   const [open, setOpen] = useState(true);
   const [paused, setPaused] = useState(false);
   const [q, setQ] = useState("");
@@ -101,9 +105,9 @@ function EventLogPanel() {
   const [awayFromTop, setAwayFromTop] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const live = !paused && !awayFromTop;
-  let liveLabel = "trực tiếp";
-  if (paused) liveLabel = "đã tạm dừng";
-  else if (awayFromTop) liveLabel = "tạm dừng khi cuộn xuống — về đầu để tiếp tục";
+  let liveLabel = t("journey.log.live");
+  if (paused) liveLabel = t("journey.log.paused");
+  else if (awayFromTop) liveLabel = t("journey.log.paused-scroll");
   const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = useExecutions(filters, {
     paused: !live,
     maxPages: LOG_MAX_PAGES,
@@ -218,13 +222,13 @@ function EventLogPanel() {
       <div
         role="separator"
         aria-orientation="horizontal"
-        aria-label="Kéo để đổi chiều cao nhật ký"
+        aria-label={t("journey.log.resize-aria")}
         aria-valuenow={aria?.now}
         aria-valuemin={aria?.min}
         aria-valuemax={aria?.max}
-        aria-valuetext={aria ? `${aria.now}% chiều cao màn hình` : undefined}
+        aria-valuetext={aria ? t("journey.log.resize-value", { n: aria.now }) : undefined}
         tabIndex={0}
-        title="Kéo (hoặc ↑/↓) để đổi chiều cao"
+        title={t("journey.log.resize-title")}
         className="flow-log-resizer absolute inset-x-0 top-0 z-10 h-2 cursor-row-resize touch-none"
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
@@ -234,7 +238,7 @@ function EventLogPanel() {
       />
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5" style={{ borderColor: "var(--flow-card-border)" }}>
         <Terminal {...ICON} className="text-muted-foreground" aria-hidden />
-        <span className="font-medium text-sm">Nhật ký sự kiện</span>
+        <span className="font-medium text-sm">{t("journey.log.title")}</span>
         <span className="text-muted-foreground text-xs" aria-live="polite">
           {liveLabel}
         </span>
@@ -242,11 +246,11 @@ function EventLogPanel() {
           {open && (
             <>
               <Select value={logProvider ?? ALL} onValueChange={(v) => url.setFilter({ logProvider: v === ALL ? null : v })}>
-                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label="Lọc provider">
+                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label={t("journey.log.filter-provider")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL}>Mọi provider</SelectItem>
+                  <SelectItem value={ALL}>{t("journey.log.all-providers")}</SelectItem>
                   {providers.map((p) => (
                     <SelectItem key={p} value={p}>
                       {p}
@@ -255,14 +259,14 @@ function EventLogPanel() {
                 </SelectContent>
               </Select>
               <Select value={logStatus ?? ALL} onValueChange={(v) => url.setFilter({ logStatus: v === ALL ? null : v })}>
-                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label="Lọc kết quả">
+                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label={t("journey.log.filter-outcome")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL}>Mọi kết quả</SelectItem>
+                  <SelectItem value={ALL}>{t("journey.log.all-outcomes")}</SelectItem>
                   {EXECUTION_STATUS_VALUES.map((st) => (
                     <SelectItem key={st} value={st}>
-                      {EXECUTION_LABEL[st]}
+                      {t(EXECUTION_LABEL_KEY[st])}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -271,25 +275,25 @@ function EventLogPanel() {
                 variant={logProbes === "hide" ? "secondary" : "ghost"}
                 size="sm"
                 aria-pressed={logProbes === "hide"}
-                title="Ẩn request kiểm tra kết nối của provider (PayOS kiểm tra URL, GitHub ping)"
+                title={t("journey.log.hide-probes-title")}
                 onClick={() => url.setFilter({ logProbes: logProbes === "hide" ? null : "hide" })}
               >
                 <EyeOff {...ICON} />
-                Ẩn request kiểm tra
+                {t("journey.log.hide-probes")}
               </Button>
             </>
           )}
           {open && (
             <div className="relative">
               <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Lọc type, provider, id…" className="h-7 w-52 pl-7 text-xs" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("journey.log.search-placeholder")} className="h-7 w-52 pl-7 text-xs" />
             </div>
           )}
           <Button variant="ghost" size="sm" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
             {paused ? <Play {...ICON} /> : <Pause {...ICON} />}
-            {paused ? "Tiếp tục" : "Tạm dừng"}
+            {paused ? t("journey.log.resume") : t("journey.log.pause")}
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => setOpen((o) => !o)} aria-label={open ? "Thu gọn" : "Mở rộng"}>
+          <Button variant="ghost" size="icon-sm" onClick={() => setOpen((o) => !o)} aria-label={open ? t("journey.log.collapse") : t("journey.log.expand")}>
             {open ? <ChevronDown {...ICON} /> : <ChevronUp {...ICON} />}
           </Button>
         </div>
@@ -308,18 +312,18 @@ function EventLogPanel() {
             >
               {LOG_COLUMNS.map((c) => (
                 <span key={c.key} className="truncate">
-                  {c.label}
+                  {t(c.labelKey)}
                 </span>
               ))}
             </div>
-            {isLoading && <div className="px-3 py-2 text-muted-foreground">Đang tải…</div>}
-            {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">Không có hành trình nào khớp bộ lọc.</div>}
+            {isLoading && <div className="px-3 py-2 text-muted-foreground">{t("common.loading")}</div>}
+            {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">{t("journey.log.empty")}</div>}
             {items.map((i) => {
               // Request kiểm tra kết nối của provider đúng thiết kế (ADR-159) → viền + nhãn trung tính, không "Thành công" xanh.
               const probe = expectedProbe(i);
               const color = probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]];
-              const resultLabel = probe ? probe.label : EXECUTION_LABEL[i.status];
-              const note = describeEvent(i);
+              const resultLabel = probe ? t(probe.label) : t(EXECUTION_LABEL_KEY[i.status]);
+              const note = describeEvent(i, t);
               const anim = unroll(i.id);
               return (
                 <Link
@@ -328,7 +332,7 @@ function EventLogPanel() {
                   className={`grid items-center gap-3 border-l-2 px-3 py-1 hover:bg-muted/50 ${anim.className ?? ""}`}
                   style={{ gridTemplateColumns: GRID_TEMPLATE, borderLeftColor: color, ...anim.style }}
                 >
-                  <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt)}</span>
+                  <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt, locale)}</span>
                   <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
                     <span className="shrink-0 text-muted-foreground">
                       <ProviderIcon provider={i.provider} size={14} />
@@ -341,7 +345,7 @@ function EventLogPanel() {
                   <span className="truncate" title={i.type ?? resultLabel}>
                     {i.type ?? <span style={{ color }}>{resultLabel}</span>}
                   </span>
-                  <span className="min-w-0 truncate" title={failedAtText(i.failedAt) ?? resultLabel}>
+                  <span className="min-w-0 truncate" title={failedAtText(i.failedAt, t) ?? resultLabel}>
                     {i.failedAt ? (
                       <FailedAt failedAt={i.failedAt} status={i.status} />
                     ) : (
@@ -357,16 +361,16 @@ function EventLogPanel() {
               );
             })}
             <div ref={sentinel} className="h-4" />
-            {isFetchingNextPage && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">Đang tải thêm…</div>}
+            {isFetchingNextPage && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">{t("journey.log.loading-more")}</div>}
             {/* Đang lọc client: không tự nạp (TB1) — người xem chủ động nạp trang cũ hơn để tìm tiếp. */}
             {q.trim() !== "" && hasNextPage && !isFetchingNextPage && (
               <div className="px-3 py-1 font-sans text-xs">
                 <Button variant="ghost" size="sm" onClick={() => void fetchNextPage()}>
-                  Tải thêm (tìm trong dòng cũ hơn)
+                  {t("journey.log.load-more")}
                 </Button>
               </div>
             )}
-            {!hasNextPage && all.length > 0 && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">Hết.</div>}
+            {!hasNextPage && all.length > 0 && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">{t("journey.log.end")}</div>}
           </div>
         </div>
       )}

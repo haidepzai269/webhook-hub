@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { createT } from "../i18n/dictionary";
 import {
   AUDIT_KEY,
   connectionDialogMode,
@@ -95,13 +96,19 @@ describe("invalidate ['audit'] sau mọi mutation có audit", () => {
 describe("describeDeleteConflict — thông báo 409 dễ hiểu", () => {
   it("subscription còn delivery -> gợi ý Tắt", () => {
     expect(describeDeleteConflict({ status: 409, body: { deliveryCount: 4 }, message: "x" })).toMatch(
-      /4 delivery.*Tắt/,
+      /4 lượt giao.*Tắt/,
+    );
+    expect(describeDeleteConflict({ status: 409, body: { deliveryCount: 4 }, message: "x" }, createT("en"))).toMatch(
+      /4 deliveries.*Disable/,
     );
   });
   it("đích còn subscription -> nêu số subscription", () => {
     expect(describeDeleteConflict({ status: 409, body: { subscriptionCount: 2, deliveryCount: 9 } })).toMatch(
-      /2 subscription/,
+      /2 đăng ký nhận/,
     );
+    expect(
+      describeDeleteConflict({ status: 409, body: { subscriptionCount: 2, deliveryCount: 9 } }, createT("en")),
+    ).toMatch(/^2 subscription.*9 past deliveries/);
   });
   it("không phải 409 -> null", () => {
     expect(describeDeleteConflict({ status: 500 })).toBeNull();
@@ -134,10 +141,13 @@ describe("describeVerification — cột Xác minh của trang Đích (P2, ADR-1
     expect(v.label).toBe("FAILED");
     expect(v.tone).toBe("bad");
     expect(v.reason).toMatch(/nội bộ/);
+    expect(v.labelKey).toBe("errors.verification.label.failed");
+    expect(describeVerification("FAILED", "ssrf_blocked", createT("en")).reason).toMatch(/internal\/private/);
   });
   it("http_502 -> nêu mã HTTP; mã lạ -> vẫn hiện mã gốc", () => {
     expect(describeVerification("FAILED", "http_502").reason).toMatch(/HTTP 502/);
     expect(describeVerification("FAILED", "weird_code").reason).toMatch(/weird_code/);
+    expect(describeVerification("FAILED", "http_502", createT("en")).reason).toMatch(/^The endpoint returned HTTP 502/);
   });
   it("VERIFIED -> tốt, không có lý do; PENDING -> đang chờ; thiếu trường (API cũ) -> coi như VERIFIED", () => {
     expect(describeVerification("VERIFIED", null)).toMatchObject({ tone: "ok", reason: null });

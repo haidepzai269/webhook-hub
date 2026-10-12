@@ -45,6 +45,67 @@ describe("i18n dictionary", () => {
     }
   });
 
+  it("en không chứa dấu tiếng Việt (trừ tên ngôn ngữ viết bằng chính nó)", () => {
+    const allow = new Set<string>(["common.language.vi"]);
+    for (const [key, value] of Object.entries(DICTIONARIES.en)) {
+      if (allow.has(key)) continue;
+      expect({ key, value, vi: /[à-ỹđ]/i.test(value) }).toMatchObject({ vi: false });
+    }
+  });
+
+  it("vi không lẫn từ giao diện tiếng Anh (trừ định danh kỹ thuật: kiểu sự kiện, scope, MÃ_HOA, `code`)", () => {
+    const DENY = [
+      "source",
+      "sources",
+      "destination",
+      "destinations",
+      "endpoint",
+      "endpoints",
+      "subscription",
+      "subscriptions",
+      "provider",
+      "providers",
+      "replay",
+      "retry",
+      "delivery",
+      "deliveries",
+      "event",
+      "events",
+      "payload",
+      "project",
+      "projects",
+      "dashboard",
+      "playground",
+      "normalize",
+      "ingest",
+      "routing",
+      "status",
+      "success",
+      "failed",
+      "error",
+      "loading",
+      "filter",
+      "realtime",
+      "operator",
+      "toggle",
+      "sidebar",
+    ];
+    // Khoá được phép giữ từ tiếng Anh (định danh kỹ thuật đứng một mình) — giữ danh sách này ngắn.
+    const allow = new Set<string>([]);
+    const stripTechnical = (s: string) =>
+      s
+        .replace(/`[^`]*`/g, " ") // `mã`
+        .replace(/\{\w+\}/g, " ") // {biến}
+        .replace(/\S*[\w-]+[.:_/][\w./:*-]+\S*/g, " ") // payment.succeeded, read:events, /v1/p/…, HUB_URL, URL
+        .replace(/\b[A-Z][A-Z0-9_-]+\b/g, " "); // PENDING, DEAD, HMAC…
+    for (const [key, value] of Object.entries(DICTIONARIES.vi)) {
+      if (allow.has(key)) continue;
+      const words = stripTechnical(value).toLowerCase().match(/[a-z-]+/g) ?? [];
+      const hits = words.filter((w) => DENY.includes(w) || w === "fan-out");
+      expect({ key, value, hits }).toEqual({ key, value, hits: [] });
+    }
+  });
+
   it("translate thay {biến}, giữ nguyên biến lạ; nextLocale xoay vòng vi ⇄ en", () => {
     expect(translate("en", "header.theme.aria", { mode: "Dark" })).toBe("Theme: Dark. Click to change");
     expect(translate("vi", "header.theme.aria")).toBe("Giao diện: {mode}. Bấm để đổi");

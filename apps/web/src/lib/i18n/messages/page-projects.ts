@@ -1,0 +1,73 @@
+import { defineMessages } from "../locales";
+
+/** Trang Dự án (dashboard/projects) + lỗi tạo dự án dựng ở client (lib/hub/keys-logic.ts → projectCreateError). */
+export const pageProjects = defineMessages("page.projects", {
+  vi: {
+    "page.projects.title": "Dự án",
+    "page.projects.description":
+      "Tài khoản mới đã có sẵn một dự án (tạo lúc đăng ký) và bảng điều khiển đang chọn nó — vào thẳng Khoá API là dùng được. Tạo thêm dự án khi cần tách môi trường, sản phẩm hoặc thành viên.",
+    "page.projects.create": "Tạo dự án",
+    "page.projects.load-error": "Không tải được danh sách dự án: {message}",
+    "page.projects.col.name": "Tên",
+    "page.projects.col.slug": "Mã định danh",
+    "page.projects.col.environment": "Môi trường",
+    "page.projects.col.role": "Vai trò",
+    "page.projects.selected": "đang chọn",
+    "page.projects.role.operator": "vận hành (không là thành viên)",
+    "page.projects.role.owner": "chủ sở hữu",
+    "page.projects.role.member": "thành viên",
+    "page.projects.env.test": "thử",
+    "page.projects.env.live": "thật",
+    "page.projects.select": "Chọn",
+    "page.projects.api-keys": "Khoá API",
+    "page.projects.created": "Đã tạo dự án \"{name}\" — đang chọn dự án này",
+    "page.projects.dialog.description":
+      "Bạn là chủ sở hữu của dự án mới. Mã định danh nằm trong chuỗi kết nối của dịch vụ.",
+    "page.projects.field.name": "Tên",
+    "page.projects.field.name-placeholder": "VD: Cửa hàng của tôi",
+    "page.projects.field.slug": "Mã định danh",
+    "page.projects.field.slug-hint": "Chữ thường, số, gạch ngang; 3–63 ký tự. Không đổi được sau khi tạo.",
+    "page.projects.field.environment": "Môi trường",
+    "page.projects.field.env-test": "thử (hk_test_)",
+    "page.projects.field.env-live": "thật (hk_live_, cần email đã xác minh)",
+    "page.projects.error.slug-taken": "Mã định danh này đã có dự án khác dùng — chọn mã khác.",
+    "page.projects.error.slug-invalid":
+      "Mã định danh chỉ gồm chữ thường, số, gạch ngang; 3–63 ký tự (vd: cua-hang-cua-toi).",
+    "page.projects.error.limit": "Đã đạt số dự án tối đa.",
+    "page.projects.error.http": "Lỗi {status}",
+  },
+  en: {
+    "page.projects.title": "Projects",
+    "page.projects.description":
+      "New accounts come with one project (created at sign-up) and the console has it selected — go straight to API keys to start. Create more projects to separate environments, products or members.",
+    "page.projects.create": "Create project",
+    "page.projects.load-error": "Couldn't load projects: {message}",
+    "page.projects.col.name": "Name",
+    "page.projects.col.slug": "Slug",
+    "page.projects.col.environment": "Environment",
+    "page.projects.col.role": "Role",
+    "page.projects.selected": "selected",
+    "page.projects.role.operator": "operator (not a member)",
+    "page.projects.role.owner": "owner",
+    "page.projects.role.member": "member",
+    "page.projects.env.test": "test",
+    "page.projects.env.live": "live",
+    "page.projects.select": "Select",
+    "page.projects.api-keys": "API keys",
+    "page.projects.created": "Created project \"{name}\" — now selected",
+    "page.projects.dialog.description":
+      "You are the owner of the new project. The slug is part of your services' connection string.",
+    "page.projects.field.name": "Name",
+    "page.projects.field.name-placeholder": "e.g. My store",
+    "page.projects.field.slug": "Slug",
+    "page.projects.field.slug-hint": "Lowercase letters, digits, hyphens; 3–63 characters. Cannot be changed later.",
+    "page.projects.field.environment": "Environment",
+    "page.projects.field.env-test": "test (hk_test_)",
+    "page.projects.field.env-live": "live (hk_live_, requires a verified email)",
+    "page.projects.error.slug-taken": "This slug is already used by another project — pick another one.",
+    "page.projects.error.slug-invalid":
+      "Slug must be lowercase letters, digits, hyphens; 3–63 characters (e.g. my-store).",
+    "page.projects.error.limit": "Project limit reached.",
+    "page.projects.error.http": "Error {status}",
+  },
+});

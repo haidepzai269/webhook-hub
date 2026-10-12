@@ -38,32 +38,34 @@ import { ageRange, DLQ_AGE_VALUES, DLQ_ERROR_KIND_VALUES, DLQ_PARAMS, toApiQuery
 import { useDestinations, useDlq, useReplayBulk, useReplayDelivery } from "@/lib/hub/queries";
 import type { Delivery, ReplayBulkFilter, ReplayBulkResult, ReplaySkipReason } from "@/lib/hub/types";
 import { useUrlParams } from "@/lib/hub/use-url-params";
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
-import { deliveryColumns } from "../deliveries/_components/delivery-columns";
+import { useDeliveryColumns } from "../deliveries/_components/delivery-columns";
 
 const ALL = "__all__";
 const REASON_MIN = 5;
 
 /** Loại lỗi (ADR-163) — theo HTTP status của lần thử cuối, khớp DLQ_ERROR_KINDS ở server. */
-const ERROR_KIND_LABEL: Record<(typeof DLQ_ERROR_KIND_VALUES)[number], string> = {
-  http_4xx: "Đích từ chối (4xx)",
-  http_other: "Lỗi phía nhận (5xx/khác)",
-  no_response: "Không gọi tới đích (circuit)",
+const ERROR_KIND_LABEL: Record<(typeof DLQ_ERROR_KIND_VALUES)[number], MessageKey> = {
+  http_4xx: "page.dlq.error-kind.http-4xx",
+  http_other: "page.dlq.error-kind.http-other",
+  no_response: "page.dlq.error-kind.no-response",
 };
 
-const SKIP_LABEL: Record<ReplaySkipReason, string> = {
-  not_found: "không còn",
-  not_dead: "không còn DEAD",
-  already_replayed: "đã được replay",
-  destination_unavailable: "đích/subscription đã xoá hoặc đang ngắt",
+const SKIP_LABEL: Record<ReplaySkipReason, MessageKey> = {
+  not_found: "page.dlq.skip.not-found",
+  not_dead: "page.dlq.skip.not-dead",
+  already_replayed: "page.dlq.skip.already-replayed",
+  destination_unavailable: "page.dlq.skip.destination-unavailable",
 };
 
-const AGE_LABEL: Record<(typeof DLQ_AGE_VALUES)[number], string> = {
-  "1h": "Trong 1 giờ qua",
-  "24h": "Trong 24 giờ qua",
-  "7d": "Trong 7 ngày qua",
-  gt1d: "Cũ hơn 1 ngày",
-  gt7d: "Cũ hơn 7 ngày",
+const AGE_LABEL: Record<(typeof DLQ_AGE_VALUES)[number], MessageKey> = {
+  "1h": "page.dlq.age.1h",
+  "24h": "page.dlq.age.24h",
+  "7d": "page.dlq.age.7d",
+  gt1d: "page.dlq.age.gt1d",
+  gt7d: "page.dlq.age.gt7d",
 };
 
 /**
@@ -81,6 +83,8 @@ function BulkReplayDialog({
   filter: ReplayBulkFilter;
   summary: string[];
 }) {
+  const t = useT();
+  const locale = useLocale();
   const destinations = useDestinations();
   const bulk = useReplayBulk();
   const [reason, setReason] = useState("");
@@ -110,7 +114,7 @@ function BulkReplayDialog({
       { ...filter, reason: reason.trim(), dryRun: true },
       {
         onSuccess: (res) => res.dryRun && setPreview(res),
-        onError: (e) => toast.error(`Xem trước thất bại: ${e.message}`),
+        onError: (e) => toast.error(t("page.dlq.bulk.preview-failed", { message: e.message })),
       },
     );
 
@@ -123,19 +127,25 @@ function BulkReplayDialog({
         onSuccess: (res) => {
           if (res.dryRun) return;
           const skipped = res.skipped?.count ?? 0;
-          toast.success(`Đã replay ${res.count} delivery`, {
+          toast.success(t("page.dlq.bulk.done", { count: res.count }), {
             description: skipped
-              ? `Bỏ qua ${skipped} (${Object.entries(res.skipped.byReason)
-                  .map(([k, n]) => `${SKIP_LABEL[k as ReplaySkipReason] ?? k}: ${n}`)
-                  .join(", ")}) — đã đổi trạng thái sau lúc xem trước.`
-              : "Tất cả delivery mới + outbox + 1 dòng audit được ghi trong MỘT transaction.",
+              ? t("page.dlq.bulk.skipped", {
+                  count: skipped,
+                  reasons: Object.entries(res.skipped.byReason)
+                    .map(([k, n]) => {
+                      const key = SKIP_LABEL[k as ReplaySkipReason];
+                      return `${key ? t(key) : k}: ${n}`;
+                    })
+                    .join(", "),
+                })
+              : t("page.dlq.bulk.atomic"),
           });
           close(false);
         },
         onError: (e) =>
           e instanceof HubApiError && e.status === 409
-            ? toast.info(e.message, { description: "Không có gì được ghi. Xem trước lại rồi thử lần nữa." })
-            : toast.error(`Replay thất bại: ${e.message}`),
+            ? toast.info(e.message, { description: t("page.dlq.bulk.nothing-written") })
+            : toast.error(t("page.dlq.replay-failed-msg", { message: e.message })),
         onSettled: () => setPreview(null),
       },
     );
@@ -144,41 +154,38 @@ function BulkReplayDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Replay hàng loạt</DialogTitle>
-          <DialogDescription>
-            Mọi delivery DEAD chưa bị replay khớp bộ lọc đang xem (tối đa 500 — không chỉ trang hiện tại). Mỗi cái được
-            tạo lại ở generation mới; lịch sử thất bại giữ nguyên.
-          </DialogDescription>
+          <DialogTitle>{t("page.dlq.bulk")}</DialogTitle>
+          <DialogDescription>{t("page.dlq.bulk.description")}</DialogDescription>
         </DialogHeader>
         <FieldGroup className="gap-4">
           <div className="rounded-md border p-3 text-sm">
-            <span className="text-muted-foreground">Bộ lọc: </span>
-            {summary.length ? summary.join(" · ") : "toàn bộ DLQ"}
+            <span className="text-muted-foreground">{t("page.dlq.bulk.filters")}</span>
+            {summary.length ? summary.join(" · ") : t("page.dlq.bulk.whole")}
           </div>
           <Field className="gap-1.5" data-invalid={reason.length > 0 && !reasonOk}>
-            <FieldLabel htmlFor="bulk-reason">Lý do (bắt buộc)</FieldLabel>
+            <FieldLabel htmlFor="bulk-reason">{t("page.dlq.bulk.reason")}</FieldLabel>
             <Textarea
               id="bulk-reason"
               rows={2}
               value={reason}
-              placeholder="VD: Đích Discord đã sống lại sau sự cố 10/10"
+              placeholder={t("page.dlq.bulk.reason-placeholder")}
               onChange={(e) => setReason(e.target.value)}
               aria-invalid={reason.length > 0 && !reasonOk}
             />
-            <FieldDescription>Ít nhất {REASON_MIN} ký tự — ghi vào audit log cùng transaction.</FieldDescription>
+            <FieldDescription>{t("page.dlq.bulk.reason-hint", { min: REASON_MIN })}</FieldDescription>
           </Field>
 
           {preview && (
             <div className="space-y-2 rounded-md border p-3 text-sm">
               <p>
-                <span className="font-semibold tabular-nums">{preview.count}</span> delivery sẽ được replay
-                {preview.truncated ? ` (chạm trần ${preview.limit} — lọc hẹp hơn để lấy phần còn lại)` : ""}.
+                <span className="font-semibold tabular-nums">{preview.count}</span> {t("page.dlq.bulk.will-replay")}
+                {preview.truncated ? t("page.dlq.bulk.truncated", { limit: preview.limit }) : ""}.
               </p>
               {preview.sample.length > 0 && (
                 <ul className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
                   {preview.sample.map((r) => (
                     <li key={r.id} className="truncate" title={r.lastError ?? ""}>
-                      {formatDateTime(r.createdAt)} · {r.eventType} → {destName(r.destinationId)} · {r.lastError ?? "—"}
+                      {formatDateTime(r.createdAt, locale)} · {r.eventType} → {destName(r.destinationId)} · {r.lastError ?? "—"}
                     </li>
                   ))}
                 </ul>
@@ -188,11 +195,11 @@ function BulkReplayDialog({
         </FieldGroup>
         <DialogFooter>
           <Button type="button" variant="outline" disabled={bulk.isPending} onClick={() => close(false)}>
-            Huỷ
+            {t("common.cancel")}
           </Button>
           <Button type="button" variant="secondary" disabled={!reasonOk || bulk.isPending} onClick={runPreview}>
             <Eye />
-            Xem trước
+            {t("page.dlq.bulk.preview")}
           </Button>
           <Button
             type="button"
@@ -200,7 +207,7 @@ function BulkReplayDialog({
             onClick={runReplay}
           >
             <ListRestart />
-            {bulk.isPending ? "Đang chạy…" : `Replay ${preview?.count ?? "N"} delivery`}
+            {bulk.isPending ? t("page.dlq.bulk.running") : t("page.dlq.bulk.run", { count: preview?.count ?? "N" })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -209,6 +216,8 @@ function BulkReplayDialog({
 }
 
 function DlqView() {
+  const t = useT();
+  const deliveryColumns = useDeliveryColumns();
   const url = useUrlParams(DLQ_PARAMS);
   const v = url.values;
   const destinations = useDestinations();
@@ -223,9 +232,12 @@ function DlqView() {
   );
   const filtered = Boolean(v.destination || v.errorKind || v.age);
   const summary = [
-    v.destination && `đích ${destinations.data?.find((d) => d.id === v.destination)?.name ?? shortId(v.destination)}`,
-    v.errorKind && ERROR_KIND_LABEL[v.errorKind as keyof typeof ERROR_KIND_LABEL],
-    v.age && AGE_LABEL[v.age as keyof typeof AGE_LABEL].toLowerCase(),
+    v.destination &&
+      t("page.dlq.filter.destination-summary", {
+        name: destinations.data?.find((d) => d.id === v.destination)?.name ?? shortId(v.destination),
+      }),
+    v.errorKind && t(ERROR_KIND_LABEL[v.errorKind as keyof typeof ERROR_KIND_LABEL]),
+    v.age && t(AGE_LABEL[v.age as keyof typeof AGE_LABEL]).toLowerCase(),
   ].filter((x): x is string => Boolean(x));
   const replay = useReplayDelivery();
   const [target, setTarget] = useState<Delivery | null>(null);
@@ -242,12 +254,12 @@ function DlqView() {
         cell: ({ row }) => (
           <Button size="sm" variant="outline" onClick={() => setTarget(row.original)}>
             <RotateCcw />
-            Replay
+            {t("page.dlq.replay")}
           </Button>
         ),
       },
     ],
-    [],
+    [deliveryColumns, t],
   );
 
   const confirmReplay = () => {
@@ -258,17 +270,17 @@ function DlqView() {
       {
         onSuccess: (res) => {
           if (res.success) {
-            toast.success(`Đã replay — delivery mới ở generation ${res.generation}`, {
-              description: "Worker sẽ gửi lại qua outbox. Theo dõi ở trang Deliveries.",
+            toast.success(t("page.dlq.replayed", { generation: res.generation ?? "—" }), {
+              description: t("page.dlq.replayed-hint"),
             });
           } else {
-            toast.error(res.message ?? "Replay thất bại");
+            toast.error(res.message ?? t("page.dlq.replay-failed"));
           }
         },
         onError: (e) =>
           e instanceof HubApiError && e.status === 409
-            ? toast.info(e.message, { description: "Danh sách DLQ đã được làm mới." })
-            : toast.error(`Replay thất bại: ${e.message}`),
+            ? toast.info(e.message, { description: t("page.dlq.conflict-refreshed") })
+            : toast.error(t("page.dlq.replay-failed-msg", { message: e.message })),
         onSettled: () => {
           setTarget(null);
           setReason("");
@@ -280,22 +292,22 @@ function DlqView() {
   return (
     <>
       <PageHeader
-        title="Dead Letter Queue"
-        description="Delivery đã hết lượt retry (DEAD). Replay KHÔNG sửa bản ghi cũ mà tạo delivery mới với attempt_generation + 1 — lịch sử thất bại được giữ nguyên."
+        title={t("page.dlq.title")}
+        description={t("page.dlq.description")}
         actions={
           <Button onClick={() => setBulkOpen(true)} disabled={!data?.items.length}>
             <ListRestart />
-            Replay hàng loạt
+            {t("page.dlq.bulk")}
           </Button>
         }
       />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select value={v.destination ?? ALL} onValueChange={(d) => url.setFilter({ destination: d === ALL ? null : d })}>
-          <SelectTrigger size="sm" className="w-52" aria-label="Đích">
+          <SelectTrigger size="sm" className="w-52" aria-label={t("page.dlq.filter.destination")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi đích</SelectItem>
+            <SelectItem value={ALL}>{t("page.dlq.filter.all-destinations")}</SelectItem>
             {(destinations.data ?? []).map((d) => (
               <SelectItem key={d.id} value={d.id}>
                 {d.name} · {d.type}
@@ -304,27 +316,27 @@ function DlqView() {
           </SelectContent>
         </Select>
         <Select value={v.errorKind ?? ALL} onValueChange={(k) => url.setFilter({ errorKind: k === ALL ? null : k })}>
-          <SelectTrigger size="sm" className="w-56" aria-label="Loại lỗi">
+          <SelectTrigger size="sm" className="w-56" aria-label={t("page.dlq.filter.error-kind")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi loại lỗi</SelectItem>
+            <SelectItem value={ALL}>{t("page.dlq.filter.all-error-kinds")}</SelectItem>
             {DLQ_ERROR_KIND_VALUES.map((k) => (
               <SelectItem key={k} value={k}>
-                {ERROR_KIND_LABEL[k]}
+                {t(ERROR_KIND_LABEL[k])}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={v.age ?? ALL} onValueChange={(a) => url.setFilter({ age: a === ALL ? null : a })}>
-          <SelectTrigger size="sm" className="w-44" aria-label="Tuổi">
+          <SelectTrigger size="sm" className="w-44" aria-label={t("page.dlq.filter.age")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi thời điểm</SelectItem>
+            <SelectItem value={ALL}>{t("page.dlq.filter.all-ages")}</SelectItem>
             {DLQ_AGE_VALUES.map((a) => (
               <SelectItem key={a} value={a}>
-                {AGE_LABEL[a]}
+                {t(AGE_LABEL[a])}
               </SelectItem>
             ))}
           </SelectContent>
@@ -332,7 +344,7 @@ function DlqView() {
         {filtered && (
           <Button variant="ghost" size="sm" onClick={url.clear}>
             <X />
-            Bỏ lọc
+            {t("common.filters.clear")}
           </Button>
         )}
       </div>
@@ -344,8 +356,8 @@ function DlqView() {
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
-        searchPlaceholder="Lọc trong trang này…"
-        emptyText={filtered ? "Không có delivery DEAD nào khớp bộ lọc." : "DLQ trống — không có delivery nào chết."}
+        searchPlaceholder={t("page.dlq.search")}
+        emptyText={filtered ? t("page.dlq.no-match") : t("page.dlq.empty")}
         toolbar={
           <CursorPager
             next={data?.next}
@@ -371,33 +383,37 @@ function DlqView() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Replay delivery này?</AlertDialogTitle>
+            <AlertDialogTitle>{t("page.dlq.confirm.title")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
-                  Gửi lại sự kiện <span className="font-mono">{target?.event?.type}</span> tới{" "}
-                  <span className="font-medium">{target?.subscription?.destination?.name ?? "đích"}</span>.
+                  {t("page.dlq.confirm.send")} <span className="font-mono">{target?.event?.type}</span>{" "}
+                  {t("page.dlq.confirm.to")}{" "}
+                  <span className="font-medium">
+                    {target?.subscription?.destination?.name ?? t("page.dlq.confirm.destination")}
+                  </span>
+                  .
                 </p>
                 <p>
-                  Hub tạo delivery mới với <span className="font-mono">attempt_generation</span> ={" "}
-                  <span className="font-mono">{(target?.attemptGeneration ?? 0) + 1}</span> (bản cũ giữ trạng thái
-                  DEAD). Nếu đích không idempotent, nó có thể nhận sự kiện hai lần.
+                  {t("page.dlq.confirm.new")} <span className="font-mono">attempt_generation</span> ={" "}
+                  <span className="font-mono">{(target?.attemptGeneration ?? 0) + 1}</span>{" "}
+                  {t("page.dlq.confirm.idempotent")}
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Field className="gap-1.5">
-            <FieldLabel htmlFor="replay-reason">Lý do (không bắt buộc)</FieldLabel>
+            <FieldLabel htmlFor="replay-reason">{t("page.dlq.reason-optional")}</FieldLabel>
             <Input
               id="replay-reason"
               value={reason}
-              placeholder="Ghi vào audit log"
+              placeholder={t("page.dlq.reason-placeholder")}
               onChange={(e) => setReason(e.target.value)}
               disabled={replay.isPending}
             />
           </Field>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={replay.isPending}>Huỷ</AlertDialogCancel>
+            <AlertDialogCancel disabled={replay.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               disabled={replay.isPending}
               onClick={(e) => {
@@ -405,7 +421,7 @@ function DlqView() {
                 confirmReplay();
               }}
             >
-              {replay.isPending ? "Đang replay…" : "Replay"}
+              {replay.isPending ? t("page.dlq.replaying") : t("page.dlq.replay")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

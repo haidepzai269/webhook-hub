@@ -1,3 +1,5 @@
+import { createT, type TranslateFn } from "./i18n/dictionary";
+
 // Lỗi production (2026-10-12): trình duyệt tự điền email + mật khẩu đăng nhập của operator vào ô "Client ID"/"Api Key" của
 // form Kết nối PayOS — bấm Kết nối là gửi mật khẩu operator sang PayOS. Mọi ô credential đi qua đây.
 
@@ -23,7 +25,10 @@ export function credentialInputAttrs(scope: string, field: string, secret: boole
   } as const;
 }
 
-/** Khoá/ID của provider không bao giờ chứa "@" — có thì gần như chắc là email bị tự điền. */
-export function credentialError(label: string, value: string): string | null {
-  return value.includes("@") ? `Đây có vẻ là email, không phải ${label}` : null;
+/**
+ * Khoá/ID của provider không bao giờ chứa "@" — có thì gần như chắc là email bị tự điền. `t` mặc định tiếng Việt
+ * (Shop dùng hàm này không có i18n); console truyền `useT()`.
+ */
+export function credentialError(label: string, value: string, t: TranslateFn = createT("vi")): string | null {
+  return value.includes("@") ? t("errors.credential.looks-like-email", { label }) : null;
 }

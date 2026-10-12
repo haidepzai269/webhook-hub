@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link2, Plug, Plus } from "lucide-react";
@@ -22,6 +22,8 @@ import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
+import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
 
@@ -29,59 +31,67 @@ import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
 const OpenConnection = createContext<(id: string) => void>(() => undefined);
 function ConnectionButton({ id }: { id: string }) {
   const open = useContext(OpenConnection);
+  const t = useT();
   return (
-    <Button size="sm" variant="ghost" onClick={() => open(id)} title="Kết nối provider (hub tự đăng ký URL)">
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => open(id)}
+      title={t("page.sources.connection-button")}
+      aria-label={t("page.sources.connection-button")}
+    >
       <Link2 />
     </Button>
   );
 }
 
-const SECRET_HINT: Record<(typeof PROVIDERS)[number], string> = {
-  github: "Webhook secret đặt trong GitHub (HMAC-SHA256 trên raw body). Content type: application/json khuyến nghị.",
-  sepay: "API key SePay (header Authorization: Apikey …).",
-  payos: "Checksum key của PayOS.",
-  stripe: "Signing secret của endpoint Stripe (whsec_…).",
+const SECRET_HINT: Record<(typeof PROVIDERS)[number], MessageKey> = {
+  github: "page.sources.secret-hint.github",
+  sepay: "page.sources.secret-hint.sepay",
+  payos: "page.sources.secret-hint.payos",
+  stripe: "page.sources.secret-hint.stripe",
 };
 
-const schema = z.object({
-  provider: z.enum(PROVIDERS),
-  name: z.string().trim().min(1, "Nhập tên nguồn.").max(255),
-  secret: z.string().min(8, "Secret tối thiểu 8 ký tự."),
-});
-type Values = z.infer<typeof schema>;
+const makeSchema = (t: TranslateFn) =>
+  z.object({
+    provider: z.enum(PROVIDERS),
+    name: z.string().trim().min(1, t("page.sources.form.name-required")).max(255),
+    secret: z.string().min(8, t("page.sources.form.secret-min")),
+  });
+type Values = z.infer<ReturnType<typeof makeSchema>>;
 
 const fullUrl = (s: Source) => `${HUB_API_URL}${s.webhookUrl}`;
 
-const columns: HubColumn<Source>[] = [
+const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
   {
     id: "name",
-    header: "Tên",
+    header: t("common.name"),
     accessorFn: (s) => s.name,
     cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
     enableHiding: false,
   },
   {
     id: "provider",
-    header: "Provider",
+    header: t("page.sources.col.provider"),
     accessorFn: (s) => s.provider,
     cell: ({ row }) => <Badge variant="secondary">{row.original.provider}</Badge>,
   },
   {
     id: "webhookUrl",
-    header: "Webhook URL (dán vào provider)",
+    header: t("page.sources.col.webhook-url"),
     accessorFn: (s) => s.webhookUrl,
     cell: ({ row }) => (
       <div className="flex max-w-md items-center gap-1">
         <span className="truncate font-mono text-xs" title={fullUrl(row.original)}>
           {fullUrl(row.original)}
         </span>
-        <CopyButton value={fullUrl(row.original)} label="Sao chép webhook URL" />
+        <CopyButton value={fullUrl(row.original)} label={t("page.sources.copy-url")} />
       </div>
     ),
   },
   {
     id: "secret",
-    header: "Secret",
+    header: t("page.sources.col.secret"),
     accessorFn: (s) => String(s.secretVersions ?? 0),
     cell: ({ row }) => (
       <span className="text-muted-foreground text-xs">
@@ -91,16 +101,20 @@ const columns: HubColumn<Source>[] = [
   },
   {
     id: "isActive",
-    header: "Trạng thái",
+    header: t("common.status"),
     accessorFn: (s) => (s.isActive ? "active" : "inactive"),
     cell: ({ row }) =>
-      row.original.isActive ? <Badge variant="outline">Đang bật</Badge> : <Badge variant="destructive">Tắt</Badge>,
+      row.original.isActive ? (
+        <Badge variant="outline">{t("common.enabled")}</Badge>
+      ) : (
+        <Badge variant="destructive">{t("page.sources.inactive")}</Badge>
+      ),
   },
   {
     id: "createdAt",
-    header: "Tạo lúc",
+    header: t("common.created-at"),
     accessorFn: (s) => s.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt)}</span>,
+    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
   },
   {
     id: "connection",
@@ -112,6 +126,10 @@ const columns: HubColumn<Source>[] = [
 ];
 
 export default function SourcesPage() {
+  const t = useT();
+  const locale = useLocale();
+  const columns = useMemo(() => makeColumns(t, locale), [t, locale]);
+  const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSources();
   const create = useCreateSource();
   const [open, setOpen] = useState(false);
@@ -129,29 +147,31 @@ export default function SourcesPage() {
   const onSubmit = (values: Values) =>
     create.mutateAsync(values).then(
       (src) => {
-        toast.success(`Đã tạo nguồn "${src.name}"`, {
-          description: `Webhook URL: ${HUB_API_URL}/hooks/${src.provider}/${src.sourceKey}`,
+        toast.success(t("page.sources.toast.created", { name: src.name }), {
+          description: t("page.sources.toast.created-url", {
+            url: `${HUB_API_URL}/hooks/${src.provider}/${src.sourceKey}`,
+          }),
         });
         form.reset();
         setOpen(false);
       },
-      (e: Error) => toast.error(`Tạo nguồn thất bại: ${e.message}`),
+      (e: Error) => toast.error(t("page.sources.toast.create-failed", { message: e.message })),
     );
 
   return (
     <>
       <PageHeader
-        title="Nguồn (Sources)"
-        description="Mỗi nguồn là một endpoint nhận webhook của một provider. Secret được mã hoá AES-256-GCM, không bao giờ hiển thị lại."
+        title={t("page.sources.title")}
+        description={t("page.sources.description")}
         actions={
           <div className="flex gap-2">
             <Button onClick={() => (setPreset(null), setConnectOpen(true))}>
               <Plug />
-              Kết nối provider
+              {t("page.sources.connect-provider")}
             </Button>
             <Button variant="outline" onClick={() => setOpen(true)}>
               <Plus />
-              Thêm nguồn (dán URL tay)
+              {t("page.sources.add-manual")}
             </Button>
           </div>
         }
@@ -174,16 +194,16 @@ export default function SourcesPage() {
           getRowId={(s) => s.id}
           isLoading={isLoading}
           error={error}
-          searchPlaceholder="Lọc theo tên, provider…"
-          emptyText="Chưa có nguồn nào."
+          searchPlaceholder={t("page.sources.search")}
+          emptyText={t("page.sources.empty")}
         />
       </OpenConnection.Provider>
 
       <FormDialog
         open={open}
         onOpenChange={setOpen}
-        title="Thêm nguồn webhook"
-        description="Sau khi tạo, dán Webhook URL vào trang cấu hình webhook của provider."
+        title={t("page.sources.form.title")}
+        description={t("page.sources.form.description")}
         formId="source-form"
         submitting={create.isPending}
       >
@@ -194,7 +214,7 @@ export default function SourcesPage() {
               name="provider"
               render={({ field }) => (
                 <Field className="gap-1.5">
-                  <FieldLabel>Provider</FieldLabel>
+                  <FieldLabel>{t("page.sources.col.provider")}</FieldLabel>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
@@ -215,11 +235,11 @@ export default function SourcesPage() {
               name="name"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="src-name">Tên</FieldLabel>
+                  <FieldLabel htmlFor="src-name">{t("common.name")}</FieldLabel>
                   <Input
                     {...field}
                     id="src-name"
-                    placeholder="VD: GitHub repo chính"
+                    placeholder={t("page.sources.form.name-placeholder")}
                     aria-invalid={fieldState.invalid}
                   />
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
@@ -231,14 +251,14 @@ export default function SourcesPage() {
               name="secret"
               render={({ field, fieldState }) => (
                 <Field className="gap-1.5" data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="src-secret">Secret</FieldLabel>
+                  <FieldLabel htmlFor="src-secret">{t("page.sources.col.secret")}</FieldLabel>
                   <Input
                     {...field}
                     {...credentialInputAttrs("source", "secret", true)}
                     id="src-secret"
                     aria-invalid={fieldState.invalid}
                   />
-                  <FieldDescription>{SECRET_HINT[provider]}</FieldDescription>
+                  <FieldDescription>{t(SECRET_HINT[provider])}</FieldDescription>
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}

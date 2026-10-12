@@ -6,6 +6,8 @@ import Link from "next/link";
 
 import { KeyRound } from "lucide-react";
 
+import { useT } from "@/lib/i18n/use-t";
+
 import { AuthShell } from "../_components/auth-shell";
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
@@ -15,6 +17,7 @@ import { AuthField } from "../_components/auth-field";
  * ref rồi xoá query bằng `history.replaceState` (SPEC-auth §5.4). Mật khẩu yếu -> 422, token KHÔNG bị đốt.
  */
 export default function ResetPasswordPage() {
+  const t = useT();
   const token = useRef<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -25,13 +28,13 @@ export default function ResetPasswordPage() {
     if (token.current !== null) return;
     token.current = new URLSearchParams(window.location.search).get("token") ?? "";
     window.history.replaceState(null, "", "/reset-password");
-    if (!token.current) setMessage("Thiếu token. Mở lại link trong email, hoặc xin link mới.");
-  }, []);
+    if (!token.current) setMessage(t("auth.reset.missing-token"));
+  }, [t]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (password !== confirm) {
-      setMessage("Hai mật khẩu không khớp.");
+      setMessage(t("auth.validation.passwords-mismatch"));
       return;
     }
     setState("sending");
@@ -51,33 +54,33 @@ export default function ResetPasswordPage() {
       setState("idle");
       setMessage(
         data.error === "token_invalid"
-          ? "Link không hợp lệ, đã dùng hoặc đã hết hạn. Xin link mới."
-          : (data.message ?? `Không đặt lại được (HTTP ${res.status}).`),
+          ? t("auth.reset.invalid")
+          : (data.message ?? t("auth.reset.failed", { status: res.status })),
       );
     } catch (err) {
       setState("idle");
-      setMessage(`Không kết nối được hub-api: ${err instanceof Error ? err.message : String(err)}`);
+      setMessage(t("auth.network-error", { message: err instanceof Error ? err.message : String(err) }));
     }
   };
 
   return (
     <AuthShell
-      title="ĐẶT LẠI MẬT KHẨU"
-      footerText="Cần link mới?"
-      footerLinkLabel="Quên mật khẩu"
+      title={t("auth.reset.title")}
+      footerText={t("auth.reset.footer")}
+      footerLinkLabel={t("auth.forgot-short")}
       footerHref="/forgot-password"
       social={false}
     >
       {state === "done" ? (
         <p>
           <KeyRound size={18} aria-hidden style={{ verticalAlign: "text-bottom", marginRight: 6 }} />
-          Đã đặt mật khẩu mới. Mọi phiên đăng nhập cũ đã bị thu hồi. <Link href="/login">Đăng nhập</Link>
+          {t("auth.reset.done")} <Link href="/login">{t("auth.sign-in")}</Link>
         </p>
       ) : (
         <form noValidate onSubmit={onSubmit}>
           <AuthField
             id="reset-password"
-            label="MẬT KHẨU MỚI"
+            label={t("auth.field.new-password")}
             type="password"
             autoComplete="new-password"
             autoFocus
@@ -86,7 +89,7 @@ export default function ResetPasswordPage() {
           />
           <AuthField
             id="reset-confirm"
-            label="NHẬP LẠI"
+            label={t("auth.field.confirm")}
             type="password"
             autoComplete="new-password"
             value={confirm}
@@ -98,7 +101,7 @@ export default function ResetPasswordPage() {
             </p>
           )}
           <button className={styles.button} type="submit" disabled={state === "sending" || !password}>
-            {state === "sending" ? "ĐANG LƯU…" : "ĐẶT MẬT KHẨU"}
+            {state === "sending" ? t("auth.reset.submitting") : t("auth.reset.submit")}
           </button>
         </form>
       )}

@@ -6,6 +6,8 @@
  * Giá trị lạ trên URL (link cũ, gõ tay) bị BỎ QUA thay vì gửi lên server để nhận 400 — trang vẫn mở được.
  */
 
+import type { MessageKey } from "../i18n/dictionary";
+
 export interface ParamSpec {
   /** Danh sách giá trị hợp lệ (enum). */
   allowed?: readonly string[];
@@ -184,8 +186,8 @@ export function localInputToIsoEnd(local: string): string | undefined {
   return iso === undefined ? undefined : new Date(Date.parse(iso) + 59_999).toISOString();
 }
 
-/** Lỗi khoảng thời gian phía client (null = hợp lệ / chưa đủ hai đầu). */
-export function timeRangeError(from: string | undefined, to: string | undefined): string | null {
+/** Lỗi khoảng thời gian phía client — trả KHOÁ i18n (null = hợp lệ / chưa đủ hai đầu); component dịch bằng t(). */
+export function timeRangeError(from: string | undefined, to: string | undefined): MessageKey | null {
   if (!from || !to) return null;
-  return Date.parse(from) > Date.parse(to) ? "“Từ” phải trước “Đến”" : null;
+  return Date.parse(from) > Date.parse(to) ? "admin.time-range.order-error" : null;
 }

@@ -2,6 +2,8 @@
 
 import type { MouseEvent } from "react";
 
+import { useT } from "@/lib/i18n/use-t";
+
 import styles from "./auth.module.css";
 
 /**
@@ -31,12 +33,13 @@ function GoogleG() {
 }
 
 export function SocialLogin() {
+  const t = useT();
   return (
     <div className={styles.socialLogin}>
-      <a className={styles.socialBtn} href="/auth/google" onClick={withNext("/auth/google")} aria-label="Đăng nhập bằng Google" title="Đăng nhập bằng Google">
+      <a className={styles.socialBtn} href="/auth/google" onClick={withNext("/auth/google")} aria-label={t("auth.social.google")} title={t("auth.social.google")}>
         <GoogleG />
       </a>
-      <a className={styles.socialBtn} href="/auth/github" aria-label="Đăng nhập bằng GitHub" title="Đăng nhập bằng GitHub">
+      <a className={styles.socialBtn} href="/auth/github" aria-label={t("auth.social.github")} title={t("auth.social.github")}>
         GH
       </a>
     </div>

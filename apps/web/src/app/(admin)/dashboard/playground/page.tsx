@@ -21,6 +21,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { DEMO_SIMULATE, HUB_API_URL } from "@/lib/env";
 import { useSources } from "@/lib/hub/queries";
 import type { Provider } from "@/lib/hub/types";
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 
 import { buildRequest, samplePayload } from "./_components/build-request";
 
@@ -37,14 +39,15 @@ interface SendResult {
 const DEMO_SEPAY_APIKEY = DEMO_SIMULATE ? (process.env.NEXT_PUBLIC_DEMO_SEPAY_APIKEY ?? "") : "";
 
 /** S2-4: PayOS cũng có ô khoá — Playground ký `data` bằng checksum key như PayOS thật. */
-const SECRET_LABEL: Record<Provider, string> = {
-  sepay: "API key",
-  payos: "Checksum key",
-  github: "Secret để ký",
-  stripe: "Secret để ký",
+const SECRET_LABEL: Record<Provider, MessageKey> = {
+  sepay: "page.playground.secret.sepay",
+  payos: "page.playground.secret.payos",
+  github: "page.playground.secret.sign",
+  stripe: "page.playground.secret.sign",
 };
 
 export default function PlaygroundPage() {
+  const t = useT();
   const qc = useQueryClient();
   const sources = useSources();
   const [sourceId, setSourceId] = useState<string>("");
@@ -92,7 +95,7 @@ export default function PlaygroundPage() {
     setResult(null);
     const url = `${HUB_API_URL}${source.webhookUrl}`;
     try {
-      const req = await buildRequest(source.provider, body, secret);
+      const req = await buildRequest(source.provider, body, secret, t);
       // PayOS: Playground ký lại body -> hiện đúng bản đã gửi để "Gửi lại" ra 200 duplicate.
       if (req.body !== body) setBody(req.body);
       const t0 = performance.now();
@@ -126,22 +129,22 @@ export default function PlaygroundPage() {
   return (
     <>
       <PageHeader
-        title="Playground"
-        description="Bắn một webhook thử vào hub, ký đúng như provider thật — rồi xem nó chảy qua Sự kiện → Deliveries."
+        title={t("page.playground.title")}
+        description={t("page.playground.description")}
       />
       <div className="grid grid-cols-1 gap-4 md:gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Yêu cầu</CardTitle>
-            <CardDescription>Gửi thẳng từ trình duyệt tới {HUB_API_URL}/hooks/…</CardDescription>
+            <CardTitle>{t("page.playground.request.title")}</CardTitle>
+            <CardDescription>{t("page.playground.request.desc", { url: HUB_API_URL })}</CardDescription>
           </CardHeader>
           <CardContent>
             <FieldGroup className="gap-4">
               <Field className="gap-1.5">
-                <FieldLabel>Nguồn</FieldLabel>
+                <FieldLabel>{t("page.playground.field.source")}</FieldLabel>
                 <Select value={sourceId} onValueChange={setSourceId}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder={sources.isLoading ? "Đang tải…" : "Chọn nguồn"} />
+                    <SelectValue placeholder={sources.isLoading ? t("common.loading") : t("page.playground.field.source-placeholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {(sources.data ?? []).map((s) => (
@@ -153,11 +156,11 @@ export default function PlaygroundPage() {
                 </Select>
                 {!sources.isLoading && !sources.data?.length && (
                   <FieldDescription>
-                    Chưa có nguồn —{" "}
+                    {t("page.playground.no-sources.before")}{" "}
                     <Link href="/dashboard/sources" className="underline">
-                      tạo một nguồn
+                      {t("page.playground.no-sources.link")}
                     </Link>{" "}
-                    trước.
+                    {t("page.playground.no-sources.after")}
                   </FieldDescription>
                 )}
                 {source && (
@@ -170,24 +173,24 @@ export default function PlaygroundPage() {
 
               {source && (
                 <Field className="gap-1.5">
-                  <FieldLabel htmlFor="pg-secret">{SECRET_LABEL[source.provider]}</FieldLabel>
+                  <FieldLabel htmlFor="pg-secret">{t(SECRET_LABEL[source.provider])}</FieldLabel>
                   <Input
                     id="pg-secret"
                     type="password"
                     autoComplete="off"
                     value={secret}
                     onChange={(e) => setSecret(e.target.value)}
-                    placeholder="Để trống = gửi chữ ký sai"
+                    placeholder={t("page.playground.secret.placeholder")}
                   />
                   <FieldDescription>
-                    Tính HMAC ngay trong trình duyệt (WebCrypto), không gửi secret đi đâu. Để trống để xem hub trả 401.
+                    {t("page.playground.secret.hint")}
                   </FieldDescription>
                 </Field>
               )}
 
               <Field className="gap-1.5">
                 <div className="flex items-center justify-between">
-                  <FieldLabel htmlFor="pg-body">Body (gửi nguyên văn)</FieldLabel>
+                  <FieldLabel htmlFor="pg-body">{t("page.playground.body.label")}</FieldLabel>
                   {source && (
                     <Button
                       type="button"
@@ -196,7 +199,7 @@ export default function PlaygroundPage() {
                       onClick={() => setBody(JSON.stringify(samplePayload(source.provider), null, 2))}
                     >
                       <Shuffle />
-                      Mẫu mới
+                      {t("page.playground.body.sample")}
                     </Button>
                   )}
                 </div>
@@ -209,13 +212,13 @@ export default function PlaygroundPage() {
                   spellCheck={false}
                 />
                 <FieldDescription>
-                  Gửi lại đúng body này hai lần (cùng id) để thấy idempotency: lần hai không tạo sự kiện mới.
+                  {t("page.playground.body.hint")}
                 </FieldDescription>
               </Field>
 
               <Button onClick={() => void send()} disabled={!source || sending}>
                 <Send />
-                {sending ? "Đang gửi…" : "Gửi webhook"}
+                {sending ? t("page.playground.sending") : t("page.playground.send")}
               </Button>
             </FieldGroup>
           </CardContent>
@@ -224,7 +227,7 @@ export default function PlaygroundPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              Phản hồi
+              {t("page.playground.response.title")}
               {result && (
                 <Badge className={ok ? "bg-emerald-600 text-white" : "bg-rose-600 text-white"}>
                   HTTP {result.status}
@@ -233,25 +236,25 @@ export default function PlaygroundPage() {
               {result && <span className="font-normal text-muted-foreground text-xs">{result.ms}ms</span>}
             </CardTitle>
             <CardDescription>
-              Hub chỉ trả 2xx SAU khi COMMIT raw event vào Postgres (BB-3) — 2xx nghĩa là sự kiện không thể mất.
+              {t("page.playground.response.desc")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {sendError && <p className="text-destructive text-sm">Không gửi được: {sendError}</p>}
-            {!result && !sendError && <p className="text-muted-foreground text-sm">Chưa gửi gì.</p>}
+            {sendError && <p className="text-destructive text-sm">{t("page.playground.send-error", { message: sendError })}</p>}
+            {!result && !sendError && <p className="text-muted-foreground text-sm">{t("page.playground.nothing-sent")}</p>}
             {result && (
               <>
                 <div className="space-y-1.5">
-                  <h3 className="font-medium text-sm">Body phản hồi</h3>
+                  <h3 className="font-medium text-sm">{t("page.playground.response.body")}</h3>
                   <JsonBlock value={result.body} maxHeight="16rem" />
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="font-medium text-sm">Header đã gửi</h3>
+                  <h3 className="font-medium text-sm">{t("page.playground.response.headers")}</h3>
                   <JsonBlock value={result.requestHeaders} maxHeight="12rem" />
                 </div>
                 {ok && (
                   <Button asChild variant="outline" size="sm">
-                    <Link href="/dashboard/events">Xem trong Sự kiện →</Link>
+                    <Link href="/dashboard/events">{t("page.playground.view-events")}</Link>
                   </Button>
                 )}
               </>

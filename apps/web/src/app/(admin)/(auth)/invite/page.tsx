@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
 
 import { readCsrfCookie } from "@/lib/hub/client";
+import { useT } from "@/lib/i18n/use-t";
 
 import { AuthShell } from "../_components/auth-shell";
 import styles from "../_components/auth.module.css";
@@ -29,6 +30,7 @@ function readToken(): string {
  */
 export default function InvitePage() {
   const router = useRouter();
+  const t = useT();
   const started = useRef(false);
   const [state, setState] = useState<"checking" | "anonymous" | "ready" | "accepting" | "error">("checking");
   const [message, setMessage] = useState<string | null>(null);
@@ -47,13 +49,13 @@ export default function InvitePage() {
     }
     if (!fromUrl && !readToken()) {
       setState("error");
-      setMessage("Không tìm thấy lời mời. Mở lại link trong email.");
+      setMessage(t("auth.invite.not-found"));
       return;
     }
     fetch("/auth/me", { credentials: "include" })
       .then((r) => setState(r.ok ? "ready" : "anonymous"))
       .catch(() => setState("anonymous"));
-  }, []);
+  }, [t]);
 
   const accept = async () => {
     setState("accepting");
@@ -81,36 +83,37 @@ export default function InvitePage() {
       setState(res.status === 401 ? "anonymous" : "error");
       setMessage(
         data.error === "invite_email_mismatch"
-          ? "Lời mời gửi cho email khác. Đăng xuất rồi đăng nhập bằng đúng email được mời."
+          ? t("auth.invite.email-mismatch")
           : data.error === "token_invalid"
-            ? "Lời mời không hợp lệ, đã dùng hoặc đã hết hạn."
-            : (data.message ?? `Không nhận được lời mời (HTTP ${res.status}).`),
+            ? t("auth.invite.invalid")
+            : (data.message ?? t("auth.invite.failed", { status: res.status })),
       );
     } catch (err) {
       setState("error");
-      setMessage(`Không kết nối được hub-api: ${err instanceof Error ? err.message : String(err)}`);
+      setMessage(t("auth.network-error", { message: err instanceof Error ? err.message : String(err) }));
     }
   };
 
   return (
     <AuthShell
-      title="LỜI MỜI VÀO PROJECT"
-      footerText="Chưa đăng nhập?"
-      footerLinkLabel="Đăng nhập"
+      title={t("auth.invite.title")}
+      footerText={t("auth.invite.footer")}
+      footerLinkLabel={t("auth.sign-in")}
       footerHref="/login?next=/invite"
       social={false}
     >
-      {state === "checking" && <p>Đang kiểm tra…</p>}
+      {state === "checking" && <p>{t("auth.invite.checking")}</p>}
       {state === "anonymous" && (
         <p>
-          Đăng nhập bằng <b>đúng email được mời</b> để nhận lời mời: <Link href="/login?next=/invite">Đăng nhập</Link>{" "}
-          hoặc <Link href="/register?next=/invite">Đăng ký</Link>.
+          {t("auth.invite.sign-in-before")} <b>{t("auth.invite.sign-in-email")}</b> {t("auth.invite.sign-in-after")}{" "}
+          <Link href="/login?next=/invite">{t("auth.sign-in")}</Link> {t("auth.invite.or")}{" "}
+          <Link href="/register?next=/invite">{t("auth.sign-up")}</Link>.
         </p>
       )}
       {(state === "ready" || state === "accepting") && (
         <button className={styles.button} type="button" onClick={accept} disabled={state === "accepting"}>
           <UserPlus size={16} aria-hidden style={{ verticalAlign: "text-bottom", marginRight: 6 }} />
-          {state === "accepting" ? "ĐANG NHẬN…" : "NHẬN LỜI MỜI"}
+          {state === "accepting" ? t("auth.invite.accepting") : t("auth.invite.accept")}
         </button>
       )}
       {message && (

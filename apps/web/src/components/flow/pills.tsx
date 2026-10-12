@@ -1,11 +1,14 @@
+"use client";
+
 import type { ReactNode } from "react";
 
 import { cn } from "cn";
 
 import type { Health, StageStatus } from "@hub/flow";
-import { HEALTH_LABELS, STAGE_STATUS_LABELS } from "@hub/flow";
 
-import { HEALTH_TONE, HealthGlyph, STATUS_TONE, StatusGlyph, type Tone, toneStyle } from "./tokens";
+import { useT } from "@/lib/i18n/use-t";
+
+import { HEALTH_TONE, HealthGlyph, healthKey, STATUS_TONE, StatusGlyph, stageStatusKey, type Tone, toneStyle } from "./tokens";
 
 export function TonePill({ tone, icon, children, className }: { tone: Tone; icon?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -21,27 +24,30 @@ export function TonePill({ tone, icon, children, className }: { tone: Tone; icon
 
 /** Pill trạng thái chặng: màu + icon + chữ (không bao giờ chỉ có màu). */
 export function StatusPill({ status, label }: { status: StageStatus; label?: string }) {
+  const t = useT();
   return (
     <TonePill tone={STATUS_TONE[status]} icon={<StatusGlyph status={status} small />}>
-      {label ?? STAGE_STATUS_LABELS[status]}
+      {label ?? t(stageStatusKey(status))}
     </TonePill>
   );
 }
 
 export function HealthPill({ health, label }: { health: Health; label?: string }) {
+  const t = useT();
   return (
     <TonePill tone={HEALTH_TONE[health]} icon={<HealthGlyph health={health} small />}>
-      {label ?? HEALTH_LABELS[health]}
+      {label ?? t(healthKey(health))}
     </TonePill>
   );
 }
 
 /** Pill HTTP: 2xx xanh, 4xx/5xx đỏ, không phản hồi xám. */
 export function HttpPill({ status }: { status: number | null | undefined }) {
+  const t = useT();
   const tone: Tone = !status ? "idle" : status < 300 ? "healthy" : status === 408 || status === 429 ? "warning" : "crashed";
   return (
     <TonePill tone={tone} className="font-mono">
-      {status ? `HTTP ${status}` : "không phản hồi"}
+      {status ? `HTTP ${status}` : t("journey.http.no-response")}
     </TonePill>
   );
 }

@@ -23,6 +23,8 @@ import type { ExecutionFilters } from "@/lib/hub/flow-types";
 import { EXECUTION_PARAMS } from "@/lib/hub/list-url";
 import { useDestinations, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
+import type { MessageKey } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 import { useUnroll } from "@/lib/ui/use-unroll";
 
 import { EventSheet } from "./_components/event-sheet";
@@ -30,12 +32,12 @@ import { OrphanBanner } from "./_components/orphan-banner";
 import { TraceFeed } from "./_components/trace-feed";
 import { useRealtimeProject } from "@/lib/hub/socket";
 
-const TABS: { id: ExecutionStatus | "all"; label: string }[] = [
-  { id: "all", label: "Tất cả" },
-  { id: "in_progress", label: "Đang chạy" },
-  { id: "failed", label: "Thất bại" },
-  { id: "rejected", label: "Bị từ chối" },
-  { id: "succeeded", label: "Thành công" },
+const TABS: { id: ExecutionStatus | "all"; label: MessageKey }[] = [
+  { id: "all", label: "common.all" },
+  { id: "in_progress", label: "page.events.tab.in-progress" },
+  { id: "failed", label: "page.events.tab.failed" },
+  { id: "rejected", label: "page.events.tab.rejected" },
+  { id: "succeeded", label: "page.events.tab.succeeded" },
 ];
 
 const ALL = "__all";
@@ -49,6 +51,8 @@ const isIdPrefix = (x: string) => /^[0-9A-Za-z_-]{4,36}$/.test(x);
  */
 function ExecutionsView() {
   const router = useRouter();
+  const t = useT();
+  const locale = useLocale();
   // ADR-163: bộ lọc trên URL (F5 / gửi link giữ nguyên): trạng thái, source, đích, type, khoảng thời gian, id.
   const url = useUrlParams(EXECUTION_PARAMS);
   const v = url.values;
@@ -109,14 +113,14 @@ function ExecutionsView() {
   return (
     <>
       <PageHeader
-        title="Hành trình sự kiện"
-        description="Mỗi dòng là một lần provider gọi vào hub: đi qua chặng nào, hỏng ở đâu. Bấm dòng để mở hành trình đầy đủ."
+        title={t("page.events.title")}
+        description={t("page.events.description")}
         actions={
           <>
           <ProjectPicker />
           <Button variant={paused ? "default" : "outline"} size="sm" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
             {paused ? <Play {...ICON} /> : <Pause {...ICON} />}
-            {paused ? "Tiếp tục luồng" : "Tạm dừng luồng"}
+            {paused ? t("page.events.resume") : t("page.events.pause")}
           </Button>
           </>
         }
@@ -129,26 +133,26 @@ function ExecutionsView() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border p-0.5" role="tablist">
-          {TABS.map((t) => (
+          {TABS.map((tab) => (
             <button
-              key={t.id}
+              key={tab.id}
               type="button"
               role="tab"
-              aria-selected={status === t.id}
-              onClick={() => url.setFilter({ status: t.id === "all" ? null : t.id })}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm ${status === t.id ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
+              aria-selected={status === tab.id}
+              onClick={() => url.setFilter({ status: tab.id === "all" ? null : tab.id })}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm ${status === tab.id ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
             >
-              {t.id !== "all" && <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[EXECUTION_TONE[t.id]] }} />}
-              {t.label}
+              {tab.id !== "all" && <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[EXECUTION_TONE[tab.id]] }} />}
+              {t(tab.label)}
             </button>
           ))}
         </div>
         <Select value={source || ALL} onValueChange={(x) => url.setFilter({ source: x === ALL ? null : x })}>
           <SelectTrigger size="sm" className="w-48">
-            <SelectValue placeholder="Source" />
+            <SelectValue placeholder={t("page.events.filter.source")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi source</SelectItem>
+            <SelectItem value={ALL}>{t("page.events.filter.all-sources")}</SelectItem>
             {sources.data?.map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.name}
@@ -158,10 +162,10 @@ function ExecutionsView() {
         </Select>
         <Select value={destination || ALL} onValueChange={(x) => url.setFilter({ destination: x === ALL ? null : x })}>
           <SelectTrigger size="sm" className="w-52">
-            <SelectValue placeholder="Đích" />
+            <SelectValue placeholder={t("page.events.filter.destination")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Mọi đích</SelectItem>
+            <SelectItem value={ALL}>{t("page.events.filter.all-destinations")}</SelectItem>
             {destinations.data?.map((d) => (
               <SelectItem key={d.id} value={d.id}>
                 {d.name}
@@ -171,15 +175,15 @@ function ExecutionsView() {
         </Select>
         <div className="relative">
           <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder="type, vd payment.*" className="h-8 w-48 pl-7 font-mono text-xs" />
+          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder={t("page.events.filter.type")} className="h-8 w-48 pl-7 font-mono text-xs" />
         </div>
         <div className="relative">
           <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
           <Input
             value={idInput}
             onChange={(e) => setIdInput(e.target.value)}
-            placeholder="id sự kiện / request"
-            title="Tìm theo id sự kiện (ULID) hoặc id request (uuid) — gõ ít nhất 4 ký tự đầu"
+            placeholder={t("page.events.filter.id")}
+            title={t("page.events.filter.id-hint")}
             className="h-8 w-48 pl-7 font-mono text-xs"
           />
         </div>
@@ -187,20 +191,20 @@ function ExecutionsView() {
         {(source || destination || v.type || v.q || v.from || v.to || status !== "all") && (
           <Button variant="ghost" size="sm" onClick={url.clear}>
             <X {...ICON} />
-            Bỏ lọc
+            {t("common.filters.clear")}
           </Button>
         )}
-        <span className="ml-auto text-muted-foreground text-xs">{paused ? "Đã tạm dừng — dữ liệu đứng yên" : "Trực tiếp"}</span>
+        <span className="ml-auto text-muted-foreground text-xs">{paused ? t("page.events.paused") : t("page.events.live")}</span>
       </div>
 
       <div className="flow-surface overflow-hidden rounded-2xl">
         <div className="grid grid-cols-[7rem_8rem_minmax(10rem,1fr)_auto_7.5rem_minmax(12rem,1.2fr)_2rem] items-center gap-3 border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs">
-          <span>Thời gian</span>
-          <span>Provider</span>
-          <span>Type · subject</span>
-          <span>Đường ống</span>
-          <span>Trạng thái</span>
-          <span>Hỏng ở</span>
+          <span>{t("page.events.col.time")}</span>
+          <span>{t("page.events.col.provider")}</span>
+          <span>{t("page.events.col.type")}</span>
+          <span>{t("page.events.col.pipeline")}</span>
+          <span>{t("page.events.col.status")}</span>
+          <span>{t("page.events.col.failed-at")}</span>
           <span />
         </div>
         {q.isLoading && (
@@ -210,8 +214,8 @@ function ExecutionsView() {
             ))}
           </div>
         )}
-        {q.error && <p className="p-4 text-destructive text-sm">Không tải được: {q.error.message}</p>}
-        {!q.isLoading && items.length === 0 && <p className="p-6 text-center text-muted-foreground text-sm">Không có hành trình nào khớp bộ lọc.</p>}
+        {q.error && <p className="p-4 text-destructive text-sm">{t("page.events.load-error", { message: q.error.message })}</p>}
+        {!q.isLoading && items.length === 0 && <p className="p-6 text-center text-muted-foreground text-sm">{t("page.events.no-match")}</p>}
         {items.map((i) => {
           // Request kiểm tra kết nối của provider (ADR-159) → viền xám + pill "Kiểm tra kết nối", như ngăn Nhật ký.
           const probe = expectedProbe(i);
@@ -232,7 +236,7 @@ function ExecutionsView() {
                 ...anim.style,
               }}
             >
-              <span className="text-xs tabular-nums" title={formatRelative(i.receivedAt)}>
+              <span className="text-xs tabular-nums" title={formatRelative(i.receivedAt, undefined, locale)}>
                 {clock(i.receivedAt)}
               </span>
               <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -253,8 +257,8 @@ function ExecutionsView() {
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Xem nhanh (Dấu vết)"
-                    title="Xem nhanh (Dấu vết)"
+                    aria-label={t("page.events.quick-view")}
+                    title={t("page.events.quick-view")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setQuick({ id: i.eventId, open: true });
@@ -268,8 +272,8 @@ function ExecutionsView() {
           );
         })}
         <div ref={sentinel} className="h-6" />
-        {q.isFetchingNextPage && <p className="pb-3 text-center text-muted-foreground text-xs">Đang tải thêm…</p>}
-        {!q.hasNextPage && items.length > 0 && <p className="pb-3 text-center text-muted-foreground text-xs">Hết.</p>}
+        {q.isFetchingNextPage && <p className="pb-3 text-center text-muted-foreground text-xs">{t("page.events.loading-more")}</p>}
+        {!q.hasNextPage && items.length > 0 && <p className="pb-3 text-center text-muted-foreground text-xs">{t("page.events.end")}</p>}
       </div>
 
       <EventSheet eventId={quick.id} open={quick.open} onClose={() => setQuick((s) => ({ ...s, open: false }))} />

@@ -1,12 +1,14 @@
 // SK1 (SPEC-shop-ket-noi-project §3): logic THUẦN của trang Project + API key — không React, test bằng jest gốc.
+// Chữ hiển thị trả về dạng khoá i18n hoặc nhận `t` (import tương đối: jest gốc không có alias `@/`).
+import type { MessageKey, TranslateFn } from "../i18n/dictionary";
 
 /** Scope cấp được cho API key (máy). Scope của NGƯỜI (manage:keys…) không bao giờ có ở đây (UA19). */
 export const KEY_SCOPES = [
-  { scope: "manage:endpoints", hint: "tự đăng ký endpoint + subscription (Shop cần)" },
-  { scope: "read:events", hint: "đọc sự kiện (polling)" },
-  { scope: "publish:events", hint: "phát sự kiện vào hub" },
-  { scope: "manage:sources", hint: "xem/tạo source (Shop dùng để liệt kê source khi Kiểm tra)" },
-] as const;
+  { scope: "manage:endpoints", hintKey: "page.api-keys.scope.manage-endpoints" },
+  { scope: "read:events", hintKey: "page.api-keys.scope.read-events" },
+  { scope: "publish:events", hintKey: "page.api-keys.scope.publish-events" },
+  { scope: "manage:sources", hintKey: "page.api-keys.scope.manage-sources" },
+] as const satisfies readonly { scope: string; hintKey: MessageKey }[];
 
 /** Mặc định cho Shop: tự đăng ký endpoint + đọc sự kiện (SPEC §3). */
 export const SHOP_DEFAULT_SCOPES = ["manage:endpoints", "read:events"];
@@ -41,7 +43,9 @@ export function toSummary(k: CreatedApiKey | ApiKeySummary): ApiKeySummary {
   return { id, serviceName, keyPrefix, scopes, lastUsedAt, revokedAt, createdAt };
 }
 
-export const keyStatus = (k: Pick<ApiKeySummary, "revokedAt">) => (k.revokedAt ? "Đã thu hồi" : "Đang dùng");
+/** Khoá i18n của trạng thái key ("Đã thu hồi" / "Đang dùng"). */
+export const keyStatus = (k: Pick<ApiKeySummary, "revokedAt">): MessageKey =>
+  k.revokedAt ? "page.api-keys.status.revoked" : "page.api-keys.status.active";
 
 /** slug gợi ý từ tên (bỏ dấu tiếng Việt), khớp ^[a-z0-9][a-z0-9-]{2,62}$ của hub. */
 export function slugFromName(name: string): string {
@@ -55,11 +59,11 @@ export function slugFromName(name: string): string {
     .slice(0, 63);
 }
 
-/** Lỗi tạo project -> câu tiếng Việt (409 slug trùng, 422 slug sai, 403 trần/xác minh). */
-export function projectCreateError(status: number, body: unknown, fallback: string): string {
+/** Lỗi tạo project -> câu theo ngôn ngữ đang chọn (409 slug trùng, 422 slug sai, 403 trần/xác minh). `fallback` = câu của server. */
+export function projectCreateError(status: number, body: unknown, fallback: string, t: TranslateFn): string {
   const code = (body as { error?: unknown } | null)?.error;
-  if (status === 409 || code === "slug_taken") return "Slug này đã có project khác dùng — chọn slug khác.";
-  if (status === 422) return "Slug chỉ gồm chữ thường, số, gạch ngang; 3–63 ký tự (vd: cua-hang-cua-toi).";
-  if (code === "project_limit") return fallback || "Đã đạt số project tối đa.";
-  return fallback || `Lỗi ${status}`;
+  if (status === 409 || code === "slug_taken") return t("page.projects.error.slug-taken");
+  if (status === 422) return t("page.projects.error.slug-invalid");
+  if (code === "project_limit") return fallback || t("page.projects.error.limit");
+  return fallback || t("page.projects.error.http", { status });
 }

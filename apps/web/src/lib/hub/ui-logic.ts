@@ -6,6 +6,11 @@
  * - Bị dội (vd 50 request chữ ký sai/giây) -> tối đa MỘT toast mỗi `windowMs`, kèm "+N" số còn lại;
  *   phần dồn lại được xả khi cửa sổ hết (component đặt hẹn giờ theo `flushInMs`).
  */
+import { createT, type MessageKey, type TranslateFn } from "../i18n/dictionary";
+
+/** Mặc định cho caller chưa truyền `t` (vd ngoài trang cấu hình) — tiếng Việt như trước. */
+const VI_T: TranslateFn = createT("vi");
+
 export const TOAST_WINDOW_MS = 2000;
 export const NOTABLE_OUTCOMES = new Set(["REJECTED", "DUPLICATE", "RATE_LIMITED"]);
 
@@ -95,18 +100,21 @@ export function keysAfterAudited(...keys: readonly (readonly unknown[])[]): (rea
 }
 
 /** 409 xoá (ADR-054) -> thông điệp dễ hiểu từ body server (deliveryCount / subscriptionCount). */
-export function describeDeleteConflict(e: unknown): string | null {
+export function describeDeleteConflict(e: unknown, t: TranslateFn = VI_T): string | null {
   // Duck-typing HubApiError (status + body) để file này không phụ thuộc client/env — test được thuần.
   const err = e as { status?: unknown; body?: unknown; message?: unknown } | null;
   if (!err || err.status !== 409) return null;
   const b = (err.body ?? {}) as { deliveryCount?: number; subscriptionCount?: number };
   if (typeof b.subscriptionCount === "number") {
-    return `Đích còn ${b.subscriptionCount} subscription trỏ vào (${b.deliveryCount ?? 0} delivery lịch sử). Tắt các subscription đó; đích chỉ xoá được khi không còn subscription nào.`;
+    return t("errors.delete-conflict.destination", {
+      subscriptions: b.subscriptionCount,
+      deliveries: b.deliveryCount ?? 0,
+    });
   }
   if (typeof b.deliveryCount === "number") {
-    return `Subscription còn ${b.deliveryCount} delivery trong lịch sử (kể cả DEAD) — không xoá để giữ bằng chứng. Hãy bấm "Tắt" để ngừng gửi.`;
+    return t("errors.delete-conflict.subscription", { deliveries: b.deliveryCount });
   }
-  return typeof err.message === "string" ? err.message : "Xung đột (409)";
+  return typeof err.message === "string" ? err.message : t("errors.delete-conflict.generic");
 }
 
 /**
@@ -153,29 +161,44 @@ export function errorMessageOf(body: unknown): string {
  */
 export type VerificationTone = "ok" | "wait" | "bad";
 
-const VI_VERIFICATION: Record<string, string> = {
-  ssrf_blocked: "URL trỏ vào địa chỉ nội bộ/riêng — hub chặn (SSRF). Đăng ký URL công khai (https) của service.",
-  timeout: "Endpoint không trả lời challenge trong 10 giây.",
-  challenge_mismatch: 'Endpoint trả lời sai challenge — phải trả đúng {"challenge": "<giá trị nhận được>"}.',
-  invalid_json: "Endpoint trả về nội dung không phải JSON.",
-  unreachable: "Hub không kết nối được (DNS, từ chối kết nối hoặc lỗi TLS).",
-  invalid_url: "Endpoint không có URL http(s) hợp lệ.",
-  no_signing_secret: "Endpoint chưa có signing secret.",
-};
+/** Mã `verificationError` của hub có câu riêng trong `errors.verification.<mã>`; mã khác -> câu chung kèm mã gốc. */
+const VERIFICATION_CODES = [
+  "ssrf_blocked",
+  "timeout",
+  "challenge_mismatch",
+  "invalid_json",
+  "unreachable",
+  "invalid_url",
+  "no_signing_secret",
+] as const;
 
+/**
+ * `label` = mã gốc của hub (PENDING / FAILED / VERIFIED — để ở `title`, đối chiếu log); `labelKey` = nhãn dịch hiển thị.
+ */
 export function describeVerification(
   verification: string | undefined | null,
   code: string | undefined | null,
-): { label: string; tone: VerificationTone; reason: string | null } {
+  t: TranslateFn = VI_T,
+): { label: string; labelKey: MessageKey; tone: VerificationTone; reason: string | null } {
   if (verification === "PENDING")
-    return { label: "PENDING", tone: "wait", reason: "Đang chờ endpoint trả lời challenge." };
-  if (verification !== "FAILED") return { label: "VERIFIED", tone: "ok", reason: null };
-  if (!code) return { label: "FAILED", tone: "bad", reason: "Xác minh thất bại." };
+    return {
+      label: "PENDING",
+      labelKey: "errors.verification.label.pending",
+      tone: "wait",
+      reason: t("errors.verification.pending"),
+    };
+  if (verification !== "FAILED")
+    return { label: "VERIFIED", labelKey: "errors.verification.label.verified", tone: "ok", reason: null };
+  const failed = { label: "FAILED", labelKey: "errors.verification.label.failed" as MessageKey, tone: "bad" as const };
+  if (!code) return { ...failed, reason: t("errors.verification.failed") };
   const http = /^http_(\d{3})$/.exec(code);
-  const reason = http
-    ? `Endpoint trả HTTP ${http[1]} cho challenge (phải trả 200).`
-    : (VI_VERIFICATION[code] ?? `Lỗi xác minh: ${code}`);
-  return { label: "FAILED", tone: "bad", reason };
+  if (http) return { ...failed, reason: t("errors.verification.http", { code: http[1] }) };
+  if (!(VERIFICATION_CODES as readonly string[]).includes(code))
+    return { ...failed, reason: t("errors.verification.unknown", { code }) };
+  // Khoá i18n chỉ dùng '-' (dictionary.spec) -> mã hub `ssrf_blocked` tra `errors.verification.ssrf-blocked`.
+  const key = `errors.verification.${code.replace(/_/g, "-")}` as MessageKey;
+  const reason = t(key);
+  return { ...failed, reason };
 }
 
 /**

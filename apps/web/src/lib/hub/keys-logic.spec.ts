@@ -1,6 +1,8 @@
+import { createT } from "../i18n/dictionary";
 import {
   envLine,
   KEY_SCOPES,
+  keyStatus,
   prefixTail,
   projectCreateError,
   SHOP_DEFAULT_SCOPES,
@@ -39,8 +41,15 @@ describe("console Project + API key (SK1)", () => {
 
   it("slug gợi ý bỏ dấu tiếng Việt; 409 slug trùng -> câu tiếng Việt", () => {
     expect(slugFromName("Cửa hàng Đồ ăn của tôi!")).toBe("cua-hang-do-an-cua-toi");
-    expect(projectCreateError(409, { error: "slug_taken" }, "x")).toMatch(/đã có project/);
-    expect(projectCreateError(422, {}, "x")).toMatch(/Slug chỉ gồm/);
+    const vi = createT("vi");
+    const en = createT("en");
+    expect(projectCreateError(409, { error: "slug_taken" }, "x", vi)).toMatch(/đã có dự án khác/);
+    expect(projectCreateError(422, {}, "x", vi)).toMatch(/Mã định danh chỉ gồm/);
+    expect(projectCreateError(409, { error: "slug_taken" }, "x", en)).toMatch(/already used/);
+    expect(projectCreateError(500, {}, "", en)).toBe("Error 500");
+    expect(projectCreateError(403, { error: "project_limit" }, "server says", vi)).toBe("server says");
+    expect(vi(keyStatus({ revokedAt: "2026-01-01" }))).toBe("Đã thu hồi");
+    expect(en(keyStatus({ revokedAt: null }))).toBe("Active");
   });
 
   it("người mới: project tự tạo lúc đăng ký được chọn sẵn -> trang API key dùng ngay, không cần bước tạo project", () => {

@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { type ProjectSummary, restoreFlowProject, useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
+import { useT } from "@/lib/i18n/use-t";
 
-import { OPERATOR_NOTE, projectItemTitle, projectPickerView } from "./project-picker-logic";
+import { projectItemTitle, projectPickerView, roleLabel } from "./project-picker-logic";
 import { ICON } from "./tokens";
 
 function useProjectPicker() {
@@ -38,17 +39,18 @@ function ProjectList({
   currentId: string;
   onChange: (id: string) => void;
 }) {
+  const t = useT();
   return (
     <>
-      <DropdownMenuLabel>Project</DropdownMenuLabel>
+      <DropdownMenuLabel>{t("admin.project.label")}</DropdownMenuLabel>
       <DropdownMenuRadioGroup value={currentId} onValueChange={onChange}>
         {data.map((p) => (
-          <DropdownMenuRadioItem key={p.id} value={p.id} title={projectItemTitle(p)} className="min-w-0">
+          <DropdownMenuRadioItem key={p.id} value={p.id} title={projectItemTitle(p, t)} className="min-w-0">
             <span className="min-w-0 flex-1 truncate">{p.name}</span>
             {p.member === false ? (
-              <span className="shrink-0 text-amber-600 text-xs dark:text-amber-400">operator</span>
+              <span className="shrink-0 text-amber-600 text-xs dark:text-amber-400">{t("admin.project.operator")}</span>
             ) : (
-              p.role && <span className="shrink-0 text-muted-foreground text-xs">{p.role}</span>
+              p.role && <span className="shrink-0 text-muted-foreground text-xs">{roleLabel(p.role, t)}</span>
             )}
             <span className="max-w-24 shrink-0 truncate pl-1 font-mono text-muted-foreground text-xs">{p.slug}</span>
           </DropdownMenuRadioItem>
@@ -65,8 +67,9 @@ function ProjectList({
  */
 export function ProjectPicker({ className }: { className?: string }) {
   const { data, projectId, setProjectId } = useProjectPicker();
+  const t = useT();
   if (!data || data.length === 0) return null;
-  const v = projectPickerView(data, projectId);
+  const v = projectPickerView(data, projectId, t);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -74,7 +77,7 @@ export function ProjectPicker({ className }: { className?: string }) {
           variant="outline"
           size="sm"
           className={cn("max-w-full", className)}
-          aria-label="Project"
+          aria-label={t("admin.project.label")}
           title={v.tooltip}
         >
           <FolderKanban {...ICON} />
@@ -82,9 +85,9 @@ export function ProjectPicker({ className }: { className?: string }) {
           {v.operator && (
             <span
               className="shrink-0 rounded bg-amber-500/15 px-1.5 text-amber-700 text-xs dark:text-amber-400"
-              title={OPERATOR_NOTE}
+              title={t("admin.project.operator-note")}
             >
-              operator
+              {t("admin.project.operator")}
             </span>
           )}
           <ChevronDown {...ICON} />
@@ -105,8 +108,9 @@ export function ProjectPicker({ className }: { className?: string }) {
 export function SidebarProjectPicker() {
   const { data, projectId, setProjectId } = useProjectPicker();
   const { state, isMobile } = useSidebar();
+  const t = useT();
   if (!data || data.length === 0) return null;
-  const v = projectPickerView(data, projectId);
+  const v = projectPickerView(data, projectId, t);
   const collapsed = state === "collapsed" && !isMobile;
   return (
     <SidebarMenu>
@@ -116,7 +120,7 @@ export function SidebarProjectPicker() {
             <SidebarMenuButton
               variant="outline"
               tooltip={v.tooltip}
-              aria-label={`Project: ${v.tooltip}`}
+              aria-label={t("admin.project.aria", { project: v.tooltip })}
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
               <span className="relative flex shrink-0 items-center">
@@ -134,9 +138,9 @@ export function SidebarProjectPicker() {
               {v.operator && (
                 <span
                   className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-700 leading-4 group-data-[collapsible=icon]:hidden dark:text-amber-400"
-                  title={OPERATOR_NOTE}
+                  title={t("admin.project.operator-note")}
                 >
-                  operator
+                  {t("admin.project.operator")}
                 </span>
               )}
               <ChevronsUpDown className="ml-auto shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />

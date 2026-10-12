@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Radio } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useRealtimeStore } from "@/lib/hub/socket";
 import { stepToasts } from "@/lib/hub/ui-logic";
 import type { TraceIngestedNotice } from "@/lib/hub/types";
+import { INTL_LOCALE, type MessageKey, type TranslateFn } from "@/lib/i18n/dictionary";
+import { useLocale, useT } from "@/lib/i18n/use-t";
 
 const OUTCOME_STYLE: Record<TraceIngestedNotice["outcome"], string> = {
   ACCEPTED: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
@@ -19,28 +21,30 @@ const OUTCOME_STYLE: Record<TraceIngestedNotice["outcome"], string> = {
   ERROR: "border-rose-500/40 text-rose-700 dark:text-rose-300",
 };
 
-const OUTCOME_LABEL: Record<TraceIngestedNotice["outcome"], string> = {
-  ACCEPTED: "nhận",
-  DUPLICATE: "trùng — bỏ qua",
-  REJECTED: "chữ ký sai — bị chặn",
-  RATE_LIMITED: "vượt rate limit",
-  ERROR: "lỗi lưu",
+const OUTCOME_LABEL: Record<TraceIngestedNotice["outcome"], MessageKey> = {
+  ACCEPTED: "page.events.outcome.accepted",
+  DUPLICATE: "page.events.outcome.duplicate",
+  REJECTED: "page.events.outcome.rejected",
+  RATE_LIMITED: "page.events.outcome.rate-limited",
+  ERROR: "page.events.outcome.error",
 };
 
 const SHOW = 5;
 
-function showTraceToast(t: TraceIngestedNotice, more: number) {
-  const extra = more > 0 ? ` (+${more} cảnh báo khác)` : "";
-  if (t.outcome === "REJECTED") {
-    toast.error(`Webhook ${t.provider} bị chặn: chữ ký sai (HTTP ${t.httpStatus})${extra}`, {
-      description: `${t.sourceKey} · correlation ${t.correlationId.slice(0, 8)}…`,
+function showTraceToast(tr: TraceIngestedNotice, more: number, t: TranslateFn) {
+  const vars = {
+    provider: tr.provider,
+    status: tr.httpStatus,
+    more: more > 0 ? t("page.events.toast.more", { count: more }) : "",
+  };
+  if (tr.outcome === "REJECTED") {
+    toast.error(t("page.events.toast.rejected", vars), {
+      description: t("page.events.toast.correlation", { source: tr.sourceKey, id: tr.correlationId.slice(0, 8) }),
     });
-  } else if (t.outcome === "DUPLICATE") {
-    toast.info(`Webhook ${t.provider} trùng — hub trả ${t.httpStatus}, không tạo sự kiện mới${extra}`, {
-      description: t.sourceKey,
-    });
-  } else if (t.outcome === "RATE_LIMITED") {
-    toast.warning(`Webhook ${t.provider} vượt rate limit (HTTP ${t.httpStatus})${extra}`);
+  } else if (tr.outcome === "DUPLICATE") {
+    toast.info(t("page.events.toast.duplicate", vars), { description: tr.sourceKey });
+  } else if (tr.outcome === "RATE_LIMITED") {
+    toast.warning(t("page.events.toast.rate-limited", vars));
   }
 }
 
@@ -50,6 +54,11 @@ function showTraceToast(t: TraceIngestedNotice, more: number) {
  */
 export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {}) {
   const traces = useRealtimeStore((s) => s.traces);
+  const t = useT();
+  const locale = useLocale();
+  // Effect toast không phụ thuộc t (đổi ngôn ngữ không được toast lại) — đọc t mới nhất qua ref.
+  const tRef = useRef(t);
+  tRef.current = t;
   // Tăng để chạy lại effect khi tới lượt xả phần toast đang dồn.
   const [flushTick, setFlushTick] = useState(0);
 
@@ -60,10 +69,10 @@ export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {})
     const { toastCursor } = useRealtimeStore.getState();
     const step = stepToasts(traces, toastCursor, Date.now());
     useRealtimeStore.setState({ toastCursor: step.cursor });
-    if (step.toast) showTraceToast(step.toast.trace, step.toast.more);
+    if (step.toast) showTraceToast(step.toast.trace, step.toast.more, tRef.current);
     if (step.flushInMs === null) return;
-    const t = setTimeout(() => setFlushTick((n) => n + 1), step.flushInMs);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setFlushTick((n) => n + 1), step.flushInMs);
+    return () => clearTimeout(timer);
   }, [traces, flushTick]);
 
   // Bản đồ luồng (toàn màn hình): chỉ toast, không chiếm chỗ của canvas.
@@ -74,21 +83,21 @@ export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {})
       <CardContent className="space-y-1.5 px-4">
         <div className="flex items-center gap-2 text-muted-foreground text-xs">
           <Radio className="size-3.5" />
-          Vừa nhận (trace.ingested, trực tiếp từ hub-api)
+          {t("page.events.feed.title")}
         </div>
         <ul className="space-y-1">
-          {traces.slice(0, SHOW).map((t) => (
-            <li key={`${t.correlationId}-${t.receivedAt}`} className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline" className={`font-mono text-[11px] ${OUTCOME_STYLE[t.outcome]}`}>
-                {t.outcome}
+          {traces.slice(0, SHOW).map((tr) => (
+            <li key={`${tr.correlationId}-${tr.receivedAt}`} className="flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant="outline" className={`font-mono text-[11px] ${OUTCOME_STYLE[tr.outcome]}`}>
+                {tr.outcome}
               </Badge>
-              <span className="font-mono">{t.provider}</span>
-              <span className="text-muted-foreground">{OUTCOME_LABEL[t.outcome]}</span>
+              <span className="font-mono">{tr.provider}</span>
+              <span className="text-muted-foreground">{t(OUTCOME_LABEL[tr.outcome])}</span>
               <span className="font-mono text-muted-foreground">
-                HTTP {t.httpStatus} · {t.ms}ms
+                HTTP {tr.httpStatus} · {tr.ms}ms
               </span>
               <span className="ml-auto text-muted-foreground">
-                {new Date(t.receivedAt).toLocaleTimeString("vi-VN")}
+                {new Date(tr.receivedAt).toLocaleTimeString(INTL_LOCALE[locale])}
               </span>
             </li>
           ))}

@@ -1,4 +1,5 @@
 import { credentialError, credentialInputAttrs } from "./credential-input";
+import { createT } from "./i18n/dictionary";
 
 /** Lỗi production: trình duyệt tự điền đăng nhập operator vào form credential của provider. */
 describe("ô credential — chống trình duyệt tự điền đăng nhập", () => {
@@ -19,5 +20,8 @@ describe("ô credential — chống trình duyệt tự điền đăng nhập", 
     expect(credentialError("Client ID", "admin@shop.vn")).toBe("Đây có vẻ là email, không phải Client ID");
     expect(credentialError("Client ID", "3f2b6c1e-8a4d-4f1b-9a7e-2c5d8e9f0a1b")).toBeNull();
     expect(credentialError("Api Key", "a1b2c3d4e5f6")).toBeNull();
+    expect(credentialError("Client ID", "admin@shop.vn", createT("en"))).toBe(
+      "This looks like an email address, not a Client ID",
+    );
   });
 });
