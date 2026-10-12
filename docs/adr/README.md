@@ -1574,3 +1574,20 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - **Replay đơn:** subscription đang tắt → 409 `subscription_inactive` (thêm vào catalog và `docs/ERRORS.md`).
 - **PATCH `isActive` của subscription (`/v1/p`):** lấy `lockFlowConfig`.
 - **Replay hàng loạt khi mọi id bị bỏ qua:** vẫn ghi 1 audit, với count 0, `requested` và `skipped`.
+
+## ADR-164 — Chiều ra lệnh (Actions): tuỳ chọn, mặc định tắt; PostgreSQL trọng tài idempotency lệnh; lease + fencing, không giữ tx qua HTTP (2026-10-12)
+
+**Vấn đề:** Hub đã giữ credentials PayOS (ADR-146), nhưng service muốn tạo link thanh toán vẫn phải tự giữ cả 3 key và tự ký HMAC (`apps/shop/src/payos.ts`). Với backend ít kỹ thuật thì thế là thừa. Ngược lại, biến hub thành cổng thanh toán lại phá ranh giới "webhook hub" (BB-1) và kéo hub vào đường đi của checkout.
+**Chọn:** (SPEC `_bmad-output/planning-artifacts/hub-multi-service/SPEC-chieu-ra-lenh.md`)
+- **Tuỳ chọn ở 3 tầng:** adapter có `actions?`; kết nối bật `actions_enabled` (mặc định tắt); API key có scope `act:payments`.
+- **Lệnh đồng bộ trong hub-api:** chỉ `payment.link.create/get/cancel`, từ vựng trung lập với provider (`reference` là chuỗi mờ).
+- **Hub cấp `remote_key`** (orderCode của PayOS) từ sequence của DB trước khi gọi provider, để đối soát được.
+- **Idempotency:** `UNIQUE(tenant, source, action_type, idempotency_key)` trong `hub.actions`, kèm `request_hash`. Thiếu `Idempotency-Key` thì mặc định `ref:<reference>`.
+- **Concurrency:** TX1 nhận lease 30 s → gọi provider ngoài tx → TX2 ghi kết quả `WHERE attempt = :mine` (fencing). Trạng thái `UNKNOWN` được đối soát theo `remoteIdempotency` (`lookup`/`native`/`none`) do adapter khai báo.
+- **Không chạm Redis.** Cấm mọi lệnh làm tiền đi ra (hoàn tiền, chi hộ).
+**Đánh đổi:**
+- Bật Actions thì hub nằm trên đường đi của checkout: hub ngủ hoặc chết thì service đó không tạo được link. Service vẫn có thể giữ key và gọi thẳng.
+- Thêm một cơ chế idempotency thứ hai, riêng cho lệnh, bên cạnh dedupe ở ingest.
+- Request bị treo lâu hơn lease có thể khiến provider bị gọi hai lần; trường hợp này dựa vào việc provider chặn trùng theo `remote_key` (PayOS mã 231).
+- Shop đang ở trần 600 dòng, nên việc tích hợp vào Shop chờ Admin chọn (SPEC §12 Q1).
+**Admin chốt (2026-10-12, append):** Q1 — Shop **chuyển sang tạo link PayOS qua hub** làm mặc định. Gọi thẳng chỉ còn khi Shop có đủ 3 key. Không bao giờ thử chế độ này rồi rơi sang chế độ kia trong cùng một lần tạo link, vì có thể ra hai link trả được tiền (SPEC §9). Được nâng trần `apps/shop/src` bằng ADR riêng ghi cùng commit. Q2 — AC6 để sau. Q3 — lease 30 s. Chưa code.
