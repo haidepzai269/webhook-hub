@@ -238,7 +238,9 @@ function streakRule(
   const prev = ctx.current.facts;
   const seen = factTime(prev, 'lastAttemptAt');
   const newer = Number.isNaN(seen) ? input.attempts : input.attempts.filter((a) => a.at.getTime() > seen);
-  const success = newer.find((a) => classifyHttpOutcome(a.status) === 'success');
+  //    Re-review CB1: nhưng nếu một chuỗi ĐỦ NGƯỠNG đã đến SAU 2xx đó (200 → 401×3, mới nhất là 401) thì điều kiện mở
+  //    đang đúng trở lại -> KHÔNG đóng (đóng rồi mở lại lượt sau = flapping + email trùng).
+  const success = streak >= minStreak ? undefined : newer.find((a) => classifyHttpOutcome(a.status) === 'success');
   const watermark = latest ? { lastAttemptAt: iso(new Date(Math.max(latest.at.getTime(), Number.isNaN(seen) ? 0 : seen))) } : {};
   if (success) return { open: false, facts: { ...prev, ...facts, ...watermark, httpStatus: success.status } };
   // 2) Đóng "im" khi 30 phút không có attempt CÙNG LOẠI (không phải "không có attempt nào": 500 liên tục không che 401 cũ).

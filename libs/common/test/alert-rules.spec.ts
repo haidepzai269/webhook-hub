@@ -79,6 +79,9 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     const opened = evalAuthRejected({ destination: LIVE, attempts: attempts([401, 401, 401]), dead: 3 }, fresh);
     const seq: AttemptSample[] = [{ status: 500, at: ago(MIN / 4) }, { status: 200, at: ago(MIN / 2) }, ...attempts([401, 401, 401])];
     expect(evalAuthRejected({ destination: LIVE, attempts: seq, dead: 3 }, openWith(opened.facts))).toMatchObject({ open: false, facts: { httpStatus: 200 } });
+    // Re-review: 200 → 401×3 (mới nhất là 401) GIỮ MỞ — chuỗi đủ ngưỡng đến sau 2xx, không đóng rồi mở lại (flapping)
+    const okThenStreak: AttemptSample[] = [...attempts([401, 401, 401]), { status: 200, at: ago(4 * MIN) }];
+    expect(evalAuthRejected({ destination: LIVE, attempts: okThenStreak, dead: 3 }, openWith({ lastAttemptAt: ago(5 * MIN).toISOString() })).open).toBe(true);
     // 2xx CŨ hơn mốc đã xét không đóng lại lần nữa
     const oldOk: AttemptSample[] = [{ status: 500, at: ago(MIN / 4) }, { status: 401, at: ago(MIN / 2) }, { status: 200, at: ago(40 * MIN) }];
     expect(evalAuthRejected({ destination: LIVE, attempts: oldOk, dead: 3 }, openWith({ lastAttemptAt: ago(MIN / 2).toISOString() })).open).toBe(true);
