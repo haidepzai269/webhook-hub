@@ -312,6 +312,7 @@ model Source {
   secrets     SourceSecret[]
   rawEvents   RawEvent[]
   connections SourceConnection[] // tối đa MỘT (source_connections.source_id UNIQUE); khai mảng vì FK ghép (id, tenant_id)
+  duplicates  IngestDuplicate[] // CB6 (ADR-171): bộ đếm bản trùng theo giờ
 
   @@unique([id, tenantId]) // KN2: đích của khoá ngoại ghép source_connections(source_id, tenant_id)
   @@map("sources")
@@ -379,6 +380,24 @@ model RawEvent {
   @@unique([sourceId, idempotencyKey])
   @@index([receivedAt(sort: Desc)])
   @@map("raw_events")
+  @@schema("hub")
+}
+
+/// CB6 (ADR-171): bản trùng hub đã chặn — KHÔNG lưu raw_events (unique (source_id, idempotency_key) là trọng tài, BB-2),
+/// nên chỉ còn bộ đếm theo (source, giờ UTC). hub-api gom trong bộ nhớ rồi `INSERT … ON CONFLICT DO UPDATE n = n + …`
+/// mỗi ~5s — không chạm Redis, không nằm trên đường ACK (BB-3). Nhận định `I-dup` đọc ở đây. RLS + TenantScopedRepository.
+model IngestDuplicate {
+  tenantId String   @map("tenant_id") @db.Uuid
+  sourceId String   @map("source_id") @db.Uuid
+  /// Đầu giờ (UTC) — múi Việt Nam lệch giờ chẵn nên "hôm nay" cắt đúng theo bucket.
+  bucket   DateTime @db.Timestamptz(6)
+  n        Int      @default(0)
+
+  source Source @relation(fields: [sourceId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@id([tenantId, sourceId, bucket])
+  @@index([tenantId, bucket(sort: Desc)])
+  @@map("ingest_duplicates")
   @@schema("hub")
 }
 

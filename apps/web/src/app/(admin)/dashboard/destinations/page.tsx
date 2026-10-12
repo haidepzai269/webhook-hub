@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { FormDialog } from "@/components/admin/form-dialog";
+import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -191,6 +192,13 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] =
     ),
   },
   {
+    // CB6 (SPEC §7, I-dest): nhãn một câu cho 1 giờ qua — phân loại HTTP chung với delivery.consumer (CB:T16).
+    id: "insight",
+    header: t("insights.col.dest"),
+    enableSorting: false,
+    cell: ({ row }) => <InsightCell id={row.original.id} />,
+  },
+  {
     id: "rateLimit",
     header: t("page.destinations.col.rate-limit"),
     accessorFn: (d) => String(d.rateLimitRps),
@@ -284,15 +292,17 @@ export default function DestinationsPage() {
       <CreateEndpointDialog open={endpointOpen} onOpenChange={setEndpointOpen} />
       <EndpointDetailDialog id={detailId} onClose={() => setDetailId(null)} />
       <OpenDetail.Provider value={setDetailId}>
-        <DataTable
-          data={data}
-          columns={columns}
-          getRowId={(d) => d.id}
-          isLoading={isLoading}
-          error={error}
-          searchPlaceholder={t("page.destinations.search")}
-          emptyText={t("page.destinations.empty")}
-        />
+        <InsightRowsProvider code="I-dest">
+          <DataTable
+            data={data}
+            columns={columns}
+            getRowId={(d) => d.id}
+            isLoading={isLoading}
+            error={error}
+            searchPlaceholder={t("page.destinations.search")}
+            emptyText={t("page.destinations.empty")}
+          />
+        </InsightRowsProvider>
       </OpenDetail.Provider>
 
       <FormDialog

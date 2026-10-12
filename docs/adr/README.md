@@ -1702,6 +1702,19 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 ---
 
+## ADR-171 — Nhận định (insight) tính lúc đọc ở `hub-api`, route theo project cho mọi thành viên; bản trùng được ĐẾM ở Postgres (`hub.ingest_duplicates`) vì không có dòng raw_events (CB6, 2026-10-12)
+
+**Vấn đề:** SPEC §7 cần bốn nhận định (`I-dest`, `I-dup`, `I-silent`, `I-dead`) không lưu, không làm chậm trang Tổng quan, và không có phán đoán thứ hai khác luật cảnh báo. Riêng `I-dup` ("hôm nay hub đã chặn n sự kiện trùng", đếm từ Postgres) không có nguồn: bản trùng KHÔNG được ghi (unique `(source_id, idempotency_key)` từ chối, ACK 200 ngay — BB-2/BB-3), còn metric Prometheus nằm trong bộ nhớ từng tiến trình và không theo project; đếm bằng Redis thì phá ngân sách R1 và trái "Redis được phép sai".
+**Chọn:**
+- `GET /api/v1/projects/:projectId/insights[?codes=I-dup,I-dead]` → `[{code, level: ok|info|warning|critical, subjectType, subjectId, facts, actions?}]`. `SessionGuard + ProjectScopeGuard`, `read:project` — thành viên nào đọc được project thì thấy (không chỉ operator, khác `/alerts*`). Mọi truy vấn qua `forTenant` (RLS). Câu chữ ở web (`messages/insights.ts`), hành động trả MÃ (`open_dlq`, `view_deliveries`, `view_events`), web tự ghép link.
+- Hàm thuần `libs/common/src/alerts/insights.ts`, dùng lại ĐÚNG: `classifyHttpOutcome`/`isRetryableFailure` (CB:T16) + `FAILING_OPEN_RATIO` cho `I-dest`; `evalSourceSilent`/`silenceThresholdMs` + `findSourceActivity` (cùng cửa sổ 7 ngày, cùng 500 mốc — hằng `SILENT_BASELINE_MAX_EVENTS` chuyển lên `rules.ts`, evaluator đọc chung) cho `I-silent`; tập DLQ (`notSuperseded`) trừ D9 cho `I-dead` (trần đếm 10 000, `capped`). `I-dest` dùng lại `findAlertDestinations` + `countAttemptStatusesByDestination` + `findRecentAttemptsByDestination(…, 1)` của CB2 (index `delivery_attempts(created_at)`).
+- Nhãn `I-dest`: circuit OPEN/HALF_OPEN → "Tạm ngưng"; không attempt → "Chưa có lượt giao"; attempt MỚI NHẤT 401/403 → "Từ chối xác thực"; 4xx khác → thêm nhãn thứ sáu "Bên nhận từ chối nội dung" (SPEC liệt kê năm, nhưng 404/422 không phải "Khoẻ"); mới nhất là thất bại hub sẽ retry hoặc ≥ 50% → "Lỗi/chậm (đang retry)"; còn lại "Khoẻ". Đích/nguồn Ngắt hoặc lưu trữ: không có nhận định.
+- **`hub.ingest_duplicates(tenant_id, source_id, bucket giờ UTC, n)`** + RLS + FK ghép `(source_id, tenant_id)`. `IngestService` gọi `DuplicateCounter.record()` ở hai chỗ trả `duplicate` (Redis hit / P2002) — chỉ cộng trong bộ nhớ, không I/O; một timer 5s (unref, chỉ tồn tại khi có bản trùng) ghi mỗi project MỘT câu `INSERT … ON CONFLICT DO UPDATE n = n + EXCLUDED.n`; lỗi ghi thì cộng trả lại cho lượt sau; `onModuleDestroy` ghi nốt. "Hôm nay" = `date_trunc('day', now(), 'Asia/Ho_Chi_Minh')` (cùng múi biểu đồ dashboard; lệch giờ chẵn nên cắt đúng theo bucket). Index `(tenant_id, bucket DESC)`.
+- Web: MỘT lời gọi mỗi trang (Tổng quan `I-dup,I-dead`; Đích `I-dest`; Nguồn `I-silent`), làm mới 60s, không socket.
+**Đánh đổi:** Bộ đếm là bằng chứng, không phải trọng tài: SIGKILL mất tối đa ~5s số đếm (hub-api chưa bật shutdown hooks nên SIGTERM cũng có thể mất); nhiều instance cộng đúng nhờ ON CONFLICT. Bản trùng giờ tốn thêm ≤ 1 câu ghi / project / 5s trên Postgres (không trên đường ACK). Bảng chưa nằm trong job cleanup (vài dòng / source / giờ có bản trùng) — thêm khi cần. `I-dead` loại D9 nên có thể nhỏ hơn KPI "DLQ" và số dòng bảng DLQ (bảng vẫn liệt kê DEAD của đích đã lưu trữ để đối soát). Trang Đích/Nguồn tốn thêm một request mỗi phút; truy vấn `I-dest` đọc attempt 1 giờ (LIMIT 20 000 dòng nhóm).
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

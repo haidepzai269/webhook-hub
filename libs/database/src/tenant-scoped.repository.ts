@@ -1321,6 +1321,64 @@ export class TenantScopedRepository {
     return rows.map((r) => ({ sourceId: r.sourceId, n: Number(r.n), lastAt: r.lastAt, medianGapMs: r.medianGapMs === null ? null : Number(r.medianGapMs) }));
   }
 
+  // --- Nhận định (CB6, SPEC §7): tính lúc đọc, mỗi câu có cửa sổ + index; dùng lại đầu vào của AlertEvaluator ở trên ---
+
+  /**
+   * CB6 / ADR-171: cộng dồn bộ đếm bản trùng (đã gom trong bộ nhớ ở hub-api) — MỘT câu cho cả lô của project này.
+   * `ON CONFLICT DO UPDATE n = n + EXCLUDED.n` trên PK (tenant, source, giờ): nhiều instance hub-api cùng ghi vẫn cộng đúng.
+   */
+  async addIngestDuplicates(rows: { sourceId: string; bucket: Date; n: number }[]): Promise<number> {
+    const valid = rows.filter((r) => r.n > 0);
+    if (valid.length === 0) return 0;
+    return this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO hub.ingest_duplicates (tenant_id, source_id, bucket, n)
+      VALUES ${Prisma.join(valid.map((r) => Prisma.sql`(${this.tenantId}::uuid, ${r.sourceId}::uuid, ${r.bucket}, ${r.n}::int)`))}
+      ON CONFLICT (tenant_id, source_id, bucket) DO UPDATE SET n = hub.ingest_duplicates.n + EXCLUDED.n`);
+  }
+
+  /**
+   * `I-dup`: số bản trùng từ đầu ngày hôm nay (múi giờ của dashboard) theo provider của source. Luôn trả ≥ 1 dòng (mang
+   * `since`; `provider` null khi chưa có bản trùng). Index `(tenant_id, bucket DESC)`.
+   */
+  async countIngestDuplicatesToday(): Promise<{ since: Date; byProvider: { provider: string; n: number }[] }> {
+    const rows = await this.prisma.$queryRaw<{ since: Date; provider: string | null; n: bigint | null }[]>(Prisma.sql`
+      SELECT b.since, x.provider, x.n
+      FROM (SELECT date_trunc('day', now(), ${TIMESERIES_TZ}) AS since) b
+      LEFT JOIN LATERAL (
+        SELECT s.provider::text AS provider, sum(d.n)::bigint AS n
+        FROM hub.ingest_duplicates d
+        JOIN hub.sources s ON s.id = d.source_id AND s.tenant_id = d.tenant_id
+        WHERE d.tenant_id = ${this.tenantId}::uuid AND d.bucket >= b.since
+        GROUP BY 1
+      ) x ON true`);
+    return {
+      since: rows[0].since,
+      byProvider: rows.filter((r) => r.provider !== null).map((r) => ({ provider: r.provider as string, n: Number(r.n ?? 0) })),
+    };
+  }
+
+  /**
+   * `I-dead`: DLQ (DEAD + `notSuperseded`, ĐÚNG điều kiện bảng DLQ) loại D9 (DEAD vì đích lưu trữ / subscription hoặc đích
+   * có `archived_at` — như `countDeadForSpike`), dừng ở `cap`; `recent` = trong đó thành DEAD từ `recentSince`.
+   * Index một phần `deliveries(tenant_id, updated_at DESC) WHERE status='DEAD'`.
+   */
+  async countDlqForInsight(recentSince: Date, archivedErrorPrefix: string, cap: number): Promise<{ total: number; recent: number; capped: boolean }> {
+    const [row] = await this.prisma.$queryRaw<{ total: bigint; recent: bigint }[]>(Prisma.sql`
+      SELECT count(*) AS total, count(*) FILTER (WHERE x.updated_at >= ${recentSince}) AS recent FROM (
+        SELECT d.updated_at FROM hub.deliveries d
+        JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+        JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
+        WHERE d.tenant_id = ${this.tenantId}::uuid AND d.status = 'DEAD'
+          AND s.archived_at IS NULL AND dst.archived_at IS NULL
+          AND (d.last_error IS NULL OR left(d.last_error, ${archivedErrorPrefix.length}::int) <> ${archivedErrorPrefix})
+          AND ${notSuperseded}
+        ORDER BY d.updated_at DESC
+        LIMIT ${cap}
+      ) x`);
+    const total = Number(row?.total ?? 0);
+    return { total, recent: Number(row?.recent ?? 0), capped: total >= cap };
+  }
+
   // --- Stats (dashboard) ---
 
   /**

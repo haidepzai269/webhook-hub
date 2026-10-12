@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, Optional } from '@nestjs/common';
 import { PrismaService, getMasterKey } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
 import { AdapterContext, IdempotencyKeyMissingError, ProviderRegistry } from '@hub/providers';
@@ -17,6 +17,7 @@ import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
 import { redactHeaders } from './redact-headers';
 import { ingestDuration, ingestRequests } from '../metrics/metrics';
+import { DuplicateCounter } from './duplicate-counter';
 
 /**
  * S2-2 (ADR-049): chặng ①–④ (nhận, verify, COMMIT, ACK) chạy trong hub-api -> phát `trace.ingested`
@@ -55,15 +56,25 @@ function rejectAck(
 }
 
 @Injectable()
-export class IngestService {
+export class IngestService implements OnModuleDestroy {
   /** S1-4: trần 20 bản ghi REJECTED/phút/source, trong bộ nhớ (không tốn Redis). */
   private readonly rejectedLimiter = new RejectedRecordLimiter();
+  /**
+   * CB6 (ADR-171): bản trùng không có dòng raw_events -> đếm trong bộ nhớ, ghi Postgres mỗi ~5s (nhận định `I-dup`).
+   * `record()` không I/O: ACK trùng không chậm thêm, ngân sách Redis không đổi.
+   */
+  readonly duplicates = new DuplicateCounter((tenantId, rows) => this.prisma.forTenant(tenantId).addIngestDuplicates(rows));
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     @Optional() @Inject(TRACE_NOTIFIER) private readonly notifier?: TraceNotifier,
   ) {}
+
+  /** Tắt tiến trình: ghi nốt bộ đếm bản trùng (best-effort). */
+  async onModuleDestroy(): Promise<void> {
+    await this.duplicates.close();
+  }
 
   async ingestWebhook(req: RawWebhookRequest): Promise<{ status: number; body: unknown }> {
     return this.traced(req, (trace) => this.ingestCore(req, trace));
@@ -145,6 +156,7 @@ export class IngestService {
     const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
     if (await this.redis.getIdempotencyKey(redisIdemKey)) {
       log.info({ idempotencyKey }, 'Chống trùng lớp 1 (Redis Cache Hit): đã nhận trước đó');
+      this.duplicates.record(source.tenantId, source.id);
       return { kind: 'duplicate' };
     }
 
@@ -181,6 +193,7 @@ export class IngestService {
       // UNIQUE(source_id, idempotency_key): PostgreSQL là trọng tài
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         log.info({ idempotencyKey }, 'Chống trùng lớp 2 (PostgreSQL Unique Violation): bỏ qua bản trùng');
+        this.duplicates.record(source.tenantId, source.id);
         return { kind: 'duplicate' };
       }
       log.error({ err: error.message }, 'Lỗi transaction khi lưu raw_event và outbox');

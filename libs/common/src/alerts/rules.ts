@@ -66,6 +66,8 @@ export const SILENT_BASELINE_WINDOW_MS = 7 * DAY;
 export const SILENT_MIN_BASELINE_EVENTS = 20;
 export const SILENT_MIN_GAP_MS = 6 * HOUR;
 export const SILENT_GAP_MULTIPLIER = 4;
+/** Số mốc sự kiện gần nhất mỗi source dùng tính nhịp baseline (ngưỡng là 20) — AlertEvaluator và nhận định `I-silent` dùng CHUNG. */
+export const SILENT_BASELINE_MAX_EVENTS = 500;
 
 /** `normalize.backlog`: ≥ 1 raw_event ACCEPTED chưa chuẩn hoá quá 10 phút. */
 export const BACKLOG_MIN_AGE_MS = 10 * MIN;

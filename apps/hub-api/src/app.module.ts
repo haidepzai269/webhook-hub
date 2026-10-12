@@ -21,6 +21,7 @@ import { ConsoleEndpointsController } from './modules/console/endpoints.controll
 import { SourceConnectionsController } from './modules/console/source-connections.controller';
 import { AlertsController, MeLocaleController } from './modules/alerts/alerts.controller';
 import { OperatorGuard } from './modules/console/operator.guard';
+import { InsightsController } from './modules/insights/insights.controller';
 
 /**
  * Review SPEC-2 #7 (ADR-054): `/mock/*` (đích giả Telegram/Discord, `/mock/fail`) chỉ tồn tại ngoài
@@ -32,6 +33,7 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
     SourceConnectionsController, // KN2 (ADR-138): hub tự đăng ký URL ingest tại provider
     AlertsController, // CB3 (ADR-169): cảnh báo xuyên project — chỉ operator
     MeLocaleController, // CB3 / DINH-CHINH D3: PUT /api/v1/me/locale
+    InsightsController, // CB6: nhận định theo project (thành viên đọc được project)
   ];
   return nodeEnv === 'production' ? base : [...base, MockController];
 }

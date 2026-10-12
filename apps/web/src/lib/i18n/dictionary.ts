@@ -36,6 +36,7 @@ import { common } from "./messages/common";
 import { errors } from "./messages/errors";
 import { flow } from "./messages/flow";
 import { header } from "./messages/header";
+import { insights } from "./messages/insights";
 import { journey } from "./messages/journey";
 import { layout } from "./messages/layout";
 import { nav } from "./messages/nav";
@@ -80,6 +81,7 @@ const NAMESPACES = {
     ...pageAudit.vi,
     ...alerts.vi,
     ...pageAlerts.vi,
+    ...insights.vi,
   },
   en: {
     ...common.en,
@@ -105,6 +107,7 @@ const NAMESPACES = {
     ...pageAudit.en,
     ...alerts.en,
     ...pageAlerts.en,
+    ...insights.en,
   },
 } satisfies Record<Locale, unknown>;
 

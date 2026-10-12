@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { CopyButton } from "@/components/admin/copy-button";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { FormDialog } from "@/components/admin/form-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -111,6 +112,13 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
       ),
   },
   {
+    // CB6 (SPEC §7, I-silent): "Sự kiện cuối …" so với nhịp của chính nguồn (cùng baseline với luật source.silent).
+    id: "insight",
+    header: t("insights.col.silent"),
+    enableSorting: false,
+    cell: ({ row }) => <InsightCell id={row.original.id} />,
+  },
+  {
     id: "createdAt",
     header: t("common.created-at"),
     accessorFn: (s) => s.createdAt,
@@ -188,15 +196,17 @@ export default function SourcesPage() {
         onConnect={(s) => (setPreset({ provider: s.provider, sourceId: s.id }), setConnectOpen(true))}
       />
       <OpenConnection.Provider value={setConnectionId}>
-        <DataTable
-          data={data}
-          columns={columns}
-          getRowId={(s) => s.id}
-          isLoading={isLoading}
-          error={error}
-          searchPlaceholder={t("page.sources.search")}
-          emptyText={t("page.sources.empty")}
-        />
+        <InsightRowsProvider code="I-silent">
+          <DataTable
+            data={data}
+            columns={columns}
+            getRowId={(s) => s.id}
+            isLoading={isLoading}
+            error={error}
+            searchPlaceholder={t("page.sources.search")}
+            emptyText={t("page.sources.empty")}
+          />
+        </InsightRowsProvider>
       </OpenConnection.Provider>
 
       <FormDialog

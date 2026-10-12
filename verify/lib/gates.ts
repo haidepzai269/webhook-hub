@@ -91,8 +91,8 @@ const NO_VERIFY = '--no-' + 'verify|--passWith' + 'NoTests';
 const RLS_SYSTEM = 'app\\.rls' + '_system';
 /** R-7: migration bật RLS; migration sau mốc này chạy dưới FORCE RLS khi owner không phải superuser (Neon). */
 const RLS_MIGRATION_TS = '20261011110000';
-/** Bảng có RLS (migration 20261011110000_rls_hub_app; alerts/alert_emails: 20261012050000_alerts). Thêm bảng RLS mới -> thêm vào đây. */
-const RLS_TABLES = ['sources', 'events', 'destinations', 'subscriptions', 'deliveries', 'audit_logs', 'source_secrets', 'raw_events', 'delivery_attempts', 'alerts', 'alert_emails'];
+/** Bảng có RLS (migration 20261011110000_rls_hub_app; alerts/alert_emails: 20261012050000_alerts; ingest_duplicates: 20261012070000_ingest_duplicates). Thêm bảng RLS mới -> thêm vào đây. */
+const RLS_TABLES = ['sources', 'events', 'destinations', 'subscriptions', 'deliveries', 'audit_logs', 'source_secrets', 'raw_events', 'delivery_attempts', 'alerts', 'alert_emails', 'ingest_duplicates'];
 const DATA_DML_RLS = new RegExp(`\\b(UPDATE|INSERT\\s+INTO|DELETE\\s+FROM)\\s+("?hub"?\\s*\\.\\s*)?"?(${RLS_TABLES.join('|')})"?(\\s|;|\\(|$)`, 'i');
 const OWNER_URL = 'VERIFY_DB_' + 'OWNER_URL|MAIL_DRIVER.*capt' + 'ure';
 

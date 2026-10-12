@@ -20,6 +20,7 @@ import {
   RuleContext,
   RuleDecision,
   SIGNATURE_WINDOW_MS,
+  SILENT_BASELINE_MAX_EVENTS,
   SILENT_BASELINE_WINDOW_MS,
   STREAK_QUIET_CLOSE_MS,
   SubjectLifecycle,
@@ -68,7 +69,7 @@ export const ALERT_REDIS = Symbol('ALERT_REDIS');
 /** Số attempt gần nhất mỗi đích cho luật chuỗi (ngưỡng là 3; thừa để còn thấy 2xx mới hơn mốc giữa các lượt). */
 export const STREAK_ATTEMPTS_PER_DESTINATION = 50;
 /** Số mốc sự kiện gần nhất mỗi source để tính nhịp baseline (`source.silent`; ngưỡng là 20). */
-export const SILENT_EVENTS_PER_SOURCE = 500;
+export const SILENT_EVENTS_PER_SOURCE = SILENT_BASELINE_MAX_EVENTS; // CB6: chung với nhận định I-silent
 /** Trần đếm `delivery.dead_spike` (ngưỡng là 10). */
 export const DEAD_SPIKE_COUNT_CAP = 1000;
 
