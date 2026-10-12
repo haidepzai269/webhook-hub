@@ -1,4 +1,3 @@
-import { parseTrustProxy } from '../../trust-proxy';
 import { mailConfigProblems } from '@hub/common';
 /**
  * SPEC-auth §7: cấu hình phiên đăng nhập. Đọc process.env trực tiếp (cùng lý do JwtModule ở auth.module.ts:
@@ -13,7 +12,7 @@ export interface AuthConfig {
   refreshIdleDays: number;
   refreshAbsoluteDays: number;
   webPublicUrl: string;
-  trustProxy: boolean;
+  // Review EG1 lượt 3 (N2): bỏ `trustProxy` — không ai đọc; nguồn duy nhất là parseTrustProxy ở main.ts (sai khuôn -> thoát).
 }
 
 export const AUTH_CONFIG = Symbol('AUTH_CONFIG');
@@ -35,7 +34,6 @@ export function loadAuthConfig(env: Record<string, string | undefined> = process
     refreshIdleDays: int(env.REFRESH_IDLE_DAYS, 7, 1, 30),
     refreshAbsoluteDays: int(env.REFRESH_ABSOLUTE_DAYS, 30, 1, 365),
     webPublicUrl: (env.WEB_PUBLIC_URL ?? '').trim().replace(/\/$/, ''),
-    trustProxy: parseTrustProxy(env.TRUST_PROXY) !== undefined,
   };
 }
 

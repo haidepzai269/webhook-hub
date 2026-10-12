@@ -25,14 +25,41 @@ const edge = require('../../../docker/nginx/edge.js');
 const { supervise, buildSpecs, edgeDrainMs, startEdgeLogSink } = require('../../../docker/hub-all.js');
 
 const TEMPLATE = fs.readFileSync(edge.TEMPLATE, 'utf8');
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'edge-'));
+/**
+ * Thư mục tạm cho EDGE_PREFIX (edge.js đòi đường dẫn POSIX `^/…`). Windows: bỏ ký tự ổ đĩa, đổi `\` -> `/` — Node trên
+ * Windows hiểu `/Users/…` là gốc ổ hiện tại, nên vẫn là đúng thư mục tạm (máy dev chạy từ ổ C:).
+ */
+const tmp = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-'));
+  return process.platform === 'win32' ? dir.replace(/^[A-Za-z]:/, '').split(path.sep).join('/') : dir;
+};
 
 function render(env: Record<string, string> = {}): string {
   const { vars } = edge.edgeVars(env, { listenPort: 8080, upstream: '127.0.0.1:4000', prefix: '/tmp/edge-nginx' });
-  return edge.renderTemplate(vars);
+  // Checkout Windows (autocrlf) cho template CRLF: chuẩn hoá để regex theo dòng của test giống trên Linux.
+  return edge.renderTemplate(vars).split('\r\n').join('\n');
+}
+
+/**
+ * Mô phỏng thứ tự chọn location của nginx (đủ cho template này): `=` khớp chính xác thắng ngay; nhớ prefix dài nhất;
+ * rồi regex (`~` phân biệt hoa thường, `~*` không) THEO THỨ TỰ trong file — regex đầu tiên khớp thắng; không có thì
+ * dùng prefix đã nhớ. (Template không dùng `^~`.)
+ */
+function pickLocation(conf: string, uri: string): string {
+  const locs = [...conf.matchAll(/^\s*location (?:(=|~\*|~) )?(?:"([^"]+)"|(\S+)) \{/gm)].map((m) => ({ mod: m[1] ?? '', arg: m[2] ?? m[3], raw: m[0].trim().replace(/ \{$/, '').replace(/^location /, '') }));
+  const exact = locs.find((l) => l.mod === '=' && l.arg === uri);
+  if (exact) return exact.raw;
+  const prefix = locs.filter((l) => l.mod === '' && !l.arg.startsWith('@') && uri.startsWith(l.arg)).sort((a, b) => b.arg.length - a.arg.length)[0];
+  const rx = locs.find((l) => (l.mod === '~' || l.mod === '~*') && new RegExp(l.arg, l.mod === '~*' ? 'i' : '').test(uri));
+  return (rx ?? prefix)?.raw ?? '';
 }
 
 afterAll(() => disconnectSeedClient?.());
+
+/** TB-1 (review EG1 lượt 3): cách viết vòng của dải IPv4 quá rộng (< /8) — parseTrustProxy và edge.js phải cùng chặn. */
+const WIDE_MAPPED = ['::ffff:0:0/96', '::ffff:0.0.0.0/97', '::ffff:0.0.0.0/100', '::ffff:0:0/103', '::FFFF:0:0/96', '::/16', '::/80', '0:0:0:0:0:ffff::/90'];
+/** Dạng mapped nhưng hẹp (≥ /104 = IPv4 ≥ /8) hoặc địa chỉ đơn: vẫn hợp lệ. */
+const NARROW_MAPPED = ['::ffff:10.0.0.0/104', '::ffff:a00:0/104', '::ffff:10.250.250.6', '::ffff:10.250.250.0/125', '2001:db8::/32'];
 
 describe('EG1 — template nginx + envsubst', () => {
   it('[EG:T3] (phần a) mọi sourceKey do seed, apiSourceKey (api_<uuid>), generateSourceKey (src_<provider>_<ulid>) và key tự đặt đúng SOURCE_KEY_RE đều khớp regex location /hooks/* — regex ĐỌC TỪ TEMPLATE, hàm sinh key là hàm THẬT', () => {
@@ -105,8 +132,39 @@ describe('EG1 — template nginx + envsubst', () => {
     // Gom từng location -> có limit_req hay không.
     const locs = [...off.matchAll(/location (.*) \{\n([^}]*)\}/g)].map((m) => [m[1].trim(), /limit_req zone/.test(m[2])]);
     const withFuse = locs.filter(([, f]) => f).map(([l]) => l);
-    expect(withFuse).toEqual(['~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"', '/v1/p/']);
+    expect(withFuse).toEqual(['~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"', '~* "^/v1/p/"']);
     for (const l of ['= /health', '/socket.io/', '/']) expect(locs.find(([x]) => x === l)?.[1]).toBe(false);
+  });
+
+  it('[EG:T10] (phần e) L0: path viết hoa (`/HOOKS/…`, `/Hooks/…`, `/V1/P/…`) KHÔNG đi vòng location được bảo vệ — express khớp route không phân biệt hoa thường (review EG1 lượt 3, TB-2): /hooks/* hoa -> 404 tĩnh, /v1/p/* hoa -> có cầu chì', () => {
+    const conf = render();
+    const HOOK_OK = '~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"';
+    const HOOK_404 = '~* "^/hooks(/|$)"';
+    const V1P = '~* "^/v1/p/"';
+    const cases: [string, string][] = [
+      ['/hooks/github/src_github_main', HOOK_OK],
+      ['/hooks/github/My-Key_01', HOOK_OK],
+      ['/HOOKS/github/src_github_main', HOOK_404],
+      ['/Hooks/github/k1', HOOK_404],
+      ['/hOoKs/github/k1', HOOK_404],
+      ['/HOOKS', HOOK_404],
+      ['/hooks/github/a.b', HOOK_404],
+      ['/hooks/GitHub/k', HOOK_404],
+      ['/hooks/github/' + 'a'.repeat(65), HOOK_404],
+      ['/v1/p/demo/events', V1P],
+      ['/V1/P/demo/events', V1P],
+      ['/v1/P/demo/events', V1P],
+      ['/health', '= /health'],
+      ['/socket.io/', '/socket.io/'],
+      ['/api/v1/me', '/'],
+      ['/hooksx', '/'],
+    ];
+    for (const [uri, want] of cases) expect([uri, pickLocation(conf, uri)]).toEqual([uri, want]);
+    // Location 404 hoa/thường không proxy lên hub-api; location /v1/p/* hoa vẫn qua cầu chì.
+    const block = (name: string) => conf.split(`location ${name} {\n`)[1]?.split('}')[0] ?? '';
+    expect(block(HOOK_404)).toMatch(/return 404 '/);
+    expect(block(HOOK_404)).not.toMatch(/proxy_pass/);
+    expect(block(V1P)).toMatch(/limit_req zone=hooks_ip/);
   });
 
   it('[EG:T10] (phần b) L0: envsubst chỉ thay danh sách biến cố định: $remote_addr/$request_id của nginx còn nguyên, secret trong env KHÔNG lọt vào file; trần body khớp ADR-162; body lỗi tĩnh là JSON đúng khuôn ERRORS.md', () => {
@@ -168,6 +226,11 @@ describe('EG1 — template nginx + envsubst', () => {
       expect(edge.realIpBlock({ EDGE_TRUSTED_PROXIES: wide, EDGE_REAL_IP_RECURSIVE: 'off' })).toContain('real_ip_recursive off;');
     }
     expect(edge.realIpBlock({ EDGE_TRUSTED_PROXIES: '10.0.0.0/8,2001:db8::/16,1.2.3.4' })).toContain('real_ip_recursive on;');
+    // TB-1: cùng luật với parseTrustProxy cho dạng IPv4-mapped (phần tử dạng chấm `::ffff:a.b.c.d` cũng được nhận).
+    for (const wide of WIDE_MAPPED) expect(() => edge.realIpBlock({ EDGE_TRUSTED_PROXIES: wide })).toThrow(/quá rộng/);
+    for (const ok of NARROW_MAPPED) expect(edge.realIpBlock({ EDGE_TRUSTED_PROXIES: ok })).toContain(`set_real_ip_from ${ok};`);
+    // Thấp-1: chỉ gồm dấu phân cách = trống.
+    expect(edge.realIpBlock({ EDGE_TRUSTED_PROXIES: ' , ' })).not.toMatch(/set_real_ip_from|real_ip_header/);
     expect(() => edge.edgeVars({ HUB_DOCS_URL: `x"}';` }, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' })).toThrow(/HUB_DOCS_URL/);
     expect(() => edge.edgeVars({}, { listenPort: 1, upstream: 'a:1; evil', prefix: '/tmp/x' })).toThrow(/EDGE_UPSTREAM/);
     // Bật cầu chì mà không khai proxy tin cậy -> cảnh báo (đúng ở local, sai sau proxy Render).
@@ -184,6 +247,9 @@ describe('EG1 — template nginx + envsubst', () => {
     const base = { DATABASE_URL: 'postgresql://u:p@h/db', PORT: '10000', EDGE_NGINX: '1', EDGE_PREFIX: tmp(), PATH: process.env.PATH ?? '' };
     expect(() => buildSpecs({ ...base, RENDER: 'true' })).toThrow(/EDGE_TRUSTED_PROXIES/);
     expect(() => buildSpecs(base)).toThrow(/EDGE_TRUSTED_PROXIES/); // D11: hub-all EDGE_NGINX=1 từ chối cả khi không phải Render
+    // Thấp-1 (review lượt 3): chỉ gồm dấu phân cách = trống -> D11 vẫn chặn.
+    for (const v of [' , ', ',', ' ,, ']) expect(() => buildSpecs({ ...base, EDGE_TRUSTED_PROXIES: v })).toThrow(/EDGE_TRUSTED_PROXIES/);
+    expect(() => edge.edgeVars({ RENDER: 'true', EDGE_TRUSTED_PROXIES: ' , ' }, opt)).toThrow(/EDGE_ALLOW_NO_REAL_IP/);
     expect(buildSpecs({ ...base, RENDER: 'true' , EDGE_ALLOW_NO_REAL_IP: '1' }).warnings[0].level).toBe(50);
     // EDGE_NGINX tắt thì RENDER không ảnh hưởng gì [EG:T16].
     expect(buildSpecs({ DATABASE_URL: 'postgresql://u:p@h/db', RENDER: 'true' }).specs.map((x: any) => x.name)).toEqual(['api', 'worker']);
@@ -315,8 +381,10 @@ async function shutdownWhileSlowRequest(sequenced: boolean) {
   return { res, code, ms: Date.now() - t0, logs, lines, real: !!real, sent: Object.fromEntries(sup.children.map((c: any) => [c.name, c.sentSignal])) };
 }
 
+// Windows không có SIGQUIT/SIGTERM thật cho tiến trình con (kill = TerminateProcess) -> chỉ chạy trên Linux (CI, image).
+const itPosix = process.platform === 'win32' ? it.skip : it;
 describe('EG1 — tắt máy (SIGQUIT)', () => {
-  it('[EG:T9] (phần b) SIGTERM supervisor -> nginx nhận SIGQUIT, worker SIGTERM; hub-api chỉ nhận SIGTERM SAU khi nginx thoát -> request đang chạy dài 3 s vẫn nhận 200; cả nhóm thoát 0 trước 25 s', async () => {
+  itPosix('[EG:T9] (phần b) SIGTERM supervisor -> nginx nhận SIGQUIT, worker SIGTERM; hub-api chỉ nhận SIGTERM SAU khi nginx thoát -> request đang chạy dài 3 s vẫn nhận 200; cả nhóm thoát 0 trước 25 s', async () => {
     const r = await shutdownWhileSlowRequest(true);
     console.log(`T9 nginx ${r.real ? 'THẬT' : 'giả (Node)'}: ${r.res.status} sau ${r.ms} ms, exit ${r.code}`);
     expect(r.res).toEqual({ status: 200, body: 'slow-ok' });
@@ -329,7 +397,7 @@ describe('EG1 — tắt máy (SIGQUIT)', () => {
     if (r.real) expect(r.lines.map((l) => (l.startsWith('{') ? JSON.parse(l) : {})).find((j) => j.uri_path === '/hooks/github/src_github_main')).toMatchObject({ proc: 'edge', status: 200, method: 'GET', ip: '127.0.0.1' });
   }, 40_000);
 
-  it('[EG:T9] (phần c) đối chứng: gửi SIGTERM cho hub-api CÙNG LÚC với nginx (không chờ) -> request đang chạy MẤT phản hồi: lý do hub-api phải chờ nginx', async () => {
+  itPosix('[EG:T9] (phần c) đối chứng: gửi SIGTERM cho hub-api CÙNG LÚC với nginx (không chờ) -> request đang chạy MẤT phản hồi: lý do hub-api phải chờ nginx', async () => {
     const r = await shutdownWhileSlowRequest(false);
     expect(r.res.status).not.toBe(200);
     expect(r.sent.edge).toBe('SIGQUIT');
@@ -403,6 +471,11 @@ describe('EG1 — chuỗi nginx thật -> trust proxy 1', () => {
         const r = await getJson(port, p, { 'x-forwarded-for': '6.6.6.6, 203.0.113.9' });
         expect([p, r.ip, r.xff]).toEqual([p, '203.0.113.9', '203.0.113.9']);
       }
+      // TB-2: viết hoa không tới được hub-api (ipEcho trả 200 cho mọi path) -> 404 tĩnh của nginx.
+      for (const p of ['/HOOKS/github/src_github_main', '/Hooks/github/k1']) {
+        const r = await getJson(port, p, {});
+        expect([p, r.status, r.error, r.ip]).toEqual([p, 404, 'not_found', undefined]);
+      }
     });
   }, 40_000);
 });
@@ -447,6 +520,12 @@ describe('TRUST_PROXY (review feat/edge: hub-api chỉ tin service edge ở comp
     expect(parseTrustProxy('10.250.250.6')).toEqual(['10.250.250.6']);
     expect(parseTrustProxy('10.250.250.0/29, ::1')).toEqual(['10.250.250.0/29', '::1']);
     for (const bad of ['edge', 'true', 'yes', '10.0.0.0/33', '0.0.0.0/0', '0.0.0.0/1', '10.0.0.0/7', '::/0', '2000::/15', '1.2.3', 'loopback']) expect(() => parseTrustProxy(bad)).toThrow(/TRUST_PROXY/);
+    // Review EG1 lượt 3 (TB-1): dải rộng viết dạng IPv4-mapped IPv6 — proxy-addr quy về IPv4 (`range - 96`), và một dải
+    // IPv6 chứa trọn ::ffff:0:0/96 thì tin MỌI IPv4. Chuẩn hoá về IPv4 rồi áp cùng luật /8.
+    for (const bad of WIDE_MAPPED) expect(() => parseTrustProxy(bad)).toThrow(/TRUST_PROXY/);
+    for (const ok of NARROW_MAPPED) expect(parseTrustProxy(ok)).toEqual([ok]);
+    // Thấp-1: chỉ gồm dấu phân cách = trống (không tin ai), không phải danh sách rỗng.
+    for (const v of [' , ', ',', ' ,, ']) expect([v, parseTrustProxy(v)]).toEqual([v, undefined]);
     expect(parseTrustProxy('10.0.0.0/8,2001:db8::/16')).toEqual(['10.0.0.0/8', '2001:db8::/16']);
     // Đúng ngữ nghĩa express (bản của Nest) với danh sách: compileTrust -> hàm tin theo địa chỉ chặng.
     const express = require(require.resolve('express', { paths: [require.resolve('@nestjs/platform-express')] }));
@@ -456,5 +535,20 @@ describe('TRUST_PROXY (review feat/edge: hub-api chỉ tin service edge ở comp
     expect(trust('10.250.250.6', 0)).toBe(true);
     expect(trust('172.20.0.1', 0)).toBe(false); // host gọi thẳng :4000 qua gateway docker
     expect(trust('10.250.250.1', 0)).toBe(false);
+    // TB-1: đối chứng bằng proxy-addr THẬT — mọi ca WIDE_MAPPED đúng là tin IP công khai (1.1.1.1) nếu lọt qua; các ca
+    // NARROW_MAPPED được nhận thì không tin 1.1.1.1 / 8.8.8.8 (cả dạng peer dual-stack ::ffff:…).
+    // Dải IPv6 chứa trọn ::ffff:0:0/96 (`::/16`…) thì proxy-addr 2.0.8 tự không cho khớp IPv4 và nginx so họ địa chỉ trước
+    // — vẫn chặn PHÒNG XA (bản proxy-addr khác, cùng một luật cho hai bên), nên đối chứng chỉ áp cho dạng ::ffff:….
+    for (const w of WIDE_MAPPED.filter((x) => /^::ffff:/i.test(x))) {
+      const a = express();
+      a.set('trust proxy', [w]);
+      expect([w, a.get('trust proxy fn')('1.1.1.1', 0)]).toEqual([w, true]);
+    }
+    for (const n of NARROW_MAPPED) {
+      const a = express();
+      a.set('trust proxy', parseTrustProxy(n));
+      const t = a.get('trust proxy fn');
+      for (const ip of ['1.1.1.1', '8.8.8.8', '::ffff:8.8.8.8']) expect([n, ip, t(ip, 0)]).toEqual([n, ip, false]);
+    }
   });
 });

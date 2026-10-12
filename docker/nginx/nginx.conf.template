@@ -8,6 +8,7 @@
 # Luật của file này:
 #   - KHÔNG sửa body (không gzip/sub_filter cho request, không đổi Content-Type): HMAC tính trên bytes gốc [EG:T2].
 #   - nginx KHÔNG BAO GIỜ trả 2xx thay hub-api (BB-3): mọi 2xx đến từ upstream.
+#   - Location được bảo vệ khớp KHÔNG phân biệt hoa thường (`~*`) — express cũng vậy, nên `/HOOKS/…` không đi vòng.
 #   - Cầu chì IP chỉ ở /hooks/* và /v1/p/*. /api/*, /auth/*, /socket.io/*, /health KHÔNG có cầu chì.
 #   - Không có `if provider = …`: một regex sourceKey cho mọi provider.
 # =====================================================================================================================
@@ -113,14 +114,18 @@ ${EDGE_REAL_IP}
             proxy_pass http://hub_api;
         }
 
-        # /hooks/* sai khuôn (path traversal, key quá dài, ký tự lạ) -> 404 tĩnh, không chạm hub-api.
-        location /hooks/ {
+        # /hooks/* sai khuôn (path traversal, key quá dài, ký tự lạ) VÀ mọi biến thể hoa/thường (`/HOOKS/…`, `/Hooks/…`)
+        # -> 404 tĩnh, không chạm hub-api. `~*` (không phân biệt hoa thường) vì express khớp route KHÔNG phân biệt hoa
+        # thường: thiếu dòng này `/HOOKS/github/<key>` rơi vào `location /` — không cầu chì, không lọc (review EG1 lượt 3).
+        # Regex xét theo thứ tự: location hợp lệ (chữ thường) ở trên luôn thắng trước.
+        location ~* "^/hooks(/|$)" {
             default_type application/json;
             add_header X-Request-Id $edge_request_id always;
             return 404 '{"error":"not_found","message":"The resource was not found.","fix":"Check the webhook URL: /hooks/<provider>/<sourceKey> as shown in the console.","docsUrl":"${HUB_DOCS_URL}#not_found","requestId":"$edge_request_id"}';
         }
 
-        location /v1/p/ {
+        # `~*`: `/V1/P/…` cũng qua cầu chì (cùng lý do hoa/thường như /hooks).
+        location ~* "^/v1/p/" {
             limit_req zone=hooks_ip burst=${EDGE_IP_BURST} nodelay;
             proxy_pass http://hub_api;
         }

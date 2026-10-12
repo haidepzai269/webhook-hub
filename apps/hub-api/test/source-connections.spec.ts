@@ -28,6 +28,16 @@ describe('[KN2] kết nối provider — L0', () => {
     expect((await errOf(svc.connect('t', 'user:u', { provider: 'nope', name: 'x', credentials: {} }))).body).toMatchObject({ error: 'validation_failed', field: 'provider' });
   });
 
+  it('[EG:T3] (phần d) "Kết nối provider" với sourceKey tự đặt sai khuôn D13 (`my.key`, 65 ký tự, `../x`, có dấu, số) -> 422 validation_failed field sourceKey; không chạm DB, không gọi provider', async () => {
+    const svc = new SourceConnectionService(noDb, { HUB_PUBLIC_URL: 'https://hub.example.com' });
+    for (const provider of ['payos', 'stripe']) {
+      for (const bad of ['my.key', 'a'.repeat(65), '../x', 'khoá', 12345]) {
+        const e = await errOf(svc.connect('t', 'user:u', { provider, name: 'x', sourceKey: bad, credentials: {} }));
+        expect([provider, bad, e.status, e.body.error, e.body.field]).toEqual([provider, bad, 422, 'validation_failed', 'sourceKey']);
+      }
+    }
+  });
+
   it('[KN:U7] HUB_PUBLIC_URL localhost / IP nội bộ / tên một nhãn -> null (422 public_url_required, không gọi provider); URL công khai -> giữ', () => {
     for (const bad of ['http://localhost:4000', 'http://127.0.0.1:4000', 'http://10.0.0.5', 'http://192.168.1.2:4000', 'http://[::1]:4000', 'http://hub-api:4000', 'http://x.localhost', 'http://169.254.169.254', '', 'not a url']) {
       expect([bad, publicIngestBase({ HUB_PUBLIC_URL: bad })]).toEqual([bad, null]);

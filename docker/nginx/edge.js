@@ -47,14 +47,57 @@ function clampInt(env, name) {
 }
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-const IPV6 = /^[0-9A-Fa-f:]+$/;
+
+/**
+ * IPv6 (cả dạng đuôi chấm `::ffff:1.2.3.4`) -> 128 bit (BigInt); sai khuôn -> null. Không phụ thuộc thư viện ngoài
+ * (file này chạy trong image trước khi có node_modules của app). Cùng thuật toán với apps/hub-api/src/trust-proxy.ts.
+ */
+function ipv6Bits(addr) {
+  let a = addr;
+  const dotted = /^(.*:)([^:]+\.[^:]+)$/.exec(a);
+  if (dotted) {
+    if (!IPV4.test(dotted[2])) return null;
+    const o = dotted[2].split('.').map(Number);
+    a = `${dotted[1]}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
+  }
+  const halves = a.split('::');
+  if (halves.length > 2) return null;
+  const part = (x) => (x === '' ? [] : x.split(':'));
+  const head = part(halves[0]);
+  const tail = halves.length === 2 ? part(halves[1]) : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return null;
+  const words = [...head, ...Array(halves.length === 2 ? fill : 0).fill('0'), ...tail];
+  if (words.some((w) => !/^[0-9A-Fa-f]{1,4}$/.test(w))) return null;
+  return words.reduce((acc, w) => (acc << 16n) | BigInt(parseInt(w, 16)), 0n);
+}
+
+const MAPPED_NET = 0xffffn << 32n; // ::ffff:0:0/96 — không gian IPv4-mapped
+
+/**
+ * Số bit prefix "hiệu dụng" của một CIDR khi so với luật dải rộng (review EG1 lượt 3, TB-1). proxy-addr (express) quy
+ * subnet IPv4-mapped về IPv4 với `prefix - 96`, và so một peer IPv4 với subnet IPv6 bằng dạng mapped của nó, nên:
+ * - IPv6 chứa TRỌN ::ffff:0:0/96 (vd `::/16`, `::ffff:0:0/96`) = tin mọi IPv4 -> `{ v4: 0 }`;
+ * - IPv6 nằm trong ::ffff:0:0/96 với prefix p -> IPv4 /(p-96);
+ * - còn lại giữ nguyên họ địa chỉ.
+ */
+function effectivePrefix(addr, prefix) {
+  if (IPV4.test(addr)) return { v4: prefix ?? 32 };
+  const bits = ipv6Bits(addr);
+  const p = prefix ?? 128;
+  if (bits === null) return null;
+  const mask = (n) => (n === 0 ? 0n : ((1n << BigInt(n)) - 1n) << BigInt(128 - n));
+  if (p <= 96 && (bits & mask(p)) === (MAPPED_NET & mask(p))) return { v4: 0 };
+  if (p > 96 && (bits & mask(96)) === MAPPED_NET) return { v4: p - 96 };
+  return { v6: p };
+}
 
 /** Một phần tử của EDGE_TRUSTED_PROXIES: IPv4/IPv6, có thể kèm /prefix. Sai khuôn -> null (gọi hàm sẽ ném lỗi). */
 function normalizeCidr(item) {
   const [addr, prefix, extra] = item.split('/');
   if (extra !== undefined) return null;
   const v4 = IPV4.test(addr);
-  const v6 = !v4 && IPV6.test(addr) && addr.includes(':') && (addr.match(/::/g) || []).length <= 1;
+  const v6 = !v4 && addr.includes(':') && ipv6Bits(addr) !== null;
   if (!v4 && !v6) return null;
   if (prefix !== undefined) {
     if (!/^\d{1,3}$/.test(prefix)) return null;
@@ -64,11 +107,20 @@ function normalizeCidr(item) {
   return item;
 }
 
-/** Dải coi là "quá rộng" để tin đệ quy: /0, IPv4 ngắn hơn /8, IPv6 ngắn hơn /16. Địa chỉ đơn lẻ không bao giờ rộng. */
+/**
+ * Dải coi là "quá rộng" để tin đệ quy: /0, IPv4 ngắn hơn /8, IPv6 ngắn hơn /16 — sau khi quy dạng IPv4-mapped về IPv4
+ * (`::ffff:0:0/96` = `0.0.0.0/0`, `::/16` chứa trọn không gian mapped). Địa chỉ đơn lẻ không bao giờ rộng.
+ */
 function tooWide(item) {
   const [addr, prefix] = item.split('/');
   if (prefix === undefined) return false;
-  return Number(prefix) < (addr.includes(':') ? 16 : 8);
+  const eff = effectivePrefix(addr, Number(prefix));
+  return eff === null || (eff.v4 !== undefined ? eff.v4 < 8 : eff.v6 < 16);
+}
+
+/** EDGE_TRUSTED_PROXIES -> danh sách phần tử. Chỉ gồm dấu phân cách (`" , "`) = trống (review EG1 lượt 3, Thấp-1). */
+function trustedItems(env) {
+  return String(env.EDGE_TRUSTED_PROXIES ?? '').split(/[\s,]+/).filter(Boolean);
 }
 
 /** Thời gian hub-api chờ nginx khi tắt máy (EDGE_DRAIN_MS, mặc định 16 s), kẹp để hub-api còn ≥ 6 s trước SIGKILL. */
@@ -90,9 +142,8 @@ function nginxShutdownSeconds(env) {
  *   `0.0.0.0/0,::/0` + EDGE_REAL_IP_RECURSIVE=off = lấy phần tử CUỐI của XFF = đúng hành vi `trust proxy 1` hôm nay.
  */
 function realIpBlock(env) {
-  const raw = String(env.EDGE_TRUSTED_PROXIES ?? '').trim();
-  if (!raw) return '    # EDGE_TRUSTED_PROXIES trống: $remote_addr = địa chỉ kết nối TCP (không tin X-Forwarded-For).';
-  const items = raw.split(/[\s,]+/).filter(Boolean);
+  const items = trustedItems(env);
+  if (!items.length) return '    # EDGE_TRUSTED_PROXIES trống: $remote_addr = địa chỉ kết nối TCP (không tin X-Forwarded-For).';
   const bad = items.filter((i) => normalizeCidr(i) === null);
   if (bad.length) throw new Error(`EDGE_TRUSTED_PROXIES có phần tử không phải IP/CIDR: ${bad.join(', ')}`);
   const rec = String(env.EDGE_REAL_IP_RECURSIVE ?? 'on').trim().toLowerCase();
@@ -129,7 +180,7 @@ function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout'
     throw new Error(`đích access log không hợp lệ: ${accessLog}`);
   }
   const fuse = on(env.EDGE_IP_FUSE);
-  const trusted = String(env.EDGE_TRUSTED_PROXIES ?? '').trim();
+  const trusted = trustedItems(env).length > 0;
   /** @type {{level:number, msg:string}[]} */
   const warnings = [];
   // Review EG1 #3 + spec EG D11: hub-all (EDGE_NGINX=1, `requireTrusted`) hoặc chạy trên Render (env RENDER) thì mọi kết
@@ -229,4 +280,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EDGE_ENVSUBST_VARS, TEMPLATE, edgeVars, renderTemplate, prepareEdge, sourceKeyLocationRegex, realIpBlock, on, edgeDrainMs, nginxShutdownSeconds };
+module.exports = { EDGE_ENVSUBST_VARS, TEMPLATE, edgeVars, renderTemplate, prepareEdge, sourceKeyLocationRegex, realIpBlock, on, edgeDrainMs, nginxShutdownSeconds, tooWide };

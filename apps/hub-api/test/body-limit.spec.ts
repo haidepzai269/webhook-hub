@@ -120,6 +120,18 @@ describe('[ADR-162] body parser limit = MAX_INGEST_PAYLOAD_BYTES, rawBody giữ 
     expect(await tooLarge('unknown')).toBe(beforeUnknown + 1);
   });
 
+  it('[EG:T10] (phần f) review EG1 lượt 3 (TB-2), lớp hub-api: `/HOOKS/…`, `/Hooks/…` (express khớp không phân biệt hoa thường) -> 404 not_found khuôn ERRORS.md, KHÔNG vào ingest; `/hooks/…` chữ thường vẫn vào', async () => {
+    for (const p of ['/HOOKS/github/src_x', '/Hooks/github/src_x', '/hOoKs/github/src_x?x=1']) {
+      const res = await fetch(`${base}${p}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'push', 'x-request-id': 'rid-case-test-1' }, body: '{}' });
+      const body = await res.json();
+      expect([p, res.status, body.error, body.requestId, typeof body.fix, body.docsUrl]).toEqual([p, 404, 'not_found', 'rid-case-test-1', 'string', 'docs/ERRORS.md#not_found']);
+    }
+    expect(seen).toHaveLength(0);
+    const ok = await post(Buffer.from('{}'), 'application/json');
+    expect(ok.status).toBe(200);
+    expect(seen).toHaveLength(1);
+  });
+
   it('JSON hỏng trên /hooks -> 400 vẫn mang header CORS cho origin hợp lệ', async () => {
     const res = await post(Buffer.from('{hong'), 'application/json', { origin: ALLOWED_ORIGIN });
     expect(res.status).toBe(400);
