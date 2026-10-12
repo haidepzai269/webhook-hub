@@ -250,6 +250,16 @@ services:
       - EVENT_RETENTION_DAYS=${EVENT_RETENTION_DAYS:-}
       # S10 (ADR-078): trần TỔNG một lần gửi, kẹp 1000–10000ms
       - DELIVERY_TIMEOUT_MS=${DELIVERY_TIMEOUT_MS:-5000}
+      # CB5 (ADR-173): vòng gửi email cảnh báo — cùng driver mail với hub-api; WEB_PUBLIC_URL = gốc deep link trong thư.
+      - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
+      - MAIL_DRIVER=${MAIL_DRIVER:-log}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN:-}
+      - MAIL_CAPTURE_DIR=${MAIL_CAPTURE_DIR:-}
+      - ALERT_EMAIL_INTERVAL_MS=${ALERT_EMAIL_INTERVAL_MS:-15000}
     depends_on:
       hub-api:
         condition: service_started

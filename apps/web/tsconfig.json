@@ -14,7 +14,9 @@
     "jsx": "react-jsx",
     "incremental": true,
     "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./src/*"], "@hub/flow": ["../../libs/common/src/flow/index.ts"] }
+    "paths": { "@/*": ["./src/*"], "@hub/flow": ["../../libs/common/src/flow/index.ts"],
+      "@hub/common/alerts/text": ["../../libs/common/src/alerts/text.ts"]
+    }
   },
   "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
   "exclude": ["node_modules", "src/**/*.spec.ts"]

@@ -11,6 +11,7 @@ import {
   Network,
   ScrollText,
   Send,
+  Settings,
   Skull,
   Workflow,
 } from "lucide-react";
@@ -81,6 +82,8 @@ export const sidebarItems: NavGroup[] = [
     items: [
       { id: "playground", titleKey: "nav.item.playground", url: "/dashboard/playground", icon: FlaskConical },
       { id: "audit", titleKey: "nav.item.audit", url: "/dashboard/audit", icon: ScrollText },
+      // CB5 (SPEC-canh-bao-nhan-dinh §8.5): Cài đặt -> mục Cảnh báo (email) — hiện chỉ có nội dung cho operator.
+      { id: "settings", titleKey: "nav.item.settings", url: "/dashboard/settings", icon: Settings, operatorOnly: true },
     ],
   },
 ];

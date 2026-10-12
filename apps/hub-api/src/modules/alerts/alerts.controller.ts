@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { MAIL_SENDER, MailSender } from '@hub/common';
 import { PrismaService } from '@hub/database';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -15,7 +16,9 @@ import {
   listAlerts,
   putAlertPreferences,
   putUserLocale,
+  sendTestAlertEmail,
 } from './alerts-api';
+import { AUTH_CONFIG, AuthConfig } from '../auth/auth-config';
 
 const OPERATOR_SCOPE = 'chuông của operator nhìn MỌI project (SPEC-canh-bao §5.2) — OperatorGuard, đọc qua escape hatch có tên';
 
@@ -27,7 +30,11 @@ const OPERATOR_SCOPE = 'chuông của operator nhìn MỌI project (SPEC-canh-ba
 @Controller('api/v1')
 @UseGuards(SessionGuard, OperatorGuard)
 export class AlertsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(MAIL_SENDER) private readonly mail: MailSender,
+    @Inject(AUTH_CONFIG) private readonly cfg: AuthConfig,
+  ) {}
 
   @Get('alerts')
   @NoProjectScope(OPERATOR_SCOPE)
@@ -65,6 +72,14 @@ export class AlertsController {
   @NoProjectScope('tuỳ chọn cảnh báo gắn NGƯỜI (IdentityRepository), chỉ operator')
   putPreferences(@Req() req: RequestWithPrincipal, @CurrentUser() userId: string, @Body() body: unknown) {
     return putAlertPreferences(this.prisma, userId, body, clientIp(req));
+  }
+
+  /** CB5 (§5.2, §8.5): thư mẫu tới email đã xác minh của CHÍNH người gọi — 3 lần/giờ (đếm ở Postgres, `auth_audit`). */
+  @Post('me/alert-preferences/test-email')
+  @HttpCode(HttpStatus.OK)
+  @NoProjectScope('email thử tới CHÍNH người gọi (IdentityRepository), chỉ operator')
+  testEmail(@Req() req: RequestWithPrincipal, @CurrentUser() userId: string) {
+    return sendTestAlertEmail(this.prisma, this.mail, userId, clientIp(req), this.cfg.webPublicUrl);
   }
 }
 

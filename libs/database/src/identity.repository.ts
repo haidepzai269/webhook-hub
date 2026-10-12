@@ -506,4 +506,22 @@ export class IdentityRepository {
     }));
   }
 
+  /**
+   * CB5: giữ một suất có hạn mức đếm trên `auth_audit` (vd "Gửi email thử" 3/giờ/người) — Postgres, không Redis (R1).
+   * PHẢI chạy trong transaction của người gọi: khoá dòng `users` của người này (`FOR UPDATE`) để hai request song song
+   * không cùng đọc "còn suất", đếm `action` từ `since`, còn suất thì ghi dòng audit ngay. Trả `{ ok, used, oldestAt }`.
+   */
+  async reserveAuditSlot(p: { userId: string; action: string; since: Date; max: number; ip?: string | null; meta?: Record<string, unknown> }) {
+    await this.db.$queryRaw(Prisma.sql`SELECT id FROM hub.users WHERE id = ${p.userId}::uuid FOR UPDATE`);
+    const recent = await this.db.authAudit.findMany({
+      where: { userId: p.userId, action: p.action, createdAt: { gt: p.since } },
+      select: { createdAt: true },
+      orderBy: { createdAt: 'asc' },
+      take: p.max,
+    });
+    if (recent.length >= p.max) return { ok: false as const, used: recent.length, oldestAt: recent[0].createdAt };
+    await this.recordAuthAudit({ userId: p.userId, action: p.action, ip: p.ip ?? null, meta: p.meta });
+    return { ok: true as const, used: recent.length + 1, oldestAt: recent[0]?.createdAt ?? null };
+  }
+
 }

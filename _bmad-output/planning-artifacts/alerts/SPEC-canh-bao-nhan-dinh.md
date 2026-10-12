@@ -268,7 +268,7 @@ Cắt được: `/dashboard/alerts` chi tiết, `I-silent`, `source.silent`. **K
 
 Tiến độ (`verify:map` đọc dòng này; story `[x]` thì mọi mã CB:T của nó trong `verify/spec-sources.json` phải có test):
 
-- [x] CB1 · [x] CB2 · [x] CB3 · [x] CB4 · [ ] CB5 · [x] CB6 · [x] CB7
+- [x] CB1 · [x] CB2 · [x] CB3 · [x] CB4 · [x] CB5 · [x] CB6 · [x] CB7
 
 ## 12. ADR cần ghi (grep số trước khi ghi, log append-only)
 1. Cảnh báo = bảng Postgres + evaluator trong `hub-worker`. Unique index một phần làm trọng tài; advisory xact lock chỉ để tiết kiệm công; không dùng Redis lock, không tạo tiến trình mới.

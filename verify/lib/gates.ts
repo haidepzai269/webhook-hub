@@ -166,6 +166,13 @@ export const GATES: Gate[] = [
     check: grepLines(/\boperator(Alerts|AlertSummary|FindAlert)\w*\s*\(/),
   },
   {
+    id: 'alert-email-outbox',
+    rule: 'Escape hatch vòng gửi email cảnh báo `alertEmailOutbox…(` (xuyên project, systemTx) chỉ được gọi ở apps/hub-worker/src/scheduler/alert-email.sender.ts và khai ở prisma.service.ts',
+    source: 'SPEC-canh-bao-nhan-dinh §6, DINH-CHINH D2, ADR-173',
+    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && f !== 'apps/hub-worker/src/scheduler/alert-email.sender.ts',
+    check: grepLines(/\balertEmailOutbox\w*\s*\(/),
+  },
+  {
     id: 'data-migration-rls',
     rule:
       "Migration DỮ LIỆU (UPDATE/INSERT/DELETE trên bảng có RLS) tạo sau 20261011110000_rls_hub_app phải tự `SET LOCAL app.rls" +

@@ -52,6 +52,7 @@ import { EmailFilterService, loadEmailFilterConfig } from './email-filter.servic
       useFactory: (auth: AuthService, prisma: PrismaService, cfg: any, g: any, mail: any) => new GoogleOAuthService(auth, prisma, cfg, g, mail),
     },
   ],
-  exports: [JwtModule, AUTH_CONFIG, SessionGuard, AuthService, MembersService],
+  // CB5: MAIL_SENDER dùng chung cho "Gửi email thử" của AlertsController (một driver mail mỗi tiến trình).
+  exports: [JwtModule, AUTH_CONFIG, SessionGuard, AuthService, MembersService, MAIL_SENDER],
 })
 export class AuthModule {}

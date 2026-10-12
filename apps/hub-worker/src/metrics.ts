@@ -93,6 +93,14 @@ export const alertEvalErrors = new Counter({
   registers: [workerRegistry],
 });
 
+/** CB5 (ADR-173): kết quả xử lý một email cảnh báo — sent | suppressed (trần 6/giờ, hết điều kiện) | retry | failed (3 lần). */
+export const alertEmailsTotal = new Counter({
+  name: 'hub_alert_emails_total',
+  help: 'Số email cảnh báo theo kết quả của vòng gửi',
+  labelNames: ['result'] as const,
+  registers: [workerRegistry],
+});
+
 /**
  * HTTP server tối giản chỉ phục vụ `/metrics` (S3-4) — worker không có Nest HTTP. Cổng
  * `WORKER_METRICS_PORT` (mặc định 9101; `0` = tắt). Chỉ mở trong mạng nội bộ compose, không publish ra host.

@@ -286,6 +286,118 @@ export class PrismaService {
     return rows[0]?.tenantId ?? null;
   }
 
+  // ================== Email cảnh báo: escape hatch của VÒNG GỬI (CB5, SPEC §6, DINH-CHINH D1/D2, ADR-173) ==================
+  // `alert_emails` mang tenant_id + RLS. Vòng gửi trong hub-worker làm việc THEO NGƯỜI, xuyên project (trần 6/giờ/người,
+  // dòng "…và k khác" gộp email của mọi project) -> đi qua ĐÚNG năm hàm có tên dưới đây (systemTx), như `cleanup.job`.
+  // Chỉ `apps/hub-worker/src/scheduler/alert-email.sender.ts` gọi — gate `alert-email-outbox` giữ điều này.
+
+  /**
+   * Lấy tối đa `limit` email PENDING đến hạn bằng `FOR UPDATE SKIP LOCKED` trong một transaction NGẮN: tăng `attempts`,
+   * đặt lease `next_attempt_at = now + leaseMs`, COMMIT — việc gửi diễn ra NGOÀI transaction (không giữ khoá/kết nối
+   * trong lúc gọi nhà mail). Trả kèm ngữ cảnh để kiểm lại điều kiện lúc gửi và dựng thư: cảnh báo, project, người nhận,
+   * tuỳ chọn, tên đối tượng. KHÔNG có URL/cấu hình đích (thư chỉ hiện tên — CB:T9).
+   */
+  public alertEmailOutboxClaim(now: Date, limit: number, leaseMs: number): Promise<AlertEmailClaim[]> {
+    return this.systemTx('alert email: lấy lô PENDING (SKIP LOCKED)', async (tx) => {
+      const picked = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+        WITH picked AS (
+          SELECT id FROM hub.alert_emails
+          WHERE state = 'PENDING' AND created_at <= ${now} AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
+          ORDER BY created_at, id
+          LIMIT ${limit}
+          FOR UPDATE SKIP LOCKED)
+        UPDATE hub.alert_emails e
+        SET attempts = e.attempts + 1, next_attempt_at = ${new Date(now.getTime() + leaseMs)}
+        FROM picked WHERE e.id = picked.id
+        RETURNING e.id`);
+      if (picked.length === 0) return [];
+      return tx.$queryRaw<AlertEmailClaim[]>(Prisma.sql`
+        SELECT e.id, e.tenant_id AS "tenantId", e.alert_id AS "alertId", e.user_id AS "userId", e.kind::text AS kind,
+               e.attempts, e.created_at AS "createdAt",
+               a.rule, a.severity::text AS severity, a.subject_type::text AS "subjectType", a.subject_id AS "subjectId",
+               a.state::text AS "alertState", a.facts, a.opened_at AS "openedAt", a.resolved_at AS "resolvedAt",
+               p.slug AS "projectSlug", p.name AS "projectName",
+               u.email, u.locale::text AS locale, u.is_operator AS "isOperator", (u.email_verified_at IS NOT NULL) AS "emailVerified",
+               COALESCE(pr.email_enabled, false) AS "emailEnabled", COALESCE(pr.email_rules, ARRAY[]::text[]) AS "emailRules",
+               COALESCE(pr.email_on_resolve, false) AS "emailOnResolve", COALESCE(pr.muted_projects, ARRAY[]::uuid[])::text[] AS "mutedProjects",
+               COALESCE(d.name, s.name) AS "subjectName"
+        FROM hub.alert_emails e
+        JOIN hub.alerts a ON a.id = e.alert_id AND a.tenant_id = e.tenant_id
+        JOIN hub.projects p ON p.id = e.tenant_id
+        JOIN hub.users u ON u.id = e.user_id
+        LEFT JOIN hub.alert_preferences pr ON pr.user_id = e.user_id
+        LEFT JOIN hub.destinations d ON a.subject_type = 'destination' AND d.id = a.subject_id AND d.tenant_id = a.tenant_id
+        LEFT JOIN hub.sources s ON a.subject_type = 'source' AND s.id = a.subject_id AND s.tenant_id = a.tenant_id
+        WHERE e.id = ANY(${picked.map((r) => r.id)}::uuid[])
+        ORDER BY e.user_id, e.created_at, e.id`);
+    });
+  }
+
+  /**
+   * Trần 6/giờ/người: số email ĐÃ GỬI của người này từ `since` (index một phần `alert_emails_user_sent_idx`) + id các
+   * email bị trần chặn (`SUPPRESSED`, `cap`) chưa được gộp vào thư nào — email gửi kế tiếp mang dòng "…và k khác".
+   */
+  public alertEmailOutboxCapState(userId: string, since: Date, rollupLimit = 500): Promise<{ sentInWindow: number; rollupIds: string[] }> {
+    return this.systemTx('alert email: trần theo người', async (tx) => {
+      const [c] = await tx.$queryRaw<{ n: number }[]>(Prisma.sql`
+        SELECT count(*)::int AS n FROM hub.alert_emails WHERE user_id = ${userId}::uuid AND state = 'SENT' AND sent_at > ${since}`);
+      const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT id FROM hub.alert_emails
+        WHERE user_id = ${userId}::uuid AND state = 'SUPPRESSED' AND suppressed_reason = 'cap' AND rolled_into IS NULL
+        ORDER BY created_at, id LIMIT ${rollupLimit}`);
+      return { sentInWindow: c?.n ?? 0, rollupIds: rows.map((r) => r.id) };
+    });
+  }
+
+  /** Đã gửi: SENT + `sent_at`; các dòng `cap` đã nêu trong thư được đánh dấu `rolled_into` (k chỉ đếm một lần). */
+  public alertEmailOutboxMarkSent(id: string, now: Date, rolledIds: string[] = []): Promise<boolean> {
+    return this.systemTx('alert email: đã gửi', async (tx) => {
+      const n = await tx.$executeRaw(Prisma.sql`
+        UPDATE hub.alert_emails SET state = 'SENT', sent_at = ${now}, next_attempt_at = NULL, last_error = NULL
+        WHERE id = ${id}::uuid AND state = 'PENDING'`);
+      if (rolledIds.length > 0) {
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE hub.alert_emails SET rolled_into = ${id}::uuid
+          WHERE id = ANY(${rolledIds}::uuid[]) AND state = 'SUPPRESSED' AND rolled_into IS NULL`);
+      }
+      return n === 1;
+    });
+  }
+
+  /** Không gửi: SUPPRESSED kèm lý do (`cap` | `ineligible:<…>`). Chỉ dòng còn PENDING. */
+  public alertEmailOutboxMarkSuppressed(id: string, reason: string): Promise<boolean> {
+    return this.systemTx('alert email: không gửi', async (tx) => {
+      const n = await tx.$executeRaw(Prisma.sql`
+        UPDATE hub.alert_emails SET state = 'SUPPRESSED', suppressed_reason = ${reason.slice(0, 64)}, next_attempt_at = NULL
+        WHERE id = ${id}::uuid AND state = 'PENDING'`);
+      return n === 1;
+    });
+  }
+
+  /**
+   * Gửi lỗi: `attempts` (đã tăng lúc lấy) ≥ `maxAttempts` -> FAILED; còn lại PENDING với `next_attempt_at = retryAt`.
+   * `release` = trả dòng chưa kịp gửi (shutdown): bớt lại lần thử đã tính lúc lấy, đến hạn ngay.
+   */
+  public alertEmailOutboxMarkFailure(
+    id: string,
+    o: { error: string; maxAttempts: number; retryAt: Date } | { release: true },
+  ): Promise<'FAILED' | 'PENDING' | null> {
+    return this.systemTx('alert email: gửi lỗi', async (tx) => {
+      const rows =
+        'release' in o
+          ? await tx.$queryRaw<{ state: string }[]>(Prisma.sql`
+              UPDATE hub.alert_emails SET attempts = GREATEST(attempts - 1, 0), next_attempt_at = NULL
+              WHERE id = ${id}::uuid AND state = 'PENDING' RETURNING state::text AS state`)
+          : await tx.$queryRaw<{ state: string }[]>(Prisma.sql`
+              UPDATE hub.alert_emails
+              SET last_error = ${o.error.slice(0, 200)},
+                  state = CASE WHEN attempts >= ${o.maxAttempts} THEN 'FAILED'::"hub"."AlertEmailState" ELSE 'PENDING'::"hub"."AlertEmailState" END,
+                  next_attempt_at = CASE WHEN attempts >= ${o.maxAttempts} THEN NULL ELSE ${o.retryAt}::timestamptz END
+              WHERE id = ${id}::uuid AND state = 'PENDING' RETURNING state::text AS state`);
+      return (rows[0]?.state as 'FAILED' | 'PENDING' | undefined) ?? null;
+    });
+  }
+
   // ================== RLS (SPEC-auth §5.12, AU6) ==================
 
   /**
@@ -328,6 +440,36 @@ export class PrismaService {
 }
 
 export const prisma = PrismaService.getInstance();
+
+/** CB5: một email cảnh báo vừa được vòng gửi lấy (kèm ngữ cảnh kiểm lại điều kiện + dựng thư). */
+export interface AlertEmailClaim {
+  id: string;
+  tenantId: string;
+  alertId: string;
+  userId: string;
+  kind: 'OPEN' | 'RESOLVED';
+  attempts: number;
+  createdAt: Date;
+  rule: string;
+  severity: 'critical' | 'warning' | 'info';
+  subjectType: 'destination' | 'source' | 'project';
+  subjectId: string;
+  alertState: 'OPEN' | 'RESOLVED';
+  facts: Record<string, unknown> | null;
+  openedAt: Date;
+  resolvedAt: Date | null;
+  projectSlug: string;
+  projectName: string;
+  email: string;
+  locale: 'vi' | 'en';
+  isOperator: boolean;
+  emailVerified: boolean;
+  emailEnabled: boolean;
+  emailRules: string[];
+  emailOnResolve: boolean;
+  mutedProjects: string[];
+  subjectName: string | null;
+}
 
 /** CB3: bộ lọc danh sách cảnh báo xuyên project của operator (giá trị đã kiểm ở route). */
 export interface OperatorAlertFilter {

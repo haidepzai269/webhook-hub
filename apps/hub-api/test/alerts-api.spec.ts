@@ -59,7 +59,7 @@ describe('[CB:T10] (phần a) chỉ operator: /alerts* và /me/alert-preferences
     const routes = Object.getOwnPropertyNames(AlertsController.prototype)
       .filter((n) => n !== 'constructor' && Reflect.getMetadata(METHOD_METADATA, (AlertsController.prototype as any)[n]) !== undefined)
       .map((n) => Reflect.getMetadata(PATH_METADATA, (AlertsController.prototype as any)[n]));
-    expect(routes.sort()).toEqual(['alerts', 'alerts/:id/ack', 'alerts/ack-all', 'alerts/summary', 'me/alert-preferences', 'me/alert-preferences'].sort());
+    expect(routes.sort()).toEqual(['alerts', 'alerts/:id/ack', 'alerts/ack-all', 'alerts/summary', 'me/alert-preferences', 'me/alert-preferences', 'me/alert-preferences/test-email'].sort());
     for (const n of Object.getOwnPropertyNames(AlertsController.prototype).filter((x) => x !== 'constructor')) {
       expect(Reflect.getMetadata(GUARDS_METADATA, (AlertsController.prototype as any)[n]) ?? []).toEqual([]); // không route nào tự thay guard
     }
@@ -350,7 +350,11 @@ describe('[CB:T10] (phần c) realtime alert.changed: chỉ socket OPERATOR củ
 
   it('API cảnh báo không phụ thuộc Redis (BB-2): controller chỉ nhận PrismaService — Redis chết chỉ mất realtime, chuông vẫn poll được', () => {
     const { PrismaService } = require('@hub/database');
-    expect(Reflect.getMetadata('design:paramtypes', AlertsController)).toEqual([PrismaService]);
+    // CB5: + MAIL_SENDER, AUTH_CONFIG (token tiêm, paramtype Object) cho "Gửi email thử" — vẫn KHÔNG có Redis.
+    const { RedisService } = require('../src/modules/redis/redis.service');
+    const types = Reflect.getMetadata('design:paramtypes', AlertsController);
+    expect(types[0]).toBe(PrismaService);
+    expect(types).not.toContain(RedisService);
     expect(Reflect.getMetadata('design:paramtypes', MeLocaleController)).toEqual([PrismaService]);
   });
 });

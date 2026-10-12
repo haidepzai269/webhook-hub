@@ -1733,6 +1733,22 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 ---
 
+## ADR-173 — Vòng gửi email cảnh báo: `SKIP LOCKED` trong transaction ngắn + lease, gửi NGOÀI transaction, trần 6/giờ/người, câu luật dùng chung web + email (CB5, 2026-10-12)
+
+**Vấn đề:** Outbox `alert_emails` (ADR-167) đã có dòng PENDING. Cần gửi đi mà: không giữ khoá/kết nối DB trong lúc gọi nhà mail (Gmail có thể mất vài giây); nhiều worker không gửi trùng; tuỳ chọn đổi sau khi xếp hàng vẫn được tôn trọng; một người không bị bão thư; gửi lỗi không chặn evaluator; thư không lộ payload/secret; vi/en đúng câu chữ console.
+**Chọn:**
+- **`AlertEmailSender` trong `hub-worker`** (không tiến trình mới), timer riêng `ALERT_EMAIL_INTERVAL_MS` (15s, `0` = tắt), tách hẳn khỏi evaluator. Năm escape hatch có tên trên `PrismaService` (`alertEmailOutboxClaim|CapState|MarkSent|MarkSuppressed|MarkFailure`, `systemTx`, xuyên project như cleanup — trần và dòng gộp là theo NGƯỜI, không theo project). Gate `alert-email-outbox` chỉ cho `alert-email.sender.ts` gọi.
+- **Lấy lô:** `FOR UPDATE SKIP LOCKED` + `attempts+1` + lease `next_attempt_at = now + 120s` rồi COMMIT ngay; gửi ngoài transaction; ghi kết quả bằng transaction ngắn khác (chỉ dòng còn PENDING). Chỉ lấy dòng `created_at <= now` (now tiêm vào — test dùng mốc 2020 nên không đụng outbox của test khác). Migration `20261012080000_alert_email_sender`: `next_attempt_at`, `last_error`, `suppressed_reason`, `rolled_into` + index một phần `(user_id, sent_at DESC) WHERE state='SENT'`.
+- **Kiểm lại lúc gửi** (hàm thuần `alertEmailEligibility`): còn operator, email đã xác minh, còn bật email, luật còn trong `email_rules`, project không bị tắt tiếng, thư RESOLVED cần `email_on_resolve` → sai thì `SUPPRESSED` `ineligible:<lý do>`.
+- **Trần 6/giờ/người** đếm `SENT` theo `sent_at` 1 giờ; vượt → `SUPPRESSED` `cap`. Thư gửi được kế tiếp của người đó nêu "…và k cảnh báo khác, xem trong console" với k = số dòng `cap` chưa gộp, và đánh dấu chúng `rolled_into` = id thư đó (đếm đúng một lần; chỉ đánh dấu sau khi gửi thành công).
+- **Lỗi gửi:** thử lại sau 1 phút, rồi 5 phút; lần 3 → `FAILED` + log + `hub_alert_emails_total{result}`. Driver mail tạo lười: cấu hình mail sai không làm worker chết. Shutdown trả các dòng chưa gửi (bớt lần thử).
+- **Thư** (`libs/common/src/alerts/email.ts`): `[Webhook Hub][CRITICAL][<slug>] <title>` (`[ĐÃ ỔN]/[RESOLVED]` lúc đóng, `[THỬ]/[TEST]` khi gửi thử), HTML + text, giờ `Asia/Ho_Chi_Minh`, deep link `/dashboard/alerts?project=&rule=` và link `/dashboard/settings`. Chỉ dựng từ mã luật + trường `facts` đã biết + tên project/đối tượng; KHÔNG đọc cấu hình/URL đích (không cả host), không `lastError/lastFix`. Ngôn ngữ = `users.locale`.
+- **Một nguồn câu:** câu luật + hàm dựng (`buildAlertText`) chuyển từ web về `libs/common/src/alerts/text.ts` (TS thuần, không import); web trải `ALERT_TEXT.vi/en` vào namespace `alerts` và import qua alias `@hub/common/alerts/text` (cùng kiểu `@hub/flow`).
+- **Gửi thử** `POST /api/v1/me/alert-preferences/test-email` (operator): email đã xác minh của chính người gọi; 3 lần/giờ đếm trên `auth_audit` (`alert_preferences.test_email`) trong một transaction khoá dòng `users` (`IdentityRepository.reserveAuditSlot`) — Postgres, không Redis (ngân sách R1 không đổi). Gửi lỗi vẫn tốn suất. `GET /me/alert-preferences` trả thêm `email`, `emailVerified`, `hourlyCap`, `testEmail.perHour`. Trang `/dashboard/settings` (mục sidebar "Cài đặt", chỉ operator).
+**Đánh đổi:** At-least-once: worker chết sau khi nhà mail nhận mà trước khi ghi SENT → hết lease gửi lại một lần. Trần đếm theo lô của MỘT worker; hai worker cùng lấy email của cùng một người trong cùng giây có thể vượt trần 1–2 thư (trần mềm, chấp nhận ở quy mô 1–3 operator). Email `OPEN` vẫn gửi dù cảnh báo đã đóng trước lượt gửi (thư "đã ổn" theo sau nếu người dùng chọn). Thư không có URL/host của đích — người nhận bấm deep link để xem. Biome báo `noUndeclaredDependencies` cho alias `@hub/common/…` như đã báo cho `@hub/flow`.
+
+---
+
 ## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
 
 **Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).

@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { ALERT_RULE_CODES, ALERT_RULES, AlertRuleCode, alertTitleKey, DEFAULT_EMAIL_RULES } from '@hub/common';
+import { ALERT_RULE_CODES, ALERT_RULES, AlertRuleCode, alertTitleKey, ALERT_EMAIL_HOURLY_CAP, DEFAULT_EMAIL_RULES, logger, MailSender, maskEmail, sampleAlertEmail } from '@hub/common';
 import { AlertPreferencesInput, OperatorAlertRow, PrismaService } from '@hub/database';
 import { hubError } from '../errors/hub-error';
 import { assertFlatQuery, badParam, isUuid, parseEnumParam, parsePageCursor, parseUuidParam } from '../api/list-params';
@@ -175,8 +175,16 @@ const PREF_KEYS = ['emailEnabled', 'emailRules', 'emailOnResolve', 'mutedProject
 /** Danh mục luật cho trang Cài đặt (CB5): mã + mức — web dịch tên luật theo `alerts.rules.<mã>.title`. */
 export const ALERT_RULE_CATALOG = ALERT_RULE_CODES.map((code) => ({ code, severity: ALERT_RULES[code].severity, titleKey: alertTitleKey(code) }));
 
-function prefsView(p: { emailEnabled: boolean; emailRules: string[]; emailOnResolve: boolean; mutedProjects: string[]; updatedAt: Date } | null) {
+type PrefsRow = { emailEnabled: boolean; emailRules: string[]; emailOnResolve: boolean; mutedProjects: string[]; updatedAt: Date } | null;
+type Account = { email: string; emailVerifiedAt: Date | null } | null;
+
+/** CB5: trang Cài đặt hiện email đích (chỉ đọc = email tài khoản) và khoá công tắc khi email chưa xác minh. */
+function prefsView(p: PrefsRow, user: Account = null) {
   return {
+    email: user?.email ?? null,
+    emailVerified: !!user?.emailVerifiedAt,
+    testEmail: { perHour: TEST_EMAIL_PER_HOUR },
+    hourlyCap: ALERT_EMAIL_HOURLY_CAP,
     emailEnabled: p?.emailEnabled ?? false,
     emailRules: p ? p.emailRules : [...DEFAULT_EMAIL_RULES],
     emailOnResolve: p?.emailOnResolve ?? false,
@@ -187,7 +195,9 @@ function prefsView(p: { emailEnabled: boolean; emailRules: string[]; emailOnReso
 }
 
 export async function getAlertPreferences(store: AlertStore, userId: string) {
-  return prefsView(await store.identity().findAlertPreferences(userId));
+  const idn = store.identity();
+  const [prefs, user] = await Promise.all([idn.findAlertPreferences(userId), idn.findUserById(userId)]);
+  return prefsView(prefs, user);
 }
 
 /**
@@ -235,9 +245,9 @@ export async function putAlertPreferences(store: AlertStore, userId: string, bod
     const idn = store.identity(tx);
     const saved = await idn.upsertAlertPreferences(userId, input);
     await idn.recordAuthAudit({ userId, action: 'alert_preferences.updated', ip, meta: { changes: input } });
-    return saved;
+    return { saved, user: await idn.findUserById(userId) };
   });
-  return prefsView(row);
+  return prefsView(row.saved, row.user);
 }
 
 export const USER_LOCALES = ['vi', 'en'] as const;
@@ -259,4 +269,48 @@ export async function putUserLocale(store: Pick<AlertStore, 'identity' | '$trans
     await idn.recordAuthAudit({ userId, action: 'user.locale_changed', ip, meta: { from: user.locale, to: loc } });
     return { locale: loc, changed: true };
   });
+}
+
+// ------------------------------------------------------------------ gửi email thử (CB5, §5.2, §8.5)
+
+/** §5.2: "Gửi email thử" tối đa 3 lần / giờ / người — đếm trên `auth_audit` ở Postgres (không Redis, ngân sách R1). */
+export const TEST_EMAIL_PER_HOUR = 3;
+export const TEST_EMAIL_AUDIT_ACTION = 'alert_preferences.test_email';
+const HOUR_MS = 3_600_000;
+
+/**
+ * Gửi một thư mẫu (cảnh báo giả định, gắn nhãn [THỬ]) tới email ĐÃ XÁC MINH của chính người gọi, theo `users.locale`.
+ * Suất được giữ TRƯỚC khi gửi (khoá dòng users + đếm + ghi audit trong một transaction) — gửi lỗi vẫn tốn suất, để nút
+ * này không thành vòi bắn thư. Không đọc dữ liệu cảnh báo thật; project trong thư = project đầu tiên của người dùng (nếu có).
+ */
+export async function sendTestAlertEmail(
+  store: AlertStore,
+  mail: MailSender,
+  userId: string,
+  ip: string | null,
+  webUrl: string,
+  now = new Date(),
+) {
+  const idn = store.identity();
+  const user = await idn.findUserById(userId);
+  if (!user) throw hubError('not_found');
+  if (!user.emailVerifiedAt) throw hubError('email_not_verified', {}, 'Email tài khoản chưa xác minh — không gửi được email cảnh báo.');
+  const slot = await store.$transaction((tx: Prisma.TransactionClient) =>
+    store.identity(tx).reserveAuditSlot({ userId, action: TEST_EMAIL_AUDIT_ACTION, since: new Date(now.getTime() - HOUR_MS), max: TEST_EMAIL_PER_HOUR, ip }),
+  );
+  if (!slot.ok) {
+    const retryAfter = Math.max(1, Math.ceil((slot.oldestAt.getTime() + HOUR_MS - now.getTime()) / 1000));
+    throw hubError('rate_limited', { retryAfter }, `Tối đa ${TEST_EMAIL_PER_HOUR} email thử mỗi giờ.`);
+  }
+  const memberships = await idn.listMemberships(userId).catch(() => []);
+  const first = memberships[0];
+  const project = first ? { id: first.projectId, slug: first.slug, name: first.name } : { id: '00000000-0000-4000-8000-000000000000', slug: 'example', name: 'Example' };
+  const msg = sampleAlertEmail({ locale: user.locale === 'en' ? 'en' : 'vi', webUrl, project, now });
+  try {
+    await mail.send({ to: user.email, ...msg });
+  } catch (err: any) {
+    logger.warn({ err: err?.message, to: maskEmail(user.email) }, 'Gửi email cảnh báo thử lỗi');
+    throw hubError('service_unavailable', {}, 'Không gửi được email thử — kiểm tra cấu hình MAIL_DRIVER của hub.');
+  }
+  return { sent: true, to: user.email, remaining: Math.max(0, TEST_EMAIL_PER_HOUR - slot.used) };
 }

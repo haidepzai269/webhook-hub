@@ -50,6 +50,7 @@ import { pageDlq } from "./messages/page-dlq";
 import { pageEvents } from "./messages/page-events";
 import { pagePlayground } from "./messages/page-playground";
 import { pageProjects } from "./messages/page-projects";
+import { pageSettings } from "./messages/page-settings";
 import { pageSources } from "./messages/page-sources";
 import { pageSubscriptions } from "./messages/page-subscriptions";
 import { status } from "./messages/status";
@@ -82,6 +83,7 @@ const NAMESPACES = {
     ...alerts.vi,
     ...pageAlerts.vi,
     ...insights.vi,
+    ...pageSettings.vi,
   },
   en: {
     ...common.en,
@@ -108,6 +110,7 @@ const NAMESPACES = {
     ...alerts.en,
     ...pageAlerts.en,
     ...insights.en,
+    ...pageSettings.en,
   },
 } satisfies Record<Locale, unknown>;
 

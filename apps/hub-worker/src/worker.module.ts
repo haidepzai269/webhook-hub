@@ -6,6 +6,7 @@ import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
 import { AlertEvaluator } from './scheduler/alert.evaluator';
+import { AlertEmailSender } from './scheduler/alert-email.sender';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 
@@ -16,6 +17,7 @@ const PROVIDERS = [
   DeliverySweeper,
   CleanupJob,
   AlertEvaluator,
+  AlertEmailSender, // CB5: vòng gửi email cảnh báo (outbox theo người) — tách khỏi evaluator
   NormalizeConsumer,
   DeliveryConsumer,
 ];

@@ -46,6 +46,18 @@ describe('grep gác cổng §7.3', () => {
     expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/api/x.ts:1', 'apps/hub-api/src/modules/api/x.ts:2', 'apps/hub-worker/src/y.ts:1']);
   });
 
+  it('[CB:T8] (phần c) escape hatch vòng gửi email: gọi ngoài alert-email.sender → đỏ; trong sender / prisma.service thì xanh', () => {
+    const call = 'await this.prisma.alertEmail' + 'OutboxClaim(now, 20, 1000);';
+    const f = files({
+      'apps/hub-api/src/modules/alerts/alerts-api.ts': call,
+      'apps/hub-worker/src/scheduler/alert.evaluator.ts': 'p.alertEmail' + 'OutboxMarkSent (id, now)',
+      'apps/hub-worker/src/scheduler/alert-email.sender.ts': call,
+      'libs/database/src/prisma.service.ts': 'public alertEmail' + 'OutboxClaim(now) {}',
+    });
+    const r = runGates([byId('alert-email-outbox')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/alerts/alerts-api.ts:1', 'apps/hub-worker/src/scheduler/alert.evaluator.ts:1']);
+  });
+
   it('chữ ký: === cạnh signature → đỏ; typeof … !== "string" / === null không phải so sánh giá trị', () => {
     const f = files({
       'libs/providers/src/a.ts': 'if (sig ' + '=== expectedSignature) ok();\nif (typeof body.signature ' + "!== 'string' || x === null) bad();",

@@ -61,6 +61,9 @@ services:
 
   hub-worker:
     container_name: !reset null
+    # CB5: email cảnh báo của worker cũng ghi vào verify/.mail (driver capture) — CB:T9 quét thư.
+    volumes:
+      - ./verify/.mail:/mail
 
   shop:
     container_name: !reset null

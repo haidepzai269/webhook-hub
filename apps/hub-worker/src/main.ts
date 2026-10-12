@@ -7,6 +7,7 @@ import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
 import { AlertEvaluator } from './scheduler/alert.evaluator';
+import { AlertEmailSender } from './scheduler/alert-email.sender';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 import { InFlightTracker } from './consumers/in-flight';
@@ -76,6 +77,7 @@ async function bootstrap() {
   const sweeper = app.get(DeliverySweeper);
   const cleanup = app.get(CleanupJob);
   const alertEvaluator = app.get(AlertEvaluator);
+  const alertEmails = app.get(AlertEmailSender);
 
   const amqpUrl = process.env.RABBITMQ_URL || 'amqp://hub_admin:hub_secret@localhost:5672';
   logger.info({ amqpUrl: redactAmqpUrl(amqpUrl) }, 'Đang kết nối tới RabbitMQ broker...');
@@ -101,6 +103,7 @@ async function bootstrap() {
     sweeper.stop();
     cleanup.stop();
     void alertEvaluator.stop();
+    void alertEmails.stop();
     process.exit(1);
   });
 
@@ -155,6 +158,8 @@ async function bootstrap() {
     cleanup.stop();
     // CB2: không hẹn lượt cảnh báo mới; lượt đang chạy dừng ở ranh giới luật (chờ nó trong ngân sách bên dưới).
     const alertsStopped = alertEvaluator.stop();
+    // CB5: vòng gửi email dừng trước dòng kế tiếp, dòng chưa gửi được trả lại outbox.
+    const emailsStopped = alertEmails.stop();
 
     try {
       await Promise.race([
@@ -164,7 +169,7 @@ async function bootstrap() {
           await normalizeChannel.cancel(normalizeTag.consumerTag).catch(() => {});
           await deliveryChannel.cancel(deliveryTag.consumerTag).catch(() => {});
           // Lượt cảnh báo dừng ở ranh giới luật SONG SONG với chờ handler — cùng một ngân sách 25s, không cộng dồn.
-          const [, idle] = await Promise.all([alertsStopped, inFlight.waitIdle(Math.max(0, shutdownTimeoutMs - 5_000))]);
+          const [, , idle] = await Promise.all([alertsStopped, emailsStopped, inFlight.waitIdle(Math.max(0, shutdownTimeoutMs - 5_000))]);
           logger.info({ idle, stillRunning: inFlight.count }, 'Đã chờ handler đang chạy trước khi đóng channel');
           await normalizeChannel.close();
           await deliveryChannel.close();

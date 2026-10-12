@@ -578,15 +578,21 @@ model Alert {
 /// CB1 (DINH-CHINH D1/D2, ADR-167): outbox email theo NGƯỜI. Mang tenant_id (= tenant của alert, khoá ngoại ghép) + RLS;
 /// vòng gửi xuyên project (CB5) đi qua escape hatch có tên. Trần 6/giờ/người và chống flapping đếm trên bảng này.
 model AlertEmail {
-  id        String          @id @default(uuid()) @db.Uuid
-  tenantId  String          @map("tenant_id") @db.Uuid
-  alertId   String          @map("alert_id") @db.Uuid
-  userId    String          @map("user_id") @db.Uuid
-  kind      AlertEmailKind
-  state     AlertEmailState @default(PENDING)
-  attempts  Int             @default(0)
-  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  sentAt    DateTime?       @map("sent_at") @db.Timestamptz(6)
+  id               String          @id @default(uuid()) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  alertId          String          @map("alert_id") @db.Uuid
+  userId           String          @map("user_id") @db.Uuid
+  kind             AlertEmailKind
+  state            AlertEmailState @default(PENDING)
+  attempts         Int             @default(0)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt           DateTime?       @map("sent_at") @db.Timestamptz(6)
+  /// CB5 (ADR-173): lease + lùi thử lại của vòng gửi (gửi NGOÀI transaction). Index một phần
+  /// `alert_emails_user_sent_idx (user_id, sent_at DESC) WHERE state='SENT'` (trần 6/giờ) chỉ có ở migration 20261012080000.
+  nextAttemptAt    DateTime?       @map("next_attempt_at") @db.Timestamptz(6)
+  lastError        String?         @map("last_error") @db.VarChar(200)
+  suppressedReason String?         @map("suppressed_reason") @db.VarChar(64)
+  rolledInto       String?         @map("rolled_into") @db.Uuid
 
   alert Alert @relation(fields: [alertId, tenantId], references: [id, tenantId], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
