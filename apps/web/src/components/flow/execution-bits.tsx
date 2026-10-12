@@ -2,8 +2,11 @@ import { Fragment } from "react";
 
 import type { ExecutionStatus, FlowFailedAt, FlowSummaryDot } from "@hub/flow";
 import { STAGE_LABELS, STAGE_STATUS_LABELS } from "@hub/flow";
-import { CircleAlert, CircleCheck, CircleX, LoaderCircle, ShieldX } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleX, Info, LoaderCircle, ShieldX } from "lucide-react";
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+import { expectedProbe, type ProbeInfo, stageHint } from "./event-notes";
 import { TonePill } from "./pills";
 import { ICON_SM, STATUS_TONE, StatusGlyph, type Tone, TONE_VAR } from "./tokens";
 
@@ -21,9 +24,20 @@ export const EXECUTION_TONE: Record<ExecutionStatus, Tone> = {
   rejected: "crashed",
 };
 
+/** Hover chấm chặng: hiện nhanh nhưng không bật khi chuột chỉ lướt qua hàng. */
+const TOOLTIP_DELAY_MS = 150;
+
 const EXECUTION_ICON = { succeeded: CircleCheck, failed: CircleX, in_progress: LoaderCircle, rejected: ShieldX } as const;
 
-export function ExecutionStatusPill({ status }: { status: ExecutionStatus }) {
+/** `probe` (từ `expectedProbe`): request kiểm tra kết nối đúng thiết kế → pill trung tính, không "Thành công" xanh. */
+export function ExecutionStatusPill({ status, probe }: { status: ExecutionStatus; probe?: ProbeInfo | null }) {
+  if (probe) {
+    return (
+      <TonePill tone="idle" icon={<Info {...ICON_SM} aria-hidden />}>
+        {probe.label}
+      </TonePill>
+    );
+  }
   const Icon = EXECUTION_ICON[status];
   return (
     <TonePill tone={EXECUTION_TONE[status]} icon={<Icon {...ICON_SM} className={status === "in_progress" ? "flow-spin" : undefined} aria-hidden />}>
@@ -32,28 +46,70 @@ export function ExecutionStatusPill({ status }: { status: ExecutionStatus }) {
   );
 }
 
-/** "Đường ống mini" 6 chấm theo `summary` do server dựng — chấm giao gộp "2/3 đích". */
-export function MiniPipeline({ summary }: { summary: FlowSummaryDot[] }) {
+/** Ngữ cảnh tuỳ chọn cho tooltip chấm: có thì thêm một dòng lý do (vd chấm Normalize của request kiểm tra kết nối). */
+export interface PipelineContext {
+  provider: string;
+  type: string | null;
+  failedAt: FlowFailedAt | null;
+  /** events.probe từ server (ADR-159/163) — expectedProbe tin cờ này trước phỏng đoán. */
+  probe?: boolean;
+}
+
+/**
+ * "Đường ống mini" 6 chấm theo `summary` do server dựng — chấm giao gộp "2/3 đích".
+ * Hover một chấm → tooltip gọn kiểu trang Hành trình: tên chặng · trạng thái · (ok/tổng đích) · lý do một dòng.
+ * Trigger là <span> (asChild), không phải <button>: hàng là <Link>, bấm lên chấm vẫn mở hàng như thường.
+ * Dùng TooltipProvider gốc (layout admin); độ trễ đặt trên từng <Tooltip>.
+ * `decorative`: hàng đã có câu mô tả (cột Ghi chú) → ẩn chấm khỏi trình đọc màn hình để tên link không dài lê thê.
+ */
+export function MiniPipeline({
+  summary,
+  context,
+  decorative,
+}: {
+  summary: FlowSummaryDot[];
+  context?: PipelineContext;
+  decorative?: boolean;
+}) {
+  const probe = context ? expectedProbe({ ...context, summary }) : null;
   return (
-    <div className="flex items-center" aria-label="Đường ống">
+    <div className="flex items-center" aria-hidden={decorative ? true : undefined}>
       {summary.map((d, i) => {
-        const tone = STATUS_TONE[d.status];
-        const color = TONE_VAR[tone];
+        // Probe đúng thiết kế (ADR-159): chấm "!" ở Normalize vẽ trung tính (icon Info + nhãn probe), không vàng.
+        const asProbe = probe !== null && d.stage === "normalized" && d.status === "warning";
+        const color = asProbe ? TONE_VAR.idle : TONE_VAR[STATUS_TONE[d.status]];
+        const statusLabel = asProbe ? probe.label : STAGE_STATUS_LABELS[d.status];
+        const dests = d.stage === "delivering" && d.total !== undefined && d.total > 0 ? `${d.okCount}/${d.total}` : null;
+        const hint = context ? stageHint({ ...context, summary }, d) : null;
         return (
           <Fragment key={d.stage}>
             {i > 0 && <span className="h-px w-2.5" style={{ background: "var(--flow-card-border)" }} />}
-            <span
-              className="inline-flex items-center gap-1"
-              title={`${STAGE_LABELS[d.stage]}: ${STAGE_STATUS_LABELS[d.status]}${d.total !== undefined ? ` (${d.okCount}/${d.total} đích)` : ""}`}
-              style={{ color }}
-            >
-              <StatusGlyph status={d.status} small />
-              {d.stage === "delivering" && d.total !== undefined && d.total > 0 && (
-                <span className="font-medium text-[11px] tabular-nums">
-                  {d.okCount}/{d.total}
+            <Tooltip delayDuration={TOOLTIP_DELAY_MS}>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1" style={{ color }}>
+                  {asProbe ? <Info {...ICON_SM} aria-hidden /> : <StatusGlyph status={d.status} small />}
+                  {!decorative && <span className="sr-only">{`${STAGE_LABELS[d.stage]}: ${statusLabel}${dests ? ` (${dests} đích)` : ""}`}</span>}
+                  {dests && (
+                    <span className="font-medium text-[11px] tabular-nums" aria-hidden>
+                      {dests}
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="font-sans">
+                <span className="flex flex-col gap-0.5">
+                  <span>
+                    <span className="font-medium">{STAGE_LABELS[d.stage]}</span>
+                    <span className="opacity-80">
+                      {" · "}
+                      {statusLabel}
+                      {dests && ` · ${dests} đích`}
+                    </span>
+                  </span>
+                  {hint && <span className="line-clamp-2 opacity-80">{hint}</span>}
+                </span>
+              </TooltipContent>
+            </Tooltip>
           </Fragment>
         );
       })}

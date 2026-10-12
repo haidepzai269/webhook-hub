@@ -252,6 +252,8 @@ model Source {
   isActive           Boolean      @default(true) @map("is_active")
   /// S8: chỉ dùng khi provider=generic (scheme, header, idempotency, eventType, mapping?)
   verificationConfig Json?        @map("verification_config")
+  /// ADR-161: "Xoá" trên bản đồ luồng = lưu trữ (luôn kèm is_active=false). NULL = còn dùng. Lịch sử giữ nguyên.
+  archivedAt         DateTime?    @map("archived_at") @db.Timestamptz(6)
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
   secrets     SourceSecret[]
@@ -384,6 +386,10 @@ model Destination {
   verificationError      String?              @map("verification_error") @db.VarChar(64)
   /// R-1/R-2 (ADR-094): API key tạo endpoint qua /v1/p — chỉ key này quản endpoint ở /v1/p. NULL = đích của operator.
   createdByKeyId         String?              @map("created_by_key_id") @db.Uuid
+  /// ADR-161: "Ngắt" đích — false = normalize không tạo delivery mới tới đích này (delivery đang bay vẫn chạy nốt).
+  isActive               Boolean              @default(true) @map("is_active")
+  /// ADR-161: lưu trữ ("Xoá" trên bản đồ luồng). NULL = còn dùng.
+  archivedAt             DateTime?            @map("archived_at") @db.Timestamptz(6)
   createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
 
   subscriptions Subscription[]
@@ -405,6 +411,8 @@ model Subscription {
   sourceIds     String[] @default([]) @map("source_ids") @db.Uuid
   template      String?  @db.Text
   isActive      Boolean  @default(true) @map("is_active")
+  /// ADR-161: lưu trữ ("Xoá" trên bản đồ luồng) — luôn kèm is_active=false; không bao giờ khớp sự kiện mới.
+  archivedAt    DateTime? @map("archived_at") @db.Timestamptz(6)
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   // S1 (ADR-038): khoá ngoại GHÉP (destination_id, tenant_id) — DB từ chối subscription trỏ sang đích của

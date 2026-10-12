@@ -14,6 +14,7 @@ import {
 } from './flow-lib';
 import { ExecutionFilter, flowRepoFor, FlowScopedRepository } from './flow.repository';
 import { assembleTopology } from './topology.assemble';
+import { assertFlatQuery, badParam, isRealUtcInstant, parseEnumParam, parseTimeRange } from '../api/list-params';
 
 export const EXECUTIONS_DEFAULT_LIMIT = 50;
 export const EXECUTIONS_MAX_LIMIT = 50;
@@ -23,6 +24,14 @@ export interface ExecutionQuery {
   source?: string;
   destination?: string;
   type?: string;
+  /** ADR-163: `payos`, `github`… (provider của source / `api`). */
+  provider?: string;
+  /** ADR-163: `hide` = bỏ request kiểm tra kết nối (events.probe, ADR-159). */
+  probes?: string;
+  from?: string;
+  to?: string;
+  /** ADR-163: tìm theo tiền tố event id (ULID) hoặc raw_event id (uuid), ≥ 4 ký tự. */
+  q?: string;
   cursor?: string;
   limit?: string;
 }
@@ -34,10 +43,10 @@ export function encodeCursor(at: string, key: string): string {
 export function decodeCursor(c: string): { at: string; key: string } {
   try {
     const [at, key] = JSON.parse(Buffer.from(c, 'base64url').toString('utf8'));
-    if (typeof at !== 'string' || typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}T[\d:.]+$/.test(at) || key.length > 64) throw new Error();
+    if (typeof at !== 'string' || typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}$/.test(at) || !isRealUtcInstant(at) || key.length > 64) throw new Error();
     return { at, key };
   } catch {
-    throw new BadRequestException('cursor không hợp lệ');
+    throw badParam('cursor', 'cursor không hợp lệ — dùng đúng nextCursor của trang trước');
   }
 }
 
@@ -97,6 +106,7 @@ export class FlowService {
 
   /** `GET /flow/executions` — danh sách hành trình, cursor, tối đa 50; summary dựng bằng CÙNG `buildEventFlow`. */
   async listExecutions(tenantId: string, q: ExecutionQuery, now = new Date()) {
+    assertFlatQuery(q); // ?a=1&a=2 / ?a[b]=1 -> 400, không 500
     const limit = Math.min(Math.max(parseInt(q.limit ?? '', 10) || EXECUTIONS_DEFAULT_LIMIT, 1), EXECUTIONS_MAX_LIMIT);
     if (q.status && !(EXECUTION_STATUSES as readonly string[]).includes(q.status)) {
       throw new BadRequestException(`status phải là một trong ${EXECUTION_STATUSES.join(', ')}`);
@@ -109,12 +119,24 @@ export class FlowService {
       if (!/^[a-z0-9_]+(\.[a-z0-9_]+)*(\.\*)?$/.test(q.type)) throw new BadRequestException('type: vd payment.received, payment.*');
       typeLike = q.type.replace(/_/g, '\\_').replace(/\.\*$/, '.%');
     }
+    if (q.provider && !/^[a-z0-9_-]{1,32}$/.test(q.provider)) throw badParam('provider', 'provider: chữ thường/số, vd payos, github');
+    const probes = parseEnumParam(q.probes, 'probes', ['hide', 'show'] as const);
+    const range = parseTimeRange(q.from, q.to);
+    const idPrefix = q.q?.trim() || undefined;
+    if (idPrefix && !/^[0-9A-Za-z_-]{4,36}$/.test(idPrefix)) {
+      throw badParam('q', 'q: id sự kiện (ULID) hoặc id request (uuid), ít nhất 4 ký tự');
+    }
     const cursor = q.cursor ? decodeCursor(q.cursor) : undefined;
     const rows = await this.repo(tenantId).findExecutions({
       status: q.status as ExecutionFilter['status'],
       sourceId: q.source || undefined,
       destinationId: q.destination || undefined,
       typeLike,
+      provider: q.provider || undefined,
+      hideProbes: probes === 'hide',
+      from: range.from,
+      to: range.to,
+      idPrefix,
       cursor,
       limit: limit + 1,
       orphanMinAgeSeconds: ORPHAN_MIN_AGE_SECONDS,
@@ -144,6 +166,8 @@ export class FlowService {
               origin: r.origin ?? 'webhook',
               correlationId: '',
               receivedAt: r.eventAt ?? r.at,
+              // Cờ chung ADR-159 — cùng lý do routed (provider_probe) như màn chi tiết.
+              probe: r.probe === true,
             }
           : null,
         deliveries: r.deliveries as FlowDeliveryInput[],
@@ -162,6 +186,8 @@ export class FlowService {
         sourceName: r.sourceName,
         type: r.type,
         subject: r.subject,
+        /** events.probe (ADR-159): request kiểm tra kết nối do ADAPTER đánh dấu — UI không phải đoán theo tên kiểu. */
+        probe: r.probe === true,
         status: f.executionStatus,
         summary: f.summary,
         failedAt: f.failedAt,
@@ -210,7 +236,8 @@ export class FlowService {
     // events.created_at = lúc INSERT (normalize + route cùng transaction) — mốc định tuyến thật (S7, R-6).
     const candidates = event ? await repo.findSubscriptionsMatching(event.type, event.createdAt ?? event.receivedAt) : [];
     const skipped = classifySkippedSubscriptions(
-      candidates.map((c) => ({ ...c, destinationVerification: c.destination?.verification ?? null })),
+      // ADR-161: đích "Ngắt" = subscription không nhận (lý do hiển thị như subscription tắt).
+      candidates.map((c) => ({ ...c, isActive: c.isActive && c.destination?.isActive !== false, destinationVerification: c.destination?.verification ?? null })),
       (event?.deliveries ?? []).map((d) => d.subscriptionId),
       // events.source_id (S5) — có cả với event không còn raw_event.
       raw?.sourceId ?? event?.sourceId ?? null,

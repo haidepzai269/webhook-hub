@@ -32,6 +32,8 @@ export interface SourceFlowNode extends FlowNodeBase {
   kind: 'source';
   provider: string;
   active: boolean;
+  /** ADR-161: hub đã đăng ký URL ingest tại provider (`source_connections`) — xoá source KHÔNG gỡ đăng ký đó. */
+  providerConnected?: boolean;
   sourceKey: string;
   accepted: number;
   rejected: number;
@@ -70,6 +72,10 @@ export interface SubscriptionFlowNode extends FlowNodeBase {
 export interface DestinationFlowNode extends FlowNodeBase {
   kind: 'destination';
   type: string;
+  /** ADR-161: false = đích đã "Ngắt" (normalize không tạo delivery mới) — UI vẽ mờ + "Đã ngắt". */
+  active: boolean;
+  /** ADR-161 (L2): endpoint do service tạo qua `/v1/p` (vd Shop `ensure`) — service có thể tạo lại sau khi xoá. */
+  managedByService?: boolean;
   circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
   throttleRps: number;
   deliveries: number;

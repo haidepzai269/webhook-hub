@@ -6,9 +6,10 @@ import { HUB_API_URL } from "@/lib/env";
 
 import { HubApiError, hubFetch } from "./client";
 import type {
+  AuditFacets,
   AuditLogsPage,
+  CursorPage,
   Delivery,
-  DeliveryStatus,
   Destination,
   EventsPage,
   Health,
@@ -40,13 +41,16 @@ export const hubKeys = {
   timeseries: (range: TimeseriesRange) => ["timeseries", range] as const,
   events: (before?: string, limit?: number) => ["events", before ?? null, limit ?? null] as const,
   event: (id: string) => ["event", id] as const,
-  deliveries: (status?: DeliveryStatus) => ["deliveries", status ?? "ALL"] as const,
+  /** `query` = chuỗi query API đã chuẩn hoá (list-url.toApiQuery) — bộ lọc + cursor. */
+  deliveries: (query = "") => ["deliveries", query] as const,
   dlq: ["dlq"] as const,
+  dlqPage: (query = "") => ["dlq", query] as const,
   sources: ["sources"] as const,
   destinations: ["destinations"] as const,
   subscriptions: ["subscriptions"] as const,
   health: ["health"] as const,
-  audit: (before?: string) => ["audit", before ?? null] as const,
+  audit: (query = "") => ["audit", query] as const,
+  auditFacets: ["audit", "facets"] as const,
 };
 
 export function useOverview() {
@@ -85,16 +89,22 @@ export function useEventDetail(id: string | null) {
   });
 }
 
-export function useDeliveries(status?: DeliveryStatus) {
+/** ADR-163: một trang Lượt giao — `query` gồm bộ lọc + `before`/`after` (list-url.ts). */
+export function useDeliveries(query: string) {
   return useQuery({
-    queryKey: hubKeys.deliveries(status),
-    queryFn: () => hubFetch<Delivery[]>(`/api/v1/deliveries${status ? `?status=${status}` : ""}`),
+    queryKey: hubKeys.deliveries(query),
+    queryFn: () => hubFetch<CursorPage<Delivery>>(`/api/v1/deliveries${query ? `?${query}` : ""}`),
     placeholderData: keepPreviousData,
   });
 }
 
-export function useDlq() {
-  return useQuery({ queryKey: hubKeys.dlq, queryFn: () => hubFetch<Delivery[]>("/api/v1/dlq") });
+/** ADR-163: một trang DLQ (DEAD chưa bị replay) — `query` gồm destination, errorKind, from/to, cursor. */
+export function useDlq(query: string) {
+  return useQuery({
+    queryKey: hubKeys.dlqPage(query),
+    queryFn: () => hubFetch<CursorPage<Delivery>>(`/api/v1/dlq${query ? `?${query}` : ""}`),
+    placeholderData: keepPreviousData,
+  });
 }
 
 /**
@@ -168,7 +178,8 @@ export function useReplayBulk() {
   const qc = useQueryClient();
   return useMutation({
     // dryRun BẮT BUỘC (server trả 400 nếu thiếu/không phải boolean — ADR-054).
-    mutationFn: (body: ReplayBulkFilter & { reason: string; dryRun: boolean }) =>
+    // ADR-163: chạy thật gửi `ids` = đúng danh sách của bản xem trước (server kiểm lại từng id).
+    mutationFn: (body: (ReplayBulkFilter & { reason: string; dryRun: true }) | { reason: string; dryRun: false; ids: string[] }) =>
       hubFetch<ReplayBulkResult>("/api/v1/deliveries/replay-bulk", { method: "POST", body: JSON.stringify(body) }),
     onSettled: (res) => {
       if (res?.dryRun) return;
@@ -177,14 +188,21 @@ export function useReplayBulk() {
   });
 }
 
-/** S2-3: audit log, phân trang lùi theo `before` (id nhỏ nhất của trang trước). */
-export function useAuditLogs(before?: string, limit = 50) {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (before) params.set("before", before);
+/** S2-3 + ADR-163: một trang audit — `query` gồm actor, action, entityType, from/to, cursor. */
+export function useAuditLogs(query: string) {
   return useQuery({
-    queryKey: hubKeys.audit(before),
-    queryFn: () => hubFetch<AuditLogsPage>(`/api/v1/audit-logs?${params.toString()}`),
+    queryKey: hubKeys.audit(query),
+    queryFn: () => hubFetch<AuditLogsPage>(`/api/v1/audit-logs${query ? `?${query}` : ""}`),
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Giá trị gợi ý cho bộ lọc audit (hành động / loại đối tượng / người làm đã có trong project). */
+export function useAuditFacets() {
+  return useQuery({
+    queryKey: hubKeys.auditFacets,
+    queryFn: () => hubFetch<AuditFacets>("/api/v1/audit-logs/facets"),
+    staleTime: 60_000,
   });
 }
 

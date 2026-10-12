@@ -32,7 +32,11 @@ export function useEventFlow(id: string | null) {
   });
 }
 
-export function useExecutions(filters: ExecutionFilters, opts: { paused?: boolean } = {}) {
+/**
+ * `maxPages` (ADR-163): trần số trang giữ trong bộ nhớ — cuộn sâu thì trang ĐẦU (mới nhất) bị bỏ; người gọi phải nạp
+ * lại từ đầu khi quay về đỉnh (xem EventLog). `paused`: không refetch theo socket.
+ */
+export function useExecutions(filters: ExecutionFilters, opts: { paused?: boolean; maxPages?: number } = {}) {
   const projectId = useFlowProjectStore((s) => s.projectId);
   return useInfiniteQuery({
     queryKey: flowKeys.executions(filters, projectId),
@@ -46,9 +50,12 @@ export function useExecutions(filters: ExecutionFilters, opts: { paused?: boolea
       return hubFetch<ExecutionsPage>(`/api/v1/flow/executions?${p.toString()}`);
     },
     getNextPageParam: (last) => last.nextCursor,
+    ...(opts.maxPages ? { maxPages: opts.maxPages } : {}),
     placeholderData: keepPreviousData,
-    // Tạm dừng luồng: không refetch khi socket invalidate (dữ liệu đứng yên để đọc).
-    subscribed: !opts.paused,
+    // Tạm dừng luồng: không refetch khi socket invalidate (dữ liệu đứng yên để đọc). `enabled` thay vì
+    // `subscribed:false` — observer vẫn nhận cache, nên "cuộn xuống nạp trang cũ" (fetchNextPage, gọi tay) vẫn hiện
+    // ngay khi đang dừng; bộ lọc mới (chưa có dữ liệu) vẫn nạp lần đầu. Bật lại -> query đã stale tự nạp.
+    enabled: (query) => !opts.paused || query.state.data === undefined,
   });
 }
 
@@ -94,5 +101,42 @@ export function useTopology(window: TopologyWindow) {
     placeholderData: keepPreviousData,
     // Circuit/OPEN hết hạn không có sự kiện nào báo → làm mới định kỳ nhẹ.
     refetchInterval: 15_000,
+  });
+}
+
+/** Mục trên bản đồ luồng có thể "Ngắt" / "Xoá" (ADR-161). */
+export type FlowItemKind = "source" | "destination" | "subscription";
+const FLOW_ITEM_PATH: Record<FlowItemKind, string> = { source: "sources", destination: "destinations", subscription: "subscriptions" };
+const FLOW_ITEM_INVALIDATE = ["flow", "sources", "destinations", "subscriptions", "overview", "audit", "connection", "connectors", "endpoint", "dlq", "deliveries"];
+
+/** "Ngắt" / "Kết nối lại": PATCH `isActive` qua route console sẵn có — node vẫn trên bản đồ (vẽ mờ khi ngắt). */
+export function useFlowSetActive() {
+  const qc = useQueryClient();
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  return useMutation({
+    mutationFn: ({ kind, id, isActive }: { kind: FlowItemKind; id: string; isActive: boolean }) =>
+      hubFetch<unknown>(withProject(`/api/v1/${FLOW_ITEM_PATH[kind]}/${encodeURIComponent(id)}`, projectId), {
+        method: "PATCH",
+        body: JSON.stringify({ isActive }),
+      }),
+    onSettled: () => {
+      for (const k of FLOW_ITEM_INVALIDATE) void qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+}
+
+/** "Xoá" = lưu trữ (ADR-161): biến khỏi bản đồ + danh sách; lịch sử sự kiện/delivery giữ nguyên để đối soát. */
+export function useFlowArchive() {
+  const qc = useQueryClient();
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  return useMutation({
+    mutationFn: ({ kind, id }: { kind: FlowItemKind; id: string }) =>
+      hubFetch<{ archived: true; id: string; archivedAt: string; archivedSubscriptionIds: string[] }>(
+        withProject(`/api/v1/${FLOW_ITEM_PATH[kind]}/${encodeURIComponent(id)}/archive`, projectId),
+        { method: "POST", body: JSON.stringify({}) },
+      ),
+    onSettled: () => {
+      for (const k of FLOW_ITEM_INVALIDATE) void qc.invalidateQueries({ queryKey: [k] });
+    },
   });
 }

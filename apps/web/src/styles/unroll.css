@@ -1,0 +1,28 @@
+/*
+ * ADR-163 — "cuộn giấy mở ra": dòng MỚI của danh sách cuộn vô hạn mở từ trên xuống (clip-path) + mờ -> rõ nhẹ.
+ * Class gắn MỘT LẦN lúc dòng xuất hiện (lib/ui/unroll.ts), animation chỉ chạy khi phần tử mount -> dòng cũ không
+ * chạy lại. Trễ theo lô: --unroll-delay (20ms/dòng, trần 200ms). Tắt hẳn khi người xem chọn giảm chuyển động.
+ */
+@keyframes unroll-reveal {
+  from {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0.35;
+    transform: translateY(-3px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.unroll-row {
+  animation: unroll-reveal 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--unroll-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unroll-row {
+    animation: none;
+  }
+}

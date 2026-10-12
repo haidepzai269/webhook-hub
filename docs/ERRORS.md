@@ -261,6 +261,32 @@ curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY" -H 'content-type:
 curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY" -d '{"type":"order.created","data":{},"idempotencyKey":"x"}'
 ```
 
+## destination_archived
+
+**409 (console).** Replay một delivery mà đích (hoặc subscription) của nó đã bị **Xoá** khỏi bản đồ luồng (lưu trữ,
+ADR-161). Lịch sử vẫn đọc được nhưng không còn nơi nhận.
+**Sửa:** tạo đích / subscription mới; sự kiện mới sẽ đi tới đó. Replay hàng loạt tự bỏ các delivery này.
+```bash
+curl -si -X POST "$API/api/v1/deliveries/$ID/replay?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF"
+```
+
+## destination_inactive
+
+**409 (console).** Replay một delivery tới đích đang **Ngắt** (`isActive=false`, ADR-161).
+**Sửa:** kết nối lại đích ("Kết nối lại" trên bản đồ luồng hoặc `PATCH /api/v1/destinations/:id {"isActive": true}`) rồi replay.
+```bash
+curl -si -X PATCH "$API/api/v1/destinations/$ID?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"isActive":true}'
+```
+
+## subscription_inactive
+
+**409 (console).** Replay một delivery mà subscription của nó đang **tắt** (`isActive=false`, ADR-163) — giống replay
+hàng loạt bỏ qua với lý do `destination_unavailable`.
+**Sửa:** bật lại subscription (`PATCH /api/v1/subscriptions/:id {"isActive": true}`) rồi replay.
+```bash
+curl -si -X PATCH "$API/api/v1/subscriptions/$ID?projectId=$PID" -b cookies.txt -H "x-csrf-token: $CSRF" -d '{"isActive":true}'
+```
+
 ## conflict
 
 **409.** Xung đột với trạng thái hiện tại (lỗi 409 chung). Tham số có thể có: `code` (vd `DESTINATION_IN_USE`,

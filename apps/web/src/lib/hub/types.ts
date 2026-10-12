@@ -191,9 +191,25 @@ export interface AuditLog {
   createdAt: string;
 }
 
-export interface AuditLogsPage {
-  items: AuditLog[];
+/**
+ * ADR-163: trang theo keyset `(created_at, id)`. `next` = cursor đi tới trang CŨ hơn (gửi lại làm `before`),
+ * `prev` = cursor đi tới trang MỚI hơn (gửi lại làm `after`); null = hết phía đó.
+ */
+export interface CursorPage<T> {
+  items: T[];
+  next: string | null;
+  prev: string | null;
+}
+
+export interface AuditLogsPage extends CursorPage<AuditLog> {
+  /** Tên cũ của `next`. */
   nextBefore: string | null;
+}
+
+export interface AuditFacets {
+  actions: string[];
+  entityTypes: string[];
+  actors: string[];
 }
 
 export interface ReplayBulkFilter {
@@ -201,6 +217,8 @@ export interface ReplayBulkFilter {
   from?: string;
   to?: string;
   errorContains?: string;
+  /** ADR-163: cùng "loại lỗi" với bảng DLQ. */
+  errorKind?: string;
 }
 
 export interface ReplayBulkSampleRow {
@@ -213,9 +231,26 @@ export interface ReplayBulkSampleRow {
   attemptGeneration: number;
 }
 
+/** ADR-163: lý do một id đã xem trước không được replay lúc chạy thật. */
+export type ReplaySkipReason = "not_found" | "not_dead" | "already_replayed" | "destination_unavailable";
+
 export type ReplayBulkResult =
-  | { dryRun: true; count: number; limit: number; truncated: boolean; sample: ReplayBulkSampleRow[] }
-  | { dryRun: false; count: number; items: { deliveryId: string; newDeliveryId: string; generation: number }[] };
+  | {
+      dryRun: true;
+      count: number;
+      limit: number;
+      truncated: boolean;
+      sample: ReplayBulkSampleRow[];
+      /** ADR-163: đúng tập sẽ replay — gửi lại khi xác nhận. */
+      ids: string[];
+    }
+  | {
+      dryRun: false;
+      count: number;
+      batchId?: string;
+      items: { deliveryId: string; newDeliveryId: string; generation: number }[];
+      skipped: { count: number; byReason: Partial<Record<ReplaySkipReason, number>>; items: { id: string; reason: ReplaySkipReason }[] };
+    };
 
 /** Raw event ACCEPTED chưa sinh event nào (S1-3) — Postgres là trọng tài, không đọc DLQ broker. */
 export interface OrphanRawEvent {

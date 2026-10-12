@@ -39,7 +39,8 @@ describe('Service API — endpoint + subscription (S5)', () => {
     ];
     const match = (row: any, where: any) =>
       Object.entries(where).every(([k, v]: [string, any]) =>
-        v && typeof v === 'object' && 'in' in v ? v.in.includes(row[k]) : row[k] === v,
+        // cột NULL mặc định (vd archived_at, ADR-161) mà fixture không khai = null như Postgres
+        v && typeof v === 'object' && 'in' in v ? v.in.includes(row[k]) : (row[k] ?? null) === v,
       );
     const client: any = {
       destination: {
@@ -59,12 +60,12 @@ describe('Service API — endpoint + subscription (S5)', () => {
       source: { findMany: jest.fn(async ({ where }: any) => sources.filter((s) => match(s, where))) },
       subscription: {
         updateMany: jest.fn(async ({ where, data }: any) => {
-          const rows = subs.filter((x) => x.id === where.id && x.tenantId === where.tenantId);
+          const rows = subs.filter((x) => match(x, where));
           rows.forEach((r) => Object.assign(r, data));
           return { count: rows.length };
         }),
         findFirst: jest.fn(async ({ where }: any) => {
-          const r = subs.find((x) => x.id === where.id && x.tenantId === where.tenantId);
+          const r = subs.find((x) => match(x, where));
           return r ? { ...r, destination: destinations.find((d) => d.id === r.destinationId) } : null;
         }),
         create: jest.fn(async ({ data }: any) => {
@@ -107,7 +108,7 @@ describe('Service API — endpoint + subscription (S5)', () => {
     const req = (tenantId: string, readTypes: string[] = [], keyId = 'key-1') => ({ tenantId, apiKey: { id: keyId, tenantId, serviceName: 'cafe-be', readTypes } }) as any;
     const verifier = { challenge: jest.fn(async (): Promise<any> => verdict.next) };
     const verdict: { next: any } = { next: { verification: 'VERIFIED', verificationError: null } };
-    return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, subs, audits, req, verifier, verdict, apiKeys };
+    return { controller: new ServiceResourcesController(prisma, verifier as any), destinations, sources, subs, audits, req, verifier, verdict, apiKeys };
   }
 
   async function status(p: Promise<unknown>): Promise<{ status: number; body: any }> {
@@ -421,6 +422,53 @@ describe('Service API — endpoint + subscription (S5)', () => {
       verdict.next = { verification: 'FAILED', verificationError: 'ssrf_blocked' };
       await controller.createEndpoint(req(PA), { name: 'x', url: 'http://10.0.0.1/h', signingSecret: NEW });
       expect(failedAudits(audits)[0].metadata).toEqual({ verificationError: 'ssrf_blocked', attempt: 'create' });
+    });
+  });
+
+  describe('ADR-161 — mục đã lưu trữ ("Xoá" trên bản đồ) coi như không tồn tại ở /v1/p', () => {
+    const ARCHIVED = new Date('2026-10-12T00:00:00Z');
+
+    it('C1: tạo subscription trên endpoint đã lưu trữ -> 404, không tạo gì', async () => {
+      const { controller, req, destinations, subs } = build();
+      destinations.find((d) => d.id === EA)!.archivedAt = ARCHIVED;
+      expect(await status(controller.createSubscription(req(PA), { endpointId: EA, name: 'x', eventTypes: ['order.*'] }))).toEqual({ status: 404, body: { error: 'not_found' } });
+      expect(subs).toHaveLength(0);
+    });
+
+    it('C2: endpoint cũ của key đã revoke nhưng ĐÃ LƯU TRỮ -> không nhận lại (adopted), tạo endpoint mới', async () => {
+      const { controller, req, destinations } = build();
+      const url = 'https://a.example/old';
+      const enc = (o: any) => aesGcmEncrypt(JSON.stringify(o), getMasterKey());
+      destinations.push({ id: '99999999-9999-4999-8999-999999999999', tenantId: PA, name: 'old', type: 'webhook', configEncrypted: enc({ url }), signingSecretEncrypted: null, verification: 'VERIFIED', createdByKeyId: 'key-old', archivedAt: ARCHIVED });
+      const r: any = await controller.createEndpoint(req(PA), { name: 'cafe', url });
+      expect(r.adopted).toBeUndefined();
+      expect(r.id).not.toBe('99999999-9999-4999-8999-999999999999');
+    });
+
+    it('T1: /verify endpoint đã lưu trữ -> 404, không chạy challenge; GET endpoints không liệt kê nó', async () => {
+      const { controller, req, destinations, verifier } = build();
+      destinations.find((d) => d.id === EA)!.archivedAt = ARCHIVED;
+      expect(await status(controller.verifyEndpoint(req(PA), EA))).toEqual({ status: 404, body: { error: 'not_found' } });
+      expect(verifier.challenge).not.toHaveBeenCalled();
+      expect(((await controller.listEndpoints(req(PA))) as any[]).map((d) => d.id)).not.toContain(EA);
+    });
+
+    it('T1: PATCH subscription đã lưu trữ -> 404 (không báo thành công khi không ghi gì)', async () => {
+      const { controller, req, subs, audits } = build();
+      await controller.createSubscription(req(PA), { endpointId: EA, name: 'old', eventTypes: ['payment.received'] });
+      subs[0].archivedAt = ARCHIVED;
+      const before = audits.length;
+      expect(await status(controller.updateSubscription(req(PA), subs[0].id, { isActive: true }))).toEqual({ status: 404, body: { error: 'not_found' } });
+      expect(audits).toHaveLength(before);
+      expect(subs[0].isActive).toBe(true); // không đổi gì (fixture tạo với isActive=true)
+    });
+
+    it('T1: source đã lưu trữ -> sourceIds / sourceKeys trỏ vào nó là 422 unknown_source', async () => {
+      const { controller, req, sources, subs } = build();
+      (sources.find((x) => x.id === SA) as any).archivedAt = ARCHIVED;
+      expect(await status(controller.createSubscription(req(PA), { endpointId: EA, name: 'x', eventTypes: ['order.*'], sourceIds: [SA] }))).toMatchObject({ status: 422, body: { error: 'unknown_source' } });
+      expect(await status(controller.createSubscription(req(PA), { endpointId: EA, name: 'x', eventTypes: ['order.*'], sourceKeys: ['src_sepay_main'] }))).toMatchObject({ status: 422, body: { error: 'unknown_source' } });
+      expect(subs).toHaveLength(0);
     });
   });
 });

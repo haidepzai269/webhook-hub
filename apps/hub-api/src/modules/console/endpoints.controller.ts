@@ -79,6 +79,8 @@ export class ConsoleEndpointsController {
     const given = parseGivenSecret(body?.signingSecret);
     const actor = `user:${userId}`;
     const r = await this.endpoints.create(tenantId, { name, url, signingSecret: given, createdByKeyId: null }, actor, async (repo, d) => {
+      // ADR-161 (T2): khoá cấu hình luồng trước khi kiểm nguồn — không ghim vào source vừa bị lưu trữ song song.
+      await repo.lockFlowConfig();
       const sourceIds = await ownSourceIds(repo, body?.sourceIds);
       const s = await repo.createSubscription({ destinationId: d.id, name, eventTypes, sourceIds, isActive: true });
       await repo.createAuditLog({ action: 'subscription.create', entityType: 'subscription', entityId: s.id, actor, metadata: { name, destinationId: d.id, eventTypes, sourceIds } });
@@ -151,10 +153,12 @@ export class ConsoleEndpointsController {
     const signingSecret = generateWhsecSecret();
     const updated = await this.endpoints.withAudit(tenantId, async (repo) => {
       const u = await repo.updateDestination(d.id, { signingSecretEncrypted: aesGcmEncrypt(signingSecret, getMasterKey()) });
+      // ADR-161 (T1): không ghi được (vừa bị lưu trữ) -> 404, KHÔNG trả một secret chưa từng được lưu.
+      if (!u) throw notFound('Endpoint');
       await repo.createAuditLog({ action: 'endpoint.secret_rotated', entityType: 'destination', entityId: d.id, actor: `user:${userId}`, metadata: { fields: ['signingSecret'] } });
       return u;
     });
-    return { endpoint: publicEndpoint(updated ?? d, endpointUrl(d.configEncrypted)), signingSecret };
+    return { endpoint: publicEndpoint(updated, endpointUrl(d.configEncrypted)), signingSecret };
   }
 
   private async findWebhook(repo: TenantScopedRepository, id: string): Promise<any> {

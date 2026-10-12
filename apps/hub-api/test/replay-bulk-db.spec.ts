@@ -73,21 +73,26 @@ describeDb('replay-bulk (Postgres, S2-3)', () => {
       if (tx) repo.createAuditLog = async () => { throw new Error('audit lỗi giả'); };
       return repo;
     }) as any);
-    await expect(controller.replayBulk(tenant, 'tester', { reason: 'kiểm rollback', dryRun: false })).rejects.toThrow('audit lỗi giả');
+    await expect(controller.replayBulk(tenant, 'tester', { reason: 'kiểm rollback', dryRun: false, ids: deadIds })).rejects.toThrow('audit lỗi giả');
     spy.mockRestore();
     expect(await count()).toEqual(before);
   });
 
   it('chạy thật: 3 delivery mới + 3 outbox + 1 audit; chạy lại -> 0 (đã bị replay thì loại khỏi tập)', async () => {
     const before = await count();
-    const res: any = await controller.replayBulk(tenant, 'tester', { reason: 'đích sống lại', dryRun: false });
+    // ADR-163 (M1): chạy thật gửi đúng ids của bản xem trước.
+    const preview: any = await controller.replayBulk(tenant, 'tester', { reason: 'đích sống lại', dryRun: true });
+    expect(preview.ids.sort()).toEqual([...deadIds].sort());
+    const res: any = await controller.replayBulk(tenant, 'tester', { reason: 'đích sống lại', dryRun: false, ids: preview.ids });
     expect(res.count).toBe(3);
     expect(await count()).toEqual({ deliveries: before.deliveries + 3, outbox: before.outbox + 3, audit: before.audit + 1 });
     const [audit] = await raw.auditLog.findMany({ where: { tenantId: tenant, action: 'delivery.replay_bulk' } });
     expect(audit).toMatchObject({ actor: 'tester', reason: 'đích sống lại', entityType: 'delivery_batch', entityId: res.batchId });
     expect((audit.metadata as any).deliveryIds.sort()).toEqual([...deadIds].sort());
 
-    const again: any = await controller.replayBulk(tenant, 'tester', { reason: 'chạy lại lần hai', dryRun: false });
+    // Chạy lại CÙNG danh sách: mọi id đã có generation mới -> 0 replay, 3 bỏ qua "already_replayed".
+    const again: any = await controller.replayBulk(tenant, 'tester', { reason: 'chạy lại lần hai', dryRun: false, ids: preview.ids });
     expect(again.count).toBe(0);
+    expect(again.skipped).toMatchObject({ count: 3, byReason: { already_replayed: 3 } });
   });
 });

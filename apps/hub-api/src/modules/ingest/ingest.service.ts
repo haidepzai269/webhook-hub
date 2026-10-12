@@ -11,6 +11,7 @@ import {
   generateCorrelationId,
   OutboxPayload,
   TraceIngestedNotice,
+  MAX_INGEST_PAYLOAD_BYTES,
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
@@ -78,7 +79,8 @@ export class IngestService {
     return this.traced(req, async (trace) => {
       const log = logger.child({ correlationId: trace.correlationId, provider: req.provider, sourceId });
       const source = await this.prisma.forTenant(tenantId).findSourceById(sourceId);
-      if (!source || !source.isActive) {
+      // ADR-161: source đã lưu trữ ("Xoá" trên bản đồ) bị từ chối y như source tắt (lưu trữ luôn kèm is_active=false).
+      if (!source || !source.isActive || source.archivedAt) {
         log.warn('Source api của key không tồn tại hoặc đã tắt');
         return { status: 409, body: { error: 'source_inactive' } };
       }
@@ -240,8 +242,7 @@ export class IngestService {
     });
 
     // 1. Kiểm tra kích thước payload <= 1MB
-    const MAX_PAYLOAD_BYTES = 1024 * 1024;
-    if (req.rawBody.length > MAX_PAYLOAD_BYTES) {
+    if (req.rawBody.length > MAX_INGEST_PAYLOAD_BYTES) {
       log.warn('Payload vượt quá giới hạn 1MB');
       return { status: 413, body: { error: 'Payload quá lớn (tối đa 1MB)' } };
     }
@@ -262,7 +263,8 @@ export class IngestService {
     // điểm duy nhất được phép truy vấn `source` không scope.
     const source = await this.prisma.findSourceBySourceKeyForIngest(req.sourceKey);
 
-    if (!source || !source.isActive) {
+    // ADR-161: source đã lưu trữ bị từ chối y như source tắt — cùng 404, không lộ khác biệt.
+    if (!source || !source.isActive || source.archivedAt) {
       log.warn('Source không tồn tại hoặc đã bị vô hiệu hóa');
       return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
     }

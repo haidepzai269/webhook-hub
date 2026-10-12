@@ -25,6 +25,8 @@ const SECRET_MISMATCH_FIX =
   'checksumKey vừa nhập KHÔNG khớp webhook thật (provider vẫn ký bằng key cũ) — hub giữ cả hai key nên không mất sự kiện. Nhập lại đúng checksumKey rồi bấm "Thử lại".';
 
 const notFound = () => hubError('not_found', {}, 'Source không tồn tại');
+/** ADR-161: lời nhắc trên kết nối của source đã lưu trữ — URL ở provider không tự gỡ. */
+const ARCHIVED_FIX = 'Source đã bị xoá khỏi luồng — gỡ URL webhook ở dashboard provider nếu còn.';
 const inProgress = () => hubError('conflict', { code: 'connection_in_progress' }, 'Đang kết nối với provider (một lượt khác vừa bấm) — đợi kết quả rồi tải lại');
 /** L-1: `source_key` UNIQUE toàn cục -> body GIỐNG HỆT dù key thuộc project mình hay project khác (không dò được key của người khác). */
 const sourceKeyTaken = () => hubError('conflict', { field: 'sourceKey', code: 'source_key_taken' }, 'sourceKey đã được dùng — chọn key khác hoặc bỏ trống để hub tự sinh');
@@ -201,6 +203,8 @@ export class SourceConnectionService {
     // CONNECTED). Bản cũ chỉ bị retire khi webhook thật verify bằng key mới (`reconcileUserSecret`, lúc kiểm tình trạng).
     const secretChanged = !!secretForSource && !this.currentSecrets(source).includes(secretForSource);
     await this.tx(tenantId, async (repo) => {
+      // ADR-161 (M1): source bị lưu trữ sau bước đọc -> 404, không ghi credentials / PENDING lên source đã lưu trữ.
+      await this.assertSourceLive(repo, source.id);
       if (secretChanged) await repo.addSourceSecret(source.id, aesGcmEncrypt(secretForSource!, masterKey));
       await repo.createSourceConnection({
         sourceId: source.id,
@@ -235,6 +239,8 @@ export class SourceConnectionService {
     const secretChanged = !!secretForSource && !this.currentSecrets(source).includes(secretForSource);
     const masterKey = getMasterKey();
     await this.tx(tenantId, async (repo) => {
+      // ADR-161 (M1): source bị lưu trữ sau `load` -> 404, không ghi lại credentials / PENDING.
+      await this.assertSourceLive(repo, source.id);
       // L-3: giành kết nối TRƯỚC (UPDATE có điều kiện) — lượt khác đang PENDING -> 409, không đụng secret.
       const claimed = await repo.claimSourceConnection(source.id, new Date(Date.now() - PENDING_STALE_MS), {
         credentialsEncrypted: aesGcmEncrypt(JSON.stringify(credentials), masterKey),
@@ -304,7 +310,8 @@ export class SourceConnectionService {
   }
 
   async disconnect(tenantId: string, actor: string, sourceId: string) {
-    const { source, conn, connector } = await this.load(tenantId, sourceId);
+    // ADR-161: vẫn ngắt/xoá credentials được cho source đã lưu trữ (dọn dẹp) — các lối khác 404.
+    const { source, conn, connector } = await this.load(tenantId, sourceId, { includeArchived: true });
     let remoteDeleted = false;
     const creds = this.decrypt(conn.credentialsEncrypted);
     if (connector.disconnect && creds && conn.remoteRef) {
@@ -318,7 +325,11 @@ export class SourceConnectionService {
       }
     }
     const updated = await this.tx(tenantId, async (repo) => {
-      const u = await repo.updateSourceConnection(sourceId, { status: 'DISCONNECTED', lastError: null, lastFix: null });
+      // ADR-161 (L2): source đã lưu trữ -> chỉ là ghi sổ; giữ lời nhắc gỡ URL ở dashboard provider.
+      const u = await repo.updateSourceConnection(
+        sourceId,
+        source.archivedAt ? { status: 'DISCONNECTED', lastError: 'source_archived', lastFix: ARCHIVED_FIX } : { status: 'DISCONNECTED', lastError: null, lastFix: null },
+      );
       await repo.createAuditLog({ action: 'source.disconnect', entityType: 'source', entityId: sourceId, actor, metadata: { provider: source.provider, remoteDeleted } });
       return u;
     });
@@ -327,7 +338,7 @@ export class SourceConnectionService {
 
   /** §4.3 điều 5: xoá cột mã hoá, GIỮ source + kết nối (status giữ nguyên). Kết nối lại phải nhập lại. */
   async deleteCredentials(tenantId: string, actor: string, sourceId: string) {
-    const { source, conn, connector } = await this.load(tenantId, sourceId);
+    const { source, conn, connector } = await this.load(tenantId, sourceId, { includeArchived: true });
     const updated = await this.tx(tenantId, async (repo) => {
       const u = await repo.updateSourceConnection(sourceId, { credentialsEncrypted: null });
       await repo.createAuditLog({
@@ -376,8 +387,15 @@ export class SourceConnectionService {
     }
     const masterKey = getMasterKey();
     let conn: any;
+    let archivedMeanwhile = false;
     try {
       conn = await this.tx(tenantId, async (repo) => {
+        // ADR-161 (7): source bị lưu trữ trong lúc gọi provider -> không ghi gì (khoá cấu hình luồng = tuần tự với lưu trữ).
+        await repo.lockFlowConfig();
+        if (!(await repo.findSourceById(sourceId))) {
+          archivedMeanwhile = true;
+          throw notFound();
+        }
         if (result?.sourceSecret) {
           // Provider SINH secret ký (Stripe): version mới; các version đang hiệu lực verify thêm 24 giờ (event của cấu hình cũ
           // còn đang gửi lại / secret dán tay trước đây của source có sẵn). Source mới chưa có version nào -> không đổi gì.
@@ -407,6 +425,17 @@ export class SourceConnectionService {
           logger.warn({ sourceId, provider, error: x instanceof ConnectorError ? x.code : 'disconnect_failed' }, 'Không dọn được cấu hình mới ở provider sau khi lưu kết quả lỗi');
         });
       }
+      // Source vừa bị lưu trữ: không ghi đè thành FAILED. Phòng thủ chiều sâu (M1/L1, best-effort, giữ 404): gỡ cấu hình
+      // CŨ ở provider khi credentials thường còn trong bộ nhớ, rồi xoá credentials + DISCONNECTED (idempotent với tx lưu trữ).
+      if (archivedMeanwhile) {
+        if (previousRemoteRef && previousRemoteRef !== result?.remoteRef && connector.disconnect) {
+          await connector.disconnect({ credentials, remoteRef: previousRemoteRef, baseUrl }).catch(() => undefined);
+        }
+        await this.tx(tenantId, (repo) =>
+          repo.updateSourceConnection(sourceId, { credentialsEncrypted: null, status: 'DISCONNECTED', lastError: 'source_archived', lastFix: ARCHIVED_FIX }),
+        ).catch(() => undefined);
+        throw e;
+      }
       await this.tx(tenantId, (repo) =>
         repo.updateSourceConnection(sourceId, { status: 'FAILED', lastError: 'save_failed', lastFix: 'Hub không lưu được kết quả kết nối (DB tạm lỗi) — bấm "Thử lại".' }),
       ).catch(() => undefined);
@@ -428,10 +457,16 @@ export class SourceConnectionService {
     return this.view(conn, connector);
   }
 
-  private async load(tenantId: string, sourceId: string) {
+  /** ADR-161 (M1): trong tx ghi — khoá cấu hình luồng (tuần tự với lưu trữ) rồi kiểm source còn sống, không thì 404. */
+  private async assertSourceLive(repo: TenantScopedRepository, sourceId: string) {
+    await repo.lockFlowConfig();
+    if (!(await repo.findSourceById(sourceId))) throw notFound();
+  }
+
+  private async load(tenantId: string, sourceId: string, opts: { includeArchived?: boolean } = {}) {
     if (!UUID_RE.test(sourceId)) throw notFound();
     const repo = this.prisma.forTenant(tenantId);
-    const source: any = await repo.findSourceById(sourceId);
+    const source: any = await repo.findSourceById(sourceId, opts);
     if (!source) throw notFound();
     const conn: any = await repo.findSourceConnection(sourceId);
     const connector = ProviderRegistry.has(source.provider) ? ProviderRegistry.get(source.provider).connector : undefined;

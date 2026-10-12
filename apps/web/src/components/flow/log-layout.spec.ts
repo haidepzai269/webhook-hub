@@ -6,21 +6,29 @@ import {
   LOG_HEIGHT_MIN_FRAC,
   logGridTemplate,
   logHeightAria,
+  logMinWidth,
   readLogHeight,
   stepLogHeight,
   writeLogHeight,
 } from "./log-layout";
 
 describe("log-layout — lưới cột cố định của Nhật ký sự kiện", () => {
-  it("5 cột theo thứ tự thời gian | provider | chặng | type | kết quả", () => {
-    expect(LOG_COLUMNS.map((c) => c.key)).toEqual(["time", "provider", "stages", "type", "result"]);
+  it("6 cột theo thứ tự thời gian | provider | chặng | type | kết quả | ghi chú", () => {
+    expect(LOG_COLUMNS.map((c) => c.key)).toEqual(["time", "provider", "stages", "type", "result", "note"]);
   });
 
-  it("mọi cột trừ cột cuối có độ rộng CỐ ĐỊNH (không auto/fr/minmax) -> hàng có '1/1' không đẩy cột sau", () => {
+  it("mọi cột trừ cột cuối KHÔNG phụ thuộc nội dung (rem hoặc minmax(rem,rem), không auto/fr) -> hàng có '1/1' không đẩy cột sau", () => {
     const tpl = logGridTemplate().split(" ");
-    expect(tpl).toHaveLength(5);
-    for (const w of tpl.slice(0, -1)) expect(w).toMatch(/^\d+(\.\d+)?rem$/);
-    expect(tpl[4]).toBe("minmax(0,1fr)");
+    expect(tpl).toHaveLength(6);
+    const rem = "\\d+(\\.\\d+)?rem";
+    for (const w of tpl.slice(0, -1)) expect(w).toMatch(new RegExp(`^(${rem}|minmax\\(${rem},${rem}\\))$`));
+    expect(tpl[5]).toMatch(/^minmax\(\d+(\.\d+)?rem,1fr\)$/);
+  });
+
+  it("chặng giữ bề rộng cố định (6 chấm + '2/3' không bị co); min-width = tổng min cột + khe + đệm", () => {
+    expect(LOG_COLUMNS.find((c) => c.key === "stages")?.width).toBe("11rem");
+    const mins = LOG_COLUMNS.reduce((n, c) => n + c.min, 0);
+    expect(logMinWidth()).toBe(`${mins + 0.75 * 5 + 1.625}rem`);
   });
 
   it("clampLogHeight giữ trong [25%, 85%] viewport", () => {

@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmDecrypt, aesGcmEncrypt, generateWhsecSecret } from '@hub/crypto';
 import { verificationFix } from '@hub/common';
@@ -176,6 +177,8 @@ export class EndpointService {
         verificationError: o.verificationError,
         verifiedAt: o.verification === 'VERIFIED' ? new Date() : null,
       });
+      // ADR-161 (T1): endpoint vừa bị lưu trữ giữa lúc challenge -> không ghi gì (kể cả audit), 404 như không tồn tại.
+      if (!u) throw new NotFoundException({ error: 'not_found', message: 'Endpoint không tồn tại' });
       if (o.verification === 'VERIFIED') {
         await repo.createAuditLog({
           action: 'endpoint.verified',

@@ -108,6 +108,28 @@
 .flow-card[data-unused="true"]:hover {
   opacity: 0.9;
 }
+/* ADR-161: mục đã "Ngắt" (is_active=false) — vẫn trên bản đồ nhưng mờ hẳn, không glow; hover đọc rõ hơn chút. */
+/* Làm mờ NỘI DUNG (không phải cả thẻ) để nút ⋯ (.flow-manage-btn) vẫn đủ tương phản. */
+.flow-card[data-disconnected="true"] {
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--flow-idle) 45%, transparent);
+  box-shadow: none;
+  background: color-mix(in oklch, var(--flow-card) 55%, transparent);
+}
+.flow-card[data-disconnected="true"] > :not(.flow-manage-btn) {
+  opacity: 0.45;
+  filter: saturate(0.3);
+}
+.flow-card[data-disconnected="true"]:hover > :not(.flow-manage-btn) {
+  opacity: 0.75;
+}
+.flow-manage-btn {
+  opacity: 0.7;
+}
+.flow-manage-btn:hover,
+.flow-manage-btn:focus-visible {
+  opacity: 1;
+}
 .flow-card.is-selected {
   outline: 2px solid color-mix(in oklch, var(--tone) 80%, transparent);
   outline-offset: 2px;

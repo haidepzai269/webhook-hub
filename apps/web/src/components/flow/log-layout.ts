@@ -1,18 +1,31 @@
 /**
  * Bố cục Nhật ký sự kiện (V3) — logic thuần: lưới cột CỐ ĐỊNH + chiều cao kéo được nhớ theo người xem.
- * Cột cố định để hàng có "1/1" (chấm giao gộp) không đẩy lệch cột type/kết quả của hàng khác.
+ * Cột không phụ thuộc nội dung (rem hoặc minmax(rem,rem)) để hàng có "1/1" (chấm giao gộp) không đẩy lệch
+ * cột của hàng khác — mỗi hàng là một grid riêng. minmax cho phép co khi ngăn hẹp; dưới `logMinWidth()`
+ * thì cuộn ngang trong ngăn thay vì đè chữ. Cột cuối "Ghi chú" (event-notes.ts) ăn phần còn lại, cắt "…".
  */
 
 export const LOG_COLUMNS = [
-  { key: "time", label: "Thời gian", width: "6.5rem" },
-  { key: "provider", label: "Provider", width: "8rem" },
-  { key: "stages", label: "Chặng", width: "11rem" },
-  { key: "type", label: "Type", width: "14rem" },
-  { key: "result", label: "Kết quả", width: "minmax(0,1fr)" },
+  { key: "time", label: "Thời gian", width: "6.5rem", min: 6.5 },
+  { key: "provider", label: "Provider", width: "minmax(4.5rem,8rem)", min: 4.5 },
+  { key: "stages", label: "Chặng", width: "11rem", min: 11 },
+  { key: "type", label: "Type", width: "minmax(7rem,13rem)", min: 7 },
+  { key: "result", label: "Kết quả", width: "minmax(5.5rem,10rem)", min: 5.5 },
+  { key: "note", label: "Ghi chú", width: "minmax(10rem,1fr)", min: 10 },
 ] as const;
 
 export function logGridTemplate(): string {
   return LOG_COLUMNS.map((c) => c.width).join(" ");
+}
+
+/** Khe giữa cột (gap-3) + đệm ngang hàng (px-3) + viền trái 2px, tính bằng rem. */
+const LOG_GAP_REM = 0.75;
+const LOG_PAD_REM = 1.5 + 0.125;
+
+/** Bề rộng tối thiểu của lưới: hẹp hơn thì ngăn nhật ký cuộn ngang. */
+export function logMinWidth(): string {
+  const cols = LOG_COLUMNS.reduce((n, c) => n + c.min, 0);
+  return `${cols + LOG_GAP_REM * (LOG_COLUMNS.length - 1) + LOG_PAD_REM}rem`;
 }
 
 export const LOG_HEIGHT_KEY = "flow:v3:log-height";

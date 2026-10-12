@@ -62,7 +62,8 @@ export async function resolveSourceKeys(repo: TenantScopedRepository, v: unknown
     unprocessable({ error: 'validation_failed', field: 'sourceKeys', message: 'sourceKeys là mảng ≤ 50 sourceKey' });
   }
   const keys = [...new Set(v as string[])];
-  const found = keys.length ? await repo.findSources({ sourceKey: { in: keys } }) : [];
+  // ADR-161: source đã lưu trữ = không còn (unknown_source).
+  const found = keys.length ? await repo.findSources({ sourceKey: { in: keys }, archivedAt: null }) : [];
   const missing = keys.filter((k) => !found.some((s: any) => s.sourceKey === k));
   if (missing.length > 0) unprocessable({ error: 'unknown_source', keys: missing });
   return found.map((s: any) => s.id);
@@ -174,7 +175,8 @@ export class ServiceResourcesController {
     const keys = await repo.findApiKeys();
     const retired = new Set(keys.filter((k: any) => k.revokedAt && k.serviceName === req.apiKey!.serviceName && k.id !== req.apiKey!.id).map((k: any) => k.id));
     if (retired.size === 0) return null;
-    const rows = await repo.findDestinations({ type: 'webhook', createdByKeyId: { in: [...retired] } });
+    // ADR-161 (C2): endpoint đã lưu trữ không bao giờ được nhận lại.
+    const rows = await repo.findDestinations({ type: 'webhook', createdByKeyId: { in: [...retired] }, archivedAt: null });
     return rows.find((d) => endpointUrl(d.configEncrypted) === url) ?? null;
   }
 
@@ -203,10 +205,12 @@ export class ServiceResourcesController {
         verificationError: null,
         verifiedAt: new Date(),
       });
+      // ADR-161 (T1): vừa bị lưu trữ giữa lúc challenge -> 404, không báo adopted khi chẳng ghi gì.
+      if (!u) throw new NotFoundException(NOT_FOUND);
       await repo.createAuditLog({ action: 'endpoint.adopted', entityType: 'destination', entityId: d.id, actor, metadata: { fromKeyId: d.createdByKeyId, secretRotated: !!given } });
       return u;
     });
-    return { ...publicEndpoint(updated ?? d, url), adopted: true };
+    return { ...publicEndpoint(updated, url), adopted: true };
   }
 
   /** S6: chạy lại challenge (vd sau khi sửa endpoint). Endpoint không thuộc project -> 404 giống hệt. */
@@ -245,7 +249,7 @@ export class ServiceResourcesController {
   @Get('endpoints')
   @RequireScope('manage:endpoints')
   async listEndpoints(@Req() req: RequestWithPrincipal) {
-    const rows = await this.prisma.forTenant(req.tenantId!).findDestinations({ type: 'webhook', createdByKeyId: req.apiKey!.id });
+    const rows = await this.prisma.forTenant(req.tenantId!).findDestinations({ type: 'webhook', createdByKeyId: req.apiKey!.id, archivedAt: null });
     return rows.map((d) => publicEndpoint(d, endpointUrl(d.configEncrypted)));
   }
 
@@ -253,13 +257,8 @@ export class ServiceResourcesController {
   @RequireScope('manage:endpoints')
   async createSubscription(@Req() req: RequestWithPrincipal, @Body() body: any) {
     const tenantId = req.tenantId!;
-    const repo = this.prisma.forTenant(tenantId);
-    // Endpoint phải thuộc project (404 giống hệt "không tồn tại"); khoá ngoại ghép là lưới cuối (S1).
     const endpointId = body?.endpointId;
-    const endpoint = typeof endpointId === 'string' && UUID_RE.test(endpointId) ? await repo.findDestinationById(endpointId) : null;
-    // MS-R3: chỉ ENDPOINT (webhook); R-1 (ADR-094): và chỉ endpoint do CHÍNH key này tạo — endpoint của service khác
-    // (vd Shop) coi như không tồn tại, nên không gắn được subscription không ghim nguồn vào đó.
-    if (!ownsEndpoint(endpoint, req)) throw new NotFoundException(NOT_FOUND);
+    if (typeof endpointId !== 'string' || !UUID_RE.test(endpointId)) throw new NotFoundException(NOT_FOUND);
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     if (!name || name.length > 255) unprocessable({ error: 'validation_failed', field: 'name', message: 'name là chuỗi 1–255 ký tự' });
     const eventTypes = parseEventTypes422(body?.eventTypes);
@@ -269,9 +268,16 @@ export class ServiceResourcesController {
       const invalid = eventTypes.filter((p) => !readTypes.some((r) => patternCovers(r, p)));
       if (invalid.length > 0) unprocessable({ error: 'outside_read_types', field: 'eventTypes', invalid, message: `Key chỉ đọc được: ${readTypes.join(', ')}` });
     }
-    // MS-P2-1 (ADR-089): ghim nguồn theo sourceKey (service biết key từ URL webhook, không cần manage:sources).
-    const sourceIds = [...new Set([...(await resolveSourceIds(repo, body?.sourceIds)), ...(await resolveSourceKeys(repo, body?.sourceKeys))])];
     const created = await this.withAudit(tenantId, async (tx) => {
+      // ADR-161 (T2, C1): khoá cấu hình luồng rồi kiểm endpoint + nguồn TRONG transaction (đích/source đã lưu trữ = không có).
+      await tx.lockFlowConfig();
+      // Endpoint phải thuộc project (404 giống hệt "không tồn tại"); khoá ngoại ghép là lưới cuối (S1).
+      // MS-R3: chỉ ENDPOINT (webhook); R-1 (ADR-094): và chỉ endpoint do CHÍNH key này tạo — endpoint của service khác
+      // (vd Shop) coi như không tồn tại, nên không gắn được subscription không ghim nguồn vào đó.
+      const endpoint = await tx.findDestinationById(endpointId);
+      if (!ownsEndpoint(endpoint, req)) throw new NotFoundException(NOT_FOUND);
+      // MS-P2-1 (ADR-089): ghim nguồn theo sourceKey (service biết key từ URL webhook, không cần manage:sources).
+      const sourceIds = [...new Set([...(await resolveSourceIds(tx, body?.sourceIds)), ...(await resolveSourceKeys(tx, body?.sourceKeys))])];
       const s = await tx.createSubscription({ destinationId: endpoint.id, name, eventTypes, sourceIds, isActive: true });
       await tx.createAuditLog({
         action: 'subscription.create',
@@ -296,18 +302,22 @@ export class ServiceResourcesController {
     // R-2 (ADR-094): chỉ subscription tới endpoint của CHÍNH key này — key khác không tắt được sub đã ghim của Shop.
     if (!sub || !ownsEndpoint((sub as any).destination, req)) throw new NotFoundException(NOT_FOUND);
     const updated = await this.withAudit(tenantId, async (tx) => {
+      // ADR-161/163: bật/tắt subscription đổi tập "còn replay được" — cùng khoá cấu hình luồng với replay hàng loạt.
+      await tx.lockFlowConfig();
       const u = await tx.updateSubscription(id, { isActive: body.isActive });
+      // ADR-161 (T1): vừa bị lưu trữ -> 404, không báo thành công khi chẳng ghi gì.
+      if (!u) throw new NotFoundException(NOT_FOUND);
       await tx.createAuditLog({ action: 'subscription.update', entityType: 'subscription', entityId: id, actor: `key:${req.apiKey!.id}`, metadata: { fields: ['isActive'], isActive: body.isActive } });
       return u;
     });
-    return (await this.withSourceKeys(tenantId, [updated ?? { ...sub, isActive: body.isActive }]))[0];
+    return (await this.withSourceKeys(tenantId, [updated]))[0];
   }
 
   @Get('subscriptions')
   @RequireScope('manage:endpoints')
   async listSubscriptions(@Req() req: RequestWithPrincipal) {
     // MS-R3: chỉ subscription tới endpoint (webhook) — không lộ đích Telegram/Discord của operator.
-    const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions({ destination: { type: 'webhook', createdByKeyId: req.apiKey!.id } });
+    const rows = await this.prisma.forTenant(req.tenantId!).findSubscriptions({ destination: { type: 'webhook', createdByKeyId: req.apiKey!.id }, archivedAt: null });
     return this.withSourceKeys(req.tenantId!, rows);
   }
 
@@ -344,7 +354,7 @@ export class ServiceResourcesController {
     if (types?.some((t) => !isValidEventPattern(t))) unprocessable({ error: 'validation_failed', field: 'types', message: 'types là danh sách mẫu cách nhau dấu phẩy (vd order.*,payment.received)' });
     if (q.status !== undefined && q.status !== 'failed') unprocessable({ error: 'validation_failed', field: 'status', message: 'status chỉ nhận "failed"' });
     const repo = this.prisma.forTenant(req.tenantId!);
-    if (q.endpointId !== undefined && !(UUID_RE.test(q.endpointId) && ownsEndpoint(await repo.findDestinationById(q.endpointId), req))) {
+    if (q.endpointId !== undefined && !(UUID_RE.test(q.endpointId) && ownsEndpoint(await repo.findDestinationById(q.endpointId, { includeArchived: true }), req))) {
       throw new NotFoundException(NOT_FOUND);
     }
     const readTypes = req.apiKey!.readTypes ?? [];
@@ -397,7 +407,7 @@ export class ServiceResourcesController {
   @Get('sources')
   @RequireScope('manage:sources')
   async listSources(@Req() req: RequestWithPrincipal) {
-    const rows = await this.prisma.forTenant(req.tenantId!).findSources();
+    const rows = await this.prisma.forTenant(req.tenantId!).findSources({ archivedAt: null });
     return rows.map(publicSource);
   }
 

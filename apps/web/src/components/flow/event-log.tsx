@@ -1,20 +1,39 @@
 "use client";
 
-import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
-import { ChevronDown, ChevronUp, Pause, Play, Search, Terminal } from "lucide-react";
+import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronUp, EyeOff, Pause, Play, Search, Terminal } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useExecutions } from "@/lib/hub/queries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { ExecutionFilters, ExecutionStatus } from "@/lib/hub/flow-types";
+import { EVENT_LOG_PARAMS, EXECUTION_STATUS_VALUES } from "@/lib/hub/list-url";
+import type { ExecutionsPage } from "@/lib/hub/flow-types";
+import { flowKeys, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
+import { useUrlParams } from "@/lib/hub/use-url-params";
+import { useUnroll } from "@/lib/ui/use-unroll";
 
+import { shouldAutoLoadMore, shouldResetHead } from "./event-log-logic";
+import { describeEvent, expectedProbe, type NoteTone } from "./event-notes";
 import { EXECUTION_LABEL, EXECUTION_TONE, FailedAt, failedAtText, MiniPipeline } from "./execution-bits";
 import {
   clampLogHeight,
   LOG_COLUMNS,
   logGridTemplate,
   logHeightAria,
+  logMinWidth,
   readLogHeight,
   stepLogHeight,
   writeLogHeight,
@@ -31,7 +50,20 @@ function viewerStorage(): Storage | null {
   }
 }
 
+const ALL = "__all";
+/** Trang (50 dòng) giữ trong bộ nhớ của ngăn nhật ký — 250 dòng, đủ đọc, không phình theo giờ. */
+const LOG_MAX_PAGES = 5;
+
 const GRID_TEMPLATE = logGridTemplate();
+const MIN_WIDTH = logMinWidth();
+
+/** Màu chữ cột "Ghi chú": bình thường / đúng thiết kế thì nhạt (muted), cần xem cấu hình thì vàng, hỏng thì đỏ. */
+const NOTE_COLOR: Record<NoteTone, string> = {
+  neutral: "var(--muted-foreground)",
+  expected: "var(--muted-foreground)",
+  attention: TONE_VAR.warning,
+  error: TONE_VAR.crashed,
+};
 
 function time(iso: string) {
   const d = new Date(iso);
@@ -43,12 +75,67 @@ function time(iso: string) {
  * rút gọn (cùng `/flow/executions` với V2), màu theo kết quả, bấm → V1. Cập nhật bằng invalidate
  * socket (không tự ghép trạng thái); "Tạm dừng" ngừng nhận dòng mới để đọc.
  * Kéo mép trên để đổi chiều cao (25%–85% viewport, nhớ theo người xem); lưới cột cố định (log-layout.ts).
+ * ADR-163: lọc provider / kết quả / "Ẩn request kiểm tra" (cờ events.probe ở SERVER) nằm trên URL (`logProvider`,
+ * `logStatus`, `logProbes`); dòng mới trực tiếp vào trên cùng, cuộn xuống đáy nạp trang cũ hơn (cursor keyset);
+ * chỉ dòng mới nạp/mới chèn "mở ra" (styles/unroll.css).
  */
 export function EventLog() {
+  return (
+    <Suspense fallback={null}>
+      <EventLogPanel />
+    </Suspense>
+  );
+}
+
+function EventLogPanel() {
   const [open, setOpen] = useState(true);
   const [paused, setPaused] = useState(false);
   const [q, setQ] = useState("");
-  const { data, isLoading } = useExecutions({}, { paused });
+  const url = useUrlParams(EVENT_LOG_PARAMS);
+  const { logProvider, logStatus, logProbes } = url.values;
+  const filters: ExecutionFilters = useMemo(
+    () => ({ provider: logProvider, status: logStatus as ExecutionStatus | undefined, probes: logProbes === "hide" ? "hide" : undefined }),
+    [logProvider, logStatus, logProbes],
+  );
+  // Cuộn xa khỏi đỉnh = tạm dừng luồng (như nút Tạm dừng): dòng mới không đẩy chỗ đang đọc; về đỉnh thì chạy tiếp.
+  const [awayFromTop, setAwayFromTop] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const live = !paused && !awayFromTop;
+  let liveLabel = "trực tiếp";
+  if (paused) liveLabel = "đã tạm dừng";
+  else if (awayFromTop) liveLabel = "tạm dừng khi cuộn xuống — về đầu để tiếp tục";
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = useExecutions(filters, {
+    paused: !live,
+    maxPages: LOG_MAX_PAGES,
+  });
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  const qc = useQueryClient();
+  // Thu gọn ngăn / đổi bộ lọc -> vùng cuộn về đỉnh -> trực tiếp lại.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chạy lại đúng khi open / bộ lọc đổi (không đọc chúng)
+  useEffect(() => {
+    setAwayFromTop(false);
+    scroller.current?.scrollTo({ top: 0 });
+  }, [open, filters]);
+  // maxPages đã bỏ trang đầu (cuộn sâu) -> CHỈ ở bước chuyển thật "không trực tiếp -> trực tiếp" (về đỉnh, hoặc bấm
+  // Tiếp tục khi đã ở đỉnh) mới nạp lại từ trang mới nhất (TB1).
+  const headDropped = data !== undefined && data.pageParams[0] != null;
+  const wasLive = useRef(live);
+  useEffect(() => {
+    const prev = wasLive.current;
+    wasLive.current = live;
+    if (!shouldResetHead({ wasLive: prev, live, headDropped })) return;
+    qc.setQueryData<InfiniteData<ExecutionsPage, string | null>>(flowKeys.executions(filters, projectId), (d) =>
+      d ? { pages: d.pages.slice(0, 1), pageParams: [null] } : d,
+    );
+    void refetch();
+  }, [live, headDropped, qc, filters, projectId, refetch]);
+  const sources = useSources(projectId);
+  const providers = useMemo(() => {
+    const set = new Set<string>((sources.data ?? []).map((s) => s.provider));
+    set.add("api");
+    if (logProvider) set.add(logProvider);
+    return [...set].sort();
+  }, [sources.data, logProvider]);
   const [height, setHeight] = useState<number | null>(null);
   const heightRef = useRef<number | null>(null);
   heightRef.current = height;
@@ -94,14 +181,32 @@ export function EventLog() {
     writeLogHeight(viewerStorage(), next);
   }, []);
   const aria = height !== null && viewportH ? logHeightAria(height, viewportH) : null;
+  const all = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
   const items = useMemo(() => {
-    const all = data?.pages.flatMap((p) => p.items) ?? [];
     const needle = q.trim().toLowerCase();
-    const rows = needle
-      ? all.filter((i) => [i.type, i.provider, i.sourceName, i.subject, i.id].some((v) => v?.toLowerCase().includes(needle)))
-      : all;
-    return rows.slice(0, 60);
-  }, [data, q]);
+    return needle ? all.filter((i) => [i.type, i.provider, i.sourceName, i.subject, i.id].some((v) => v?.toLowerCase().includes(needle))) : all;
+  }, [all, q]);
+  // Số phận "mở ra" tính trên TOÀN BỘ dòng đã nạp (không phải tập đã lọc client) — gõ lọc không làm dòng cũ chạy lại.
+  const unroll = useUnroll(
+    all.map((i) => i.id),
+    { resetKey: `${projectId ?? ""}|${logProvider ?? ""}|${logStatus ?? ""}|${logProbes ?? ""}` },
+  );
+
+  // Cuộn tới đáy ngăn -> nạp trang cũ hơn (cursor). Root = vùng cuộn của chính ngăn.
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !open) return;
+    const io = new IntersectionObserver(
+      (es) => {
+        const go = shouldAutoLoadMore({ visible: Boolean(es[0]?.isIntersecting), hasNextPage: Boolean(hasNextPage), fetching: isFetchingNextPage, clientFilter: q });
+        if (go) void fetchNextPage();
+      },
+      { root: scroller.current, rootMargin: "120px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [open, hasNextPage, isFetchingNextPage, fetchNextPage, q]);
 
   return (
     <div
@@ -130,8 +235,50 @@ export function EventLog() {
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5" style={{ borderColor: "var(--flow-card-border)" }}>
         <Terminal {...ICON} className="text-muted-foreground" aria-hidden />
         <span className="font-medium text-sm">Nhật ký sự kiện</span>
-        <span className="text-muted-foreground text-xs">{paused ? "đã tạm dừng" : "trực tiếp"}</span>
+        <span className="text-muted-foreground text-xs" aria-live="polite">
+          {liveLabel}
+        </span>
         <div className="ml-auto flex items-center gap-1.5">
+          {open && (
+            <>
+              <Select value={logProvider ?? ALL} onValueChange={(v) => url.setFilter({ logProvider: v === ALL ? null : v })}>
+                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label="Lọc provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Mọi provider</SelectItem>
+                  {providers.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={logStatus ?? ALL} onValueChange={(v) => url.setFilter({ logStatus: v === ALL ? null : v })}>
+                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label="Lọc kết quả">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Mọi kết quả</SelectItem>
+                  {EXECUTION_STATUS_VALUES.map((st) => (
+                    <SelectItem key={st} value={st}>
+                      {EXECUTION_LABEL[st]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant={logProbes === "hide" ? "secondary" : "ghost"}
+                size="sm"
+                aria-pressed={logProbes === "hide"}
+                title="Ẩn request kiểm tra kết nối của provider (PayOS kiểm tra URL, GitHub ping)"
+                onClick={() => url.setFilter({ logProbes: logProbes === "hide" ? null : "hide" })}
+              >
+                <EyeOff {...ICON} />
+                Ẩn request kiểm tra
+              </Button>
+            </>
+          )}
           {open && (
             <div className="relative">
               <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
@@ -148,53 +295,79 @@ export function EventLog() {
         </div>
       </div>
       {open && (
-        <div className="min-h-0 flex-1 overflow-y-auto font-mono text-[12px]">
-          <div
-            className="sticky top-0 z-[1] grid items-center gap-3 border-b border-l-2 border-l-transparent px-3 py-1 font-sans text-[11px] text-muted-foreground uppercase tracking-wide"
-            style={{ gridTemplateColumns: GRID_TEMPLATE, borderBottomColor: "var(--flow-card-border)", background: "var(--flow-card-solid)" }}
-          >
-            {LOG_COLUMNS.map((c) => (
-              <span key={c.key} className="truncate">
-                {c.label}
-              </span>
-            ))}
-          </div>
-          {isLoading && <div className="px-3 py-2 text-muted-foreground">Đang tải…</div>}
-          {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">Chưa có hành trình nào.</div>}
-          {items.map((i) => {
-            const color = TONE_VAR[EXECUTION_TONE[i.status]];
-            return (
-              <Link
-                key={i.id}
-                href={`/dashboard/events/${encodeURIComponent(i.id)}`}
-                className="grid items-center gap-3 border-l-2 px-3 py-1 hover:bg-muted/50"
-                style={{ gridTemplateColumns: GRID_TEMPLATE, borderLeftColor: color }}
-              >
-                <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt)}</span>
-                <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
-                  <span className="shrink-0 text-muted-foreground">
-                    <ProviderIcon provider={i.provider} size={14} />
-                  </span>
-                  <span className="truncate">{i.providerLabel}</span>
+        <div
+          ref={scroller}
+          className="min-h-0 flex-1 overflow-auto font-mono text-[12px]"
+          onScroll={(e) => setAwayFromTop(e.currentTarget.scrollTop > 24)}
+        >
+          {/* Hẹp hơn tổng min cột → cuộn ngang trong ngăn (log-layout.ts) thay vì đè chữ. */}
+          <div style={{ minWidth: MIN_WIDTH }}>
+            <div
+              className="sticky top-0 z-[1] grid items-center gap-3 border-b border-l-2 border-l-transparent px-3 py-1 font-sans text-[11px] text-muted-foreground uppercase tracking-wide"
+              style={{ gridTemplateColumns: GRID_TEMPLATE, borderBottomColor: "var(--flow-card-border)", background: "var(--flow-card-solid)" }}
+            >
+              {LOG_COLUMNS.map((c) => (
+                <span key={c.key} className="truncate">
+                  {c.label}
                 </span>
-                <span className="min-w-0 overflow-hidden">
-                  <MiniPipeline summary={i.summary} />
-                </span>
-                <span className="truncate" title={i.type ?? EXECUTION_LABEL[i.status]}>
-                  {i.type ?? <span style={{ color }}>{EXECUTION_LABEL[i.status]}</span>}
-                </span>
-                <span className="min-w-0 truncate" title={failedAtText(i.failedAt) ?? EXECUTION_LABEL[i.status]}>
-                  {i.failedAt ? (
-                    <FailedAt failedAt={i.failedAt} status={i.status} />
-                  ) : (
-                    <span style={{ color }} className="font-sans text-xs">
-                      {EXECUTION_LABEL[i.status]}
+              ))}
+            </div>
+            {isLoading && <div className="px-3 py-2 text-muted-foreground">Đang tải…</div>}
+            {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">Không có hành trình nào khớp bộ lọc.</div>}
+            {items.map((i) => {
+              // Request kiểm tra kết nối của provider đúng thiết kế (ADR-159) → viền + nhãn trung tính, không "Thành công" xanh.
+              const probe = expectedProbe(i);
+              const color = probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]];
+              const resultLabel = probe ? probe.label : EXECUTION_LABEL[i.status];
+              const note = describeEvent(i);
+              const anim = unroll(i.id);
+              return (
+                <Link
+                  key={i.id}
+                  href={`/dashboard/events/${encodeURIComponent(i.id)}`}
+                  className={`grid items-center gap-3 border-l-2 px-3 py-1 hover:bg-muted/50 ${anim.className ?? ""}`}
+                  style={{ gridTemplateColumns: GRID_TEMPLATE, borderLeftColor: color, ...anim.style }}
+                >
+                  <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt)}</span>
+                  <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
+                    <span className="shrink-0 text-muted-foreground">
+                      <ProviderIcon provider={i.provider} size={14} />
                     </span>
-                  )}
-                </span>
-              </Link>
-            );
-          })}
+                    <span className="truncate">{i.providerLabel}</span>
+                  </span>
+                  <span className="min-w-0 overflow-hidden">
+                    <MiniPipeline summary={i.summary} context={i} decorative />
+                  </span>
+                  <span className="truncate" title={i.type ?? resultLabel}>
+                    {i.type ?? <span style={{ color }}>{resultLabel}</span>}
+                  </span>
+                  <span className="min-w-0 truncate" title={failedAtText(i.failedAt) ?? resultLabel}>
+                    {i.failedAt ? (
+                      <FailedAt failedAt={i.failedAt} status={i.status} />
+                    ) : (
+                      <span style={{ color }} className="font-sans text-xs">
+                        {resultLabel}
+                      </span>
+                    )}
+                  </span>
+                  <span className="min-w-0 truncate font-sans text-xs" style={{ color: NOTE_COLOR[note.tone] }} title={note.text}>
+                    {note.text}
+                  </span>
+                </Link>
+              );
+            })}
+            <div ref={sentinel} className="h-4" />
+            {isFetchingNextPage && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">Đang tải thêm…</div>}
+            {/* Đang lọc client: không tự nạp (TB1) — người xem chủ động nạp trang cũ hơn để tìm tiếp. */}
+            {q.trim() !== "" && hasNextPage && !isFetchingNextPage && (
+              <div className="px-3 py-1 font-sans text-xs">
+                <Button variant="ghost" size="sm" onClick={() => void fetchNextPage()}>
+                  Tải thêm (tìm trong dòng cũ hơn)
+                </Button>
+              </div>
+            )}
+            {!hasNextPage && all.length > 0 && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">Hết.</div>}
+          </div>
         </div>
       )}
     </div>

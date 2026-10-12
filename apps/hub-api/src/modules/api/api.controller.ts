@@ -10,10 +10,13 @@ import {
   Param,
   Body,
   Query,
+  Req,
+  HttpException,
+  HttpStatus,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter } from '@hub/database';
+import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter, DLQ_ERROR_KINDS, DlqErrorKind } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType } from '@hub/common';
 import { Prisma } from '@prisma/client';
@@ -23,12 +26,15 @@ import { SessionGuard } from '../auth/session.guard';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
+import { RequestWithPrincipal } from '../service-api/principal';
 import { hubError } from '../errors/hub-error';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
 import { parseSourceInput } from '../service-api/source-input';
 import { consoleDestination } from './destination-view';
+import { badParam, parseEnumParam, parseTextParam, parseTimeRange, parseUuidParam } from './list-params';
+import { AuditListQuery, DeliveryListQuery, listAuditPage, listDeliveryPage } from './console-lists';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,17 +50,6 @@ function optionalReason(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim().slice(0, 2000) : null;
 }
 
-/** Body JSON (replay hàng loạt): thời điểm phải là CHUỖI ISO 8601 có ngày — số/epoch/object -> 400. */
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
-function parseIsoDate(v: unknown, name: string): Date | undefined {
-  if (v === undefined || v === null || v === '') return undefined;
-  if (typeof v !== 'string' || !ISO_DATE_RE.test(v.trim())) {
-    throw new BadRequestException(`${name} phải là chuỗi thời điểm ISO 8601 (vd 2026-10-10T00:00:00Z)`);
-  }
-  const d = new Date(v.trim());
-  if (Number.isNaN(d.getTime())) throw new BadRequestException(`${name} không phải thời điểm hợp lệ (ISO 8601)`);
-  return d;
-}
 
 /**
  * S3-3: `eventTypes` của subscription — mảng 1..50 mẫu, mỗi mẫu đúng ngữ pháp
@@ -73,6 +68,17 @@ export function parseEventTypes(v: unknown): string[] {
     });
   }
   return [...new Set(v as string[])];
+}
+
+/**
+ * ADR-161 (L1): route cần THÊM một scope ngoài `@RequireScope` (decorator chỉ nhận một). Đóng mặc định: không có
+ * principal/scopes -> 403 (guard thật luôn gắn `principal.scopes`).
+ */
+function requireAlsoScope(req: RequestWithPrincipal | undefined, scope: string) {
+  const scopes = (req?.principal as { scopes?: string[] } | undefined)?.scopes;
+  if (!Array.isArray(scopes) || !scopes.includes(scope)) {
+    throw new HttpException({ error: 'missing_scope', message: `Role hiện tại không có quyền ${scope}`, required: scope }, HttpStatus.FORBIDDEN);
+  }
 }
 
 function assertUuid(id: string, what: string) {
@@ -100,8 +106,9 @@ export class ApiController {
   async getOverview(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     const [totalSources, totalDestinations, totalEvents, totalDeliveries, deadDeliveries] = await Promise.all([
-      repo.countSources(),
-      repo.countDestinations(),
+      // ADR-161: mục đã lưu trữ không còn là cấu hình (lịch sử event/delivery vẫn đếm).
+      repo.countSources({ archivedAt: null }),
+      repo.countDestinations({ archivedAt: null }),
       repo.countEvents(),
       repo.countDeliveries(),
       repo.countDeadDeliveries(),
@@ -134,7 +141,8 @@ export class ApiController {
   @RequireScope('read:project')
   async listSources(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
-    const sources = await repo.findSources();
+    // ADR-161: mặc định ẩn source đã lưu trữ.
+    const sources = await repo.findSources({ archivedAt: null });
     return sources.map(({ secrets, ...s }) => ({
       ...s,
       secretVersions: secrets.length,
@@ -203,7 +211,8 @@ export class ApiController {
   async listDestinations(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
     // P2 (ADR-140): bản công khai — không trả config/secret mã hoá; có trạng thái xác minh.
-    return (await repo.findDestinations()).map(consoleDestination);
+    // ADR-161: mặc định ẩn đích đã lưu trữ.
+    return (await repo.findDestinations({ archivedAt: null })).map(consoleDestination);
   }
 
   @Post('destinations')
@@ -243,6 +252,8 @@ export class ApiController {
     const masterKey = getMasterKey();
     const data: Record<string, unknown> = {};
     if (typeof body?.name === 'string' && body.name.trim()) data.name = body.name.trim();
+    // ADR-161: "Ngắt" / "Kết nối lại" đích trên bản đồ luồng.
+    if (typeof body?.isActive === 'boolean') data.isActive = body.isActive;
     if (body?.config !== undefined) {
       if (typeof body.config !== 'object' || body.config === null || Array.isArray(body.config)) {
         throw new BadRequestException('config phải là object');
@@ -258,8 +269,10 @@ export class ApiController {
       data.rateLimitRps = rps;
     }
     const changed = Object.keys(data).map((k) => k.replace(/Encrypted$/, ''));
-    if (changed.length === 0) throw new BadRequestException('Không có trường nào để sửa (name, config, signingSecret, rateLimitRps)');
+    if (changed.length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive, config, signingSecret, rateLimitRps)');
     return this.withAudit(tenantId, async (repo) => {
+      // ADR-161/163: bật/tắt đích đổi tập "còn replay được" — cùng khoá cấu hình luồng với replay hàng loạt / lưu trữ.
+      if (typeof data.isActive === 'boolean') await repo.lockFlowConfig();
       const u = await repo.updateDestination(id, data);
       if (!u) throw new NotFoundException('Destination không tồn tại');
       await repo.createAuditLog({
@@ -268,7 +281,7 @@ export class ApiController {
         entityId: id,
         actor,
         reason: optionalReason(body?.reason),
-        metadata: { fields: changed },
+        metadata: { fields: changed, ...(typeof data.isActive === 'boolean' ? { isActive: data.isActive } : {}) },
       });
       return consoleDestination(u);
     });
@@ -320,24 +333,25 @@ export class ApiController {
   @RequireScope('read:project')
   async listSubscriptions(@CurrentTenant() tenantId: string) {
     const repo = this.prisma.forTenant(tenantId);
-    return repo.findSubscriptions();
+    // ADR-161: mặc định ẩn subscription đã lưu trữ.
+    return repo.findSubscriptions({ archivedAt: null });
   }
 
   @Post('subscriptions')
   @RequireScope('manage:endpoints')
   async createSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
-    const repo = this.prisma.forTenant(tenantId);
-    // S1-5 (BB-5): đích phải thuộc CÙNG tenant. Trả 404 (không phải 403) để không lộ việc
-    // destinationId đó có tồn tại ở tenant khác hay không.
-    const destination =
-      typeof body?.destinationId === 'string' && UUID_RE.test(body.destinationId)
-        ? await repo.findDestinationById(body.destinationId)
-        : null;
-    if (!destination) throw new NotFoundException('Destination không tồn tại');
+    if (typeof body?.destinationId !== 'string' || !UUID_RE.test(body.destinationId)) throw new NotFoundException('Destination không tồn tại');
     const eventTypes = parseEventTypes(body?.eventTypes);
-    // S5: lọc nguồn — id lạ / của project khác -> 422 unknown_source (cùng hàm với /v1/p)
-    const sourceIds = await resolveSourceIds(repo, body?.sourceIds);
     return this.withAudit(tenantId, async (txRepo) => {
+      // ADR-161 (T2): khoá cấu hình luồng rồi mới kiểm đích + nguồn TRONG transaction — không gắn được subscription vào
+      // đích/source vừa bị lưu trữ song song.
+      await txRepo.lockFlowConfig();
+      // S1-5 (BB-5): đích phải thuộc CÙNG tenant. Trả 404 (không phải 403) để không lộ việc destinationId đó có tồn tại
+      // ở tenant khác hay không. ADR-161 (C1): đích đã lưu trữ = không tồn tại.
+      const destination = await txRepo.findDestinationById(body.destinationId);
+      if (!destination) throw new NotFoundException('Destination không tồn tại');
+      // S5: lọc nguồn — id lạ / của project khác / đã lưu trữ -> 422 unknown_source (cùng hàm với /v1/p)
+      const sourceIds = await resolveSourceIds(txRepo, body?.sourceIds);
       const created = await txRepo.createSubscription({
         destinationId: body.destinationId,
         name: body.name,
@@ -366,9 +380,12 @@ export class ApiController {
     if (typeof body?.isActive === 'boolean') data.isActive = body.isActive;
     if (body?.template !== undefined) data.template = body.template === null ? null : String(body.template);
     if (body?.eventTypes !== undefined) data.eventTypes = parseEventTypes(body.eventTypes);
-    if (body?.sourceIds !== undefined) data.sourceIds = await resolveSourceIds(this.prisma.forTenant(tenantId), body.sourceIds);
-    if (Object.keys(data).length === 0) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes, sourceIds)');
+    const wantsSourceIds = body?.sourceIds !== undefined;
+    if (Object.keys(data).length === 0 && !wantsSourceIds) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes, sourceIds)');
     return this.withAudit(tenantId, async (repo) => {
+      // ADR-161 (T2): kiểm nguồn TRONG transaction, sau khoá cấu hình luồng.
+      await repo.lockFlowConfig();
+      if (wantsSourceIds) data.sourceIds = await resolveSourceIds(repo, body.sourceIds);
       const u = await repo.updateSubscription(id, data);
       if (!u) throw new NotFoundException('Subscription không tồn tại');
       await repo.createAuditLog({
@@ -421,6 +438,108 @@ export class ApiController {
     );
   }
 
+  // --- Lưu trữ ("Xoá" trên bản đồ luồng, ADR-161) ---
+  /**
+   * Lưu trữ source: `archived_at` + `is_active=false` → ingest từ chối y như source tắt (404 `/hooks`, 409
+   * `source_inactive` ở `/v1/p`); biến khỏi bản đồ luồng + danh sách console. KHÔNG xoá raw_events/events. Subscription
+   * chỉ còn lọc theo source này (không còn nguồn sống nào) được lưu trữ theo — bản đồ không còn cạnh treo.
+   * Source đã lưu trữ / không thuộc project → 404. Không hoàn tác qua API (ADR-161).
+   */
+  @Post('sources/:id/archive')
+  @RequireScope('manage:sources')
+  async archiveSource(
+    @CurrentTenant() tenantId: string,
+    @CurrentUser() actor: string,
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req?: RequestWithPrincipal,
+  ) {
+    assertUuid(id, 'Source');
+    // ADR-161 (L1): lưu trữ source có thể lưu trữ/sửa subscription theo -> cần CẢ manage:endpoints (luôn đòi, không tuỳ
+    // có cascade hay không: quyền không được phụ thuộc dữ liệu).
+    requireAlsoScope(req, 'manage:endpoints');
+    return this.withAudit(tenantId, async (repo) => {
+      await repo.lockFlowConfig();
+      const existing = await repo.findSourceById(id);
+      if (!existing || existing.archivedAt) throw new NotFoundException('Source không tồn tại');
+      const at = new Date();
+      if ((await repo.archiveSource(id, at)) !== 1) throw new NotFoundException('Source không tồn tại');
+      const subscriptionIds = await repo.findSubscriptionIdsOrphanedBy({ sourceId: id });
+      await repo.archiveSubscriptions(subscriptionIds, at);
+      // T4: sub còn sống không giữ id source đã lưu trữ trong bộ lọc nguồn.
+      await repo.removeSourceFromSubscriptions(id);
+      // ADR-161 (1): source lưu trữ không giữ credentials provider mãi mãi — xoá bản mã hoá + DISCONNECTED cùng tx.
+      // (URL đã đăng ký ở provider KHÔNG tự gỡ; hộp thoại gợi ý "Ngắt kết nối provider" trước khi Xoá.)
+      const providerConnectionWiped = !!(await repo.updateSourceConnection(id, {
+        credentialsEncrypted: null,
+        status: 'DISCONNECTED',
+        lastError: 'source_archived',
+        lastFix: 'Source đã bị xoá khỏi luồng — gỡ URL webhook ở dashboard provider nếu còn.',
+      }));
+      await repo.createAuditLog({
+        action: 'source.archive',
+        entityType: 'source',
+        entityId: id,
+        actor,
+        reason: optionalReason(body?.reason),
+        metadata: { name: existing.name, provider: existing.provider, archivedSubscriptionIds: subscriptionIds, providerConnectionWiped },
+      });
+      return { archived: true, id, archivedAt: at, archivedSubscriptionIds: subscriptionIds };
+    });
+  }
+
+  /**
+   * Lưu trữ đích: `archived_at` + `is_active=false`, mọi subscription của đích lưu trữ theo → normalize không tạo
+   * delivery mới. Delivery đang PENDING/RETRYING chạy nốt (như khi tắt subscription); deliveries/attempts giữ nguyên
+   * (FK RESTRICT, ADR-054) — vì thế đây là lưu trữ, không phải DELETE.
+   */
+  @Post('destinations/:id/archive')
+  @RequireScope('manage:endpoints')
+  async archiveDestination(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any) {
+    assertUuid(id, 'Destination');
+    return this.withAudit(tenantId, async (repo) => {
+      await repo.lockFlowConfig();
+      const existing = await repo.findDestinationById(id);
+      if (!existing || existing.archivedAt) throw new NotFoundException('Destination không tồn tại');
+      const at = new Date();
+      if ((await repo.archiveDestination(id, at)) !== 1) throw new NotFoundException('Destination không tồn tại');
+      const subscriptionIds = await repo.findSubscriptionIdsOrphanedBy({ destinationId: id });
+      await repo.archiveSubscriptions(subscriptionIds, at);
+      await repo.createAuditLog({
+        action: 'destination.archive',
+        entityType: 'destination',
+        entityId: id,
+        actor,
+        reason: optionalReason(body?.reason),
+        metadata: { name: existing.name, type: existing.type, archivedSubscriptionIds: subscriptionIds },
+      });
+      return { archived: true, id, archivedAt: at, archivedSubscriptionIds: subscriptionIds };
+    });
+  }
+
+  /** Lưu trữ subscription: không bao giờ khớp sự kiện mới; deliveries lịch sử giữ nguyên. */
+  @Post('subscriptions/:id/archive')
+  @RequireScope('manage:endpoints')
+  async archiveSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Param('id') id: string, @Body() body: any) {
+    assertUuid(id, 'Subscription');
+    return this.withAudit(tenantId, async (repo) => {
+      await repo.lockFlowConfig();
+      const existing = await repo.findSubscriptionById(id);
+      if (!existing || existing.archivedAt) throw new NotFoundException('Subscription không tồn tại');
+      const at = new Date();
+      if ((await repo.archiveSubscriptions([id], at)) !== 1) throw new NotFoundException('Subscription không tồn tại');
+      await repo.createAuditLog({
+        action: 'subscription.archive',
+        entityType: 'subscription',
+        entityId: id,
+        actor,
+        reason: optionalReason(body?.reason),
+        metadata: { name: existing.name, destinationId: existing.destinationId },
+      });
+      return { archived: true, id, archivedAt: at, archivedSubscriptionIds: [id] };
+    });
+  }
+
   // --- Events (hỗ trợ Polling ADR-016 §8.1) ---
   /**
    * S7 (ADR-077, X11): `before=<eventId>` = trang CŨ HƠN (giảm dần theo thời điểm nhận — hành vi dashboard cũ);
@@ -461,19 +580,21 @@ export class ApiController {
   }
 
   // --- Deliveries & DLQ ---
+  /**
+   * ADR-163: trang Lượt giao — keyset `(created_at, id)`, Trước/Sau bằng `before`/`after` (list-params.ts).
+   * Lọc: `status`, `destination` (uuid), `code` (404 | 5xx | none — HTTP lần thử cuối), `from`/`to` (ISO).
+   */
   @Get('deliveries')
   @RequireScope('read:project')
-  async listDeliveries(@CurrentTenant() tenantId: string, @Query('status') status?: string) {
-    const repo = this.prisma.forTenant(tenantId);
-    const where = status ? { status: status as any } : {};
-    return repo.findDeliveries(where, 50);
+  async listDeliveries(@CurrentTenant() tenantId: string, @Query() q: DeliveryListQuery) {
+    return listDeliveryPage(this.prisma.forTenant(tenantId), q ?? {}, 'deliveries');
   }
 
+  /** DLQ (DEAD chưa bị replay, ADR-031) — như trên; lọc `destination`, `errorKind`, `from`/`to` (tuổi). */
   @Get('dlq')
   @RequireScope('read:project')
-  async listDlq(@CurrentTenant() tenantId: string) {
-    const repo = this.prisma.forTenant(tenantId);
-    return repo.findDeadDeliveries(50);
+  async listDlq(@CurrentTenant() tenantId: string, @Query() q: DeliveryListQuery) {
+    return listDeliveryPage(this.prisma.forTenant(tenantId), q ?? {}, 'dlq');
   }
 
   // --- Replay Delivery (§5.3 Replay: attempt_generation + 1) ---
@@ -498,6 +619,18 @@ export class ApiController {
     // lượt retry đang xếp hàng → đích nhận hai lần. SUCCEEDED thì không có gì để "cứu".
     if (delivery.status !== 'DEAD') {
       throw new ConflictException(`Chỉ replay được delivery DEAD (hiện tại: ${delivery.status})`);
+    }
+    // ADR-161 (T3): đích / subscription đã lưu trữ hoặc đích đang "Ngắt" -> replay không có nơi nhận.
+    const dst = delivery.subscription?.destination as { id: string; isActive?: boolean; archivedAt?: Date | null } | undefined;
+    if (delivery.subscription?.archivedAt || dst?.archivedAt) {
+      throw hubError('destination_archived', { field: 'destinationId' }, 'Đích (hoặc subscription) của delivery này đã bị xoá khỏi luồng — không replay được');
+    }
+    if (dst && dst.isActive === false) {
+      throw hubError('destination_inactive', { field: 'destinationId' }, 'Đích đang Ngắt — kết nối lại đích rồi replay');
+    }
+    // ADR-163: subscription đang tắt cũng không nhận — cùng điều kiện `replayableOnly` của replay hàng loạt.
+    if ((delivery.subscription as { isActive?: boolean } | undefined)?.isActive === false) {
+      throw hubError('subscription_inactive', { field: 'subscriptionId' }, 'Subscription đang tắt — bật lại subscription rồi replay');
     }
 
     // Chỉ replay bản MỚI NHẤT: bản đã bị replay rồi (có generation cao hơn) mà replay tiếp
@@ -571,82 +704,109 @@ export class ApiController {
     }
     const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
     if (reason.length < REASON_MIN) throw new BadRequestException(`Cần lý do (reason) ít nhất ${REASON_MIN} ký tự`);
-    const filter: DeadDeliveryFilter = {};
-    if (body?.destinationId !== undefined && body.destinationId !== '' && body.destinationId !== null) {
-      if (typeof body.destinationId !== 'string' || !UUID_RE.test(body.destinationId)) {
-        throw new BadRequestException('destinationId phải là UUID');
-      }
-      filter.destinationId = body.destinationId;
+    const FILTER_FIELDS = ['destinationId', 'from', 'to', 'errorContains', 'errorKind'] as const;
+    const given = (k: string) => body[k] !== undefined && body[k] !== null && body[k] !== '';
+    // ADR-163 (TB2): chạy thật = đúng `ids` đã xem trước; bộ lọc gửi kèm sẽ bị bỏ qua -> 400 thay vì nhận rồi lờ đi.
+    if (!body.dryRun) {
+      const extra = FILTER_FIELDS.find(given);
+      if (extra) throw badParam(extra, 'Chạy thật (dryRun: false) chỉ nhận ids của bản xem trước — bộ lọc chỉ dùng khi xem trước');
     }
-    filter.from = parseIsoDate(body.from, 'from');
-    filter.to = parseIsoDate(body.to, 'to');
-    if (filter.from && filter.to && filter.from > filter.to) throw new BadRequestException('from phải ≤ to');
-    if (body.errorContains !== undefined && body.errorContains !== null && typeof body.errorContains !== 'string') {
-      throw new BadRequestException('errorContains phải là chuỗi');
-    }
-    if (typeof body.errorContains === 'string' && body.errorContains.trim()) {
-      filter.errorContains = body.errorContains.trim().slice(0, 200);
-    }
-    const filterForAudit = {
-      destinationId: filter.destinationId ?? null,
-      from: filter.from?.toISOString() ?? null,
-      to: filter.to?.toISOString() ?? null,
-      errorContains: filter.errorContains ?? null,
+    // Cùng bộ kiểm với các trang danh sách (list-params.ts): 400 bad_request + field.
+    const range = parseTimeRange(body.from, body.to);
+    const filter: DeadDeliveryFilter = {
+      destinationId: parseUuidParam(body.destinationId ?? undefined, 'destinationId'),
+      from: range.from,
+      to: range.to,
+      errorContains: parseTextParam(body.errorContains ?? undefined, 'errorContains', 200),
+      // ADR-163: CÙNG bộ lọc "loại lỗi" với bảng DLQ — trang DLQ gửi đúng bộ lọc đang xem, xem trước đếm đúng tập đó.
+      errorKind: parseEnumParam(body.errorKind ?? undefined, 'errorKind', DLQ_ERROR_KINDS) as DlqErrorKind | undefined,
     };
-
-    const refs = await this.prisma.forTenant(tenantId).findDeadDeliveryRefs(filter, REPLAY_BULK_LIMIT);
+    // ADR-163 (M1): chạy thật BẮT BUỘC gửi `ids` = đúng tập đã xem trước (≤ 500) — không chọn lại theo bộ lọc lúc
+    // bấm (DLQ có thể đã đổi giữa xem trước và xác nhận). Xem trước thì không nhận `ids`.
+    let ids: string[] | undefined;
+    if (!body.dryRun) {
+      if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > REPLAY_BULK_LIMIT) {
+        throw hubError('bad_request', { field: 'ids' }, `ids bắt buộc khi chạy thật: mảng 1–${REPLAY_BULK_LIMIT} id lấy từ bản xem trước`);
+      }
+      if (!body.ids.every((i: unknown) => typeof i === 'string' && UUID_RE.test(i))) {
+        throw hubError('bad_request', { field: 'ids' }, 'ids phải là mảng UUID');
+      }
+      ids = [...new Set((body.ids as string[]).map((i) => i.toLowerCase()))];
+    } else if (body.ids !== undefined) {
+      throw hubError('bad_request', { field: 'ids' }, 'Xem trước (dryRun: true) chọn theo bộ lọc — không nhận ids');
+    }
+    // ADR-161 (T3): chỉ delivery còn nơi nhận — cùng điều kiện cho xem trước và chạy thật.
+    filter.replayableOnly = true;
     if (body.dryRun) {
+      // Lấy 501 để biết CHẮC có bị cắt không (đúng 500 dòng thì không "chạm trần").
+      const found = await this.prisma.forTenant(tenantId).findDeadDeliveryRefs(filter, REPLAY_BULK_LIMIT + 1);
+      const refs = found.slice(0, REPLAY_BULK_LIMIT);
       return {
         dryRun: true,
         count: refs.length,
         limit: REPLAY_BULK_LIMIT,
-        truncated: refs.length >= REPLAY_BULK_LIMIT,
+        truncated: found.length > REPLAY_BULK_LIMIT,
         sample: refs.slice(0, REPLAY_BULK_SAMPLE),
+        // ADR-163 (M1): client gửi lại đúng danh sách này khi xác nhận.
+        ids: refs.map((r) => r.id),
       };
     }
-    if (refs.length === 0) return { dryRun: false, count: 0, items: [] };
 
-    const items = refs.map((r) => ({ deliveryId: r.id, newDeliveryId: randomUUID(), generation: r.attemptGeneration + 1 }));
     // Review SPEC-2 #9: entityId là id THẬT của lô (UUID, trả về cho client); danh sách id ở metadata.
     const batchId = randomUUID();
+    let refs: Awaited<ReturnType<TenantScopedRepository['findDeadDeliveryRefs']>> = [];
+    let items: { deliveryId: string; newDeliveryId: string; generation: number }[] = [];
+    let skipped: { id: string; reason: string }[] = [];
     try {
       await this.prisma.tenantTx(
         tenantId,
         async (tx) => {
           const repo = this.prisma.forTenant(tenantId, tx);
-          await repo.createDeliveries(
-            refs.map((r, i) => ({
-              id: items[i].newDeliveryId,
-              eventId: r.eventId,
-              subscriptionId: r.subscriptionId,
-              attemptGeneration: items[i].generation,
-              status: 'PENDING' as const,
-              attemptCount: 0,
-            })),
-          );
-          await tx.outbox.createMany({
-            data: refs.map((r, i) => ({
-              topic: 'delivery.replayed',
-              payload: buildDeliveryMessage({
-                deliveryId: items[i].newDeliveryId,
-                tenantId,
+          // Khoá cấu hình luồng (ADR-161) rồi KIỂM LẠI từng id trong CÙNG transaction: còn DEAD, chưa bị replay, đúng
+          // tenant, subscription/đích chưa lưu trữ và đích đang bật (replayableOnly — dùng chung với xem trước).
+          await repo.lockFlowConfig();
+          refs = await repo.findDeadDeliveryRefs({ ids, replayableOnly: true }, REPLAY_BULK_LIMIT);
+          const kept = new Set(refs.map((r) => r.id));
+          skipped = await repo.findReplaySkipReasons((ids ?? []).filter((i) => !kept.has(i)));
+          items = refs.map((r) => ({ deliveryId: r.id, newDeliveryId: randomUUID(), generation: r.attemptGeneration + 1 }));
+          // Thấp 3: mọi id đều bị bỏ qua -> không ghi delivery/outbox nhưng VẪN ghi audit (requested, skipped, count 0).
+          if (refs.length > 0) {
+            await repo.createDeliveries(
+              refs.map((r, i) => ({
+                id: items[i].newDeliveryId,
+                eventId: r.eventId,
+                subscriptionId: r.subscriptionId,
                 attemptGeneration: items[i].generation,
+                status: 'PENDING' as const,
                 attemptCount: 0,
-                correlationId: r.correlationId,
-              }) as unknown as Prisma.InputJsonValue,
-            })),
-          });
+              })),
+            );
+            await tx.outbox.createMany({
+              data: refs.map((r, i) => ({
+                topic: 'delivery.replayed',
+                payload: buildDeliveryMessage({
+                  deliveryId: items[i].newDeliveryId,
+                  tenantId,
+                  attemptGeneration: items[i].generation,
+                  attemptCount: 0,
+                  correlationId: r.correlationId,
+                }) as unknown as Prisma.InputJsonValue,
+              })),
+            });
+          }
           await repo.createAuditLog({
             action: 'delivery.replay_bulk',
             entityType: 'delivery_batch',
             entityId: batchId,
             actor,
             reason,
+            // TB2: chạy thật không có bộ lọc (chỉ ids) — audit ghi đúng những gì đã yêu cầu/làm/bỏ qua.
             metadata: {
-              filter: filterForAudit,
               count: refs.length,
               deliveryIds: refs.map((r) => r.id),
               newDeliveryIds: items.map((i) => i.newDeliveryId),
+              requested: ids?.length ?? 0,
+              skipped,
             },
           });
         },
@@ -659,23 +819,31 @@ export class ApiController {
       }
       throw e;
     }
-    return { dryRun: false, count: refs.length, batchId, items };
+    const skippedByReason: Record<string, number> = {};
+    for (const k of skipped) skippedByReason[k.reason] = (skippedByReason[k.reason] ?? 0) + 1;
+    return {
+      dryRun: false,
+      count: refs.length,
+      batchId,
+      items,
+      // ADR-163 (M1): id đã xem trước nhưng KHÔNG replay — vì sao (not_found | not_dead | already_replayed | destination_unavailable).
+      skipped: { count: skipped.length, byReason: skippedByReason, items: skipped },
+    };
   }
 
   // --- Audit log (S2-3) ---
+  /** ADR-163: keyset `(created_at, id)`, Trước/Sau `before`/`after`; lọc `actor`, `action` (tiền tố), `entityType`, `from`/`to`. */
   @Get('audit-logs')
   @RequireScope('read:project')
-  async listAuditLogs(@CurrentTenant() tenantId: string, @Query('limit') limit = '50', @Query('before') before?: string) {
-    const take = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
-    let beforeId: bigint | undefined;
-    if (before) {
-      if (!/^\d{1,19}$/.test(before)) throw new BadRequestException('before phải là id số');
-      beforeId = BigInt(before);
-    }
-    const rows = await this.prisma.forTenant(tenantId).findAuditLogs({ limit: take, before: beforeId });
-    // id là BIGINT -> chuỗi (JSON không có bigint).
-    const items = rows.map((r) => ({ ...r, id: r.id.toString() }));
-    return { items, nextBefore: rows.length === take ? items[items.length - 1].id : null };
+  async listAuditLogs(@CurrentTenant() tenantId: string, @Query() q: AuditListQuery) {
+    return listAuditPage(this.prisma.forTenant(tenantId), q ?? {});
+  }
+
+  /** Giá trị gợi ý cho bộ lọc Nhật ký thao tác (hành động / loại đối tượng / người làm đã có). */
+  @Get('audit-logs/facets')
+  @RequireScope('read:project')
+  async auditFacets(@CurrentTenant() tenantId: string) {
+    return this.prisma.forTenant(tenantId).findAuditFacets();
   }
 
   /** Mọi hành động có audit: hành động + audit_logs trong CÙNG một transaction. */

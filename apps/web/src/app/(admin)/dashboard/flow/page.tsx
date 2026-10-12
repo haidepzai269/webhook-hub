@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { TOPOLOGY_WINDOWS, type TopologyWindow } from "@hub/flow";
 import { ChevronDown, PowerOff, SlidersHorizontal } from "lucide-react";
@@ -42,11 +42,14 @@ export default function FlowMapPage() {
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [showPulses, setShowPulses] = useState(true);
   const [collapseSubs, setCollapseSubs] = useState(false);
-  const [hideInactive, setHideInactive] = useState(true);
   const [showSubscriptions, setShowSubscriptions] = useState(false);
   const [showUnused, setShowUnused] = useState(true);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const { data, error, isLoading } = useTopology(window);
+  // ADR-161 (L5): source đang lọc vừa bị Xoá (lưu trữ) khỏi bản đồ -> bỏ lọc, không để bản đồ trống không lý do.
+  useEffect(() => {
+    if (sourceFilter && data && !data.nodes.some((n) => n.id === `src:${sourceFilter}`)) setSourceFilter(null);
+  }, [sourceFilter, data]);
   useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
 
   const sources = data?.nodes.filter((n) => n.kind === "source") ?? [];
@@ -136,9 +139,6 @@ export default function FlowMapPage() {
                 <DropdownMenuCheckboxItem checked={showSubscriptions} onCheckedChange={(v) => setShowSubscriptions(Boolean(v))}>
                   Hiện cột Subscription (mặc định gộp vào nhãn cạnh)
                 </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem checked={!hideInactive} onCheckedChange={(v) => setHideInactive(!v)}>
-                  Hiện subscription đang tắt
-                </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={showUnused} onCheckedChange={(v) => setShowUnused(Boolean(v))}>
                   Hiện đích không dùng (không còn subscription)
                 </DropdownMenuCheckboxItem>
@@ -174,7 +174,6 @@ export default function FlowMapPage() {
             collapseSubs={collapseSubs}
             sourceFilter={sourceFilter}
             layoutVersion={layoutVersion}
-            hideInactive={hideInactive}
             showSubscriptions={showSubscriptions}
             showUnused={showUnused}
           />

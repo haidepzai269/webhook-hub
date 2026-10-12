@@ -12,12 +12,16 @@ import {
 } from './flow-lib';
 
 export interface TopologyConfig {
-  sources: { id: string; name: string; provider: string; sourceKey: string; isActive: boolean }[];
+  sources: { id: string; name: string; provider: string; sourceKey: string; isActive: boolean; connections?: { id: string }[] }[];
   subscriptions: { id: string; name: string; eventTypes: string[]; isActive: boolean; destinationId: string; sourceIds?: string[] }[];
   destinations: {
     id: string;
     name: string;
     type: string;
+    /** ADR-161: false = "Ngắt" (vẽ mờ). Thiếu = true (dữ liệu/test cũ). */
+    isActive?: boolean;
+    /** ADR-161 (L2): endpoint do một service (API key) tạo — service có thể tạo lại khi khởi động. */
+    createdByKeyId?: string | null;
     circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
     rateLimitRps: number;
     verification?: 'PENDING' | 'VERIFIED' | 'FAILED';
@@ -70,6 +74,7 @@ export function assembleTopology(
       label: s.name,
       provider: s.provider,
       active: s.isActive,
+      providerConnected: (s.connections?.length ?? 0) > 0,
       sourceKey: s.sourceKey,
       accepted,
       rejected,
@@ -163,6 +168,8 @@ export function assembleTopology(
       kind: 'destination',
       label: d.name,
       type: d.type,
+      active: d.isActive !== false,
+      managedByService: !!d.createdByKeyId,
       circuitState: d.circuitState,
       throttleRps: d.rateLimitRps,
       deliveries: agg.total,

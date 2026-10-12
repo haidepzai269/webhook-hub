@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
-import { Eye, ListRestart, RotateCcw } from "lucide-react";
+import { Eye, ListRestart, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
 import {
@@ -29,45 +30,71 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { HubApiError } from "@/lib/hub/client";
 import { formatDateTime, shortId } from "@/lib/hub/format";
+import { ageRange, DLQ_AGE_VALUES, DLQ_ERROR_KIND_VALUES, DLQ_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useDestinations, useDlq, useReplayBulk, useReplayDelivery } from "@/lib/hub/queries";
-import type { Delivery, ReplayBulkResult } from "@/lib/hub/types";
+import type { Delivery, ReplayBulkFilter, ReplayBulkResult, ReplaySkipReason } from "@/lib/hub/types";
+import { useUrlParams } from "@/lib/hub/use-url-params";
 
 import { deliveryColumns } from "../deliveries/_components/delivery-columns";
 
 const ALL = "__all__";
 const REASON_MIN = 5;
 
-/** `datetime-local` (giờ máy người dùng) -> ISO; rỗng -> undefined. */
-function toIso(local: string): string | undefined {
-  if (!local) return undefined;
-  const d = new Date(local);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}
+/** Loại lỗi (ADR-163) — theo HTTP status của lần thử cuối, khớp DLQ_ERROR_KINDS ở server. */
+const ERROR_KIND_LABEL: Record<(typeof DLQ_ERROR_KIND_VALUES)[number], string> = {
+  http_4xx: "Đích từ chối (4xx)",
+  http_other: "Lỗi phía nhận (5xx/khác)",
+  no_response: "Không gọi tới đích (circuit)",
+};
 
-function BulkReplayDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+const SKIP_LABEL: Record<ReplaySkipReason, string> = {
+  not_found: "không còn",
+  not_dead: "không còn DEAD",
+  already_replayed: "đã được replay",
+  destination_unavailable: "đích/subscription đã xoá hoặc đang ngắt",
+};
+
+const AGE_LABEL: Record<(typeof DLQ_AGE_VALUES)[number], string> = {
+  "1h": "Trong 1 giờ qua",
+  "24h": "Trong 24 giờ qua",
+  "7d": "Trong 7 ngày qua",
+  gt1d: "Cũ hơn 1 ngày",
+  gt7d: "Cũ hơn 7 ngày",
+};
+
+/**
+ * Replay hàng loạt theo ĐÚNG bộ lọc đang xem trên trang DLQ (ADR-163): xem trước đếm cùng tập (đích, loại lỗi,
+ * tuổi -> from/to) mà bảng đang lọc — không có bộ lọc riêng lệch với bảng. Tối đa 500.
+ */
+function BulkReplayDialog({
+  open,
+  onOpenChange,
+  filter,
+  summary,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  filter: ReplayBulkFilter;
+  summary: string[];
+}) {
   const destinations = useDestinations();
   const bulk = useReplayBulk();
-  const [destinationId, setDestinationId] = useState(ALL);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [errorContains, setErrorContains] = useState("");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<Extract<ReplayBulkResult, { dryRun: true }> | null>(null);
+  // Bộ lọc của trang đổi -> bản xem trước không còn đúng tập -> bắt xem trước lại.
+  const filterKey = JSON.stringify(filter);
+  const [previewFor, setPreviewFor] = useState(filterKey);
+  if (previewFor !== filterKey) {
+    setPreviewFor(filterKey);
+    setPreview(null);
+  }
 
-  const filter = {
-    destinationId: destinationId === ALL ? undefined : destinationId,
-    from: toIso(from),
-    to: toIso(to),
-    errorContains: errorContains.trim() || undefined,
-  };
   const reasonOk = reason.trim().length >= REASON_MIN;
   const destName = (id: string) => destinations.data?.find((d) => d.id === id)?.name ?? shortId(id);
-
-  // Đổi bộ lọc thì bản xem trước không còn đúng -> bắt xem trước lại.
-  const resetPreview = () => setPreview(null);
 
   const close = (o: boolean) => {
     if (bulk.isPending) return;
@@ -88,12 +115,20 @@ function BulkReplayDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     );
 
   const runReplay = () =>
+    preview &&
     bulk.mutate(
-      { ...filter, reason: reason.trim(), dryRun: false },
+      // Đúng tập đã xem trước — server kiểm lại từng id, bỏ cái đã đổi trạng thái kèm lý do.
+      { reason: reason.trim(), dryRun: false, ids: preview.ids },
       {
         onSuccess: (res) => {
+          if (res.dryRun) return;
+          const skipped = res.skipped?.count ?? 0;
           toast.success(`Đã replay ${res.count} delivery`, {
-            description: "Tất cả delivery mới + outbox + 1 dòng audit được ghi trong MỘT transaction.",
+            description: skipped
+              ? `Bỏ qua ${skipped} (${Object.entries(res.skipped.byReason)
+                  .map(([k, n]) => `${SKIP_LABEL[k as ReplaySkipReason] ?? k}: ${n}`)
+                  .join(", ")}) — đã đổi trạng thái sau lúc xem trước.`
+              : "Tất cả delivery mới + outbox + 1 dòng audit được ghi trong MỘT transaction.",
           });
           close(false);
         },
@@ -111,71 +146,15 @@ function BulkReplayDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         <DialogHeader>
           <DialogTitle>Replay hàng loạt</DialogTitle>
           <DialogDescription>
-            Chọn delivery DEAD chưa bị replay theo bộ lọc (tối đa 500). Mỗi cái được tạo lại ở generation mới; lịch sử
-            thất bại giữ nguyên.
+            Mọi delivery DEAD chưa bị replay khớp bộ lọc đang xem (tối đa 500 — không chỉ trang hiện tại). Mỗi cái được
+            tạo lại ở generation mới; lịch sử thất bại giữ nguyên.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup className="gap-4">
-          <Field className="gap-1.5">
-            <FieldLabel>Đích</FieldLabel>
-            <Select
-              value={destinationId}
-              onValueChange={(v) => {
-                setDestinationId(v);
-                resetPreview();
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>Tất cả đích</SelectItem>
-                {(destinations.data ?? []).map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {d.name} · {d.type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="bulk-from">Từ</FieldLabel>
-              <Input
-                id="bulk-from"
-                type="datetime-local"
-                value={from}
-                onChange={(e) => {
-                  setFrom(e.target.value);
-                  resetPreview();
-                }}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="bulk-to">Đến</FieldLabel>
-              <Input
-                id="bulk-to"
-                type="datetime-local"
-                value={to}
-                onChange={(e) => {
-                  setTo(e.target.value);
-                  resetPreview();
-                }}
-              />
-            </Field>
+          <div className="rounded-md border p-3 text-sm">
+            <span className="text-muted-foreground">Bộ lọc: </span>
+            {summary.length ? summary.join(" · ") : "toàn bộ DLQ"}
           </div>
-          <Field className="gap-1.5">
-            <FieldLabel htmlFor="bulk-err">Lỗi chứa</FieldLabel>
-            <Input
-              id="bulk-err"
-              placeholder="VD: 500, timeout, ECONNREFUSED"
-              value={errorContains}
-              onChange={(e) => {
-                setErrorContains(e.target.value);
-                resetPreview();
-              }}
-            />
-          </Field>
           <Field className="gap-1.5" data-invalid={reason.length > 0 && !reasonOk}>
             <FieldLabel htmlFor="bulk-reason">Lý do (bắt buộc)</FieldLabel>
             <Textarea
@@ -229,8 +208,25 @@ function BulkReplayDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   );
 }
 
-export default function DlqPage() {
-  const { data, isLoading, error } = useDlq();
+function DlqView() {
+  const url = useUrlParams(DLQ_PARAMS);
+  const v = url.values;
+  const destinations = useDestinations();
+  // Tuổi là preset tương đối -> from/to tính một lần mỗi khi chọn (query key ổn định); CÙNG cặp đi vào xem trước replay.
+  const range = useMemo(() => ageRange(v.age, Date.now()), [v.age]);
+  const bulkFilter: ReplayBulkFilter = useMemo(
+    () => ({ destinationId: v.destination, errorKind: v.errorKind, ...range }),
+    [v.destination, v.errorKind, range],
+  );
+  const { data, isLoading, isPlaceholderData, error } = useDlq(
+    toApiQuery({ destination: v.destination, errorKind: v.errorKind, ...range, before: v.before, after: v.after }),
+  );
+  const filtered = Boolean(v.destination || v.errorKind || v.age);
+  const summary = [
+    v.destination && `đích ${destinations.data?.find((d) => d.id === v.destination)?.name ?? shortId(v.destination)}`,
+    v.errorKind && ERROR_KIND_LABEL[v.errorKind as keyof typeof ERROR_KIND_LABEL],
+    v.age && AGE_LABEL[v.age as keyof typeof AGE_LABEL].toLowerCase(),
+  ].filter((x): x is string => Boolean(x));
   const replay = useReplayDelivery();
   const [target, setTarget] = useState<Delivery | null>(null);
   const [reason, setReason] = useState("");
@@ -287,23 +283,82 @@ export default function DlqPage() {
         title="Dead Letter Queue"
         description="Delivery đã hết lượt retry (DEAD). Replay KHÔNG sửa bản ghi cũ mà tạo delivery mới với attempt_generation + 1 — lịch sử thất bại được giữ nguyên."
         actions={
-          <Button onClick={() => setBulkOpen(true)} disabled={!data?.length}>
+          <Button onClick={() => setBulkOpen(true)} disabled={!data?.items.length}>
             <ListRestart />
             Replay hàng loạt
           </Button>
         }
       />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Select value={v.destination ?? ALL} onValueChange={(d) => url.setFilter({ destination: d === ALL ? null : d })}>
+          <SelectTrigger size="sm" className="w-52" aria-label="Đích">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi đích</SelectItem>
+            {(destinations.data ?? []).map((d) => (
+              <SelectItem key={d.id} value={d.id}>
+                {d.name} · {d.type}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={v.errorKind ?? ALL} onValueChange={(k) => url.setFilter({ errorKind: k === ALL ? null : k })}>
+          <SelectTrigger size="sm" className="w-56" aria-label="Loại lỗi">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi loại lỗi</SelectItem>
+            {DLQ_ERROR_KIND_VALUES.map((k) => (
+              <SelectItem key={k} value={k}>
+                {ERROR_KIND_LABEL[k]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={v.age ?? ALL} onValueChange={(a) => url.setFilter({ age: a === ALL ? null : a })}>
+          <SelectTrigger size="sm" className="w-44" aria-label="Tuổi">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi thời điểm</SelectItem>
+            {DLQ_AGE_VALUES.map((a) => (
+              <SelectItem key={a} value={a}>
+                {AGE_LABEL[a]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={url.clear}>
+            <X />
+            Bỏ lọc
+          </Button>
+        )}
+      </div>
       <DataTable
-        data={data}
+        data={data?.items}
         columns={columns}
         getRowId={(d) => d.id}
         isLoading={isLoading}
+        isStale={isPlaceholderData}
         error={error}
-        searchPlaceholder="Lọc theo đích, lỗi…"
-        emptyText="DLQ trống — không có delivery nào chết."
+        pageSize={false}
+        searchPlaceholder="Lọc trong trang này…"
+        emptyText={filtered ? "Không có delivery DEAD nào khớp bộ lọc." : "DLQ trống — không có delivery nào chết."}
+        toolbar={
+          <CursorPager
+            next={data?.next}
+            prev={data?.prev}
+            loading={isPlaceholderData}
+            onNext={(c) => url.setCursor({ before: c })}
+            onPrev={(c) => url.setCursor({ after: c })}
+            onNewest={() => url.setCursor({})}
+          />
+        }
       />
 
-      <BulkReplayDialog open={bulkOpen} onOpenChange={setBulkOpen} />
+      <BulkReplayDialog open={bulkOpen} onOpenChange={setBulkOpen} filter={bulkFilter} summary={summary} />
 
       <AlertDialog
         open={Boolean(target)}
@@ -356,5 +411,13 @@ export default function DlqPage() {
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+export default function DlqPage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <DlqView />
+    </Suspense>
   );
 }

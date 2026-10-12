@@ -53,6 +53,11 @@ export interface ExecutionItem {
   sourceName: string | null;
   type: string | null;
   subject: string | null;
+  /**
+   * events.probe (ADR-159): request kiểm tra kết nối do ADAPTER đánh dấu (PayOS confirm-webhook, GitHub ping).
+   * Tuỳ chọn: server cũ không gửi -> UI rớt về phỏng đoán theo tên kiểu (event-notes.expectedProbe).
+   */
+  probe?: boolean;
   status: ExecutionStatus;
   summary: FlowSummaryDot[];
   failedAt: FlowFailedAt | null;
@@ -68,4 +73,12 @@ export interface ExecutionFilters {
   source?: string;
   destination?: string;
   type?: string;
+  /** ADR-163 */
+  provider?: string;
+  /** `hide` = bỏ request kiểm tra kết nối (lọc ở server theo events.probe). */
+  probes?: "hide";
+  from?: string;
+  to?: string;
+  /** Tiền tố event id / request id (≥ 4 ký tự). */
+  q?: string;
 }

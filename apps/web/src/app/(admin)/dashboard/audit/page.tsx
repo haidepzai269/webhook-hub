@@ -1,18 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useCallback } from "react";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { X } from "lucide-react";
 
+import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
+import { TimeRange } from "@/components/admin/time-range";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
-import { useAuditLogs } from "@/lib/hub/queries";
+import { AUDIT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
+import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
 import type { AuditLog } from "@/lib/hub/types";
+import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
 
-const PAGE_SIZE = 50;
+const ALL = "__all";
+const ACTOR_MAX = 128;
+const isActor = (x: string) => x.length <= ACTOR_MAX;
 
 /** Hành động "nguy hiểm" (gửi lại / xoá) tô màu để nhìn ra ngay. */
 function actionTone(action: string) {
@@ -100,21 +109,87 @@ const columns: HubColumn<AuditLog>[] = [
 ];
 
 /**
- * Nhật ký hành động (S2-3/S2-5). Mỗi dòng được ghi CÙNG transaction với hành động — có hành động thì
- * chắc chắn có dòng này. Phân trang lùi theo `before` (id nhỏ nhất của trang trước).
+ * Nhật ký thao tác (S2-3/S2-5). Mỗi dòng được ghi CÙNG transaction với hành động — có hành động thì chắc chắn có
+ * dòng này. ADR-163: Trước/Sau theo cursor keyset `(created_at, id)`; lọc người làm, hành động, loại đối tượng,
+ * khoảng thời gian — tất cả trên URL.
  */
-export default function AuditPage() {
-  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
-  const before = cursors.at(-1);
-  const { data, isLoading, isFetching, isPlaceholderData, error } = useAuditLogs(before, PAGE_SIZE);
-  const page = cursors.length;
+function AuditView() {
+  const url = useUrlParams(AUDIT_PARAMS);
+  const v = url.values;
+  const facets = useAuditFacets();
+  const { data, isLoading, isPlaceholderData, error } = useAuditLogs(toApiQuery(v));
+  const writeActor = useCallback((x: string | null) => url.setFilter({ actor: x }), [url.setFilter]);
+  const [actorInput, setActorInput] = useDebouncedUrlInput(v.actor, isActor, writeActor, 400, url.resetToken);
+  const filtered = Boolean(v.actor || v.action || v.entityType || v.from || v.to);
+  // Nhóm hành động theo tiền tố (`delivery.` gồm delivery.replay, delivery.replay_bulk) + từng hành động.
+  const actions = facets.data?.actions ?? [];
+  const actionGroups = [...new Set(actions.map((a) => a.split(".")[0]).filter(Boolean))].map((g) => `${g}.`);
 
   return (
     <>
       <PageHeader
-        title="Nhật ký (Audit)"
+        title="Nhật ký thao tác"
         description="Ai đã làm gì, lúc nào, vì sao: replay, replay hàng loạt, chuẩn hoá lại, tạo/sửa/xoá nguồn, đích, subscription."
       />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Input
+          value={actorInput}
+          onChange={(e) => setActorInput(e.target.value)}
+          placeholder="Người làm (email…)"
+          maxLength={ACTOR_MAX}
+          list="audit-actors"
+          className="h-8 w-48 text-xs"
+          aria-label="Người làm"
+        />
+        <datalist id="audit-actors">
+          {(facets.data?.actors ?? []).map((a) => (
+            <option key={a} value={a} />
+          ))}
+        </datalist>
+        <Select value={v.action ?? ALL} onValueChange={(a) => url.setFilter({ action: a === ALL ? null : a })}>
+          <SelectTrigger size="sm" className="w-56" aria-label="Hành động">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi hành động</SelectItem>
+            {actionGroups.map((g) => (
+              <SelectItem key={g} value={g} className="font-mono text-xs">
+                {g}*
+              </SelectItem>
+            ))}
+            {actions.map((a) => (
+              <SelectItem key={a} value={a} className="font-mono text-xs">
+                {a}
+              </SelectItem>
+            ))}
+            {v.action && !actions.includes(v.action) && !actionGroups.includes(v.action) && (
+              <SelectItem value={v.action} className="font-mono text-xs">
+                {v.action}
+              </SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+        <Select value={v.entityType ?? ALL} onValueChange={(e) => url.setFilter({ entityType: e === ALL ? null : e })}>
+          <SelectTrigger size="sm" className="w-48" aria-label="Loại đối tượng">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi loại đối tượng</SelectItem>
+            {[...new Set([...(facets.data?.entityTypes ?? []), ...(v.entityType ? [v.entityType] : [])])].map((e) => (
+              <SelectItem key={e} value={e} className="font-mono text-xs">
+                {e}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <TimeRange key={url.resetToken} from={v.from} to={v.to} onChange={(r) => url.setFilter(r)} />
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={url.clear}>
+            <X />
+            Bỏ lọc
+          </Button>
+        )}
+      </div>
       <DataTable
         data={data?.items}
         columns={columns}
@@ -124,29 +199,26 @@ export default function AuditPage() {
         error={error}
         pageSize={false}
         searchPlaceholder="Lọc trong trang này…"
-        emptyText={page > 1 ? "Hết nhật ký." : "Chưa có hành động nào được ghi."}
+        emptyText={filtered ? "Không có thao tác nào khớp bộ lọc." : "Chưa có hành động nào được ghi."}
         toolbar={
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">
-              Trang {page}
-              {isFetching ? " · đang tải…" : ""}
-            </span>
-            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setCursors((c) => c.slice(0, -1))}>
-              <ChevronLeft />
-              Trước
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!data?.nextBefore || isPlaceholderData}
-              onClick={() => data?.nextBefore && setCursors((c) => [...c, data.nextBefore ?? undefined])}
-            >
-              Trang sau
-              <ChevronRight />
-            </Button>
-          </div>
+          <CursorPager
+            next={data?.next}
+            prev={data?.prev}
+            loading={isPlaceholderData}
+            onNext={(c) => url.setCursor({ before: c })}
+            onPrev={(c) => url.setCursor({ after: c })}
+            onNewest={() => url.setCursor({})}
+          />
         }
       />
     </>
+  );
+}
+
+export default function AuditPage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <AuditView />
+    </Suspense>
   );
 }

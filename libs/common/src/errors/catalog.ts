@@ -164,6 +164,24 @@ export const ERROR_CATALOG = {
     message: 'The source this key publishes into is disabled.',
     fix: () => "Re-enable the key's api source in the console (Sources), or create a new key with scope \"publish:events\".",
   },
+  destination_archived: {
+    status: 409,
+    message: 'The destination (or subscription) of this delivery was removed from the flow (archived).',
+    params: ['field'],
+    fix: () => 'Archived items cannot receive deliveries. Create a new destination/subscription and let new events flow there; history stays readable.',
+  },
+  destination_inactive: {
+    status: 409,
+    message: 'The destination of this delivery is disconnected (isActive=false).',
+    params: ['field'],
+    fix: () => 'Reconnect the destination (PATCH /api/v1/destinations/:id {"isActive": true} or "Kết nối lại" on the flow map), then replay.',
+  },
+  subscription_inactive: {
+    status: 409,
+    message: 'The subscription of this delivery is turned off (isActive=false).',
+    params: ['field'],
+    fix: () => 'Turn the subscription back on (PATCH /api/v1/subscriptions/:id {"isActive": true}), then replay.',
+  },
   conflict: {
     status: 409,
     message: 'The request conflicts with the current state of the resource.',

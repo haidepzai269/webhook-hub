@@ -142,6 +142,14 @@ export class DeliveryConsumer {
         return;
       }
       const destination = row.subscription.destination;
+      // ADR-161 (T3): đích đã LƯU TRỮ ("Xoá" trên bản đồ luồng) -> không gửi; delivery thành DEAD kèm lý do rõ, ack.
+      // Đích chỉ "Ngắt" (is_active=false) thì delivery đang bay vẫn chạy nốt (ADR-161) — chỉ normalize/replay chặn mới.
+      if ((destination as { archivedAt?: Date | null }).archivedAt) {
+        await repo.abandonDelivery(deliveryId, 'destination_archived: đích đã bị xoá khỏi luồng (lưu trữ, ADR-161) — không gửi');
+        log.warn({ destinationId: destination.id }, 'Đích đã lưu trữ -> delivery DEAD, không gửi');
+        channel.ack(msg);
+        return;
+      }
       const destinationId = destination.id;
       const destinationType = destination.type as DestinationType;
       const event = toNormalizedEvent(row);

@@ -133,9 +133,13 @@ export class TenantScopedRepository {
     });
   }
 
-  async findSourceById(id: string) {
+  /**
+   * ADR-161: mặc định BỎ QUA source đã lưu trữ (coi như không tồn tại -> 404 / từ chối). Chỉ màn lịch sử thật sự cần
+   * mới truyền `{ includeArchived: true }`.
+   */
+  async findSourceById(id: string, opts: ArchivedOpt = {}) {
     return this.prisma.source.findFirst({
-      where: { id, tenantId: this.tenantId },
+      where: { id, tenantId: this.tenantId, ...notArchived(opts) },
       include: { secrets: true },
     });
   }
@@ -147,8 +151,9 @@ export class TenantScopedRepository {
     });
   }
 
+  /** ADR-161: source đã lưu trữ coi như không còn — không sửa/bật lại được (trả null -> 404). */
   async updateSource(id: string, data: Pick<Prisma.SourceUncheckedUpdateInput, 'name' | 'isActive'>) {
-    const result = await this.prisma.source.updateMany({ where: { id, tenantId: this.tenantId }, data });
+    const result = await this.prisma.source.updateMany({ where: { id, tenantId: this.tenantId, archivedAt: null }, data });
     if (result.count !== 1) return null;
     return this.findSourceById(id);
   }
@@ -237,9 +242,10 @@ export class TenantScopedRepository {
     });
   }
 
-  async findDestinationById(id: string) {
+  /** ADR-161: mặc định bỏ qua đích đã lưu trữ — xem `findSourceById`. */
+  async findDestinationById(id: string, opts: ArchivedOpt = {}) {
     return this.prisma.destination.findFirst({
-      where: { id, tenantId: this.tenantId },
+      where: { id, tenantId: this.tenantId, ...notArchived(opts) },
     });
   }
 
@@ -257,7 +263,8 @@ export class TenantScopedRepository {
    */
   async updateDestination(id: string, data: Prisma.DestinationUncheckedUpdateInput): Promise<Destination | null> {
     const result = await this.prisma.destination.updateMany({
-      where: { id, tenantId: this.tenantId },
+      // ADR-161: đích đã lưu trữ không sửa/bật lại được (null -> 404).
+      where: { id, tenantId: this.tenantId, archivedAt: null },
       data,
     });
     if (result.count !== 1) return null;
@@ -297,9 +304,10 @@ export class TenantScopedRepository {
     });
   }
 
-  async findSubscriptionById(id: string) {
+  /** ADR-161: mặc định bỏ qua subscription đã lưu trữ — xem `findSourceById`. */
+  async findSubscriptionById(id: string, opts: ArchivedOpt = {}) {
     return this.prisma.subscription.findFirst({
-      where: { id, tenantId: this.tenantId },
+      where: { id, tenantId: this.tenantId, ...notArchived(opts) },
       include: { destination: true },
     });
   }
@@ -319,8 +327,10 @@ export class TenantScopedRepository {
       where: {
         tenantId: this.tenantId,
         isActive: true,
+        archivedAt: null,
         eventTypes: { hasSome: eventTypeCandidates(eventType) },
-        destination: { tenantId: this.tenantId },
+        // ADR-161: đích đã "Ngắt" (is_active=false) hoặc lưu trữ không nhận delivery mới.
+        destination: { tenantId: this.tenantId, isActive: true, archivedAt: null },
       },
       // Chỉ id/name/type để realtime `event.received` vẽ được N nhánh (S2-2) — KHÔNG đọc cấu hình mã hoá.
       include: { destination: { select: { id: true, name: true, type: true } } },
@@ -338,8 +348,10 @@ export class TenantScopedRepository {
       where: {
         tenantId: this.tenantId,
         isActive: true,
+        archivedAt: null,
         eventTypes: { hasSome: eventTypeCandidates(eventType) },
-        destination: { tenantId: this.tenantId },
+        // ADR-161: đích đã "Ngắt" (is_active=false) hoặc lưu trữ không nhận delivery mới.
+        destination: { tenantId: this.tenantId, isActive: true, archivedAt: null },
         OR: sourceId ? [anySource, { sourceIds: { has: sourceId } }] : [anySource],
       },
       include: { destination: { select: { id: true, name: true, type: true, verification: true } } },
@@ -349,15 +361,78 @@ export class TenantScopedRepository {
   /** S5: id nào trong danh sách KHÔNG phải source của project này (kiểm `sourceIds` của subscription). */
   async findForeignSourceIds(ids: string[]): Promise<string[]> {
     if (ids.length === 0) return [];
-    const own = await this.prisma.source.findMany({ where: { id: { in: ids }, tenantId: this.tenantId }, select: { id: true } });
+    // ADR-161: source đã lưu trữ coi như không thuộc project nữa (không ghim subscription mới vào nó).
+    const own = await this.prisma.source.findMany({ where: { id: { in: ids }, tenantId: this.tenantId, archivedAt: null }, select: { id: true } });
     const ok = new Set(own.map((s) => s.id));
     return ids.filter((id) => !ok.has(id));
   }
 
   async updateSubscription(id: string, data: Prisma.SubscriptionUncheckedUpdateInput) {
-    const result = await this.prisma.subscription.updateMany({ where: { id, tenantId: this.tenantId }, data });
+    // ADR-161: subscription đã lưu trữ không sửa/bật lại được (null -> 404).
+    const result = await this.prisma.subscription.updateMany({ where: { id, tenantId: this.tenantId, archivedAt: null }, data });
     if (result.count !== 1) return null;
     return this.findSubscriptionById(id);
+  }
+
+  /**
+   * ADR-161: "Xoá" trên bản đồ luồng = LƯU TRỮ — đặt `archived_at` + `is_active=false`, KHÔNG DELETE (deliveries /
+   * attempts / raw_events là bằng chứng đối soát, ADR-054). Chỉ dòng chưa lưu trữ; trả số dòng đổi (0 = không có /
+   * đã lưu trữ / tenant khác).
+   */
+  async archiveSource(id: string, at: Date): Promise<number> {
+    return (await this.prisma.source.updateMany({ where: { id, tenantId: this.tenantId, archivedAt: null }, data: { archivedAt: at, isActive: false } })).count;
+  }
+
+  async archiveDestination(id: string, at: Date): Promise<number> {
+    return (await this.prisma.destination.updateMany({ where: { id, tenantId: this.tenantId, archivedAt: null }, data: { archivedAt: at, isActive: false } })).count;
+  }
+
+  /**
+   * ADR-161 (T2): khoá cấu hình luồng của tenant đến hết transaction hiện tại (`pg_advisory_xact_lock`, xact-level —
+   * an toàn với pgbouncer transaction mode). Lưu trữ source/đích và tạo/sửa subscription đều lấy khoá này trước khi
+   * đọc-kiểm-ghi, nên cascade lưu trữ thấy một tập subscription nhất quán và không subscription nào gắn vào mục vừa bị
+   * lưu trữ. CHỈ có nghĩa khi gọi trên repo của một transaction (`withAudit`).
+   */
+  async lockFlowConfig(): Promise<void> {
+    if (typeof (this.prisma as { $executeRaw?: unknown }).$executeRaw !== 'function') return; // test double
+    await this.prisma.$executeRaw`SELECT pg_advisory_xact_lock(4243, hashtext(${this.tenantId}))`;
+  }
+
+  /** ADR-161 (T4): gỡ source đã lưu trữ khỏi `sourceIds` của các subscription còn sống (array_remove), scope tenant. */
+  async removeSourceFromSubscriptions(sourceId: string): Promise<number> {
+    return this.prisma.$executeRaw`
+      UPDATE "hub"."subscriptions" SET source_ids = array_remove(source_ids, ${sourceId}::uuid)
+      WHERE tenant_id = ${this.tenantId}::uuid AND archived_at IS NULL AND ${sourceId}::uuid = ANY(source_ids)`;
+  }
+
+  async archiveSubscriptions(ids: string[], at: Date): Promise<number> {
+    if (ids.length === 0) return 0;
+    return (
+      await this.prisma.subscription.updateMany({ where: { id: { in: ids }, tenantId: this.tenantId, archivedAt: null }, data: { archivedAt: at, isActive: false } })
+    ).count;
+  }
+
+  /**
+   * ADR-161: subscription còn sống sẽ thành cạnh treo khi lưu trữ `ref`: mọi sub của đích đó; với source — sub có lọc
+   * nguồn mà SAU khi bỏ source này không còn source sống nào trong `sourceIds` (sub `sourceIds` rỗng = mọi source,
+   * không bị ảnh hưởng; sub lọc nhiều nguồn còn nguồn khác sống thì giữ).
+   */
+  async findSubscriptionIdsOrphanedBy(ref: { destinationId: string } | { sourceId: string }): Promise<string[]> {
+    if ('destinationId' in ref) {
+      const rows = await this.prisma.subscription.findMany({ where: { tenantId: this.tenantId, destinationId: ref.destinationId, archivedAt: null }, select: { id: true } });
+      return rows.map((r) => r.id);
+    }
+    const subs = await this.prisma.subscription.findMany({
+      where: { tenantId: this.tenantId, archivedAt: null, sourceIds: { has: ref.sourceId } },
+      select: { id: true, sourceIds: true },
+    });
+    const others = [...new Set(subs.flatMap((s) => s.sourceIds.filter((x) => x !== ref.sourceId)))];
+    const live = others.length
+      ? new Set(
+          (await this.prisma.source.findMany({ where: { id: { in: others }, tenantId: this.tenantId, archivedAt: null }, select: { id: true } })).map((s) => s.id),
+        )
+      : new Set<string>();
+    return subs.filter((s) => !s.sourceIds.some((x) => x !== ref.sourceId && live.has(x))).map((s) => s.id);
   }
 
   async deleteSubscription(id: string): Promise<number> {
@@ -577,6 +652,17 @@ export class TenantScopedRepository {
     if (filter.from) conds.push(Prisma.sql`AND d.created_at >= ${filter.from}`);
     if (filter.to) conds.push(Prisma.sql`AND d.created_at <= ${filter.to}`);
     if (filter.errorContains) conds.push(Prisma.sql`AND d.last_error ILIKE ${'%' + escapeLike(filter.errorContains) + '%'}`);
+    // ADR-163: CÙNG điều kiện "loại lỗi" với bảng DLQ (findDeliveryPage) — xem trước replay đếm đúng tập đang lọc.
+    if (filter.errorKind) conds.push(Prisma.sql`AND ${errorKindSql(filter.errorKind)}`);
+    // ADR-163 (M1): chạy thật replay hàng loạt = ĐÚNG tập id đã xem trước (kiểm lại DEAD/chưa bị thay/còn nơi nhận).
+    if (filter.ids) conds.push(Prisma.sql`AND d.id = ANY(${filter.ids}::uuid[])`);
+    // ADR-161 (T3): replay hàng loạt (xem trước + chạy thật dùng CÙNG điều kiện) bỏ subscription đã lưu trữ và đích
+    // đã lưu trữ / đang "Ngắt" — replay tới đó vô nghĩa. Bảng DLQ (không cờ này) vẫn liệt kê để đối soát.
+    if (filter.replayableOnly) {
+      // ADR-163: + subscription đang bật — subscription tắt thì replay tới đó cũng vô nghĩa.
+      conds.push(Prisma.sql`AND s.archived_at IS NULL AND s.is_active AND EXISTS (SELECT 1 FROM hub.destinations dst WHERE dst.id = s.destination_id
+                            AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)`);
+    }
     return this.prisma.$queryRaw<DeadDeliveryRef[]>(Prisma.sql`
       SELECT d.id, d.event_id AS "eventId", d.subscription_id AS "subscriptionId",
              d.attempt_generation AS "attemptGeneration", d.last_error AS "lastError",
@@ -590,6 +676,76 @@ export class TenantScopedRepository {
       ORDER BY d.created_at DESC
       LIMIT ${take}
     `);
+  }
+
+  /**
+   * ADR-163 (M1): lý do từng id (đã xem trước) bị loại khỏi lượt chạy thật — theo đúng thứ tự kiểm của
+   * `findDeadDeliveryRefs` + `replayableOnly`. Id không thuộc tenant này = `not_found` (không lộ sự tồn tại).
+   */
+  async findReplaySkipReasons(ids: string[]): Promise<{ id: string; reason: ReplaySkipReason }[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<{ id: string; dead: boolean; superseded: boolean; replayable: boolean }[]>(Prisma.sql`
+      SELECT d.id, d.status = 'DEAD' AS dead, NOT ${notSuperseded} AS superseded,
+             (s.archived_at IS NULL AND s.is_active AND EXISTS (SELECT 1 FROM hub.destinations dst WHERE dst.id = s.destination_id
+                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)) AS replayable
+      FROM hub.deliveries d
+      JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+      WHERE d.tenant_id = ${this.tenantId}::uuid AND d.id = ANY(${ids}::uuid[])
+    `);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ids.map((id) => {
+      const r = byId.get(id);
+      const reason: ReplaySkipReason = !r ? 'not_found' : !r.dead ? 'not_dead' : r.superseded ? 'already_replayed' : !r.replayable ? 'destination_unavailable' : 'already_replayed';
+      return { id, reason };
+    });
+  }
+
+  /**
+   * ADR-163: MỘT trang deliveries (hoặc DLQ khi `dlq: true`) theo KEYSET `(created_at, id)` — không OFFSET.
+   * Bước 1 (raw SQL, scope tenant): lọc + so sánh BỘ `(d.created_at, d.id) < / > cursor` (thế hoà cùng µs phân
+   * định bằng id) + `LIMIT limit+1` -> id + mốc µs làm cursor. Bước 2: nạp quan hệ cho đúng các id đó, giữ thứ tự
+   * bước 1. `dir: 'newer'` trả TĂNG dần sát cursor (gọi bên ngoài đảo lại) — đó là trang "Trước".
+   */
+  async findDeliveryPage(f: DeliveryPageFilter): Promise<{ rows: DeliveryPageRow[] }> {
+    const conds: Prisma.Sql[] = [];
+    if (f.dlq) conds.push(Prisma.sql`AND d.status = 'DEAD' AND ${notSuperseded}`);
+    else if (f.status) conds.push(Prisma.sql`AND d.status::text = ${f.status}`);
+    if (f.destinationId) {
+      conds.push(Prisma.sql`AND EXISTS (SELECT 1 FROM hub.subscriptions s WHERE s.id = d.subscription_id
+                            AND s.tenant_id = d.tenant_id AND s.destination_id = ${f.destinationId}::uuid)`);
+    }
+    if (f.from) conds.push(Prisma.sql`AND d.created_at >= ${f.from}`);
+    if (f.to) conds.push(Prisma.sql`AND d.created_at <= ${f.to}`);
+    if (f.httpCode) conds.push(Prisma.sql`AND ${httpCodeSql(f.httpCode)}`);
+    if (f.errorKind) conds.push(Prisma.sql`AND ${errorKindSql(f.errorKind)}`);
+    if (f.cursor) {
+      const at = Prisma.sql`${f.cursor.at}::timestamp AT TIME ZONE 'UTC'`;
+      conds.push(
+        f.dir === 'newer'
+          ? Prisma.sql`AND (d.created_at, d.id) > (${at}, ${f.cursor.id}::uuid)`
+          : Prisma.sql`AND (d.created_at, d.id) < (${at}, ${f.cursor.id}::uuid)`,
+      );
+    }
+    const order = f.dir === 'newer' ? Prisma.sql`d.created_at ASC, d.id ASC` : Prisma.sql`d.created_at DESC, d.id DESC`;
+    const keys = await this.prisma.$queryRaw<{ id: string; cursorAt: string }[]>(Prisma.sql`
+      SELECT d.id, to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS "cursorAt"
+      FROM hub.deliveries d
+      WHERE d.tenant_id = ${this.tenantId}::uuid ${conds.length ? Prisma.join(conds, ' ') : Prisma.empty}
+      ORDER BY ${order}
+      LIMIT ${f.limit + 1}
+    `);
+    if (keys.length === 0) return { rows: [] };
+    const full = await this.prisma.delivery.findMany({
+      where: { id: { in: keys.map((k) => k.id) }, tenantId: this.tenantId },
+      include: { event: true, subscription: { include: { destination: true } }, attempts: true },
+    });
+    const byId = new Map(full.map((d) => [d.id, d]));
+    const rows: DeliveryPageRow[] = [];
+    for (const k of keys) {
+      const d = byId.get(k.id);
+      if (d) rows.push({ ...d, cursorAt: k.cursorAt });
+    }
+    return { rows };
   }
 
   /** Đếm cùng điều kiện với `findDeadDeliveries` — để KPI "DLQ" khớp đúng số dòng trong bảng DLQ. */
@@ -659,6 +815,18 @@ export class TenantScopedRepository {
    * Circuit hoãn gửi (S2-1/S2-2): ghi `next_attempt_at` để UI hiện "thử lại lúc" và để sweeper
    * không coi delivery đang bị hoãn hợp lệ là kẹt. Không đổi status/attemptCount (hoãn ≠ một lần thử).
    */
+  /**
+   * ADR-161 (T3): delivery chưa xong tới đích đã LƯU TRỮ -> DEAD kèm lý do rõ, KHÔNG gửi. Chỉ dòng còn đang chờ
+   * (PENDING / RETRYING) — KHÔNG đụng DELIVERING (worker giữ lease có thể đang gửi dở); trả số dòng đổi.
+   */
+  async abandonDelivery(id: string, reason: string): Promise<number> {
+    const result = await this.prisma.delivery.updateMany({
+      where: { id, tenantId: this.tenantId, status: { in: ['PENDING', 'RETRYING'] } },
+      data: { status: 'DEAD', lastError: reason, nextAttemptAt: null },
+    });
+    return result.count;
+  }
+
   async deferDelivery(id: string, nextAttemptAt: Date): Promise<number> {
     const result = await this.prisma.delivery.updateMany({
       where: { id, tenantId: this.tenantId, status: { in: ['PENDING', 'RETRYING'] } },
@@ -835,6 +1003,50 @@ export class TenantScopedRepository {
     });
   }
 
+  /**
+   * ADR-163: audit theo KEYSET `(created_at, id)` + bộ lọc (người làm, hành động, loại đối tượng, khoảng thời gian).
+   * `dir: 'newer'` trả TĂNG dần sát cursor (trang "Trước"; gọi bên ngoài đảo lại). Kèm `cursorAt` µs UTC.
+   */
+  async findAuditLogPage(f: AuditLogFilter) {
+    const conds: Prisma.Sql[] = [];
+    if (f.actor) conds.push(Prisma.sql`AND a.actor ILIKE ${'%' + escapeLike(f.actor) + '%'}`);
+    if (f.action) conds.push(Prisma.sql`AND (a.action = ${f.action} OR starts_with(a.action, ${f.action.endsWith('.') ? f.action : f.action + '.'}))`);
+    if (f.entityType) conds.push(Prisma.sql`AND a.entity_type = ${f.entityType}`);
+    if (f.from) conds.push(Prisma.sql`AND a.created_at >= ${f.from}`);
+    if (f.to) conds.push(Prisma.sql`AND a.created_at <= ${f.to}`);
+    if (f.cursor) {
+      const at = Prisma.sql`${f.cursor.at}::timestamp AT TIME ZONE 'UTC'`;
+      conds.push(
+        f.dir === 'newer'
+          ? Prisma.sql`AND (a.created_at, a.id) > (${at}, ${f.cursor.id}::bigint)`
+          : Prisma.sql`AND (a.created_at, a.id) < (${at}, ${f.cursor.id}::bigint)`,
+      );
+    }
+    const order = f.dir === 'newer' ? Prisma.sql`a.created_at ASC, a.id ASC` : Prisma.sql`a.created_at DESC, a.id DESC`;
+    return this.prisma.$queryRaw<
+      { id: bigint; action: string; entityType: string; entityId: string; actor: string; reason: string | null; metadata: unknown; createdAt: Date; cursorAt: string }[]
+    >(Prisma.sql`
+      SELECT a.id, a.action, a.entity_type AS "entityType", a.entity_id AS "entityId", a.actor, a.reason, a.metadata,
+             a.created_at AS "createdAt", to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS "cursorAt"
+      FROM hub.audit_logs a
+      WHERE a.tenant_id = ${this.tenantId}::uuid ${conds.length ? Prisma.join(conds, ' ') : Prisma.empty}
+      ORDER BY ${order}
+      LIMIT ${f.limit + 1}
+    `);
+  }
+
+  /** Giá trị gợi ý cho bộ lọc audit (hành động / loại đối tượng / người làm đã từng xuất hiện) — tối đa 100 mỗi loại. */
+  async findAuditFacets() {
+    // Raw DISTINCT (Prisma `distinct` khử trùng trong bộ nhớ sau khi đọc HẾT dòng).
+    const col = (c: Prisma.Sql) =>
+      this.prisma.$queryRaw<{ v: string }[]>(Prisma.sql`
+        SELECT DISTINCT ${c} AS v FROM hub.audit_logs WHERE tenant_id = ${this.tenantId}::uuid ORDER BY 1 LIMIT 100`);
+    const actions = await col(Prisma.sql`action`);
+    const entityTypes = await col(Prisma.sql`entity_type`);
+    const actors = await col(Prisma.sql`actor`);
+    return { actions: actions.map((r) => r.v), entityTypes: entityTypes.map((r) => r.v), actors: actors.map((r) => r.v) };
+  }
+
   // --- Stats (dashboard) ---
 
   /**
@@ -975,11 +1187,92 @@ export interface AuditLogInput {
   metadata?: Record<string, unknown> | null;
 }
 
+/** ADR-161: tuỳ chọn tra theo id — mặc định bỏ qua mục đã lưu trữ. */
+export interface ArchivedOpt {
+  includeArchived?: boolean;
+}
+function notArchived(opts: ArchivedOpt): { archivedAt?: null } {
+  return opts.includeArchived ? {} : { archivedAt: null };
+}
+
 export interface DeadDeliveryFilter {
   destinationId?: string;
   from?: Date;
   to?: Date;
   errorContains?: string;
+  errorKind?: DlqErrorKind;
+  /** ADR-161: chỉ delivery còn replay được (subscription chưa lưu trữ, đích chưa lưu trữ + đang bật). */
+  replayableOnly?: boolean;
+  /** ADR-163: chỉ trong các id này (tập đã xem trước). */
+  ids?: string[];
+}
+
+/** ADR-163: vì sao một id đã xem trước KHÔNG được replay lúc chạy thật. */
+export type ReplaySkipReason = 'not_found' | 'not_dead' | 'already_replayed' | 'destination_unavailable';
+
+/**
+ * ADR-163: "loại lỗi" của delivery DEAD theo HTTP status của lần thử CUỐI (worker chỉ đặt DEAD sau một attempt):
+ * `http_4xx` = đích từ chối (4xx -> DEAD ngay, hoặc 408/429 hết lượt) — gửi lại vô ích nếu chưa sửa cấu hình;
+ * `http_other` = mọi status khác 4xx: 5xx thật VÀ lỗi mạng/timeout (sender quy về 500, không tách được ở DB) — hết
+ *   lượt retry. Không gọi là "5xx" vì không trung thực: lỗi mạng cũng rơi vào đây;
+ * `no_response` = không có status (hoãn vì circuit mở quá lâu, không gọi tới đích).
+ */
+export const DLQ_ERROR_KINDS = ['http_4xx', 'http_other', 'no_response'] as const;
+export type DlqErrorKind = (typeof DLQ_ERROR_KINDS)[number];
+
+/** HTTP code của lần thử cuối: chính xác (`404`), theo lớp (`5` = 5xx), hoặc chưa có phản hồi. */
+export type DeliveryHttpCode = { exact: number } | { klass: number } | 'none';
+
+export interface DeliveryPageFilter {
+  /** true = đúng điều kiện DLQ (DEAD chưa bị replay, ADR-031) — `status` bị bỏ qua. */
+  dlq?: boolean;
+  status?: string;
+  destinationId?: string;
+  from?: Date;
+  to?: Date;
+  httpCode?: DeliveryHttpCode;
+  errorKind?: DlqErrorKind;
+  cursor?: { at: string; id: string };
+  /** older = `(created_at,id) < cursor` giảm dần; newer = `> cursor` TĂNG dần (trang "Trước"). */
+  dir: 'older' | 'newer';
+  limit: number;
+}
+
+export type DeliveryPageRow = Prisma.DeliveryGetPayload<{
+  include: { event: true; subscription: { include: { destination: true } }; attempts: true };
+}> & { cursorAt: string };
+
+export interface AuditLogFilter {
+  actor?: string;
+  /** Tiền tố: `delivery.` khớp `delivery.replay`, `delivery.replay_bulk`; không có `.` cuối = khớp chính xác hoặc tiền tố. */
+  action?: string;
+  entityType?: string;
+  from?: Date;
+  to?: Date;
+  cursor?: { at: string; id: string };
+  dir: 'older' | 'newer';
+  limit: number;
+}
+
+/** Status HTTP của lần thử cuối của `d` (NULL nếu chưa thử / không có phản hồi). */
+const lastAttemptStatus = Prisma.sql`(SELECT a.response_status FROM hub.delivery_attempts a
+  WHERE a.delivery_id = d.id ORDER BY a.attempt_no DESC LIMIT 1)`;
+
+function errorKindSql(kind: DlqErrorKind): Prisma.Sql {
+  switch (kind) {
+    case 'http_4xx':
+      return Prisma.sql`${lastAttemptStatus} BETWEEN 400 AND 499`;
+    case 'http_other':
+      return Prisma.sql`COALESCE(${lastAttemptStatus} NOT BETWEEN 400 AND 499, false)`;
+    case 'no_response':
+      return Prisma.sql`${lastAttemptStatus} IS NULL`;
+  }
+}
+
+function httpCodeSql(code: DeliveryHttpCode): Prisma.Sql {
+  if (code === 'none') return Prisma.sql`${lastAttemptStatus} IS NULL`;
+  if ('exact' in code) return Prisma.sql`${lastAttemptStatus} = ${code.exact}::int`;
+  return Prisma.sql`${lastAttemptStatus} BETWEEN ${code.klass * 100}::int AND ${code.klass * 100 + 99}::int`;
 }
 
 export interface DeadDeliveryRef {

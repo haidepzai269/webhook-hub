@@ -77,6 +77,18 @@ export class FlowScopedRepository extends TenantScopedRepository {
       rawConds.push(Prisma.sql`AND type LIKE ${f.typeLike}`);
       evConds.push(Prisma.sql`AND type LIKE ${f.typeLike}`);
     }
+    // ADR-163: lọc thêm cho ngăn Nhật ký / trang Hành trình — provider, ẩn probe (cờ events.probe, ADR-159),
+    // khoảng thời gian (theo x_at = mốc sắp xếp), tìm theo id (tiền tố event id ULID hoặc raw_event uuid).
+    const common: Prisma.Sql[] = [];
+    if (f.provider) common.push(Prisma.sql`AND provider = ${f.provider}`);
+    if (f.from) common.push(Prisma.sql`AND x_at >= ${f.from}`);
+    if (f.to) common.push(Prisma.sql`AND x_at <= ${f.to}`);
+    if (f.idPrefix) {
+      // ULID viết hoa — so không phân biệt hoa thường; uuid của raw_events viết thường.
+      common.push(Prisma.sql`AND (upper(event_id) LIKE ${escapeLikePrefix(f.idPrefix.toUpperCase()) + '%'} OR raw_id::text LIKE ${escapeLikePrefix(f.idPrefix.toLowerCase()) + '%'})`);
+    }
+    rawConds.push(...common);
+    evConds.push(...common);
     if (f.cursor) {
       const c = Prisma.sql`AND (x_at, x_key) < (${f.cursor.at}::timestamp AT TIME ZONE 'UTC', ${f.cursor.key})`;
       rawConds.push(c);
@@ -97,6 +109,9 @@ export class FlowScopedRepository extends TenantScopedRepository {
           AND COALESCE(dl.n_active, 0) = 0 AND (j.event_id IS NOT NULL OR j.processed)`,
     };
     const statusCond = f.status ? Prisma.sql`AND ${status[f.status]}` : Prisma.empty;
+    // "Ẩn request kiểm tra" chỉ ẩn probe ĐÚNG thiết kế: cờ events.probe VÀ không có delivery nào (cùng quy tắc
+    // expectedProbe của UI). Probe mà có delivery (sai cấu hình / lỗi thật) KHÔNG BAO GIỜ bị ẩn.
+    const probeCond = f.hideProbes ? Prisma.sql`AND NOT (j.probe AND dl.deliveries IS NULL)` : Prisma.empty;
     // Lọc sơ bộ RẺ (index deliveries(event_id, subscription_id, generation)) trước LATERAL — để trạng thái
     // hiếm (vd 'succeeded' khi một đích chết hẳn) không phải dựng JSON cho cả 10k dòng. Điều kiện chính
     // xác vẫn là statusCond ở ngoài.
@@ -122,7 +137,8 @@ export class FlowScopedRepository extends TenantScopedRepository {
           SELECT r.received_at AS x_at, r.id::text AS x_key, r.id AS raw_id, r.status::text AS raw_status,
                  r.signature_valid, s.id AS source_id, s.name AS source_name, s.provider::text AS provider,
                  EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text) AS processed,
-                 e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at
+                 e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
+                 COALESCE(e.probe, false) AS probe
           FROM hub.raw_events r
           JOIN hub.sources s ON s.id = r.source_id AND s.tenant_id = ${t}::uuid
           LEFT JOIN hub.events e ON e.raw_event_id = r.id AND e.tenant_id = ${t}::uuid
@@ -131,14 +147,15 @@ export class FlowScopedRepository extends TenantScopedRepository {
         SELECT * FROM (
           SELECT e.received_at AS x_at, e.id::text AS x_key, NULL::uuid AS raw_id, NULL::text AS raw_status, true AS signature_valid,
                  NULL::uuid AS source_id, NULL::varchar AS source_name, e.source::text AS provider,
-                 true AS processed, e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at
+                 true AS processed, e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
+                 e.probe
           FROM hub.events e WHERE e.tenant_id = ${t}::uuid AND e.raw_event_id IS NULL
         ) e WHERE true ${evConds.length ? Prisma.join(evConds, ' ') : Prisma.empty}
       )
       SELECT to_char(j.x_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS "cursorAt", j.x_key AS "cursorKey",
              j.x_at AS "at", j.raw_id AS "rawId", j.raw_status AS "rawStatus", j.signature_valid AS "signatureValid",
              j.source_id AS "sourceId", j.source_name AS "sourceName", j.provider, j.processed,
-             j.event_id AS "eventId", j.type, j.subject, j.normalized, j.origin, j.event_at AS "eventAt",
+             j.event_id AS "eventId", j.type, j.subject, j.normalized, j.origin, j.event_at AS "eventAt", j.probe,
              COALESCE(dl.deliveries, '[]'::json) AS deliveries
       -- Sắp + đánh số TRƯỚC khi LATERAL: nested loop giữ thứ tự nên LIMIT dừng sớm, không tính
       -- LATERAL cho cả 10k dòng rồi mới sắp (đo: 800ms → xem ADR-DRAFT EF-6).
@@ -162,7 +179,7 @@ export class FlowScopedRepository extends TenantScopedRepository {
         JOIN hub.destinations dst ON dst.id = sub.destination_id AND dst.tenant_id = ${t}::uuid
         LEFT JOIN LATERAL (SELECT a.* FROM hub.delivery_attempts a WHERE a.delivery_id = d.id ORDER BY a.attempt_no DESC LIMIT 1) la ON true
       ) dl ON j.event_id IS NOT NULL
-      WHERE true ${statusCond} ${destCond}
+      WHERE true ${statusCond} ${destCond} ${probeCond}
       ORDER BY j.x_at DESC, j.x_key DESC
       LIMIT ${f.limit}
     `);
@@ -236,22 +253,27 @@ export class FlowScopedRepository extends TenantScopedRepository {
       GROUP BY 1`);
   }
 
-  /** Cấu hình (không secret): source, subscription, đích. */
+  /**
+   * Cấu hình (không secret): source, subscription, đích. ADR-161: mục đã lưu trữ ("Xoá" trên bản đồ) không vẽ;
+   * mục "Ngắt" (is_active=false) vẫn vẽ (mờ) — `isActive` đi kèm để UI tô.
+   */
   async findTopologyConfig() {
     const [sources, subscriptions, destinations] = await Promise.all([
       this.db.source.findMany({
-        where: { tenantId: this.tenantId },
-        select: { id: true, name: true, provider: true, sourceKey: true, isActive: true },
+        where: { tenantId: this.tenantId, archivedAt: null },
+        // ADR-161: có source_connections (hub đã đăng ký URL ở provider) → hộp "Xoá" cảnh báo phải gỡ tay ở provider.
+        select: { id: true, name: true, provider: true, sourceKey: true, isActive: true, connections: { where: { status: { not: 'DISCONNECTED' } }, select: { id: true } } },
         orderBy: { createdAt: 'asc' },
       }),
       this.db.subscription.findMany({
-        where: { tenantId: this.tenantId },
+        // Đích lưu trữ thì subscription của nó cũng đã lưu trữ (cùng tx) — lọc thêm theo đích để không bao giờ treo cạnh.
+        where: { tenantId: this.tenantId, archivedAt: null, destination: { archivedAt: null } },
         select: { id: true, name: true, eventTypes: true, isActive: true, destinationId: true, sourceIds: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.db.destination.findMany({
-        where: { tenantId: this.tenantId },
-        select: { id: true, name: true, type: true, circuitState: true, rateLimitRps: true, verification: true, verificationError: true },
+        where: { tenantId: this.tenantId, archivedAt: null },
+        select: { id: true, name: true, type: true, isActive: true, createdByKeyId: true, circuitState: true, rateLimitRps: true, verification: true, verificationError: true },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -266,9 +288,10 @@ export class FlowScopedRepository extends TenantScopedRepository {
   async findSubscriptionsMatching(eventType: string, existedAt: Date) {
     return this.db.subscription.findMany({
       // R-6: chỉ subscription ĐÃ TỒN TẠI lúc event được tạo — cái tạo sau không thể là lý do bỏ qua event này.
-      where: { tenantId: this.tenantId, eventTypes: { hasSome: eventTypeCandidates(eventType) }, createdAt: { lte: existedAt } },
-      // F7 (§6A): source_ids + destinations.verification của đợt đa service.
-      select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, destination: { select: { verification: true } } },
+      // ADR-161: subscription đã lưu trữ không còn trong cấu hình hiện tại → không liệt kê là "bỏ qua".
+      where: { tenantId: this.tenantId, archivedAt: null, eventTypes: { hasSome: eventTypeCandidates(eventType) }, createdAt: { lte: existedAt } },
+      // F7 (§6A): source_ids + destinations.verification của đợt đa service. ADR-161: + destinations.is_active.
+      select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, destination: { select: { verification: true, isActive: true } } },
     });
   }
 }
@@ -284,6 +307,13 @@ export interface ExecutionFilter {
   destinationId?: string;
   /** Mẫu LIKE đã thoát ký tự (vd `payment.%`). */
   typeLike?: string;
+  /** ADR-163 */
+  provider?: string;
+  hideProbes?: boolean;
+  from?: Date;
+  to?: Date;
+  /** Tiền tố event id / raw_event id (chưa thoát ký tự). */
+  idPrefix?: string;
   cursor?: { at: string; key: string };
   limit: number;
   orphanMinAgeSeconds: number;
@@ -306,7 +336,14 @@ export interface ExecutionRow {
   normalized: boolean | null;
   origin: string | null;
   eventAt: Date | null;
+  /** events.probe (ADR-159) — false với raw không sinh event. */
+  probe: boolean;
   deliveries: any[];
+}
+
+/** `%` `_` `\` là ký tự thường trong tiền tố người dùng gõ. */
+function escapeLikePrefix(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => '\\' + c);
 }
 
 export interface FlowRawRow {
