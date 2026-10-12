@@ -16,8 +16,9 @@ worker_processes 1;
 pid ${EDGE_PREFIX}/nginx.pid;
 error_log stderr warn;
 # Tắt máy bằng SIGQUIT (graceful): request đang proxy được chờ tối đa chừng này rồi mới bị cắt. Supervisor chờ nginx
-# thoát rồi mới SIGTERM hub-api; 15 s + phần của hub-api (≤ 5 s) nằm trong ngân sách 25 s (ADR-175).
-worker_shutdown_timeout 15s;
+# thoát rồi mới SIGTERM hub-api. Giá trị = EDGE_DRAIN_MS - 1 s (edge.js, mặc định 15 s) — luôn nhỏ hơn thời gian hub-api
+# chờ, và hub-api còn ≥ 6 s trong ngân sách 25 s (ADR-175).
+worker_shutdown_timeout ${EDGE_SHUTDOWN_TIMEOUT};
 
 events {
     worker_connections 1024;
@@ -85,7 +86,7 @@ ${EDGE_REAL_IP}
         listen ${EDGE_LISTEN} default_server;
 
         # Header gửi lên hub-api: GHI ĐÈ (không nối chuỗi cũ) -> `trust proxy 1` của hub-api ra đúng IP nginx đã đếm.
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Request-Id $edge_request_id;
@@ -95,6 +96,8 @@ ${EDGE_REAL_IP}
 
         error_page 429 = @edge_rate_limited;
         error_page 413 = @edge_payload_too_large;
+        # hub-api chưa lên / đang khởi động lại / quá proxy_read_timeout -> JSON tĩnh (không trang HTML của nginx).
+        error_page 502 504 =503 @edge_upstream_unavailable;
 
         # Health check của Render đi qua nginx — không cầu chì.
         location = /health {
@@ -123,7 +126,12 @@ ${EDGE_REAL_IP}
         }
 
         # Realtime console: WebSocket, không cầu chì.
+        # proxy_set_header ở location này -> KHÔNG kế thừa 4 header của server (luật của nginx): phải lặp lại đủ.
         location /socket.io/ {
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Request-Id $edge_request_id;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $edge_connection_upgrade;
@@ -141,6 +149,13 @@ ${EDGE_REAL_IP}
             add_header Retry-After 1 always;
             add_header X-Request-Id $edge_request_id always;
             return 429 '{"error":"edge_rate_limited","message":"Too many requests from this IP address.","fix":"Slow down and retry after the number of seconds in Retry-After. Providers retry on 429 by themselves.","docsUrl":"${HUB_DOCS_URL}#edge_rate_limited","requestId":"$edge_request_id","retryAfter":1}';
+        }
+
+        location @edge_upstream_unavailable {
+            default_type application/json;
+            add_header Retry-After 5 always;
+            add_header X-Request-Id $edge_request_id always;
+            return 503 '{"error":"service_unavailable","message":"The service is temporarily unavailable.","fix":"Retry in 5s (with backoff). If it persists, send the requestId to the hub admin.","docsUrl":"${HUB_DOCS_URL}#service_unavailable","requestId":"$edge_request_id","retryAfter":5}';
         }
 
         location @edge_payload_too_large {

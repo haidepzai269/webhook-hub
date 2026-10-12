@@ -22,7 +22,7 @@ import {
 import { longPoll } from './polling';
 import { hubError } from '../errors/hub-error';
 import { parseSourceInput } from './source-input';
-import { ulid } from 'ulidx';
+import { generateSourceKey } from '../console/source-key';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOT_FOUND = { error: 'not_found' };
@@ -381,7 +381,7 @@ export class ServiceResourcesController {
   @RequireScope('manage:sources')
   async createSource(@Req() req: RequestWithPrincipal, @Body() body: any) {
     const input = parseSourceInput(body);
-    const sourceKey = `src_${input.provider}_${ulid().toLowerCase()}`;
+    const sourceKey = generateSourceKey(input.provider);
     const masterKey = getMasterKey();
     const created = await this.withAudit(req.tenantId!, async (repo) => {
       const s = await repo.createSource({

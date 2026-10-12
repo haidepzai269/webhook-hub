@@ -148,7 +148,8 @@ services:
       - WEB_PROXY_SECRET=${WEB_PROXY_SECRET:-}
       # Web (CORS có credentials, link trong mail, OAuth callback). Local: web docker ở :3000.
       - WEB_PUBLIC_URL=${WEB_PUBLIC_URL:-http://localhost:3000}
-      - TRUST_PROXY=${TRUST_PROXY:-0}
+      # Chỉ tin X-Forwarded-For từ service `edge` (IP cố định trên mạng edge_net) — gọi thẳng :4000 (k6) KHÔNG giả được IP.
+      - TRUST_PROXY=${TRUST_PROXY:-10.250.250.6}
       # AU2 (SPEC-auth §5.9): log (in link ra log, CHỈ local) | resend (RESEND_API_KEY + MAIL_FROM) | gmail (GOOGLE_* + MAIL_FROM, ADR-124) | capture (CHỈ hubv)
       - MAIL_DRIVER=${MAIL_DRIVER:-log}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
@@ -195,6 +196,10 @@ services:
       - MOCK_BASE_URL=http://hub-api:4000
       # Khoá SePay thứ 2 cho nút Giả lập (seed thêm làm secret v2) — phải trùng build arg của web
       - DEMO_SEPAY_APIKEY=${DEMO_SEPAY_APIKEY:-demo_sepay_simulate_key_local_only}
+    # edge_net: mạng riêng edge <-> hub-api (EG1). default: mọi service khác như cũ.
+    networks:
+      - default
+      - edge_net
     depends_on:
       postgres:
         condition: service_healthy
@@ -300,7 +305,9 @@ services:
   # (docker/nginx/nginx.conf.template). Cổng 4000 của hub-api VẪN mở để k6 bắn thẳng ("bắn vào localhost"); báo cáo số
   # đo phải ghi rõ bắn qua edge (:8080) hay bắn thẳng (:4000). Ở local không có proxy phía trước: $remote_addr là IP thật
   # -> cầu chì IP bật được (EDGE_IP_FUSE mặc định 1 ở đây; mặc định của image/hub-all là TẮT, ADR-176).
-  # hub-api ở compose giữ TRUST_PROXY=0 (cổng 4000 mở thẳng, tin XFF là cho giả IP) -> qua edge, req.ip = IP container edge.
+  # edge CHỈ nằm trên edge_net với IP cố định 10.250.250.6 = giá trị TRUST_PROXY của hub-api: hub-api tin XFF do nginx ghi
+  # đè (req.ip = IP client thật), còn request gọi thẳng :4000 thì không (không giả được IP). Không gắn edge vào `default`:
+  # hai mạng chung thì hub-api có thể thấy edge bằng IP khác, không còn khớp TRUST_PROXY.
   edge:
     build:
       context: .
@@ -318,6 +325,9 @@ services:
       - EDGE_IP_BURST=${EDGE_IP_BURST:-500}
       - EDGE_CONN_PER_IP=${EDGE_CONN_PER_IP:-50}
       - EDGE_TRUSTED_PROXIES=${EDGE_TRUSTED_PROXIES:-}
+    networks:
+      edge_net:
+        ipv4_address: 10.250.250.6
     # nginx: SIGQUIT = tắt êm (trả nốt request đang proxy); SIGTERM của nginx là tắt NHANH.
     stop_signal: SIGQUIT
     stop_grace_period: 25s
@@ -351,6 +361,15 @@ services:
     depends_on:
       hub-api:
         condition: service_started
+
+networks:
+  # EG1: mạng riêng edge <-> hub-api, subnet cố định để TRUST_PROXY của hub-api trỏ đúng một IP (10.250.250.6 = edge).
+  edge_net:
+    ipam:
+      config:
+        - subnet: 10.250.250.0/29
+          # Cấp IP động chỉ trong .1–.3 (hub-api nhận .2) -> .6 cố định của edge không bao giờ bị container khác chiếm.
+          ip_range: 10.250.250.0/30
 
 volumes:
   pgdata:

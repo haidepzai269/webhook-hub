@@ -26,6 +26,7 @@ const EDGE_ENVSUBST_VARS = [
   'EDGE_CONN_PER_IP',
   'HUB_DOCS_URL',
   'EDGE_ACCESS_LOG',
+  'EDGE_SHUTDOWN_TIMEOUT',
 ];
 
 /** Mặc định (§3.3, §3.4). Kẹp như `resolveSendTimeoutMs`: ngoài khoảng -> giá trị biên, không phải lỗi. */
@@ -63,6 +64,24 @@ function normalizeCidr(item) {
   return item;
 }
 
+/** Dải coi là "quá rộng" để tin đệ quy: /0, IPv4 ngắn hơn /8, IPv6 ngắn hơn /16. Địa chỉ đơn lẻ không bao giờ rộng. */
+function tooWide(item) {
+  const [addr, prefix] = item.split('/');
+  if (prefix === undefined) return false;
+  return Number(prefix) < (addr.includes(':') ? 16 : 8);
+}
+
+/** Thời gian hub-api chờ nginx khi tắt máy (EDGE_DRAIN_MS, mặc định 16 s), kẹp để hub-api còn ≥ 6 s trước SIGKILL. */
+function edgeDrainMs(env, supervisorTimeout = parseInt(env.SHUTDOWN_TIMEOUT_MS || '25000', 10)) {
+  const n = parseInt(env.EDGE_DRAIN_MS || '16000', 10);
+  return Math.max(0, Math.min(Number.isFinite(n) ? n : 16_000, supervisorTimeout - 6000));
+}
+
+/** `worker_shutdown_timeout` của nginx: luôn NHỎ hơn thời gian hub-api chờ (drain - 1 s, tối thiểu 1 s). */
+function nginxShutdownSeconds(env) {
+  return Math.max(1, Math.floor(edgeDrainMs(env) / 1000) - 1);
+}
+
 /**
  * §3.2 — khối real_ip:
  * - EDGE_TRUSTED_PROXIES trống: KHÔNG tin header nào, `$remote_addr` = địa chỉ kết nối TCP (đúng ở local: không có proxy
@@ -78,6 +97,14 @@ function realIpBlock(env) {
   if (bad.length) throw new Error(`EDGE_TRUSTED_PROXIES có phần tử không phải IP/CIDR: ${bad.join(', ')}`);
   const rec = String(env.EDGE_REAL_IP_RECURSIVE ?? 'on').trim().toLowerCase();
   if (rec !== 'on' && rec !== 'off') throw new Error('EDGE_REAL_IP_RECURSIVE chỉ nhận on|off');
+  // Review EG1 #2: recursive on + dải tin cậy quá rộng (/0, IPv4 < /8, IPv6 < /16) = mọi phần tử XFF đều "tin cậy" ->
+  // nginx lấy phần tử ĐẦU, tức IP do client tự đặt. Không tự sửa ngầm: từ chối khởi động.
+  const wide = items.filter(tooWide);
+  if (rec === 'on' && wide.length) {
+    throw new Error(
+      `EDGE_TRUSTED_PROXIES có dải quá rộng (${wide.join(', ')}) mà EDGE_REAL_IP_RECURSIVE=on: nginx sẽ lấy phần tử ĐẦU của X-Forwarded-For (IP client tự đặt). Đặt EDGE_REAL_IP_RECURSIVE=off (lấy phần tử cuối) hoặc dùng dải hẹp của proxy`,
+    );
+  }
   return [
     ...items.map((i) => `    set_real_ip_from ${i};`),
     '    real_ip_header X-Forwarded-For;',
@@ -88,7 +115,7 @@ function realIpBlock(env) {
 /**
  * Giá trị chèn vào template. `listenPort`/`upstream` do bên gọi quyết (hub-all: $PORT + 127.0.0.1:EDGE_API_PORT;
  * service `edge`: $PORT + EDGE_UPSTREAM).
- * @returns {{vars: Record<string,string>, warnings: string[]}}
+ * @returns {{vars: Record<string,string>, warnings: {level:number, msg:string}[]}}
  */
 function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout' }) {
   const port = parseInt(String(listenPort), 10);
@@ -102,11 +129,25 @@ function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout'
     throw new Error(`đích access log không hợp lệ: ${accessLog}`);
   }
   const fuse = on(env.EDGE_IP_FUSE);
+  const trusted = String(env.EDGE_TRUSTED_PROXIES ?? '').trim();
+  /** @type {{level:number, msg:string}[]} */
   const warnings = [];
-  if (fuse && !String(env.EDGE_TRUSTED_PROXIES ?? '').trim()) {
-    warnings.push(
-      'EDGE_IP_FUSE=1 nhưng EDGE_TRUSTED_PROXIES trống: cầu chì đếm theo địa chỉ kết nối TCP — chỉ đúng khi KHÔNG có proxy phía trước (local). Sau proxy Render = chặn mọi người (§3.2).',
-    );
+  // Review EG1 #3: trên Render (env RENDER) mọi kết nối tới container đến từ proxy Render. Không khai proxy tin cậy =
+  // req.ip của MỌI người là IP Render: rate limit đăng nhập chung một xô, limit_conn thành trần chung, hộp phạt EG2
+  // phạt tất cả. Từ chối khởi động, trừ khi cố ý vượt bằng EDGE_ALLOW_NO_REAL_IP=1 (khi đó vẫn cảnh báo level 50).
+  if (!trusted && env.RENDER) {
+    if (!on(env.EDGE_ALLOW_NO_REAL_IP)) {
+      throw new Error(
+        'EDGE_NGINX trên Render cần EDGE_TRUSTED_PROXIES (lần đầu: 0.0.0.0/0,::/0 + EDGE_REAL_IP_RECURSIVE=off, xem DEPLOYMENT §3.6). Trống = mọi request mang IP proxy Render. Cố ý chạy vậy: EDGE_ALLOW_NO_REAL_IP=1',
+      );
+    }
+    warnings.push({ level: 50, msg: 'EDGE_ALLOW_NO_REAL_IP=1: chạy sau proxy Render mà KHÔNG đọc IP thật — req.ip của mọi người là IP proxy (rate limit IP, limit_conn, hộp phạt dùng chung một khoá).' });
+  }
+  if (fuse && !trusted) {
+    warnings.push({
+      level: env.RENDER ? 50 : 40,
+      msg: 'EDGE_IP_FUSE=1 nhưng EDGE_TRUSTED_PROXIES trống: cầu chì đếm theo địa chỉ kết nối TCP — chỉ đúng khi KHÔNG có proxy phía trước (local). Sau proxy Render = chặn mọi người (§3.2).',
+    });
   }
   return {
     warnings,
@@ -121,6 +162,7 @@ function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout'
       EDGE_CONN_PER_IP: String(clampInt(env, 'EDGE_CONN_PER_IP')),
       HUB_DOCS_URL: docs,
       EDGE_ACCESS_LOG: accessLog,
+      EDGE_SHUTDOWN_TIMEOUT: `${nginxShutdownSeconds(env)}s`,
     },
   };
 }
@@ -173,7 +215,7 @@ function main() {
   }
   const env = process.env;
   const out = prepareEdge(env, { listenPort: env.PORT || '8080', upstream: env.EDGE_UPSTREAM || 'hub-api:4000' });
-  for (const w of out.warnings) process.stderr.write(`${JSON.stringify({ proc: 'edge', level: 40, msg: w })}\n`);
+  for (const w of out.warnings) process.stderr.write(`${JSON.stringify({ proc: 'edge', level: w.level, msg: w.msg })}\n`);
   process.stdout.write(`${out.confPath}\n`);
 }
 
@@ -186,4 +228,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EDGE_ENVSUBST_VARS, TEMPLATE, edgeVars, renderTemplate, prepareEdge, sourceKeyLocationRegex, realIpBlock, on };
+module.exports = { EDGE_ENVSUBST_VARS, TEMPLATE, edgeVars, renderTemplate, prepareEdge, sourceKeyLocationRegex, realIpBlock, on, edgeDrainMs, nginxShutdownSeconds };

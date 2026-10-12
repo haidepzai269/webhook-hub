@@ -183,16 +183,12 @@ function supervise(specs, opts = {}) {
   return { children, stop: onSignal };
 }
 
-/** EDGE_DRAIN_MS: hub-api chờ nginx thoát tối đa chừng này (mặc định 16 s = worker_shutdown_timeout 15 s + 1 s). */
-function edgeDrainMs(env, supervisorTimeout) {
-  const n = parseInt(env.EDGE_DRAIN_MS || '16000', 10);
-  // Kẹp: hub-api còn ≥ 6 s trước mốc SIGKILL để ghi nốt bộ đếm (≤ 5 s, shutdown.ts).
-  return Math.max(0, Math.min(Number.isFinite(n) ? n : 16_000, supervisorTimeout - 6000));
-}
+/** EDGE_DRAIN_MS (mặc định 16 s) — định nghĩa ở docker/nginx/edge.js để worker_shutdown_timeout của nginx luôn nhỏ hơn. */
+const edgeDrainMs = (env, supervisorTimeout) => edge.edgeDrainMs(env, supervisorTimeout);
 
 /**
  * Danh sách con theo env. Không bật EDGE_NGINX -> đúng hai con như trước EG1 (api, worker), env không đổi [EG:T16].
- * @returns {{timeoutMs:number, specs:object[], warnings:string[]}}
+ * @returns {{timeoutMs:number, specs:object[], warnings:{level:number, msg:string}[]}}
  */
 function buildSpecs(env, opts = {}) {
   const heap = (mb, def) => `--max-old-space-size=${parseInt(mb || def, 10)}`;
@@ -217,10 +213,21 @@ function buildSpecs(env, opts = {}) {
  * được "/dev/stdout". Mỗi gói `<pri>Mmm dd hh:mm:ss edge: {json}` -> dòng JSON thêm "proc":"edge" (như pipeLines).
  * @returns {Promise<{accessLog:string, close:()=>void}>}
  */
-function startEdgeLogSink(out = process.stdout) {
+function startEdgeLogSink(out = process.stdout, { maxBuffered = 1024 * 1024, log } = {}) {
   return new Promise((resolve, reject) => {
     const sock = dgram.createSocket('udp4');
+    let dropped = 0;
+    let bound = false;
     sock.on('message', (msg) => {
+      // Review EG1 #6: stdout chậm (log Render) -> BỎ dòng thay vì dồn vô hạn trong RAM supervisor. Đếm để biết đã mất.
+      if (out.writableLength > maxBuffered) {
+        dropped += 1;
+        return;
+      }
+      if (dropped > 0) {
+        out.write(`${JSON.stringify({ proc: 'supervisor', level: 40, msg: `bỏ ${dropped} dòng access log nginx vì stdout chậm` })}\n`);
+        dropped = 0;
+      }
       const text = msg.toString('utf8');
       const i = text.indexOf(' edge: ');
       const line = (i >= 0 ? text.slice(i + 7) : text).trimEnd();
@@ -230,10 +237,15 @@ function startEdgeLogSink(out = process.stdout) {
         out.write(`[edge] ${line}\n`);
       }
     });
-    sock.once('error', reject);
+    // Listener lâu dài: lỗi socket SAU khi bind (hiếm) chỉ ghi log, không làm sập PID 1 (mất access log, không mất request).
+    sock.on('error', (err) => {
+      if (!bound) return reject(err);
+      (log ?? ((m) => process.stderr.write(`${JSON.stringify({ proc: 'supervisor', level: 50, msg: m })}\n`)))(`log UDP của nginx lỗi: ${err.message}`);
+    });
     sock.bind(0, '127.0.0.1', () => {
+      bound = true;
       sock.unref();
-      resolve({ accessLog: `syslog:server=127.0.0.1:${sock.address().port},tag=edge,nohostname`, close: () => sock.close() });
+      resolve({ accessLog: `syslog:server=127.0.0.1:${sock.address().port},tag=edge,nohostname`, close: () => sock.close(), dropped: () => dropped });
     });
   });
 }
@@ -249,7 +261,7 @@ async function main() {
     say(`EDGE_NGINX: cấu hình lỗi -> không khởi động: ${err.message}`, 60);
     process.exit(1);
   }
-  for (const w of built.warnings) say(w, 40);
+  for (const w of built.warnings) say(w.msg, w.level);
   const sup = supervise(built.specs, { timeoutMs: built.timeoutMs });
   process.on('SIGTERM', () => sup.stop('SIGTERM'));
   process.on('SIGINT', () => sup.stop('SIGINT'));

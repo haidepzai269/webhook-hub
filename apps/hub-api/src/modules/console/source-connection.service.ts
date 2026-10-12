@@ -1,15 +1,14 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import * as net from 'net';
-import { ulid } from 'ulidx';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { aesGcmDecrypt, aesGcmEncrypt, isLinkLocalIp, isPrivateIp } from '@hub/crypto';
 import { logger } from '@hub/common';
 import { ConnectorError, ProviderConnector, ProviderRegistry, connectorBaseUrl } from '@hub/providers';
 import { unprocessable } from '../service-api/service-api.controller';
 import { hubError } from '../errors/hub-error';
+import { SOURCE_KEY_RE, generateSourceKey } from './source-key';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SOURCE_KEY_RE = /^[a-z0-9_]{3,64}$/;
 /** `GET …/connection` gọi `status?` của provider tối đa 1 lần / phút / kết nối (đọc `last_checked_at`, 0 lệnh Redis). */
 export const STATUS_CHECK_INTERVAL_MS = 60_000;
 /** Provider sinh secret mới khi kết nối lại (Stripe) -> secret cũ còn verify thêm 24 giờ (thời gian chồng). */
@@ -129,7 +128,7 @@ export class SourceConnectionService {
     if (!connector) throw hubError('connector_unsupported', { provider }, 'Provider này chưa tự kết nối được — tạo source rồi dán URL ở dashboard provider');
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     if (!name || name.length > 255) unprocessable({ error: 'validation_failed', field: 'name', message: 'name là chuỗi 1–255 ký tự' });
-    const sourceKey = body?.sourceKey === undefined || body?.sourceKey === null || body?.sourceKey === '' ? `src_${provider}_${ulid().toLowerCase()}` : body.sourceKey;
+    const sourceKey = body?.sourceKey === undefined || body?.sourceKey === null || body?.sourceKey === '' ? generateSourceKey(provider) : body.sourceKey;
     if (typeof sourceKey !== 'string' || !SOURCE_KEY_RE.test(sourceKey)) {
       unprocessable({ error: 'validation_failed', field: 'sourceKey', message: 'sourceKey: 3–64 ký tự a-z 0-9 _' });
     }

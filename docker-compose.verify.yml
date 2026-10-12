@@ -87,6 +87,8 @@ services:
   # (mặc định thật 50 r/s burst 500 kiểm ở L0). Không đổi service cũ: request không qua :18080 chạy như trước.
   edge:
     container_name: !reset null
+    # Tên image cố định để edge-sink dùng CHUNG (không build hai lần).
+    image: hubv-edge
     ports: !override
       - "18080:8080"
     environment:
@@ -100,9 +102,8 @@ services:
 
   # Chỉ hubv: cùng image + template nhưng upstream là sink -> [EG:T11]/[EG:T2] đọc lại ĐÚNG header/bytes nginx gửi lên.
   edge-sink:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: hubv-edge
+    pull_policy: never
     restart: unless-stopped
     command: ["edge"]
     ports:
@@ -113,6 +114,8 @@ services:
       - EDGE_IP_FUSE=0
     stop_signal: SIGQUIT
     depends_on:
+      edge:
+        condition: service_started
       sink:
         condition: service_started
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { apiSourceKey } from './source-key';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 
 export interface ApiKeyCreateData {
@@ -21,7 +22,7 @@ export async function createApiKeyWithSource(prisma: PrismaService, projectId: s
     const id = randomUUID();
     let sourceId: string | undefined;
     if (d.scopes.includes('publish:events')) {
-      const source = await repo.createSource({ provider: 'api', name: d.serviceName, sourceKey: `api_${id}`, isActive: true });
+      const source = await repo.createSource({ provider: 'api', name: d.serviceName, sourceKey: apiSourceKey(id), isActive: true });
       sourceId = source.id;
     }
     const key = await repo.createApiKey({

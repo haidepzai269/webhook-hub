@@ -12,6 +12,7 @@ import { configureBodyParsers } from './body-parsers';
 import { IngestService } from './modules/ingest/ingest.service';
 import { installPenaltyGate } from './modules/ingest/penalty-gate';
 import { installShutdown } from './shutdown';
+import { parseTrustProxy } from './trust-proxy';
 
 function assertMasterKeyConfigured(): void {
   const masterKey = process.env.MASTER_KEY;
@@ -62,8 +63,10 @@ async function bootstrap() {
   // AU6 (SPEC-auth §5.12.2): runtime KHÔNG được là superuser / BYPASSRLS (RLS sẽ bị bỏ qua) -> thoát.
   await assertAppRoleNotPrivileged(PrismaService.getInstance());
 
-  // SPEC-auth §5.5: X-Forwarded-For CHỈ được tin khi đứng sau proxy thật (Render, Vercel) — TRUST_PROXY=1.
-  if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+  // SPEC-auth §5.5: X-Forwarded-For CHỈ được tin khi đứng sau proxy thật (Render, Vercel) — TRUST_PROXY=1; compose local:
+  // TRUST_PROXY=<IP của service edge> (chỉ tin nginx, không tin client gọi thẳng). Sai khuôn -> thoát (trust-proxy.ts).
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
   // SPEC-auth §5.4: header bảo mật. API chỉ trả JSON; CORP cross-origin để playground của web (khác origin)
   // vẫn gọi /hooks/* được.
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));

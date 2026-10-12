@@ -84,7 +84,7 @@ const file: ScenarioFile = {
       },
     },
     {
-      name: '[EG:T11] (phần b) L2: IP thật: X-Forwarded-For/X-Real-IP giả 6.6.6.6 -> upstream nhận XFF = X-Real-IP = IP kết nối (GHI ĐÈ, không nối), log nginx ip ≠ 6.6.6.6; x-request-id client hợp lệ giữ nguyên, thiếu/rác thì nginx đặt; hub-api qua edge: khoá rl:login:ip KHÔNG phải 6.6.6.6',
+      name: '[EG:T11] (phần b) L2: IP thật: X-Forwarded-For/X-Real-IP giả 6.6.6.6 -> upstream nhận XFF = X-Real-IP = IP kết nối (GHI ĐÈ, không nối) ở /hooks VÀ /socket.io, log nginx ip ≠ 6.6.6.6; x-request-id client hợp lệ giữ nguyên, thiếu/rác thì nginx đặt; hub-api qua edge: req.ip = IP client nginx thấy (khoá rl:login:ip), không phải IP edge hay 6.6.6.6; gọi thẳng hub-api với XFF giả không được tin',
       tags: ['EG1'],
       fn: async () => {
         const since = new Date(Date.now() - 1000).toISOString();
@@ -111,13 +111,35 @@ const file: ScenarioFile = {
         for (const l of logs) expect(l.ip !== '6.6.6.6' && l.ip === reqs[0].headers['x-forwarded-for'], `log nginx ip=${l.ip} (mong IP thật = XFF upstream)`);
         expect(logs.some((l) => l.request_id === mine), 'log nginx không mang request_id của client -> không nối được log hai bên');
 
-        // hub-api qua edge: khoá rate limit đăng nhập theo IP (auth.service `rl:login:ip:<req.ip>`).
+        // /socket.io/ tự đặt proxy_set_header (Upgrade/Connection) -> phải lặp đủ 4 header ghi đè (review EG1 #1).
+        const sio = await fetch(`${EDGE_SINK}/socket.io/?EIO=4&transport=polling&eg=${RUN}`, { headers: { ...spoof, 'x-request-id': 'abc' } });
+        expect(sio.status === 200, `/socket.io/ qua edge-sink -> ${sio.status}`);
+        const s = (await sinkRequests('/socket.io/')).filter((r) => r.query?.eg === RUN).pop();
+        expect(s, 'sink không nhận request /socket.io/');
+        expect(s.headers['x-forwarded-for'] === reqs[0].headers['x-forwarded-for'] && s.headers['x-real-ip'] === s.headers['x-forwarded-for'], `/socket.io/: XFF=${s.headers['x-forwarded-for']} X-Real-IP=${s.headers['x-real-ip']} (mong IP kết nối, không 6.6.6.6)`);
+        expect(/^[0-9a-f]{32}$/.test(s.headers['x-request-id'] ?? ''), `/socket.io/: x-request-id sai khuôn "abc" phải bị thay, nhận ${s.headers['x-request-id']}`);
+        expect(s.headers.host === new URL(EDGE_SINK).host, `/socket.io/: Host bị đổi thành ${s.headers.host}`);
+
+        // hub-api qua edge (review feat/edge): hub-api CHỈ tin edge (TRUST_PROXY=10.250.250.6) -> req.ip = IP client mà nginx
+        // thấy (khoá rl:login:ip:<ip đó>), KHÔNG phải IP container edge, KHÔNG phải 6.6.6.6. Gọi thẳng :14000 với XFF giả
+        // -> không được tin (đường k6). Khoá: auth.service `rl:login:ip:<req.ip>`.
         const redis = new Redis(process.env.VERIFY_REDIS_URL || hostUrls().REDIS_URL, { maxRetriesPerRequest: 1 });
         try {
-          const login = await fetch(`${EDGE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', ...spoof }, body: JSON.stringify({ email: `eg-t11-${RUN}@example.test`, password: 'sai-mat-khau-123' }) });
-          expect(login.status === 401 || login.status === 400 || login.status === 403 || login.status === 429, `login qua edge -> ${login.status}`);
-          const spoofed = await redis.keys('*rl:login:ip:6.6.6.6*');
-          expect(spoofed.length === 0, `hub-api tin IP giả: ${spoofed.join(', ')}`);
+          const loginSince = new Date(Date.now() - 1000).toISOString();
+          const body = JSON.stringify({ email: `eg-t11-${RUN}@example.test`, password: 'sai-mat-khau-123' });
+          const viaEdge = await fetch(`${EDGE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', ...spoof }, body });
+          expect([400, 401, 403, 429].includes(viaEdge.status), `login qua edge -> ${viaEdge.status}`);
+          const line = await waitFor('log edge của /auth/login', async () => edgeLogLines('edge', loginSince).filter((x) => x.uri_path === '/auth/login').pop());
+          expect(line.ip && line.ip !== '6.6.6.6' && line.ip !== '10.250.250.6', `nginx ghi ip=${line.ip}`);
+          const keys = await redis.keys('*rl:login:ip:*');
+          const mine = keys.filter((k) => k.endsWith(`:${line.ip}`));
+          expect(mine.length > 0, `hub-api KHÔNG thấy IP client ${line.ip} (khoá hiện có: ${keys.join(', ')}) — TRUST_PROXY của hub-api chưa tin edge?`);
+          expect(!keys.some((k) => k.endsWith(':10.250.250.6')), `hub-api thấy IP container edge: ${keys.join(', ')}`);
+          const direct = await fetch(`${hostUrls().HUB_API_URL}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '7.7.7.7' }, body });
+          expect([400, 401, 403, 429].includes(direct.status), `login thẳng hub-api -> ${direct.status}`);
+          const all = await redis.keys('*rl:login:ip:*');
+          expect(!all.some((k) => k.includes('6.6.6.6') || k.includes('7.7.7.7')), `hub-api tin IP giả: ${all.join(', ')}`);
+          console.log(`  req.ip của hub-api sau edge = ${line.ip} (IP client nginx thấy)`);
         } finally {
           await redis.quit().catch(() => undefined);
         }

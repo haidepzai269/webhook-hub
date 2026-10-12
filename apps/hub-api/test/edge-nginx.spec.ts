@@ -4,10 +4,13 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { PassThrough } from 'stream';
-import { ulid } from 'ulidx';
+import { HttpException } from '@nestjs/common';
 import { ERROR_CATALOG } from '@hub/common';
 import { ProviderEnum } from '@prisma/client';
 import { DEMO_PROJECTS, disconnectSeedClient, SEED_DEFAULT_SOURCE_KEYS } from '@hub/database/seed';
+import { apiSourceKey, generateSourceKey, SOURCE_KEY_RE } from '../src/modules/console/source-key';
+import { ApiController } from '../src/modules/api/api.controller';
+import { toErrorBody } from '../src/modules/errors/service-exception.filter';
 
 /**
  * EG1 (SPEC-chong-qua-tai §3, ADR-175/176): nginx là con thứ ba của docker/hub-all.js, cấu hình từ MỘT template.
@@ -32,24 +35,45 @@ function render(env: Record<string, string> = {}): string {
 afterAll(() => disconnectSeedClient?.());
 
 describe('EG1 — template nginx + envsubst', () => {
-  it('[EG:T3] mọi sourceKey do seed, api-key-create (api_<uuid>) và bộ sinh key console (src_<provider>_<ulid>, key tự đặt ^[a-z0-9_]{3,64}$) đều khớp regex location /hooks/* — regex ĐỌC TỪ TEMPLATE', () => {
+  it('[EG:T3] (phần a) mọi sourceKey do seed, apiSourceKey (api_<uuid>), generateSourceKey (src_<provider>_<ulid>) và key tự đặt đúng SOURCE_KEY_RE đều khớp regex location /hooks/* — regex ĐỌC TỪ TEMPLATE, hàm sinh key là hàm THẬT', () => {
     const re: RegExp = edge.sourceKeyLocationRegex();
     expect(re.source).toContain('[A-Za-z0-9_-]{1,64}');
     const providers = Object.values(ProviderEnum).filter((p) => p !== 'api');
     const keys: string[] = [
       ...SEED_DEFAULT_SOURCE_KEYS,
       ...DEMO_PROJECTS.map((p) => p.sourceKey),
-      `api_${require('crypto').randomUUID()}`,
-      ...providers.map((p) => `src_${p}_${ulid().toLowerCase()}`),
+      apiSourceKey(require('crypto').randomUUID()),
+      ...providers.map((p) => generateSourceKey(p)),
       'abc',
       'a'.repeat(64),
       `src_${'x'.repeat(60)}`,
     ];
     const urls = keys.flatMap((k) => [...providers, 'api'].map((p) => `/hooks/${p}/${k}`));
     expect(urls.filter((u) => !re.test(u))).toEqual([]);
+    // Mọi key qua được SOURCE_KEY_RE (luật key tự đặt) đều qua được nginx: bộ ký tự con, độ dài 3–64 ⊂ 1–64.
+    for (const k of ['abc', 'a'.repeat(64), 'src_x_1', '___']) expect([k, SOURCE_KEY_RE.test(k), re.test(`/hooks/github/${k}`)]).toEqual([k, true, true]);
+    for (const k of providers.map((p) => generateSourceKey(p))) expect([k, SOURCE_KEY_RE.test(k)]).toEqual([k, true]);
     // Lọc thô vẫn chặn đúng thứ cần chặn.
     for (const bad of ['/hooks/github/../etc/passwd', `/hooks/github/${'a'.repeat(65)}`, '/hooks/github/a.b', '/hooks/github/a/b', '/hooks/GitHub/k', '/hooks/github/']) {
       expect([bad, re.test(bad)]).toEqual([bad, false]);
+    }
+  });
+
+  it('[EG:T3] (phần b) POST /api/v1/sources với sourceKey sai khuôn (`my.key`, 65 ký tự, chữ hoa, số) -> 400 bad_request field sourceKey theo khuôn ERRORS.md, KHÔNG chạm DB (source không được tạo)', async () => {
+    const prisma: any = new Proxy({}, { get: () => { throw new Error('không được chạm DB'); } });
+    const c = new ApiController(prisma);
+    const prev = process.env.MASTER_KEY;
+    process.env.MASTER_KEY = prev && prev.length >= 32 ? prev : 'k'.repeat(64);
+    try {
+      for (const bad of ['my.key', 'a'.repeat(65), 'Src_Upper', 'ab', 12345, '../x']) {
+        const e = await c.createSource('t', 'u', { provider: 'github', name: 'x', secret: 's'.repeat(24), sourceKey: bad }).then(() => null, (x) => x);
+        expect(e).toBeInstanceOf(HttpException);
+        expect([bad, e.getStatus()]).toEqual([bad, 400]);
+        expect(toErrorBody(e, 'rid').body).toMatchObject({ error: 'bad_request', field: 'sourceKey', requestId: 'rid' });
+      }
+    } finally {
+      if (prev === undefined) delete process.env.MASTER_KEY;
+      else process.env.MASTER_KEY = prev;
     }
   });
 
@@ -91,7 +115,18 @@ describe('EG1 — template nginx + envsubst', () => {
     expect(out).not.toMatch(/^\s*(gzip|sub_filter|proxy_set_body)\b/m);
 
     const bodies = [...out.matchAll(/return (\d{3}) '([^']+)';/g)].map((m) => ({ status: Number(m[1]), body: JSON.parse(m[2].replace(/\$edge_request_id/g, 'rid')) }));
-    expect(bodies.map((b) => b.body.error).sort()).toEqual(['edge_rate_limited', 'not_found', 'payload_too_large']);
+    expect(bodies.map((b) => b.body.error).sort()).toEqual(['edge_rate_limited', 'not_found', 'payload_too_large', 'service_unavailable']);
+    expect(out).toMatch(/error_page 502 504 =503 @edge_upstream_unavailable;/);
+    // Location nào tự đặt proxy_set_header thì KHÔNG kế thừa header của server -> phải lặp đủ 4 header (review EG1 #1).
+    const base = ['Host $http_host', 'X-Forwarded-For $remote_addr', 'X-Real-IP $remote_addr', 'X-Request-Id $edge_request_id'];
+    for (const m of out.matchAll(/location (.*) \{\n([^}]*)\}/g)) {
+      if (!/proxy_set_header/.test(m[2])) continue;
+      for (const h of base) expect([m[1].trim(), m[2].includes(`proxy_set_header ${h};`)]).toEqual([m[1].trim(), true]);
+    }
+    // worker_shutdown_timeout dẫn từ EDGE_DRAIN_MS (nhỏ hơn 1 s), không viết cứng (review EG1 #7).
+    expect(out).toMatch(/worker_shutdown_timeout 15s;/);
+    expect(render({ EDGE_DRAIN_MS: '8000' })).toMatch(/worker_shutdown_timeout 7s;/);
+    expect(render({ EDGE_DRAIN_MS: '0' })).toMatch(/worker_shutdown_timeout 1s;/);
     for (const b of bodies) {
       const entry = (ERROR_CATALOG as Record<string, { status: number; message: string }>)[b.body.error];
       expect([b.body.error, entry?.status, entry?.message]).toEqual([b.body.error, b.status, b.body.message]);
@@ -115,10 +150,30 @@ describe('EG1 — template nginx + envsubst', () => {
       expect(() => edge.realIpBlock({ EDGE_TRUSTED_PROXIES: bad })).toThrow(/EDGE_TRUSTED_PROXIES/);
     }
     expect(() => edge.realIpBlock({ EDGE_TRUSTED_PROXIES: '10.0.0.0/8', EDGE_REAL_IP_RECURSIVE: 'maybe' })).toThrow(/on\|off/);
+    // Review EG1 #2: dải quá rộng + recursive on = lấy phần tử ĐẦU của XFF (IP giả) -> từ chối khởi động.
+    for (const wide of ['0.0.0.0/0', '::/0', '0.0.0.0/0,::/0', '10.0.0.0/7', '2000::/15']) {
+      expect(() => edge.realIpBlock({ EDGE_TRUSTED_PROXIES: wide })).toThrow(/quá rộng/);
+      expect(edge.realIpBlock({ EDGE_TRUSTED_PROXIES: wide, EDGE_REAL_IP_RECURSIVE: 'off' })).toContain('real_ip_recursive off;');
+    }
+    expect(edge.realIpBlock({ EDGE_TRUSTED_PROXIES: '10.0.0.0/8,2001:db8::/16,1.2.3.4' })).toContain('real_ip_recursive on;');
     expect(() => edge.edgeVars({ HUB_DOCS_URL: `x"}';` }, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' })).toThrow(/HUB_DOCS_URL/);
     expect(() => edge.edgeVars({}, { listenPort: 1, upstream: 'a:1; evil', prefix: '/tmp/x' })).toThrow(/EDGE_UPSTREAM/);
     // Bật cầu chì mà không khai proxy tin cậy -> cảnh báo (đúng ở local, sai sau proxy Render).
-    expect(edge.edgeVars({ EDGE_IP_FUSE: '1' }, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' }).warnings.join()).toMatch(/EDGE_TRUSTED_PROXIES trống/);
+    expect(edge.edgeVars({ EDGE_IP_FUSE: '1' }, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' }).warnings).toEqual([expect.objectContaining({ level: 40, msg: expect.stringMatching(/EDGE_TRUSTED_PROXIES trống/) })]);
+  });
+
+  it('[EG:T11] (phần c) L0: trên Render (env RENDER) EDGE_TRUSTED_PROXIES trống -> TỪ CHỐI khởi động (fuse bật hay tắt); EDGE_ALLOW_NO_REAL_IP=1 cố ý vượt -> chạy kèm cảnh báo level 50; hub-all thoát với thông báo', () => {
+    const opt = { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' };
+    for (const fuse of ['0', '1']) expect(() => edge.edgeVars({ RENDER: 'true', EDGE_IP_FUSE: fuse }, opt)).toThrow(/EDGE_ALLOW_NO_REAL_IP/);
+    const allowed = edge.edgeVars({ RENDER: 'true', EDGE_ALLOW_NO_REAL_IP: '1' }, opt).warnings;
+    expect(allowed).toEqual([expect.objectContaining({ level: 50, msg: expect.stringMatching(/IP proxy/) })]);
+    expect(edge.edgeVars({ RENDER: 'true', EDGE_TRUSTED_PROXIES: '0.0.0.0/0,::/0', EDGE_REAL_IP_RECURSIVE: 'off', EDGE_IP_FUSE: '1' }, opt).warnings).toEqual([]);
+    expect(edge.edgeVars({}, opt).warnings).toEqual([]); // local, không fuse: im lặng
+    const base = { DATABASE_URL: 'postgresql://u:p@h/db', PORT: '10000', EDGE_NGINX: '1', EDGE_PREFIX: tmp(), PATH: process.env.PATH ?? '' };
+    expect(() => buildSpecs({ ...base, RENDER: 'true' })).toThrow(/EDGE_TRUSTED_PROXIES/);
+    expect(buildSpecs({ ...base, RENDER: 'true' , EDGE_ALLOW_NO_REAL_IP: '1' }).warnings[0].level).toBe(50);
+    // EDGE_NGINX tắt thì RENDER không ảnh hưởng gì [EG:T16].
+    expect(buildSpecs({ DATABASE_URL: 'postgresql://u:p@h/db', RENDER: 'true' }).specs.map((x: any) => x.name)).toEqual(['api', 'worker']);
   });
 });
 
@@ -265,4 +320,124 @@ describe('EG1 — tắt máy (SIGQUIT)', () => {
     expect(r.res.status).not.toBe(200);
     expect(r.sent.edge).toBe('SIGQUIT');
   }, 40_000);
+});
+
+// ---- [EG:T11] (phần d) chuỗi THẬT nginx -> hub-api `trust proxy 1` (review EG1 #5) ---------------------------------------
+// hub-api giả dùng ĐÚNG express của Nest + đúng luật main.ts (`TRUST_PROXY === '1'` -> trust proxy 1), env lấy từ buildSpecs
+// (hub-all tự ép TRUST_PROXY=1). Chỉ có nghĩa với nginx thật -> cần EDGE_NGINX_BIN (CI job unit cài nginx; local: chạy
+// trong image, DEPLOYMENT §3.6). Thay cho ca hub-all-e2e.sh (script đó thay hub-api của hubv dùng chung bằng hub-all).
+const ROOT = path.resolve(__dirname, '../../..');
+const ipEcho = (port: number) =>
+  `const e=require(require.resolve('express',{paths:[require.resolve('@nestjs/platform-express')]}));const a=e();` +
+  `if(process.env.TRUST_PROXY==='1')a.set('trust proxy',1);` +
+  `a.use((q,r)=>r.json({ip:q.ip,xff:q.headers['x-forwarded-for']??null,realIp:q.headers['x-real-ip']??null,rid:q.headers['x-request-id']??null}));` +
+  `a.listen(${port},'127.0.0.1');process.on('SIGTERM',()=>process.exit(0));`;
+
+function getJson(port: number, p: string, headers: Record<string, string>): Promise<any> {
+  return new Promise((resolve, reject) => {
+    http
+      .get({ host: '127.0.0.1', port, path: p, headers }, (res) => {
+        let body = '';
+        res.on('data', (d) => (body += d));
+        res.on('end', () => resolve({ status: res.statusCode, ...JSON.parse(body || '{}') }));
+      })
+      .on('error', reject);
+  });
+}
+
+async function withRealChain(extraEnv: Record<string, string>, fn: (edgePort: number) => Promise<void>) {
+  const [edgePort, apiPort] = [await freePort(), await freePort()];
+  const out = new PassThrough();
+  const lines: string[] = [];
+  out.on('data', (d) => lines.push(String(d)));
+  const logSink = await startEdgeLogSink(out);
+  const built = buildSpecs({ DATABASE_URL: 'postgresql://u:p@h/db', PORT: String(edgePort), EDGE_API_PORT: String(apiPort), EDGE_NGINX: '1', EDGE_PREFIX: tmp(), EDGE_NGINX_BIN: process.env.EDGE_NGINX_BIN!, PATH: process.env.PATH ?? '', ...extraEnv }, { accessLog: logSink.accessLog });
+  const specs = built.specs.map((x: any) =>
+    x.name === 'api' ? { ...x, cmd: process.execPath, args: ['-e', ipEcho(apiPort)], cwd: ROOT } : x.name === 'worker' ? { ...x, cmd: process.execPath, args: ['-e', drainer], cwd: undefined, env: { PATH: process.env.PATH } } : x,
+  );
+  let resolveExit!: (c: number) => void;
+  const exited = new Promise<number>((r) => (resolveExit = r));
+  const sup = supervise(specs, { timeoutMs: 10_000, log: (m: string) => lines.push(m), exit: resolveExit, stdout: out, stderr: out });
+  try {
+    try {
+      await waitUp(edgePort);
+      await waitUp(apiPort);
+    } catch (e) {
+      throw new Error(`${(e as Error).message}\n${lines.join('')}`);
+    }
+    await fn(edgePort);
+  } finally {
+    sup.stop('SIGTERM');
+    await exited;
+    logSink.close();
+  }
+}
+
+describe('EG1 — chuỗi nginx thật -> trust proxy 1', () => {
+  (process.env.EDGE_NGINX_BIN ? it : it.skip)('[EG:T11] (phần d) nginx THẬT + express trust proxy 1 (env từ buildSpecs): XFF giả 6.6.6.6 -> req.ip = IP kết nối ở /hooks, /socket.io, /api; cấu hình Render (0.0.0.0/0 + recursive off) -> req.ip = phần tử CUỐI do proxy thêm, không phải 6.6.6.6; x-request-id sai khuôn bị thay ở /socket.io', async () => {
+    await withRealChain({}, async (port) => {
+      for (const p of ['/hooks/github/src_github_main', '/socket.io/?EIO=4&transport=polling', '/api/v1/me']) {
+        const r = await getJson(port, p, { 'x-forwarded-for': '6.6.6.6', 'x-real-ip': '6.6.6.6', 'x-request-id': 'abc' });
+        expect([p, r.status, r.ip, r.xff, r.realIp]).toEqual([p, 200, '127.0.0.1', '127.0.0.1', '127.0.0.1']);
+        expect([p, /^[0-9a-f]{32}$/.test(r.rid)]).toEqual([p, true]);
+      }
+    });
+    await withRealChain({ EDGE_TRUSTED_PROXIES: '0.0.0.0/0,::/0', EDGE_REAL_IP_RECURSIVE: 'off' }, async (port) => {
+      for (const p of ['/hooks/github/src_github_main', '/socket.io/?EIO=4&transport=polling', '/api/v1/me']) {
+        const r = await getJson(port, p, { 'x-forwarded-for': '6.6.6.6, 203.0.113.9' });
+        expect([p, r.ip, r.xff]).toEqual([p, '203.0.113.9', '203.0.113.9']);
+      }
+    });
+  }, 40_000);
+});
+
+describe('EG1 — log UDP của nginx về supervisor', () => {
+  it('[EG:T10] (phần d) L0: dòng syslog -> JSON + "proc":"edge"; stdout chậm (đệm vượt trần) -> BỎ dòng và báo số dòng đã bỏ', async () => {
+    const dgram = require('dgram');
+    const out = new PassThrough({ highWaterMark: 1 });
+    const errs: string[] = [];
+    const sink = await startEdgeLogSink(out, { maxBuffered: 200, log: (m: string) => errs.push(m) });
+    const port = Number(/:(\d+),/.exec(sink.accessLog)![1]);
+    const c = dgram.createSocket('udp4');
+    const send = (m: string) => new Promise((r) => c.send(Buffer.from(m), port, '127.0.0.1', r));
+    await send('<190>Oct 12 08:54:35 edge: {"uri_path":"/hooks/a/b","status":429,"limit_req_status":"REJECTED"}');
+    await sleep(100);
+    expect(JSON.parse(String(out.read()))).toEqual({ uri_path: '/hooks/a/b', status: 429, limit_req_status: 'REJECTED', proc: 'edge' });
+    // Không ai đọc `out` -> writableLength tăng tới trần -> các dòng sau bị bỏ, không dồn RAM.
+    for (let i = 0; i < 20; i++) await send(`<190>Oct 12 08:54:35 edge: {"i":${i},"pad":"${'x'.repeat(50)}"}`);
+    await sleep(150);
+    expect(sink.dropped()).toBeGreaterThan(0);
+    expect(out.writableLength).toBeLessThan(200 + 200);
+    // Đọc hết -> dòng kế tiếp kèm thông báo đã bỏ bao nhiêu dòng.
+    while (out.read() !== null);
+    await send('<190>Oct 12 08:54:36 edge: {"after":true}');
+    await sleep(100);
+    const rest = String(out.read() ?? '');
+    expect(rest).toMatch(/bỏ \d+ dòng access log nginx/);
+    expect(rest).toContain('"after":true');
+    c.close();
+    sink.close();
+    expect(errs).toEqual([]);
+  });
+});
+
+
+describe('TRUST_PROXY (review feat/edge: hub-api chỉ tin service edge ở compose)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { parseTrustProxy } = require('../src/trust-proxy');
+  it('[EG:T11] (phần e) L0: trống/0/số khác 1 -> không tin (như cũ); 1 -> một chặng (như cũ); danh sách IP/CIDR -> chỉ tin đúng các địa chỉ đó; sai khuôn hoặc /0 -> lỗi; express với danh sách: client gọi THẲNG giả XFF không được tin, request từ IP edge thì được', () => {
+    for (const v of [undefined, '', '0', '2', ' 0 ']) expect([v, parseTrustProxy(v)]).toEqual([v, undefined]);
+    expect(parseTrustProxy('1')).toBe(1);
+    expect(parseTrustProxy('10.250.250.6')).toEqual(['10.250.250.6']);
+    expect(parseTrustProxy('10.250.250.0/29, ::1')).toEqual(['10.250.250.0/29', '::1']);
+    for (const bad of ['edge', '10.0.0.0/33', '0.0.0.0/0', '::/0', '1.2.3', 'loopback']) expect(() => parseTrustProxy(bad)).toThrow(/TRUST_PROXY/);
+    // Đúng ngữ nghĩa express (bản của Nest) với danh sách: compileTrust -> hàm tin theo địa chỉ chặng.
+    const express = require(require.resolve('express', { paths: [require.resolve('@nestjs/platform-express')] }));
+    const app = express();
+    app.set('trust proxy', parseTrustProxy('10.250.250.6'));
+    const trust = app.get('trust proxy fn');
+    expect(trust('10.250.250.6', 0)).toBe(true);
+    expect(trust('172.20.0.1', 0)).toBe(false); // host gọi thẳng :4000 qua gateway docker
+    expect(trust('10.250.250.1', 0)).toBe(false);
+  });
 });

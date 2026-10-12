@@ -155,16 +155,20 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 
 - **Rollback = một biến:** xoá `EDGE_NGINX` (hoặc đặt `0`) → Render khởi động lại → hub-api nghe thẳng `$PORT` như cũ.
 - **Health check** `/health` đi qua nginx, không bị cầu chì. Không cần đổi cấu hình health check của Render.
-- **Tắt máy:** nginx nhận `SIGQUIT` (trả nốt request đang proxy, tối đa 15 s — `worker_shutdown_timeout`), worker nhận
+- **Tắt máy:** nginx nhận `SIGQUIT` (trả nốt request đang proxy, tối đa `EDGE_DRAIN_MS` − 1 s = 15 s — `worker_shutdown_timeout`, dẫn ra từ biến, luôn nhỏ hơn thời gian hub-api chờ), worker nhận
   `SIGTERM` ngay, hub-api nhận `SIGTERM` khi nginx đã thoát (chậm nhất `EDGE_DRAIN_MS`) — hub-api thoát ngay khi nhận
   SIGTERM (không drain HTTP), nên phải chờ nginx trả xong. Tổng vẫn trong 25 s.
 - **Log:** access log JSON của nginx (`ts, ip, peer, xff, method, uri_path, status, limit_req_status, limit_conn_status,
   request_id, bytes, rt`) đi về supervisor qua syslog UDP 127.0.0.1 (stdout của tiến trình con là socket, nginx không mở
   được `/dev/stdout`), in ra với `"proc":"edge"`. Lỗi nginx (kể cả dòng `limiting requests` khi cầu chì chặn) đi stderr
-  với tiền tố `[edge]`.
+  với tiền tố `[edge]`. stdout chậm (đệm > 1 MB) → supervisor **bỏ** dòng access log (không dồn RAM) và in số dòng đã bỏ.
+- **hub-api chưa lên / timeout** → nginx trả `503 service_unavailable` JSON (khuôn ERRORS.md, `Retry-After: 5`) thay trang
+  HTML 502/504. Provider gặp 5xx thì tự gửi lại.
 - **RAM:** nginx 1 worker ≈ 7 MB (master) + 6 MB (worker) RSS, đo trong container `edge` của hubv.
-- **Lỗi cấu hình** (`EDGE_TRUSTED_PROXIES` sai khuôn, `EDGE_API_PORT` trùng `PORT`…) → supervisor in lỗi và thoát 1 ngay lúc
-  khởi động; nginx không chạy được (thiếu binary…) → coi như con chết ngoài ý muốn, cả nhóm dừng, Render khởi động lại.
+- **Lỗi cấu hình** → supervisor in lỗi và thoát 1 ngay lúc khởi động: `EDGE_TRUSTED_PROXIES` sai khuôn; `EDGE_API_PORT` trùng
+  `PORT`; dải tin cậy **quá rộng** (`/0`, IPv4 < /8, IPv6 < /16) mà `EDGE_REAL_IP_RECURSIVE=on` (nginx sẽ lấy phần tử
+  **đầu** của XFF = IP client tự đặt); **trên Render (env `RENDER`) mà `EDGE_TRUSTED_PROXIES` trống** (mọi người mang IP
+  proxy Render — chỉ chạy được khi cố ý đặt `EDGE_ALLOW_NO_REAL_IP=1`, kèm cảnh báo level 50); nginx không chạy được (thiếu binary…) → coi như con chết ngoài ý muốn, cả nhóm dừng, Render khởi động lại.
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
@@ -174,9 +178,10 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 | `EDGE_IP_BURST` | 500 | burst `nodelay` (kẹp 0–1000000) |
 | `EDGE_CONN_PER_IP` | 50 | kết nối đồng thời/IP cho `/hooks/*` (`limit_conn`, luôn bật khi có nginx) |
 | `EDGE_TRUSTED_PROXIES` | trống | IP/CIDR tin cậy cho `set_real_ip_from`, cách nhau dấu phẩy/khoảng trắng. Trống = không tin `X-Forwarded-For` (IP = địa chỉ kết nối TCP — trên Render đó là IP proxy, CHUNG cho mọi người) |
-| `EDGE_REAL_IP_RECURSIVE` | `on` | `real_ip_recursive`. `off` = lấy phần tử **cuối** của XFF |
+| `EDGE_REAL_IP_RECURSIVE` | `on` | `real_ip_recursive`. `off` = lấy phần tử **cuối** của XFF. Dải quá rộng (`/0`…) BẮT BUỘC `off` |
+| `EDGE_ALLOW_NO_REAL_IP` | tắt | `1` = cho chạy trên Render khi `EDGE_TRUSTED_PROXIES` trống (cố ý; cảnh báo level 50). Không đặt thì từ chối khởi động |
 | `EDGE_API_PORT` | 4000 | cổng nội bộ của hub-api khi có nginx (phải khác `PORT`) |
-| `EDGE_DRAIN_MS` | 16000 | hub-api chờ nginx thoát tối đa chừng này khi tắt máy (kẹp để còn ≥ 6 s trước mốc SIGKILL) |
+| `EDGE_DRAIN_MS` | 16000 | hub-api chờ nginx thoát tối đa chừng này khi tắt máy (kẹp để còn ≥ 6 s trước mốc SIGKILL); `worker_shutdown_timeout` của nginx = giá trị này − 1 s |
 | `HOST` | trống | địa chỉ hub-api nghe. `hub-all` tự đặt `127.0.0.1` khi `EDGE_NGINX=1`; trống = mọi interface như cũ. Không đặt tay trên Render |
 
 **Lần bật đầu tiên trên Render (Admin làm; phiên dev không có quyền Render):**
@@ -184,7 +189,9 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 1. Thêm env cho service `hub-all`: `EDGE_NGINX=1`, `EDGE_TRUSTED_PROXIES=0.0.0.0/0,::/0`, `EDGE_REAL_IP_RECURSIVE=off`.
    Không đặt `EDGE_IP_FUSE`. Cấu hình này = **đúng hành vi `TRUST_PROXY=1` hôm nay**: tin chặng ngay trước (proxy Render —
    chỉ nó gọi được vào container) và lấy phần tử **cuối** của `X-Forwarded-For`. Nếu đã đặt tay `PORT=4000` thì thêm
-   `EDGE_API_PORT=4001`.
+   `EDGE_API_PORT=4001`. **Bắt buộc `EDGE_REAL_IP_RECURSIVE=off`** với `0.0.0.0/0` (để `on` thì app từ chối khởi động).
+   Lưu ý: `0.0.0.0/0` cũng tin mọi máy trong **private network của Render** (service khác cùng tài khoản gọi thẳng
+   `$PORT` được, tự đặt XFF) — giống hệt `TRUST_PROXY=1` hôm nay; thu hẹp ở bước 5 nếu đo được dải proxy.
 2. Chờ deploy xanh, mở `https://<hub>/health` → 200. Log Render có dòng `{"proc":"edge",…,"uri_path":"/health"}`.
 3. **Đo IP thật** (§3.2 của SPEC-chong-qua-tai). Từ máy của bạn:
    ```bash
@@ -209,13 +216,23 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 
 **Kiểm ở local (không cần Render):**
 - L0: `npx jest apps/hub-api/test/edge-nginx.spec.ts` (template, envsubst, regex sourceKey [EG:T3], supervisor [EG:T9] với
-  nginx giả).
+  nginx giả). Có `EDGE_NGINX_BIN` thì [EG:T9] và [EG:T11] (phần d) — chuỗi nginx thật → express `trust proxy 1` — chạy với
+  nginx THẬT; job `unit` của CI cài nginx và đặt biến này.
 - nginx THẬT trong image: `docker build -t hub-edge . && docker run --rm --entrypoint node -e EDGE_NGINX_BIN=nginx hub-edge
   node_modules/jest/bin/jest.js -w 1 --runTestsByPath apps/hub-api/test/edge-nginx.spec.ts` — test in `T9 nginx THẬT: 200 sau … ms, exit 0`.
 - L2 trên hubv: service `edge` (:18080 → hub-api, trần thấp 5 r/s burst 10) + `edge-sink` (:18090 → sink, chỉ hubv) —
   `npm run verify:e2e -- --tag EG1` ([EG:T2], [EG:T10], [EG:T11]).
 - Compose dev: `edge` nghe :8080 (cầu chì bật, không có proxy phía trước nên IP kết nối là IP thật). k6 vẫn bắn thẳng
   `hub-api:4000`; số đo bắn qua `edge` phải ghi rõ trong báo cáo.
+- Compose (dev + hubv): `edge` nằm RIÊNG trên mạng `edge_net` (10.250.250.0/29) với IP cố định `10.250.250.6`; hub-api có
+  `TRUST_PROXY=10.250.250.6` (`main.ts` nhận danh sách IP/CIDR, `apps/hub-api/src/trust-proxy.ts`) → qua edge, `req.ip` của
+  hub-api = IP client mà nginx thấy (từ máy host là gateway `10.250.250.1`); gọi thẳng :4000/:14000 với XFF giả thì **không**
+  được tin. Đổi IP/subnet phải đổi cả hai chỗ.
+- Bằng chứng regex `sourceKey` (2026-10-12, DB hubv, chỉ đọc): `SELECT count(*), count(*) FILTER (WHERE ('/hooks/'||provider||'/'||source_key)
+  !~ '^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$') FROM hub.sources` → **29 source, 0 không khớp**, key dài nhất 40 ký tự
+  (payos 6, sepay 4, github 3, stripe 2, generic 2, api 12). Từ EG1, `POST /api/v1/sources` từ chối `sourceKey` tự đặt sai
+  `SOURCE_KEY_RE` (`^[a-z0-9_]{3,64}$`) bằng 400 `bad_request` — key nào tạo được cũng qua được nginx. Chạy lại query này
+  trên Neon trước khi bật `EDGE_NGINX` (key tạo trước EG1 qua API có thể lệch).
 
 ---
 
@@ -476,7 +493,8 @@ GOOGLE_OAUTH_CLIENT_ID=  # AU5b (ADR-127): đăng nhập Google — client RIÊN
 GOOGLE_OAUTH_CLIENT_SECRET=
                          # Authorized redirect URI = https://<web>.vercel.app/auth/google/callback (qua proxy web). Cách tạo:
                          # mục "Tạo client đăng nhập Google" dưới khối này. KHÔNG đặt GOOGLE_OAUTH_FAKE_BASE_URL trên deployed
-TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For (request gọi THẲNG API)
+TRUST_PROXY=1            # sau proxy của Render: rate limit theo IP đọc X-Forwarded-For (request gọi THẲNG API). Nhận
+                         # thêm danh sách IP/CIDR = chỉ tin đúng các proxy đó (compose local: IP của service edge)
 WEB_PROXY_SECRET=        # R-2/ADR-110: ≥ 32 ký tự, GIỐNG HỆT biến cùng tên ở Vercel. Request console đi qua proxy của
                          # Vercel (rewrites) nên `req.ip` là IP egress của Vercel (chung cho mọi người). Web gửi IP thật
                          # trong `x-hub-client-ip` kèm secret này; API chỉ tin khi khớp (timingSafeEqual). Để trống =

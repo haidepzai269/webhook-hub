@@ -20,7 +20,6 @@ import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter
 import { aesGcmEncrypt } from '@hub/crypto';
 import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType } from '@hub/common';
 import { Prisma } from '@prisma/client';
-import { ulid } from 'ulidx';
 import { randomUUID } from 'crypto';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
@@ -28,6 +27,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { RequestWithPrincipal } from '../service-api/principal';
 import { hubError } from '../errors/hub-error';
+import { SOURCE_KEY_RE, generateSourceKey } from '../console/source-key';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
@@ -156,7 +156,13 @@ export class ApiController {
     const masterKey = getMasterKey();
     // S8: cùng bộ kiểm với /v1/p (provider hợp lệ, generic bắt buộc verificationConfig) -> 422 có tên trường.
     const input = parseSourceInput(body);
-    const sourceKey = body.sourceKey || `src_${input.provider}_${ulid().toLowerCase()}`;
+    // Review EG1 #4: key tự đặt phải đúng khuôn (cùng luật với "Kết nối provider") — key lạ (`my.key`, > 64 ký tự) sẽ bị
+    // nginx trả 404 ở /hooks/* mà source vẫn được tạo.
+    const custom = body?.sourceKey;
+    if (custom !== undefined && custom !== null && custom !== '' && (typeof custom !== 'string' || !SOURCE_KEY_RE.test(custom))) {
+      throw hubError('bad_request', { field: 'sourceKey' }, 'sourceKey: 3–64 ký tự a-z 0-9 _ (bỏ trống để hub tự sinh)');
+    }
+    const sourceKey: string = custom || generateSourceKey(input.provider);
 
     const source = await this.withAudit(tenantId, async (repo) => {
       const created = await repo.createSource({
