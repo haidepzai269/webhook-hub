@@ -23,6 +23,12 @@ const RECHECK_MS = Number(process.env.SOCKET_RECHECK_MS) > 0 ? Number(process.en
 /** SPEC-auth §5.7 (thay ADR-035): mỗi socket ở ĐÚNG một room project. Tên giữ cho log/metrics đọc được. */
 const ROOM_PREFIX = 'project:';
 const tenantRoom = (tenantId: string) => `${ROOM_PREFIX}${tenantId}`;
+/**
+ * CB3 (review M1, ADR-169): room CHỈ operator của MỘT project — `alert.changed` chỉ vào đây (cảnh báo là của operator, Q1).
+ * Vẫn theo project (SPEC §5.3: không room operator xuyên project). Bộ đếm metrics.tick bỏ qua room này.
+ */
+const OPS_SUFFIX = ':ops';
+export const opsRoom = (tenantId: string) => `${tenantRoom(tenantId)}${OPS_SUFFIX}`;
 
 /** Kênh Redis (từ hub-worker) -> tên sự kiện Socket.IO. Chặng ở hub-api KHÔNG đi qua đây (in-process). */
 export const REALTIME_CHANNELS: Record<string, string> = {
@@ -124,7 +130,7 @@ export class RealtimeGateway
       if (!this.server) return;
       const rooms = this.server.sockets.adapter.rooms;
       for (const [room] of rooms) {
-        if (!room.startsWith(ROOM_PREFIX)) continue;
+        if (!room.startsWith(ROOM_PREFIX) || room.endsWith(OPS_SUFFIX)) continue;
         const tenantId = room.slice(ROOM_PREFIX.length);
         this.server.to(room).emit('metrics.tick', computeTick(this.counters.get(tenantId)));
       }
@@ -167,8 +173,12 @@ export class RealtimeGateway
       logger.warn({ channel }, 'Realtime message thiếu tenantId, bỏ qua');
       return;
     }
+    if (eventName === 'alert.changed') {
+      // M1: chỉ socket của OPERATOR đang mở project này — thành viên thường cùng room project không nhận.
+      this.server.to(opsRoom(tenantId)).emit(eventName, data);
+      return; // không đụng bộ đếm metrics.tick
+    }
     this.server.to(tenantRoom(tenantId)).emit(eventName, data);
-    if (eventName === 'alert.changed') return; // không đụng bộ đếm metrics.tick
     const c = this.counterFor(tenantId);
     if (eventName === 'event.received') {
       c.events += Array.isArray(data.events) ? data.events.length : 1;
@@ -200,6 +210,7 @@ export class RealtimeGateway
         socket.data.tenantId = claims.tid;
         socket.data.userId = claims.sub;
         socket.data.sid = claims.sid;
+        socket.data.isOperator = session.user?.isOperator === true; // CB3: từ CHÍNH user của session, không từ vé/client
         next();
       })
       .catch(() => next(new Error('UNAUTHORIZED')));
@@ -233,6 +244,10 @@ export class RealtimeGateway
       if (!ok) {
         s.disconnect(true);
         n++;
+      } else if (s.data.isOperator && !sess.isOperator) {
+        // CB3: mất quyền operator nhưng vẫn là thành viên -> giữ kết nối, chỉ rời room cảnh báo (R-3 không đổi).
+        s.data.isOperator = false;
+        s.leave(opsRoom(s.data.tenantId));
       }
     }
     if (n > 0) logger.info({ disconnected: n, userId: userId ?? null }, 'Realtime: ngắt socket mất phiên / mất quyền (R-3)');
@@ -259,6 +274,7 @@ export class RealtimeGateway
   handleConnection(client: Socket) {
     // Middleware ở afterInit đã kiểm vé + session; tới đây chắc chắn có tenantId (= project của vé)
     client.join(tenantRoom(client.data.tenantId));
+    if (client.data.isOperator === true) client.join(opsRoom(client.data.tenantId));
     logger.debug({ clientId: client.id }, 'Client kết nối tới Realtime Gateway');
   }
 

@@ -145,6 +145,13 @@ export class PrismaService {
     return this.client.project.findUnique({ where: { id } });
   }
 
+  /** CB3 (review L6): id nào trong danh sách là project đang tồn tại — một truy vấn `id IN (…)`, không kéo mọi project. */
+  public async findExistingProjectIds(ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.client.project.findMany({ where: { id: { in: ids } }, select: { id: true } });
+    return rows.map((r) => r.id);
+  }
+
   /** Dùng ở `/v1/p/:project/*` — path mang slug. */
   public findProjectBySlug(slug: string) {
     return this.client.project.findUnique({ where: { slug } });
@@ -172,8 +179,8 @@ export class PrismaService {
   }
 
   // ================== Cảnh báo: escape hatch của OPERATOR (CB3, SPEC-canh-bao-nhan-dinh §5.2, ADR-169) ==================
-  // Chuông của operator nhìn MỌI project (Q1). `alerts` mang tenant_id + RLS -> đọc xuyên project chỉ qua BA hàm có tên
-  // dưới đây (systemTx), CHỈ `AlertsController` (sau OperatorGuard) gọi. Ghi (ack) KHÔNG đi đường này: tra tenant của
+  // Chuông của operator nhìn MỌI project (Q1). `alerts` mang tenant_id + RLS -> đọc xuyên project chỉ qua BỐN hàm có tên
+  // dưới đây (systemTx), CHỈ module alerts (sau OperatorGuard) gọi — gate `operator-alerts` giữ điều này. Ghi (ack) KHÔNG đi đường này: tra tenant của
   // cảnh báo rồi ghi bằng `forTenant(tenant)` như mọi chỗ khác — giống bước ingest tra source rồi mới scope.
 
   /**
@@ -182,8 +189,9 @@ export class PrismaService {
    */
   public operatorAlertsAcrossTenants(f: OperatorAlertFilter): Promise<OperatorAlertRow[]> {
     const conds: Prisma.Sql[] = [];
-    if (f.state) conds.push(Prisma.sql`AND a.state::text = ${f.state}`);
-    if (f.severity) conds.push(Prisma.sql`AND a.severity::text = ${f.severity}`);
+    // review L4: so sánh trên kiểu enum (không ép ::text cột) để index (state, severity, opened_at) dùng được.
+    if (f.state) conds.push(Prisma.sql`AND a.state = ${f.state}::"hub"."AlertState"`);
+    if (f.severity) conds.push(Prisma.sql`AND a.severity = ${f.severity}::"hub"."AlertSeverity"`);
     if (f.rule) conds.push(Prisma.sql`AND a.rule = ${f.rule}`);
     if (f.projectId) conds.push(Prisma.sql`AND a.tenant_id = ${f.projectId}::uuid`);
     if (f.cursor) {
@@ -210,9 +218,18 @@ export class PrismaService {
     });
   }
 
-  /** Tóm tắt cho chuông: số cảnh báo OPEN theo mức + chưa xem, theo từng project (chỉ project có cảnh báo OPEN). */
-  public operatorAlertSummaryAcrossTenants(limit = 500): Promise<OperatorAlertProjectSummary[]> {
+  /**
+   * Tóm tắt cho chuông: tổng OPEN theo mức + chưa xem tính trên TOÀN bảng (không trần), và chi tiết theo từng project
+   * (chỉ project có cảnh báo OPEN, tối đa `limit` project — tổng không phụ thuộc trần này).
+   */
+  public operatorAlertSummaryAcrossTenants(limit = 500): Promise<OperatorAlertSummary> {
     return this.systemTx('operator: tóm tắt alerts xuyên project', async (tx) => {
+      const [t] = await tx.$queryRaw<{ critical: bigint; warning: bigint; info: bigint; unacked: bigint }[]>(Prisma.sql`
+        SELECT count(*) FILTER (WHERE severity = 'critical') AS critical,
+               count(*) FILTER (WHERE severity = 'warning')  AS warning,
+               count(*) FILTER (WHERE severity = 'info')     AS info,
+               count(*) FILTER (WHERE acknowledged_at IS NULL) AS unacked
+        FROM hub.alerts WHERE state = 'OPEN'`);
       const rows = await tx.$queryRaw<{ id: string; slug: string; name: string; critical: bigint; warning: bigint; info: bigint; unacked: bigint }[]>(Prisma.sql`
         SELECT p.id, p.slug, p.name,
                count(*) FILTER (WHERE a.severity = 'critical') AS critical,
@@ -224,14 +241,27 @@ export class PrismaService {
         GROUP BY p.id, p.slug, p.name
         ORDER BY critical DESC, warning DESC, p.slug ASC
         LIMIT ${limit}`);
-      return rows.map((r) => ({
-        project: { id: r.id, slug: r.slug, name: r.name },
-        critical: Number(r.critical),
-        warning: Number(r.warning),
-        info: Number(r.info),
-        unacked: Number(r.unacked),
-      }));
+      return {
+        totals: { critical: Number(t?.critical ?? 0), warning: Number(t?.warning ?? 0), info: Number(t?.info ?? 0), unacked: Number(t?.unacked ?? 0) },
+        perProject: rows.map((r) => ({
+          project: { id: r.id, slug: r.slug, name: r.name },
+          critical: Number(r.critical),
+          warning: Number(r.warning),
+          info: Number(r.info),
+          unacked: Number(r.unacked),
+        })),
+      };
     });
+  }
+
+  /** ack-all không chỉ định project: MỌI tenant còn cảnh báo OPEN chưa xem (mở trước `asOf` nếu có) — không trần. */
+  public async operatorAlertsUnackedTenants(asOf?: Date): Promise<string[]> {
+    const rows = await this.systemTx('operator: tenant còn alert chưa xem', (tx) =>
+      tx.$queryRaw<{ tenantId: string }[]>(Prisma.sql`
+        SELECT DISTINCT tenant_id AS "tenantId" FROM hub.alerts
+        WHERE state = 'OPEN' AND acknowledged_at IS NULL ${asOf ? Prisma.sql`AND opened_at <= ${asOf}` : Prisma.empty}`),
+    );
+    return rows.map((r) => r.tenantId);
   }
 
   /** Bước XÁC ĐỊNH tenant của một cảnh báo (ack theo id từ chuông xuyên project). Không có -> null (route trả 404). */
@@ -306,6 +336,11 @@ export interface OperatorAlertProject {
 export interface OperatorAlertRow extends AlertRow {
   cursorAt: string;
   project: OperatorAlertProject;
+}
+
+export interface OperatorAlertSummary {
+  totals: { critical: number; warning: number; info: number; unacked: number };
+  perProject: OperatorAlertProjectSummary[];
 }
 
 export interface OperatorAlertProjectSummary {

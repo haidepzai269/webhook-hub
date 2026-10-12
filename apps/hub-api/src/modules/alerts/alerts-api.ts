@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { ALERT_RULE_CODES, ALERT_RULES, AlertRuleCode, alertTitleKey, DEFAULT_EMAIL_RULES } from '@hub/common';
 import { AlertPreferencesInput, OperatorAlertRow, PrismaService } from '@hub/database';
 import { hubError } from '../errors/hub-error';
-import { assertFlatQuery, badParam, isUuid, parseEnumParam, parsePageCursor, parseUuidParam } from '../api/list-params';
+import { assertFlatQuery, badParam, isUuid, parseEnumParam, parsePageCursor, parseTimeParam, parseUuidParam } from '../api/list-params';
 import { parseLimit, runPage } from '../api/console-lists';
 
 /**
@@ -18,10 +18,11 @@ export type AlertStore = Pick<
   | 'operatorAlertsAcrossTenants'
   | 'operatorAlertSummaryAcrossTenants'
   | 'operatorFindAlertTenant'
+  | 'operatorAlertsUnackedTenants'
   | 'tenantTx'
   | 'forTenant'
   | 'findProjectById'
-  | 'listProjects'
+  | 'findExistingProjectIds'
   | 'identity'
   | '$transaction'
 >;
@@ -87,11 +88,10 @@ export async function listAlerts(store: AlertStore, q: AlertListQuery) {
 }
 
 export async function alertSummary(store: AlertStore) {
-  const perProject = await store.operatorAlertSummaryAcrossTenants();
-  const sum = (k: 'critical' | 'warning' | 'info' | 'unacked') => perProject.reduce((n, p) => n + p[k], 0);
+  const { totals, perProject } = await store.operatorAlertSummaryAcrossTenants();
   return {
-    openBySeverity: { critical: sum('critical'), warning: sum('warning'), info: sum('info') },
-    unacked: sum('unacked'),
+    openBySeverity: { critical: totals.critical, warning: totals.warning, info: totals.info },
+    unacked: totals.unacked,
     perProject,
   };
 }
@@ -115,25 +115,34 @@ export async function ackAlert(store: AlertStore, rawId: string, actor: string, 
 }
 
 /**
- * "Đã xem tất cả": `?project=<uuid>` -> một project (không tồn tại -> 404); không có -> mọi project đang có cảnh báo OPEN
- * chưa xem. Mỗi project MỘT transaction (ack + audit `alert.acknowledged_all` khi ghi được ≥ 1 dòng).
+ * "Đã xem tất cả": `?project=<uuid>` -> một project (không tồn tại -> 404); không có -> mọi project còn cảnh báo OPEN chưa
+ * xem (truy vấn riêng, không trần). `?asOf=<ISO>` (review L2): chỉ cảnh báo mở TỪ TRƯỚC mốc này — web gửi lúc mở chuông,
+ * cảnh báo mới đến sau đó không bị đánh dấu "đã xem" oan. Mỗi project MỘT transaction (ack + audit khi ghi được ≥ 1 dòng).
  */
-export async function ackAllAlerts(store: AlertStore, rawProject: unknown, actor: string, now = new Date()) {
-  const projectId = parseUuidParam(rawProject, 'project');
+export async function ackAllAlerts(store: AlertStore, q: { project?: unknown; asOf?: unknown }, actor: string, now = new Date()) {
+  assertFlatQuery(q);
+  const projectId = parseUuidParam(q.project, 'project');
+  const asOf = parseTimeParam(q.asOf, 'asOf');
   let tenants: string[];
   if (projectId) {
     if (!(await store.findProjectById(projectId))) throw hubError('not_found');
     tenants = [projectId];
   } else {
-    tenants = (await store.operatorAlertSummaryAcrossTenants()).filter((p) => p.unacked > 0).map((p) => p.project.id);
+    tenants = await store.operatorAlertsUnackedTenants(asOf);
   }
   const projects: { id: string; acknowledged: number }[] = [];
   for (const tenantId of tenants) {
     const n = await store.tenantTx(tenantId, async (tx) => {
       const repo = store.forTenant(tenantId, tx);
-      const count = await repo.ackAllOpenAlerts(actor, now);
+      const count = await repo.ackAllOpenAlerts(actor, now, asOf);
       if (count > 0) {
-        await repo.createAuditLog({ action: 'alert.acknowledged_all', entityType: 'project', entityId: tenantId, actor, metadata: { count } });
+        await repo.createAuditLog({
+          action: 'alert.acknowledged_all',
+          entityType: 'project',
+          entityId: tenantId,
+          actor,
+          metadata: { count, ...(asOf ? { asOf: asOf.toISOString() } : {}) },
+        });
       }
       return count;
     });
@@ -200,8 +209,8 @@ export function parseAlertPreferences(body: unknown): AlertPreferencesInput {
 export async function putAlertPreferences(store: AlertStore, userId: string, body: unknown, ip: string | null) {
   const input = parseAlertPreferences(body);
   if (input.mutedProjects?.length) {
-    // review CB1: mảng uuid không có khoá ngoại -> route kiểm project tồn tại TRƯỚC khi ghi.
-    const existing = new Set((await store.listProjects()).map((p) => p.id));
+    // review CB1: mảng uuid không có khoá ngoại -> route kiểm project tồn tại TRƯỚC khi ghi (một truy vấn theo id).
+    const existing = new Set(await store.findExistingProjectIds(input.mutedProjects));
     const unknown = input.mutedProjects.filter((id) => !existing.has(id));
     if (unknown.length) throw badParam('mutedProjects', `Project không tồn tại: ${unknown.slice(0, 5).join(', ')}`);
   }

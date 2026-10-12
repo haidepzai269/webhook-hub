@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import { PrismaService } from '@hub/database';
+import { JwtService } from '@nestjs/jwt';
 import { describeDb, newTestPrisma } from '../../../libs/database/test/support/test-db';
+import { AuthService } from '../src/modules/auth/auth.service';
+import { AuthRateLimiter } from '../src/modules/auth/rate-limit';
+import { loadAuthConfig } from '../src/modules/auth/auth-config';
 import { ackAlert, ackAllAlerts, alertSummary, getAlertPreferences, listAlerts, putAlertPreferences, putUserLocale } from '../src/modules/alerts/alerts-api';
 
 /**
@@ -102,6 +106,8 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     expect(sum.perProject.find((p) => p.project.id === A)).toMatchObject({ warning: 5, critical: 0, unacked: 5, project: { slug: `cb3-a-${run}` } });
     expect(sum.perProject.find((p) => p.project.id === B)).toMatchObject({ warning: 5, unacked: 5 });
     expect(sum.openBySeverity.warning).toBeGreaterThanOrEqual(10);
+    // tổng tính trên toàn bảng: không nhỏ hơn tổng các project được liệt kê
+    expect(sum.unacked).toBeGreaterThanOrEqual(sum.perProject.reduce((n, p) => n + p.unacked, 0));
 
     const repoB = svc.forTenant(B);
     expect(await repoB.findAlertById(aId)).toBeNull();
@@ -125,17 +131,24 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     expect(audits[0]).toMatchObject({ tenantId: A, entityType: 'alert', actor: op });
     await expect(ackAlert(svc, randomUUID(), op)).rejects.toMatchObject({ status: 404 });
 
-    const all = await ackAllAlerts(svc, A, op);
-    expect(all).toEqual({ acknowledged: 4, projects: [{ id: A, acknowledged: 4 }] }); // 5 dòng A, 1 đã xem
-    expect(await ackAllAlerts(svc, A, op)).toEqual({ acknowledged: 0, projects: [{ id: A, acknowledged: 0 }] });
-    expect(await owner.auditLog.findMany({ where: { tenantId: A, action: 'alert.acknowledged_all' }, select: { metadata: true, actor: true } })).toEqual([
-      { metadata: { count: 4 }, actor: op },
+    const unacked = await svc.operatorAlertsUnackedTenants();
+    expect(unacked).toEqual(expect.arrayContaining([A, B]));
+    expect(await svc.operatorAlertsUnackedTenants(new Date('2000-01-01T00:00:00Z'))).not.toContain(A);
+    // asOf = lúc mở chuông: dòng 2091 (mở sau mốc) KHÔNG bị đánh dấu
+    const asOf = '2090-12-31T00:00:00.000Z';
+    expect(await ackAllAlerts(svc, { project: A, asOf }, op)).toEqual({ acknowledged: 3, projects: [{ id: A, acknowledged: 3 }] }); // 5 dòng A, 1 đã xem, 1 sau asOf
+    expect(await owner.alert.findUniqueOrThrow({ where: { id: idOf(99) } })).toMatchObject({ acknowledgedAt: null });
+    expect(await ackAllAlerts(svc, { project: A }, op)).toEqual({ acknowledged: 1, projects: [{ id: A, acknowledged: 1 }] });
+    expect(await ackAllAlerts(svc, { project: A }, op)).toEqual({ acknowledged: 0, projects: [{ id: A, acknowledged: 0 }] });
+    expect(await owner.auditLog.findMany({ where: { tenantId: A, action: 'alert.acknowledged_all' }, select: { metadata: true, actor: true }, orderBy: { id: 'asc' } })).toEqual([
+      { metadata: { count: 3, asOf }, actor: op },
+      { metadata: { count: 1 }, actor: op },
     ]);
     expect(await owner.alert.count({ where: { tenantId: A, state: 'OPEN' } })).toBe(5);
     expect((await alertSummary(svc)).perProject.find((p) => p.project.id === A)).toMatchObject({ unacked: 0 });
   });
 
-  it('tuỳ chọn cảnh báo + ngôn ngữ: mutedProjects phải tồn tại; ghi qua IdentityRepository + auth_audit cùng transaction', async () => {
+  it('tuỳ chọn cảnh báo + ngôn ngữ: mutedProjects phải tồn tại; ghi qua IdentityRepository + auth_audit cùng transaction; /auth/me có locale', async () => {
     expect(await getAlertPreferences(svc, op)).toMatchObject({ emailEnabled: false, updatedAt: null });
     await expect(putAlertPreferences(svc, op, { mutedProjects: [randomUUID()] }, null)).rejects.toMatchObject({ status: 400 });
     const saved = await putAlertPreferences(svc, op, { emailEnabled: true, emailRules: ['destination.auth_rejected'], mutedProjects: [B] }, '10.0.0.1');
@@ -147,5 +160,9 @@ describeDb('CB3 API cảnh báo (Postgres, hub_app)', () => {
     expect(await putUserLocale(svc, op, { locale: 'en' }, null)).toEqual({ locale: 'en', changed: false });
     expect((await owner.user.findUniqueOrThrow({ where: { id: op } })).locale).toBe('en');
     expect(await owner.authAudit.count({ where: { userId: op, action: 'user.locale_changed' } })).toBe(1);
+    // GET /auth/me trả locale đã lưu — web đồng bộ nút Ngôn ngữ ở máy khác
+    const cfg = loadAuthConfig({ JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40) });
+    const auth = new AuthService(svc, new JwtService({}), cfg, new AuthRateLimiter(null));
+    expect((await auth.me(op)).user).toMatchObject({ id: op, locale: 'en' });
   });
 });

@@ -1130,9 +1130,10 @@ export class TenantScopedRepository {
   }
 
   /** "Đánh dấu đã xem tất cả" của project: mọi cảnh báo OPEN chưa xem. Trả số dòng vừa ghi. */
-  async ackAllOpenAlerts(userId: string, now: Date): Promise<number> {
+  async ackAllOpenAlerts(userId: string, now: Date, asOf?: Date): Promise<number> {
+    // CB3 (review L2): `asOf` = lúc người dùng mở chuông — cảnh báo mở SAU mốc này (chưa ai thấy) không bị đánh dấu theo.
     const r = await this.prisma.alert.updateMany({
-      where: { tenantId: this.tenantId, state: 'OPEN', acknowledgedAt: null },
+      where: { tenantId: this.tenantId, state: 'OPEN', acknowledgedAt: null, ...(asOf ? { openedAt: { lte: asOf } } : {}) },
       data: { acknowledgedAt: now, acknowledgedBy: userId },
     });
     return r.count;

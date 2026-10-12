@@ -1674,6 +1674,13 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - **Tuỳ chọn / ngôn ngữ** (gắn người, ADR-166): `IdentityRepository` + `auth_audit` (`alert_preferences.updated`, `user.locale_changed`) cùng transaction. `emailRules` ⊆ `ALERT_RULE_CODES`, `mutedProjects` phải là project đang tồn tại (kiểm trước khi ghi), trường lạ → 400.
 - **Realtime:** `hub:realtime:alerts` → `alert.changed` qua đúng đường các kênh cũ (`REALTIME_CHANNELS`), vào room `project:<tenantId>` của tin; payload lọc lại còn 6 trường (`parseAlertChangedNotice`), sai hình thì bỏ. Không room operator, không đụng R-3.
 **Đánh đổi:** Escape hatch dùng `app.rls_system` — một chỗ quên lọc trong ba hàm này là lộ chéo, nên chúng chỉ ĐỌC và có test riêng. Danh sách không lọc `state` sắp theo `opened_at` không có index khớp hoàn toàn (index hiện có bắt đầu bằng `state`/`tenant_id`) — đủ ở quy mô đồ án. Tóm tắt trả tối đa 500 project. `unacked` tính trên cảnh báo OPEN.
+**Bổ sung (review CB3, 2026-10-12, append):**
+- **M1 — `alert.changed` chỉ tới operator:** room project thường có cả thành viên không phải operator. Socket nhận `isOperator` từ CHÍNH user của session lúc handshake; operator join thêm room `project:<id>:ops` (vẫn theo project, đúng §5.3 — không room xuyên project). `alert.changed` chỉ vào room này; `metrics.tick` bỏ qua nó. Kiểm lại R-3 thấy operator bị hạ quyền nhưng còn là thành viên -> giữ kết nối, rời room `:ops` (ngữ nghĩa R-3 khác không đổi). Người vừa được nâng thành operator phải kết nối lại mới nhận.
+- **Tổng của chuông không phụ thuộc trần:** `openBySeverity`/`unacked` từ một câu tổng hợp riêng không LIMIT; `perProject` vẫn tối đa 500. ack-all không chỉ định project lấy tenant bằng escape hatch thứ tư `operatorAlertsUnackedTenants` (`SELECT DISTINCT tenant_id`, chỉ đọc).
+- **`asOf` cho ack-all:** `?asOf=<ISO>` = lúc mở chuông — cảnh báo mở sau mốc đó không bị đánh dấu "đã xem" oan.
+- **Gate `operator-alerts`:** lời gọi `operator(Alerts|AlertSummary|FindAlert)…(` chỉ được ở `apps/hub-api/src/modules/alerts/` và `prisma.service.ts`.
+- Lọc `state`/`severity` so sánh trên kiểu enum (không ép `::text` cột) để index dùng được; `mutedProjects` kiểm bằng `findExistingProjectIds` (`id IN (…)`). `GET /auth/me` trả `user.locale`.
+- **Chấp nhận:** đọc của operator (list/summary) KHÔNG ghi audit — chỉ thao tác ghi (ack, ack-all, tuỳ chọn, ngôn ngữ). Index cho `/alerts` không lọc `state` để sau.
 
 ---
 

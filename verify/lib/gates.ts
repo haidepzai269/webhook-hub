@@ -159,6 +159,13 @@ export const GATES: Gate[] = [
     check: grepLines(new RegExp(RLS_SYSTEM)),
   },
   {
+    id: 'operator-alerts',
+    rule: 'Escape hatch cảnh báo xuyên project `operator(Alerts|AlertSummary|FindAlert)…(` chỉ được gọi ở apps/hub-api/src/modules/alerts/ (sau OperatorGuard) và khai ở prisma.service.ts',
+    source: 'SPEC-canh-bao-nhan-dinh §5.2, review CB3 L3, ADR-169',
+    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && !f.startsWith('apps/hub-api/src/modules/alerts/'),
+    check: grepLines(/\boperator(Alerts|AlertSummary|FindAlert)\w*\s*\(/),
+  },
+  {
     id: 'data-migration-rls',
     rule:
       "Migration DỮ LIỆU (UPDATE/INSERT/DELETE trên bảng có RLS) tạo sau 20261011110000_rls_hub_app phải tự `SET LOCAL app.rls" +

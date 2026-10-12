@@ -34,6 +34,18 @@ describe('grep gác cổng §7.3', () => {
     expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/a.ts:1']);
   });
 
+  it('escape hatch cảnh báo của operator: gọi ngoài module alerts → đỏ; trong module alerts / prisma.service thì xanh', () => {
+    const call = 'await this.prisma.operator' + 'AlertsAcrossTenants({ dir: "older", limit: 1 });';
+    const f = files({
+      'apps/hub-api/src/modules/api/x.ts': call + '\nconst t = await p.operator' + 'FindAlertTenant(id);',
+      'apps/hub-worker/src/y.ts': 'p.operator' + 'AlertSummaryAcrossTenants ()',
+      'apps/hub-api/src/modules/alerts/alerts-api.ts': call,
+      'libs/database/src/prisma.service.ts': 'public operator' + 'AlertsAcrossTenants(f) {}',
+    });
+    const r = runGates([byId('operator-alerts')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/api/x.ts:1', 'apps/hub-api/src/modules/api/x.ts:2', 'apps/hub-worker/src/y.ts:1']);
+  });
+
   it('chữ ký: === cạnh signature → đỏ; typeof … !== "string" / === null không phải so sánh giá trị', () => {
     const f = files({
       'libs/providers/src/a.ts': 'if (sig ' + '=== expectedSignature) ok();\nif (typeof body.signature ' + "!== 'string' || x === null) bad();",

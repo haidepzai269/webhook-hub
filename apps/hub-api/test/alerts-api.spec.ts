@@ -18,6 +18,7 @@ import { toErrorBody } from '../src/modules/errors/service-exception.filter';
 import { encodeKeyset } from '../src/modules/api/list-params';
 import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { loadAuthConfig } from '../src/modules/auth/auth-config';
+import { signSocketTicket } from '../src/modules/auth/tokens';
 
 /**
  * CB3 (SPEC-canh-bao-nhan-dinh §5.2/§5.3, ADR-169) — phần thuần: OperatorGuard + khuôn lỗi, kiểm đầu vào (400), ack
@@ -74,7 +75,10 @@ function fakeStore(opts: { rows?: any[]; tenantOf?: Record<string, string>; ackR
   const ackResults = [...(opts.ackResults ?? [])];
   const repo = (tenantId: string) => ({
     ackAlert: async () => ackResults.shift() ?? { found: false, changed: false },
-    ackAllOpenAlerts: async () => (tenantId === A ? 2 : 0),
+    ackAllOpenAlerts: async (_u: string, _now: Date, asOf?: Date) => {
+      calls.push({ ackAll: tenantId, asOf: asOf ?? null });
+      return tenantId === A ? 2 : 0;
+    },
     findAlertById: async (id: string) => ({ id, state: 'OPEN', acknowledgedAt: new Date('2026-10-12T00:00:00Z'), acknowledgedBy: 'u-1' }),
     createAuditLog: async (x: any) => audits.push({ tenantId, ...x }),
   });
@@ -91,15 +95,23 @@ function fakeStore(opts: { rows?: any[]; tenantOf?: Record<string, string>; ackR
       calls.push(f);
       return opts.rows ?? [];
     },
-    operatorAlertSummaryAcrossTenants: async () => [
-      { project: { id: A, slug: 'a', name: 'A' }, critical: 2, warning: 1, info: 0, unacked: 2 },
-      { project: { id: B, slug: 'b', name: 'B' }, critical: 0, warning: 3, info: 1, unacked: 0 },
-    ],
+    // tổng (totals) tính riêng, không cộng từ perProject (có trần) — review L1
+    operatorAlertSummaryAcrossTenants: async () => ({
+      totals: { critical: 7, warning: 9, info: 1, unacked: 12 },
+      perProject: [
+        { project: { id: A, slug: 'a', name: 'A' }, critical: 2, warning: 1, info: 0, unacked: 2 },
+        { project: { id: B, slug: 'b', name: 'B' }, critical: 0, warning: 3, info: 1, unacked: 0 },
+      ],
+    }),
+    operatorAlertsUnackedTenants: async (asOf?: Date) => {
+      calls.push({ unackedAsOf: asOf ?? null });
+      return [A];
+    },
     operatorFindAlertTenant: async (id: string) => opts.tenantOf?.[id] ?? null,
     tenantTx: async (t: string, fn: any) => fn({ tx: t }),
     forTenant: (t: string) => repo(t),
     findProjectById: async (id: string) => ((opts.projects ?? [A, B]).includes(id) ? { id } : null),
-    listProjects: async () => (opts.projects ?? [A, B]).map((id) => ({ id })),
+    findExistingProjectIds: async (ids: string[]) => ids.filter((id) => (opts.projects ?? [A, B]).includes(id)),
     identity: () => idn,
     $transaction: async (fn: any) => fn({}),
   };
@@ -140,10 +152,10 @@ describe('GET /api/v1/alerts — kiểm đầu vào (400 bad_request kèm field)
 });
 
 describe('GET /api/v1/alerts/summary', () => {
-  it('cộng openBySeverity + unacked từ từng project; perProject giữ nguyên {project, critical, warning, …}', async () => {
+  it('openBySeverity + unacked lấy từ tổng KHÔNG trần (không cộng perProject có trần 500); perProject giữ nguyên {project, critical, warning, …}', async () => {
     expect(await alertSummary(fakeStore().store)).toEqual({
-      openBySeverity: { critical: 2, warning: 4, info: 1 },
-      unacked: 2,
+      openBySeverity: { critical: 7, warning: 9, info: 1 },
+      unacked: 12,
       perProject: [expect.objectContaining({ project: { id: A, slug: 'a', name: 'A' }, critical: 2, warning: 1 }), expect.objectContaining({ project: expect.objectContaining({ id: B }) })],
     });
   });
@@ -159,13 +171,16 @@ describe('POST /api/v1/alerts/:id/ack + ack-all', () => {
     expect(audits).toEqual([{ tenantId: A, action: 'alert.acknowledged', entityType: 'alert', entityId: ALERT, actor: 'u-1' }]);
   });
 
-  it('ack-all: ?project= sai -> 400, không tồn tại -> 404; không có project -> mọi project còn cảnh báo chưa xem; audit chỉ khi ghi được', async () => {
-    const { store, audits } = fakeStore();
-    expect((await bodyOf(ackAllAlerts(store, 'cafe', 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'project' });
-    expect((await bodyOf(ackAllAlerts(store, '44444444-4444-4444-8444-444444444444', 'u-1'))).status).toBe(404);
-    expect(await ackAllAlerts(store, undefined, 'u-1')).toEqual({ acknowledged: 2, projects: [{ id: A, acknowledged: 2 }] });
-    expect(await ackAllAlerts(store, B, 'u-1')).toEqual({ acknowledged: 0, projects: [{ id: B, acknowledged: 0 }] });
-    expect(audits).toEqual([{ tenantId: A, action: 'alert.acknowledged_all', entityType: 'project', entityId: A, actor: 'u-1', metadata: { count: 2 } }]);
+  it('ack-all: ?project= sai -> 400, không tồn tại -> 404; không có project -> danh sách tenant riêng (không trần); asOf truyền xuống repo; audit chỉ khi ghi được', async () => {
+    const { store, audits, calls } = fakeStore();
+    expect((await bodyOf(ackAllAlerts(store, { project: 'cafe' }, 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'project' });
+    expect((await bodyOf(ackAllAlerts(store, { asOf: 'hôm qua' }, 'u-1'))).body).toMatchObject({ error: 'bad_request', field: 'asOf' });
+    expect((await bodyOf(ackAllAlerts(store, { project: '44444444-4444-4444-8444-444444444444' }, 'u-1'))).status).toBe(404);
+    const asOf = '2026-10-12T07:00:00.000Z';
+    expect(await ackAllAlerts(store, { asOf }, 'u-1')).toEqual({ acknowledged: 2, projects: [{ id: A, acknowledged: 2 }] });
+    expect(calls).toEqual([{ unackedAsOf: new Date(asOf) }, { ackAll: A, asOf: new Date(asOf) }]);
+    expect(await ackAllAlerts(store, { project: B }, 'u-1')).toEqual({ acknowledged: 0, projects: [{ id: B, acknowledged: 0 }] });
+    expect(audits).toEqual([{ tenantId: A, action: 'alert.acknowledged_all', entityType: 'project', entityId: A, actor: 'u-1', metadata: { count: 2, asOf } }]);
   });
 });
 
@@ -214,25 +229,85 @@ describe('GET/PUT /api/v1/me/alert-preferences + PUT /api/v1/me/locale', () => {
   });
 });
 
-describe('[CB:T10] (phần c) realtime alert.changed: chỉ tới room của project trong tin, chỉ 6 trường của hợp đồng', () => {
+describe('[CB:T10] (phần c) realtime alert.changed: chỉ socket OPERATOR của đúng project trong tin, chỉ 6 trường của hợp đồng', () => {
   const cfg = loadAuthConfig({ JWT_SECRET: 'j'.repeat(40), CSRF_SECRET: 'c'.repeat(40), SOCKET_TICKET_SECRET: 's'.repeat(40), OAUTH_COOKIE_SECRET: 'o'.repeat(40) });
-  function gateway() {
-    const gw = new RealtimeGateway(new JwtService({}), cfg);
-    const emitted: { room: string; event: string; data: any }[] = [];
-    gw.server = { to: (room: string) => ({ emit: (event: string, data: any) => emitted.push({ room, event, data }) }) } as any;
-    return { gw, emitted };
+  const jwt = new JwtService({});
+  const sessions: Record<string, { userId: string; isOperator: boolean }> = {
+    's-dev': { userId: 'u-dev', isOperator: false },
+    's-op': { userId: 'u-op', isOperator: true },
+    's-opB': { userId: 'u-opB', isOperator: true },
+  };
+  const prisma: any = {
+    identity: () => ({
+      findLiveSessionWithUser: async (sid: string) => (sessions[sid] ? { id: sid, userId: sessions[sid].userId, user: { isOperator: sessions[sid].isOperator } } : null),
+      socketAccess: async (sids: string[]) => ({
+        live: new Map(sids.filter((x) => sessions[x]).map((x) => [x, sessions[x]])),
+        members: new Set([`u-dev:${A}`, `u-op:${A}`]),
+      }),
+    }),
+  };
+
+  /** Server Socket.IO giả có room thật: `to(room).emit` chỉ tới socket đã join room đó. */
+  function world() {
+    const gw = new RealtimeGateway(jwt, cfg, prisma);
+    const rooms = new Map<string, Set<any>>();
+    const sockets = new Map<string, any>();
+    gw.server = {
+      to: (room: string) => ({ emit: (event: string, data: any) => rooms.get(room)?.forEach((s) => s.got.push({ event, data })) }),
+      sockets: { sockets, adapter: { rooms } },
+    } as any;
+    const connect = async (sid: string, userId: string, projectId: string) => {
+      const s: any = {
+        id: sid, handshake: { auth: { ticket: signSocketTicket(jwt, cfg, { userId, sessionId: sid, projectId }) } }, data: {}, got: [] as any[],
+        join: (r: string) => (rooms.get(r) ?? rooms.set(r, new Set()).get(r))!.add(s),
+        leave: (r: string) => rooms.get(r)?.delete(s),
+        disconnect: () => { s.disconnected = true; for (const set of rooms.values()) set.delete(s); },
+      };
+      const err = await new Promise<Error | undefined>((res) => gw.authenticate(s, res));
+      expect(err).toBeUndefined();
+      gw.handleConnection(s);
+      sockets.set(sid, s);
+      return s;
+    };
+    return { gw, connect, rooms };
   }
   const notice = { id: ALERT, tenantId: A, rule: 'destination.auth_rejected', severity: 'critical', state: 'OPEN', titleKey: 'alerts.rules.destination.auth_rejected.title' };
 
-  it('tin hợp lệ -> emit `alert.changed` vào ĐÚNG room project:<tenantId>; facts/trường lạ bị bỏ; không đụng bộ đếm metrics.tick', () => {
-    const { gw, emitted } = gateway();
+  it('M1: thành viên THƯỜNG cùng room project không nhận; operator của project A nhận (facts/trường lạ bị bỏ); operator đang mở project B không nhận; sự kiện cũ vẫn tới mọi socket', async () => {
+    const { gw, connect } = world();
+    const dev = await connect('s-dev', 'u-dev', A);
+    const op = await connect('s-op', 'u-op', A);
+    const opB = await connect('s-opB', 'u-opB', B);
+    expect(dev.data.isOperator).toBe(false);
+    expect(op.data.isOperator).toBe(true);
     gw.handleRedisMessage(ALERT_REALTIME_CHANNEL, JSON.stringify({ ...notice, facts: { sample: { url: 'https://x?token=1' } }, email: 'op@x.vn' }));
-    expect(emitted).toEqual([{ room: `project:${A}`, event: 'alert.changed', data: notice }]);
-    expect((gw as any).counters.size).toBe(0);
+    expect(dev.got).toEqual([]);
+    expect(opB.got).toEqual([]);
+    expect(op.got).toEqual([{ event: 'alert.changed', data: notice }]);
+    expect((gw as any).counters.size).toBe(0); // không đụng bộ đếm metrics.tick
+    gw.handleRedisMessage('hub:realtime:circuit', JSON.stringify({ tenantId: A, state: 'OPEN' }));
+    expect(dev.got.map((g: any) => g.event)).toEqual(['circuit.changed']);
+    expect(op.got.map((g: any) => g.event)).toEqual(['alert.changed', 'circuit.changed']);
   });
 
-  it('sai hình (thiếu tenantId, luật lạ, mức lạ, JSON hỏng) -> không emit gì (socket project B không bao giờ nhận tin của A)', () => {
-    const { gw, emitted } = gateway();
+  it('operator bị hạ quyền (vẫn là thành viên): kiểm lại R-3 giữ kết nối nhưng rời room cảnh báo -> không nhận alert.changed nữa', async () => {
+    const { gw, connect } = world();
+    const op = await connect('s-op', 'u-op', A);
+    sessions['s-op'] = { userId: 'u-op', isOperator: false };
+    try {
+      expect(await gw.recheckSockets()).toBe(0);
+      expect(op.disconnected).toBeUndefined();
+      expect(op.data.isOperator).toBe(false);
+      gw.handleRedisMessage(ALERT_REALTIME_CHANNEL, JSON.stringify(notice));
+      expect(op.got).toEqual([]);
+    } finally {
+      sessions['s-op'] = { userId: 'u-op', isOperator: true };
+    }
+  });
+
+  it('sai hình (thiếu tenantId, luật lạ, mức lạ, JSON hỏng) -> không emit gì', async () => {
+    const { gw, connect } = world();
+    const op = await connect('s-op', 'u-op', A);
     for (const m of [
       { ...notice, tenantId: undefined },
       { ...notice, rule: 'order.paid' },
@@ -243,9 +318,7 @@ describe('[CB:T10] (phần c) realtime alert.changed: chỉ tới room của pro
       gw.handleRedisMessage(ALERT_REALTIME_CHANNEL, JSON.stringify(m));
     }
     gw.handleRedisMessage(ALERT_REALTIME_CHANNEL, '{không phải json');
-    expect(emitted).toEqual([]);
-    gw.handleRedisMessage(ALERT_REALTIME_CHANNEL, JSON.stringify({ ...notice, tenantId: B }));
-    expect(emitted.map((e) => e.room)).toEqual([`project:${B}`]);
+    expect(op.got).toEqual([]);
   });
 
   it('API cảnh báo không phụ thuộc Redis (BB-2): controller chỉ nhận PrismaService — Redis chết chỉ mất realtime, chuông vẫn poll được', () => {
