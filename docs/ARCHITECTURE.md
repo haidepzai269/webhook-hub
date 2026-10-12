@@ -143,9 +143,13 @@ Tách ra mua được ba thứ:
     chặn -> 429 + Connection: close, KHÔNG đọc body) rồi ingest kiểm lại sau body parser (gate lỗi -> cho qua,
     fail-open). Chấm điểm chỉ ở ingest.
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
-2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant)
+2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant) + nấc dung lượng của project
+    (LEFT JOIN project_usage trong CÙNG câu nạp source — +0 lượt DB, QT3/ADR-182)
        không tìm thấy -> 404 (+1 điểm phạt cho IP) -> DỪNG · tắt / đã lưu trữ -> 404 (không tính điểm) -> DỪNG
-    [SPEC QT, chưa code: "khoá dung lượng" của project chèn ngay SAU bước này — cần trạng thái khoá nạp kèm source]
+2q. Khoá dung lượng (QT3, ADR-182/189): isWriteBlocked(level, keepLonger, STORAGE_LOCK_ENABLED) -> 507
+    project_storage_full -> DỪNG (0 HMAC, 0 Redis). LOCKED (≥100%) chặn source thường, source "Giữ lâu" nhận tới
+    HARD_LOCKED (≥110%). Đọc nấc lỗi -> fail-open. Cờ tắt (mặc định production) -> chỉ đếm "lẽ ra chặn".
+    Publish /v1/p: ApiKeyGuard -> nạp source api (JOIN nấc) -> 2q -> rate limit -> persist (cùng hàm quyết định).
 2a. Hộp phạt theo cặp (IP, sourceKey): cặp đang bị phạt vì ký sai liên tục -> 429 -> DỪNG (0 HMAC, 0 Redis)
 3.  Giải mã secrets · adapter.verify(rawBytes, headers, secrets[])
        sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) (+1 điểm phạt cho cặp) -> 401 -> DỪNG

@@ -24,7 +24,7 @@ export class ServiceExceptionFilter extends BaseExceptionFilter {
     const requestId = ensureRequestId(req, res);
     const { status, body, original } = toErrorBody(exception, requestId);
     const where = { requestId, method: req.method, path: (req.originalUrl ?? req.url ?? '').split('?')[0], status, error: body.error };
-    if (status >= 500 && status !== 503) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
+    if (status >= 500 && status !== 503 && status !== 507) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
     else if (status >= 500) logger.warn({ ...where, original }, 'Tạm thời không phục vụ được (503)');
     else logger.info(where, 'Trả lỗi cho client');
     if (res.headersSent) return;
@@ -67,7 +67,11 @@ export function toErrorBody(exception: unknown, requestId: string): { status: nu
   }
 
   let code: HubErrorCode;
-  if (status >= 500) {
+  // QT (ADR-182): mã 5xx CÓ TRONG catalog với đúng status đó (507 project_storage_full) giữ nguyên — không phải lỗi máy chủ.
+  const catalog5xx = status >= 500 && isHubErrorCode(raw.error) && ERROR_CATALOG[raw.error].status === status;
+  if (catalog5xx) {
+    code = raw.error as HubErrorCode;
+  } else if (status >= 500) {
     code = status === 503 ? 'service_unavailable' : 'internal_error';
     status = status === 503 ? 503 : 500;
   } else {
@@ -77,7 +81,7 @@ export function toErrorBody(exception: unknown, requestId: string): { status: nu
   const params: Record<string, unknown> = {};
   for (const k of def.params ?? []) if (raw[k] !== undefined) params[k] = raw[k];
   const msg = Array.isArray(raw.message) ? raw.message.join('; ') : raw.message;
-  const detail = status < 500 && code !== 'not_found' && typeof msg === 'string' && msg.length > 0 ? msg.slice(0, 500) : undefined;
+  const detail = (status < 500 || catalog5xx) && code !== 'not_found' && typeof msg === 'string' && msg.length > 0 ? msg.slice(0, 500) : undefined;
   const body: ErrorBody = {
     error: code,
     message: def.message,
@@ -87,5 +91,5 @@ export function toErrorBody(exception: unknown, requestId: string): { status: nu
     ...params,
     ...(detail ? { detail } : {}),
   };
-  return { status, body, ...(status >= 500 ? { original: raw } : {}) };
+  return { status, body, ...(status >= 500 && !catalog5xx ? { original: raw } : {}) };
 }

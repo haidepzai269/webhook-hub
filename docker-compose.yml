@@ -115,6 +115,8 @@ services:
       - PORT=4000
       # S3-4: trần ingest/phút/source (mặc định 100). Chạy k6: INGEST_RATE_LIMIT_PER_MIN=100000 docker compose up -d hub-api
       - INGEST_RATE_LIMIT_PER_MIN=${INGEST_RATE_LIMIT_PER_MIN:-100}
+      # QT3 E5 (ADR-189): khoá chiều ghi (507) khi project đầy hạn mức. Local/hubv BẬT để đo/demo; production mặc định 0.
+      - STORAGE_LOCK_ENABLED=${STORAGE_LOCK_ENABLED:-1}
       # Deployed: đặt để chặn /metrics bằng Bearer token; local để trống
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       # AU6 (SPEC-auth §5.12, ADR-108): runtime = role hub_app (KHÔNG superuser, KHÔNG BYPASSRLS) -> RLS có hiệu lực.

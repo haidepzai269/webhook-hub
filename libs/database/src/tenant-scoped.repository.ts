@@ -1,5 +1,5 @@
 import { DEFAULT_STORAGE_POLICIES, eventTypeCandidates } from '@hub/common';
-import { PrismaClient, Destination, Delivery, Prisma, CircuitState } from '@prisma/client';
+import { PrismaClient, Destination, Delivery, Prisma, CircuitState, Source, SourceSecret } from '@prisma/client';
 
 /**
  * `PrismaClient` gốc HOẶC `Prisma.TransactionClient` (bên trong một `$transaction`
@@ -137,7 +137,23 @@ export class TenantScopedRepository {
    * ADR-161: mặc định BỎ QUA source đã lưu trữ (coi như không tồn tại -> 404 / từ chối). Chỉ màn lịch sử thật sự cần
    * mới truyền `{ includeArchived: true }`.
    */
-  async findSourceById(id: string, opts: ArchivedOpt = {}) {
+  /**
+   * QT3 (E4, ADR-182): `{ withStorageLevel: true }` (đường publish `/v1/p`) — MỘT câu `sources LEFT JOIN project_usage`
+   * trả source (không secrets — publish không verify) kèm `storageLevel` (null = chưa đo = OK). Ít câu hơn đường mặc định.
+   */
+  findSourceById(id: string, opts: ArchivedOpt & { withStorageLevel: true }): Promise<SourceWithStorageLevel | null>;
+  findSourceById(id: string, opts?: ArchivedOpt): Promise<(Source & { secrets: SourceSecret[] }) | null>;
+  async findSourceById(id: string, opts: ArchivedOpt & { withStorageLevel?: boolean } = {}): Promise<unknown> {
+    if (opts.withStorageLevel) {
+      const archived = opts.includeArchived ? Prisma.empty : Prisma.sql`AND s.archived_at IS NULL`;
+      const rows = await this.prisma.$queryRaw<SourceWithStorageLevel[]>(Prisma.sql`
+        SELECT s.id, s.tenant_id AS "tenantId", s.provider::text AS provider, s.name, s.source_key AS "sourceKey",
+               s.is_active AS "isActive", s.verification_config AS "verificationConfig", s.archived_at AS "archivedAt",
+               s.keep_longer AS "keepLonger", s.created_at AS "createdAt", pu.level AS "storageLevel"
+        FROM hub.sources s LEFT JOIN hub.project_usage pu ON pu.tenant_id = s.tenant_id
+        WHERE s.id = ${id}::uuid AND s.tenant_id = ${this.tenantId}::uuid ${archived}`);
+      return rows[0] ?? null;
+    }
     return this.prisma.source.findFirst({
       where: { id, tenantId: this.tenantId, ...notArchived(opts) },
       include: { secrets: true },
@@ -1890,3 +1906,6 @@ export interface SourceTrafficRow {
   bytes?: number;
   topIps: { ip: string; count: number }[];
 }
+
+/** QT3 (E4): source của đường publish kèm nấc dung lượng của project (JOIN cùng câu). null = chưa đo (= OK). */
+export type SourceWithStorageLevel = Source & { storageLevel: string | null };

@@ -48,6 +48,23 @@ describeDb('QT1: project_usage + storage_policies (RLS, seed mặc định)', ()
     expect((await svc.forTenant(A).findProjectUsage())?.level).toBe('OK');
   });
 
+  it('[QT:T7] (phần b) câu nạp source của ingest (escape hatch) và của publish (repo) trả nấc dung lượng JOIN cùng câu + keepLonger + secrets còn hiệu lực', async () => {
+    const src = await owner.source.create({
+      data: { tenantId: A, provider: 'github', name: 'k', sourceKey: `qt_k_${run}`, keepLonger: true, secrets: { create: [{ secretEncrypted: 'x' }, { secretEncrypted: 'old', validUntil: new Date(Date.now() - 1000) }] } },
+    });
+    await owner.$executeRaw`UPDATE hub.project_usage SET level = 'LOCKED' WHERE tenant_id = ${A}::uuid`;
+    const viaIngest = await svc.findSourceBySourceKeyForIngest(`qt_k_${run}`);
+    expect(viaIngest).toMatchObject({ id: src.id, tenantId: A, keepLonger: true, storageLevel: 'LOCKED', isActive: true, archivedAt: null });
+    expect(viaIngest!.secrets.map((x) => x.secretEncrypted)).toEqual(['x']);
+    const viaPublish = await svc.forTenant(A).findSourceById(src.id, { withStorageLevel: true });
+    expect(viaPublish).toMatchObject({ id: src.id, keepLonger: true, storageLevel: 'LOCKED' });
+    // project B chưa đo -> null (= OK); không thấy source của A
+    expect(await svc.forTenant(B).findSourceById(src.id, { withStorageLevel: true })).toBeNull();
+    expect(await svc.findSourceBySourceKeyForIngest(`khong_co_${run}`)).toBeNull();
+    await owner.$executeRaw`UPDATE hub.project_usage SET level = 'OK' WHERE tenant_id = ${A}::uuid`;
+    await owner.source.delete({ where: { id: src.id } });
+  });
+
   it('[QT:T26] (phần b) project mới có sẵn policy mặc định (Rác delete 1 ngày, Thấp trim 3 ngày, Trung bình off) + project_usage; seed lại không nhân đôi', async () => {
     await svc.forTenant(A).seedStorageDefaults('test-again');
     const rows = await svc.forTenant(A).findStoragePolicies();

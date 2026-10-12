@@ -1,7 +1,7 @@
 import { TRAFFIC_INSIGHT, TrafficBucket, buildTrafficInsight } from '../src/traffic';
 
 /** EG5 (SPEC-chong-qua-tai §6.2): nhận định `I-traffic` — hàm thuần `code + facts`, câu chữ ở web. */
-const b = (o: Partial<TrafficBucket> = {}): TrafficBucket => ({ t: '2026-10-12T08:00:00.000Z', ACCEPTED: 0, DUPLICATE: 0, REJECTED: 0, RATE_LIMITED: 0, BLOCKED: 0, ...o });
+const b = (o: Partial<TrafficBucket> = {}): TrafficBucket => ({ t: '2026-10-12T08:00:00.000Z', ACCEPTED: 0, DUPLICATE: 0, REJECTED: 0, RATE_LIMITED: 0, BLOCKED: 0, STORAGE_FULL: 0, ...o });
 const ip = (addr: string, count: number) => ({ ip: addr, count, rejected: 0, lastSeen: '2026-10-12T08:00:00.000Z' });
 
 describe('EG5 nhận định lưu lượng', () => {

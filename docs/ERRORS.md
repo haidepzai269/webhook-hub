@@ -270,6 +270,19 @@ curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY" -H 'content-type:
 curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY" -d '{"type":"order.created","data":{},"idempotencyKey":"x"}'
 ```
 
+## project_storage_full
+
+**507 (`/hooks/*` và `/v1/p/:project/events`).** Project đã vượt hạn mức dung lượng (ước tính) và đang **khoá chiều ghi**
+(SPEC-han-muc-dung-luong, ADR-182/189). Ở nấc `LOCKED` (≥ 100%) source thường bị từ chối, source gắn **"Giữ lâu"** vẫn nhận
+tới 110%; ở `HARD_LOCKED` (≥ 110%) mọi source đều bị từ chối. Không phải 2xx: provider sẽ tự gửi lại một thời gian rồi bỏ.
+Event đã lưu vẫn được giao; polling, console và dọn dẹp vẫn chạy. Trả trước khi verify chữ ký nên không tốn HMAC/Redis.
+Chỉ xảy ra khi người vận hành bật `STORAGE_LOCK_ENABLED=1`.
+**Sửa:** vào trang Dung lượng của project: áp dụng gợi ý dọn, hoặc dọn / xoá hẳn event cũ; project mở khoá khi dưới 90%.
+Hoặc nhờ người vận hành tăng hạn mức.
+```bash
+curl -si -X POST $API/hooks/github/$SOURCE_KEY -H 'content-type: application/json' -d '{}'
+```
+
 ## destination_archived
 
 **409 (console).** Replay một delivery mà đích (hoặc subscription) của nó đã bị **Xoá** khỏi bản đồ luồng (lưu trữ,

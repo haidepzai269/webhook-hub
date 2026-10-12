@@ -98,3 +98,19 @@ export const penaltyGoodEntries = new Gauge({
   help: 'Số cặp (IP, sourceKey) đã verify đúng đang nhớ ở instance này (trần EDGE_PENALTY_GOOD_MAX_ENTRIES)',
   registers: [apiRegistry],
 });
+
+/** QT3 (ADR-182/189): request bị 507 `project_storage_full` (khoá chiều ghi, `STORAGE_LOCK_ENABLED=1`). */
+export const storageRejectedTotal = new Counter({
+  name: 'hub_ingest_storage_rejected_total',
+  help: 'Số request /hooks + publish bị 507 vì project đầy hạn mức dung lượng',
+  labelNames: ['path'] as const,
+  registers: [apiRegistry],
+});
+
+/** QT E5 (ADR-189): `STORAGE_LOCK_ENABLED=0` — request LẼ RA bị 507 nếu bật khoá (vẫn được nhận). */
+export const storageWouldRejectTotal = new Counter({
+  name: 'hub_ingest_storage_would_reject_total',
+  help: 'Số request /hooks + publish lẽ ra bị 507 nếu bật STORAGE_LOCK_ENABLED (khoá đang tắt nên vẫn nhận)',
+  labelNames: ['path'] as const,
+  registers: [apiRegistry],
+});

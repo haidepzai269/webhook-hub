@@ -269,6 +269,14 @@ export const ERROR_CATALOG = {
     message: 'The stored provider credentials were deleted.',
     fix: () => 'Reconnect with POST /api/v1/sources/:id/connection/retry and the credentials in the body.',
   },
+  // ---- hạn mức dung lượng (SPEC-han-muc-dung-luong §4 + E1/E4, ADR-182/189) ----
+  // 507 Insufficient Storage: KHÔNG 2xx (BB-3 giữ, provider tự gửi lại). Trả TRƯỚC verify/rate limit — 0 HMAC, 0 Redis.
+  project_storage_full: {
+    status: 507,
+    message: 'This project has reached its storage quota and is not accepting new events.',
+    fix: () =>
+      'Free space in the console (Storage: apply a cleanup suggestion, or trim / delete old events), or ask the hub operator to raise the quota. Sources marked "keep longer" are still accepted up to 110%. Already stored events keep being delivered; the provider will retry this request.',
+  },
   // ---- máy chủ (KHÔNG lộ stack/message gốc) ----
   internal_error: {
     status: 500,

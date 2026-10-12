@@ -2,7 +2,7 @@
  * EG5 (SPEC-chong-qua-tai §6, ADR-181): hợp đồng của `GET /api/v1/projects/:p/sources/:id/traffic` + nhận định `I-traffic`.
  * Cùng khuôn với nhận định CB6 (`code + level + facts`, câu chữ dựng ở web theo ngôn ngữ). Hàm THUẦN — không I/O.
  */
-export const TRAFFIC_OUTCOMES = ['ACCEPTED', 'DUPLICATE', 'REJECTED', 'RATE_LIMITED', 'BLOCKED'] as const;
+export const TRAFFIC_OUTCOMES = ['ACCEPTED', 'DUPLICATE', 'REJECTED', 'RATE_LIMITED', 'BLOCKED', 'STORAGE_FULL'] as const;
 export type TrafficOutcomeName = (typeof TRAFFIC_OUTCOMES)[number];
 
 export const TRAFFIC_RANGES = ['1h', '24h', '7d'] as const;

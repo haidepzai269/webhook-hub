@@ -12,6 +12,10 @@ import {
   OutboxPayload,
   TraceIngestedNotice,
   MAX_INGEST_PAYLOAD_BYTES,
+  STORAGE_LEVELS,
+  isWriteBlocked,
+  parseStorageLevel,
+  resolveStorageLockEnabled,
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
@@ -22,13 +26,15 @@ import {
   penaltyEntries,
   penaltyGoodEntries,
   penaltySkippedPrivate,
+  storageRejectedTotal,
+  storageWouldRejectTotal,
   trafficFlushDropped,
   unknownSourceTotal,
 } from '../metrics/metrics';
 import { DuplicateCounter } from './duplicate-counter';
 import { PenaltyBox, PenaltyVerdict, isLocalOrPrivateIp, resolvePenaltyConfig } from './penalty-box';
 import { createPenaltyBox } from './penalty-provider';
-import { IngestResponse, blockedAck, providerMetricLabel } from './blocked-ack';
+import { IngestResponse, blockedAck, providerMetricLabel, storageFullAck } from './blocked-ack';
 import { TrafficOutcome, TrafficRecorder } from './traffic-recorder';
 import { onShutdownFlush } from '../../shutdown';
 
@@ -54,6 +60,8 @@ interface TraceState {
   sourceId?: string;
   /** QT E2 (ADR-183): byte THỰC SỰ ghi xuống DB bởi request này (body_raw khi ACCEPTED, mẫu ≤4KB khi REJECTED có lưu). */
   bytes?: number;
+  /** QT3 (ADR-182): bị 507 vì project đầy — tenant đã biết, không phát trace, lưu lượng outcome STORAGE_FULL (bytes 0). */
+  storageFull?: boolean;
 }
 
 /** EG4: outcome của trace -> outcome của bảng lưu lượng (ERROR không lưu — đã có metric + log). */
@@ -96,6 +104,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   penalty: PenaltyBox;
   private lastPrivateLog = 0;
   private readonly penaltyEnabled = resolvePenaltyConfig().enabled !== false;
+  /**
+   * QT E5 (ADR-189): `STORAGE_LOCK_ENABLED` đọc MỘT lần lúc khởi động (đổi = đổi env + restart). Tắt (mặc định production):
+   * vẫn đo, vẫn đổi nấc, KHÔNG trả 507 — chỉ đếm `hub_ingest_storage_would_reject_total`. Gán lại được (test).
+   */
+  storageLockEnabled = resolveStorageLockEnabled();
   /**
    * EG4 (ADR-179): lưu lượng theo (source, phút, outcome) — `record()` không I/O; đẩy xuống Postgres mỗi `TRAFFIC_FLUSH_MS`
    * qua `forTenant` (RLS). Ghi lỗi -> giữ tối đa 10 phút dữ liệu.
@@ -141,7 +154,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   async publishFromService(tenantId: string, sourceId: string, req: RawWebhookRequest): Promise<{ status: number; body: unknown }> {
     return this.traced(req, async (trace) => {
       const log = logger.child({ correlationId: trace.correlationId, provider: req.provider, sourceId });
-      const source = await this.prisma.forTenant(tenantId).findSourceById(sourceId);
+      // QT3 (E4): nấc dung lượng JOIN vào chính câu nạp source (+0 lượt DB).
+      const source = await this.prisma.forTenant(tenantId).findSourceById(sourceId, { withStorageLevel: true });
       // ADR-161: source đã lưu trữ ("Xoá" trên bản đồ) bị từ chối y như source tắt (lưu trữ luôn kèm is_active=false).
       if (!source || !source.isActive || source.archivedAt) {
         log.warn('Source api của key không tồn tại hoặc đã tắt');
@@ -149,6 +163,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       }
       trace.tenantId = source.tenantId;
       trace.sourceId = source.id;
+      // QT3 (E4): khoá chiều ghi SAU nạp source, TRƯỚC rate limit — project đầy không tốn EVAL.
+      if (this.storageBlocked(source, 'publish', log)) {
+        trace.storageFull = true;
+        return { status: 507, body: { error: 'project_storage_full' } };
+      }
       if (!(await this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60))) {
         trace.outcome = 'RATE_LIMITED';
         return { status: 429, body: { error: 'rate_limited' } };
@@ -288,7 +307,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   private recordMetrics(provider: string, trace: TraceState, status: number, startedAt: number) {
     try {
       const label = providerMetricLabel(provider);
-      const outcome = trace.outcome ?? (trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
+      const outcome = trace.outcome ?? (trace.storageFull ? 'STORAGE_FULL' : trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
       ingestRequests.inc({ provider: label, outcome });
       ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
     } catch {
@@ -352,6 +371,14 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     }
     trace.tenantId = source.tenantId;
     trace.sourceId = source.id;
+
+    // 2q. QT3 (SPEC-han-muc-dung-luong E1/E4, ADR-182/189): khoá chiều ghi khi project đầy. Nấc đã nạp CÙNG câu với source
+    // (bước 2, +0 lượt DB); quyết định là hàm thuần (0 Redis, 0 HMAC). Áp như nhau cho mọi provider. 507 không phải 2xx —
+    // BB-3 giữ, provider tự gửi lại. Đặt TRƯỚC hộp phạt theo cặp / verify / rate limit: project đầy không tốn HMAC, EVAL.
+    if (this.storageBlocked(source, 'hooks', log)) {
+      trace.storageFull = true;
+      return storageFullAck(req.headers, trace.correlationId);
+    }
 
     // 2a. EG2 luật (b): cặp (IP, sourceKey) đang bị phạt vì ký sai liên tục -> chặn trước verify (0 HMAC, 0 Redis).
     const pairVerdict = this.penaltySafe(() => this.penalty.checkPair(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
@@ -430,7 +457,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   /** EG4: cộng một request vào lưu lượng trong bộ nhớ (không I/O). Lỗi -> bỏ qua (số liệu quan sát). */
   private recordTraffic(req: RawWebhookRequest, trace: TraceState): void {
     if (!trace.tenantId || !trace.sourceId) return; // 404 sourceKey lạ: không thuộc tenant nào -> chỉ metric + log
-    const outcome: TrafficOutcome | null = trace.blocked ? 'BLOCKED' : trace.outcome && TRAFFIC_OUTCOMES.has(trace.outcome) ? (trace.outcome as TrafficOutcome) : null;
+    const outcome: TrafficOutcome | null = trace.storageFull ? 'STORAGE_FULL' : trace.blocked ? 'BLOCKED' : trace.outcome && TRAFFIC_OUTCOMES.has(trace.outcome) ? (trace.outcome as TrafficOutcome) : null;
     if (!outcome) return;
     try {
       // QT E2: chỉ ACCEPTED / REJECTED có ghi mẫu mới mang byte; còn lại 0 (trùng, 429, chặn, 507).
@@ -455,6 +482,36 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     } catch {
       /* metric không làm hỏng ingest */
     }
+  }
+
+  /**
+   * QT3 (E1/E4/E5, ADR-182/189): `true` = trả 507. Nấc đọc từ source đã nạp (`storageLevel`, JOIN cùng câu): null = chưa
+   * đo = OK; giá trị lạ / lỗi đọc -> FAIL-OPEN (coi như OK) + log — hạn mức là chống lạm dụng, không phải bất biến đúng–sai.
+   * "Giữ lâu" (`keepLonger`, cờ user TỰ gắn) còn nhận tới HARD_LOCKED. Cờ tắt -> chỉ đếm "lẽ ra chặn".
+   */
+  private storageBlocked(
+    source: { keepLonger?: boolean | null; storageLevel?: unknown },
+    path: 'hooks' | 'publish',
+    log: { warn: (o: object, m: string) => void },
+  ): boolean {
+    let blocked: boolean;
+    try {
+      const raw = source.storageLevel;
+      if (raw !== null && raw !== undefined && !(STORAGE_LEVELS as readonly unknown[]).includes(raw)) {
+        log.warn({ storageLevel: String(raw).slice(0, 32) }, 'Nấc dung lượng không đọc được -> fail-open (coi như OK)');
+      }
+      blocked = isWriteBlocked(parseStorageLevel(raw), source.keepLonger === true, true);
+    } catch (err: any) {
+      log.warn({ err: err?.message }, 'Lỗi khi đọc nấc dung lượng -> fail-open (coi như OK)');
+      return false;
+    }
+    if (!blocked) return false;
+    try {
+      (this.storageLockEnabled ? storageRejectedTotal : storageWouldRejectTotal).inc({ path });
+    } catch {
+      /* metric không làm hỏng ingest */
+    }
+    return this.storageLockEnabled;
   }
 
   /** EG2: hộp phạt lỗi thì cho request đi qua như chưa có hộp phạt (fail-open) — chỉ log. */

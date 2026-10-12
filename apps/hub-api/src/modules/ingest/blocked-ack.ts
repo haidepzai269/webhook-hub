@@ -35,6 +35,27 @@ export function blockedAck(
 }
 
 /**
+ * QT3 (ADR-182): 507 `project_storage_full` theo khuôn ERRORS.md cho `/hooks/*` (publish đi qua exception filter). Hằng của
+ * lõi — không chứa level, quota hay gì của project ngoài mã lỗi. `requestId` như `blockedAck`.
+ */
+export function storageFullAck(headers: Record<string, string | string[] | undefined> | undefined, fallbackRequestId: string): IngestResponse {
+  const code = 'project_storage_full';
+  const def = ERROR_CATALOG[code];
+  const given = headers?.['x-request-id'];
+  const rid = Array.isArray(given) ? given[0] : given;
+  return {
+    status: def.status,
+    body: {
+      error: code,
+      message: def.message,
+      fix: def.fix(),
+      docsUrl: docsUrlFor(code),
+      requestId: typeof rid === 'string' && REQUEST_ID_RE.test(rid) ? rid : fallbackRequestId,
+    },
+  };
+}
+
+/**
  * S3-4: nhãn `provider` của metric chỉ nhận provider ĐÃ ĐĂNG KÝ — path `/hooks/:provider` do client gửi, để nguyên thì
  * kẻ xấu làm nổ số chuỗi thời gian (cardinality). Dùng chung ingest + gate.
  */
