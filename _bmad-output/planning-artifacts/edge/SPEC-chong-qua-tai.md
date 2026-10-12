@@ -1,6 +1,7 @@
 # SPEC EG — Chống quá tải ở cửa vào: nginx trong container + hộp phạt IP trong hub-api + khối "Lưu lượng"
 
 > Phòng party viết ngày 2026-10-12. Spec chỉ mô tả việc cần làm, **chưa có code**. Admin sẽ giao spec cho phiên dev.
+> **Trạng thái 2026-10-12:** Admin đã chốt hết (Q5, Q6; Admin trả lời trong phòng của phiên webhook-hub-02, phiên đó chuyển lời). **Admin tạm dừng, chưa giao dev.**
 > Tiền tố mã test là `EG:`. Phải thêm namespace `EG` vào `verify/spec-sources.json` **trước** khi viết test đầu tiên, theo dạng khai báo của `KN`.
 > Số ADR của spec này **bắt đầu từ ADR-175**:
 > - ADR-163..164 đã nằm trên master.
@@ -24,6 +25,8 @@
 | Q2 | Cầu chì theo IP ở nginx **bật ngay và ghi log** (phương án của Amelia), không chạy chế độ chỉ ghi log. |
 | Q3 | **Không dùng Lua.** Dùng nginx bản thường. Việc phạt IP dựa trên mã phản hồi (404/401) đặt trong hub-api, lưu trong bộ nhớ, không tốn lệnh Redis nào. |
 | Q4 | Người xem được lưu lượng là **tài khoản trên hub đang nắm project**, cộng với người vận hành hub. Chi tiết ở §6.1. |
+| Q5 | **EG3: ĐỒNG Ý.** Rate limit theo source chạy **sau** `adapter.verify` (§4.3). |
+| Q6 | **§6.1: operator + `owner` của project** xem được lưu lượng theo source. `developer`/`viewer` thì không. |
 
 **Ngoài phạm vi:**
 - Chống DDoS ở tầng mạng (L3/L4).
@@ -167,7 +170,7 @@ Mỗi lớp được phép sai theo hướng **cho request đi qua (fail-open)**
   - `hub_ingest_penalty_entries` (gauge)
   - `hub_ingest_unknown_source_total`
 
-### 4.3. Đổi thứ tự: rate limit theo source chạy **sau** verify (EG3). **Cần Admin xác nhận.**
+### 4.3. Đổi thứ tự: rate limit theo source chạy **sau** verify (EG3). **Admin đã đồng ý (Q5).**
 
 **Vấn đề (Mary phát hiện):** rate limit theo source (`:276`) chạy **trước** bước verify. Request sai chữ ký vẫn **tiêu hạn mức** của source. Kẻ biết một `sourceKey` thật (lộ qua log, qua ảnh chụp màn hình) chỉ cần bắn 100 request sai chữ ký mỗi phút là **khoá được webhook thật** của nạn nhân. Hộp phạt §4.2-b chỉ ra tay sau 30 lần, nên vẫn còn lọt khoảng 30 lần mỗi phút.
 
@@ -176,9 +179,9 @@ Mỗi lớp được phép sai theo hướng **cho request đi qua (fail-open)**
 - Số lệnh Redis của một sự kiện hợp lệ **không đổi**. Request sai chữ ký giờ **ít hơn** một lệnh.
 - Rate limit theo source vẫn chặn được hai trường hợp nó cần chặn: provider gửi lại dồn dập, và secret bị lộ.
 
-**Đánh đổi:** tốn thêm HMAC cho request sai chữ ký (có trần 1MB/body), đổi lại source không bị khoá oan. `ARCHITECTURE.md` §3.1 phải sửa thứ tự cho khớp. Spec docs-sync DS1 đang sửa đúng đoạn này, **hai phiên phải phối hợp**: làm EG3 thì DS1 ghi theo thứ tự mới.
-
-Nếu Admin **không** đồng ý EG3: giữ thứ tự cũ, ghi lỗ hổng này vào ADR như rủi ro đã chấp nhận, và chỉ trông vào §4.2-b.
+**Đánh đổi:** tốn thêm HMAC cho request sai chữ ký (có trần 1MB/body), đổi lại source không bị khoá oan. `ARCHITECTURE.md` §3.1 phải sửa thứ tự cho khớp. - DS1 (docs-sync, nhánh `docs/ds-sync`, commit `df21a5a`) ghi **thứ tự hiện tại**: nạp source → rate limit → verify.
+- EG3 khi code phải sửa lại `ARCHITECTURE.md` §3.1 **trong cùng PR**, thành nạp source → (hộp phạt) → verify → rate limit, kèm câu lý do: request sai chữ ký không tiêu hạn mức của source.
+- Spec QT §4 ghi thứ tự "kiểm khoá dung lượng trước rate limit và verify". Theo EG3, thứ tự đầy đủ là nạp source (kèm trạng thái khoá) → khoá dung lượng → hộp phạt → verify → rate limit.
 
 ## 5. Lưu lượng theo source: dữ liệu (EG4)
 
@@ -217,7 +220,7 @@ Nếu Admin **không** đồng ý EG3: giữ thứ tự cũ, ghi lỗ hổng nà
 
 ### 6.1. Ai xem được gì (Q4)
 
-Admin nói: "chủ project không xem được mà chủ hub xem được, tức tài khoản đăng ký vào hub, nắm giữ các project". Spec hiểu câu này như sau. **Admin xác nhận lại trước EG5:**
+Admin nói: "chủ project không xem được mà chủ hub xem được, tức tài khoản đăng ký vào hub, nắm giữ các project". **Admin đã chốt (Q6):** bảng dưới là đúng.
 
 | Vai trong hub | Xem khối Lưu lượng của project | Xem lớp biên toàn hub (§6.2) |
 |---|---|---|
@@ -226,7 +229,6 @@ Admin nói: "chủ project không xem được mà chủ hub xem được, tức
 | `developer`, `viewer` của project | ❌ | ❌ |
 | Hệ thống bên ngoài dùng hub (Shop, cafe, bookstore…) | ❌ (không đăng nhập console) | ❌ |
 
-> ⚠️ Mary hỏi lại: nếu "chủ project" mà Admin nói là **`owner`** thì bảng trên **sai**, vì khi đó chỉ người vận hành được xem. Phiên dev **không** làm EG5 khi Admin chưa chốt dòng thứ hai của bảng.
 
 Quyền xem dùng scope mới `traffic:read`, thêm vào `ROLE_SCOPES` cho `owner`. Người vận hành đi qua `viaOperator`. Không viết lệnh `if` theo vai trò rải trong controller.
 
@@ -293,9 +295,9 @@ Quyền xem dùng scope mới `traffic:read`, thêm vào `ROLE_SCOPES` cho `owne
 |---|---|---|
 | **EG1** | nginx trong `hub-all` + service `edge` ở compose, IP thật, cầu chì, các lớp ở §3.4, tắt máy bằng SIGQUIT, `EDGE_NGINX` | T2, T3, T9, T10, T11, T16 |
 | **EG2** | Hộp phạt IP trong hub-api + metric | T1, T4, T5, T6, T7 |
-| **EG3** | Rate limit theo source chạy sau verify (**Admin xác nhận**) + sửa ARCHITECTURE §3.1 (phối hợp với docs-sync DS1) | T8, T12 |
+| **EG3** | Rate limit theo source chạy sau verify (Admin đồng ý, Q5) + sửa ARCHITECTURE §3.1 trong cùng PR (DS1 đã ghi thứ tự cũ) | T8, T12 |
 | **EG4** | Bảng `source_traffic_minutely` + đẩy dữ liệu từ bộ nhớ + dọn dữ liệu cũ + yêu cầu thay đổi gửi sang CB (§5.3) | T13 |
-| **EG5** | API traffic + scope `traffic:read` + khối Lưu lượng + câu nhận định + panel Grafana (**Admin chốt §6.1 trước**) | T14, T15 |
+| **EG5** | API traffic + scope `traffic:read` + khối Lưu lượng + câu nhận định + panel Grafana (§6.1 đã chốt, Q6) | T14, T15 |
 | **EG6** | ADR, `docs/DEPLOYMENT.md` (biến `EDGE_*`, `TRAFFIC_*`, `HOST`, cách đo IP thật), `docs/ARCHITECTURE.md` (sơ đồ §2, mục chống quá tải), `verify/spec-sources.json` (`EG`) | — |
 
 - **Ưu tiên:** EG2 → EG3 → EG1 → EG4 → EG5. Hộp phạt **bịt được lỗ hổng 404 vào DB ngay**, kể cả khi chưa có nginx.
@@ -309,12 +311,12 @@ Quyền xem dùng scope mới `traffic:read`, thêm vào `ROLE_SCOPES` cho `owne
 3. Không dùng Lua. Việc phạt dựa trên phản hồi đặt trong hub-api, trạng thái trong bộ nhớ, không dùng Redis. 401 phạt theo cặp (IP, sourceKey). 404 của source đã lưu trữ không tính điểm.
 4. (Nếu làm EG3) Rate limit theo source chạy sau verify.
 5. Lưu lượng gộp theo phút, đẩy xuống DB mỗi 60s, giữ 7 ngày. Được phép thiếu dữ liệu, không được làm chậm ingest. 404 của key lạ không lưu.
-6. Quyền xem lưu lượng là scope `traffic:read` (theo §6.1 sau khi Admin chốt).
+6. Quyền xem lưu lượng là scope `traffic:read` (owner + operator, Q6).
 
 ## Xong khi
 
 - [ ] EG1–EG6 xong, `[EG:T1–T16]` xanh (L2 chạy trên hubv).
 - [ ] Đã đo IP thật trên Render và ghi kết quả vào `DEPLOYMENT.md`.
 - [ ] Query chứng minh mọi `sourceKey` trong DB khớp regex đã được dán vào PR.
-- [ ] Admin đã chốt §4.3 (EG3) và §6.1 (quyền xem).
+- [x] Admin đã chốt §4.3 (EG3) và §6.1 (quyền xem).
 - [ ] Commit tách riêng theo từng story. Không gộp với commit docs-sync hoặc alerts.
