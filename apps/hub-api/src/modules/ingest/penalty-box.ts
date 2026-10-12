@@ -326,7 +326,8 @@ export class PenaltyBox {
       if (!overKeys && this.goodEntries <= this.goodMaxEntries) break;
       const victim = this.fairVictim(overKeys ? this.keyTally : this.entryTally, sourceKey);
       if (victim === undefined) break; // chỉ còn key vừa chạm (goodMaxEntries ≥ goodIpsPerKey)
-      this.removeGoodKey(victim);
+      // THẤP-A (R7): victim thuộc chính tenant đang gọi -> giảm nhưng VẪN vừa hoạt động (không về nhóm nguội).
+      this.removeGoodKey(victim, this.good.get(victim)?.tenantId === t);
     }
   }
 

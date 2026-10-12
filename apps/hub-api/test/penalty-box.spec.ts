@@ -415,6 +415,20 @@ describe('EG2 hộp phạt — review lượt 5 (cache cặp tốt)', () => {
     expect(checkGoodInvariants(box)).toEqual([]);
   });
 
+  it('THẤP-A (R7): tenant đang gọi bị loại key của CHÍNH NÓ vì trần tổng vẫn là "vừa hoạt động" — tenant nằm im bị loại trước', () => {
+    const box = new PenaltyBox(cfg({ maxGoodKeys: 4, goodKeysPerTenant: 64 }));
+    box.markGood(gh, 'b1', 'B');
+    box.markGood(gh, 'b2', 'B'); // B: 2 key, nằm im từ đây
+    box.markGood(gh, 'a1', 'A');
+    box.markGood(gh, 'a2', 'A');
+    box.markGood(gh, 'a3', 'A'); // vượt trần: A (3 key) bị loại a1, về bucket 2 — phải NÓNG (đang gọi)
+    expect(present(box, 'a1')).toBe(false);
+    box.markGood(gh, 'c1', 'C'); // vượt trần: bucket 2 = {B (nằm im), A (vừa gọi)} -> loại b1
+    expect(present(box, 'b1')).toBe(false); // trước fix: A thành nguội, đứng trước B -> a2 bị loại
+    expect(['b2', 'a2', 'a3', 'c1'].map((k) => present(box, k))).toEqual([true, true, true, true]);
+    expect(checkGoodInvariants(box)).toEqual([]);
+  });
+
   it('NÊN-1: chạm trần MỤC thì loại theo số mục của tenant — tenant 3 key × 1 IP không bị 130 tenant × 16 IP đẩy', () => {
     const box = new PenaltyBox(cfg({ goodMaxEntries: 2_000, goodIpsPerKey: 16, maxGoodKeys: 10_000 }));
     for (const k of ['v1', 'v2', 'v3']) box.markGood(gh, k, 'tenant-victim');
