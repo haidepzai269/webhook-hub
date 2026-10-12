@@ -114,8 +114,8 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
 
   it("critical mới có alert.changed trong phiên -> banner; critical chỉ thấy qua poll (project khác) -> toast dính; warning -> toast 6s; info/đã xem -> không", () => {
     const mem = createFeedMemory();
-    // Mốc tường minh trước openedAt của fixture (10:00Z) — không dùng Date.now() (test hẹn giờ).
-    takeArrivals(mem, [alert("c-old", "critical")], Date.parse("2026-10-12T09:59:00Z"));
+    // Mốc = asOf của server (trước openedAt của fixture 10:00Z), lần đầu bị cắt — không dùng Date.now() (ADR-188).
+    takeArrivals(mem, [alert("c-old", "critical")], { asOf: "2026-10-12T09:59:00Z", complete: false });
     noteSocketNotice(mem, { id: "c-new", state: "OPEN" });
     const fresh = takeArrivals(mem, [
       alert("c-old", "critical"),
@@ -137,7 +137,7 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
 
   it("review L3: id lạ mở TRƯỚC mốc (lần đầu bị cắt ở 100 dòng) không phải 'vừa đến' — trừ khi có alert.changed của nó", () => {
     const mem = createFeedMemory();
-    takeArrivals(mem, [alert("seen", "warning")], Date.parse("2026-10-12T12:00:00Z"));
+    takeArrivals(mem, [alert("seen", "warning")], { asOf: "2026-10-12T12:00:00Z", complete: false });
     noteSocketNotice(mem, { id: "old-but-socket", state: "OPEN" });
     const fresh = takeArrivals(mem, [
       alert("old-truncated", "warning", { openedAt: "2026-10-12T09:00:00Z" }),
@@ -154,6 +154,52 @@ describe("[CB:T15] banner/toast chỉ cho cảnh báo MỚI trong phiên", () =>
     expect(toastsToDismiss(mem, rows, false)).toEqual(["acked"]);
     expect(toastsToDismiss(mem, rows, true)).toEqual(["gone"]);
     expect([...mem.toasted]).toEqual(["still"]);
+  });
+
+  describe("ADR-188: mốc 'mới' theo đồng hồ SERVER — trình duyệt lệch giờ ±10 phút không đổi kết quả", () => {
+    const SERVER_AS_OF = "2026-10-12T12:00:00.000Z";
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each([-10, 0, 10])("đồng hồ trình duyệt lệch %i phút: lần đầu bị cắt -> mốc = asOf server; mới sau mốc toast, cũ không bật lại", (skewMin) => {
+      // Đồng hồ trình duyệt cố định = giờ server + lệch (không giờ thật). Logic không được đọc nó.
+      jest.spyOn(Date, "now").mockReturnValue(Date.parse(SERVER_AS_OF) + skewMin * 60_000);
+      const mem = createFeedMemory();
+      expect(takeArrivals(mem, [alert("seen", "warning", { openedAt: "2026-10-12T11:58:00Z" })], { asOf: SERVER_AS_OF, complete: false })).toEqual([]);
+      const fresh = takeArrivals(
+        mem,
+        [
+          alert("seen", "warning", { openedAt: "2026-10-12T11:58:00Z" }),
+          alert("old-truncated", "warning", { openedAt: "2026-10-12T11:55:00Z", project: P2 }),
+          alert("new-other-project", "warning", { openedAt: "2026-10-12T12:00:30Z", project: P2 }),
+          alert("new-critical", "critical", { openedAt: "2026-10-12T12:01:00Z", project: P2 }),
+        ],
+        { asOf: "2026-10-12T12:01:05.000Z", complete: false },
+      );
+      expect(fresh.map((a) => a.id)).toEqual(["new-other-project", "new-critical"]);
+      // Lần sau: không toast lại cái đã báo, không bật cái cũ.
+      expect(takeArrivals(mem, fresh, { asOf: "2026-10-12T12:02:00.000Z", complete: false })).toEqual([]);
+    });
+
+    it("lần đầu ĐẦY ĐỦ: mọi id chưa thấy về sau là mới — kể cả opened_at (đầu lượt evaluator) sớm hơn asOf vì commit muộn", () => {
+      jest.spyOn(Date, "now").mockReturnValue(Date.parse(SERVER_AS_OF) + 10 * 60_000);
+      const mem = createFeedMemory();
+      takeArrivals(mem, [alert("seen", "warning")], { asOf: SERVER_AS_OF, complete: true });
+      const fresh = takeArrivals(mem, [alert("seen", "warning"), alert("late-commit", "warning", { openedAt: "2026-10-12T11:59:59Z", project: P2 })], {
+        asOf: "2026-10-12T12:00:30.000Z",
+        complete: true,
+      });
+      expect(fresh.map((a) => a.id)).toEqual(["late-commit"]);
+    });
+
+    it("server cũ (không có asOf), lần đầu bị cắt -> mốc = max(openedAt) đã thấy (vẫn đồng hồ server), không Date.now()", () => {
+      jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-12T11:00:00Z"));
+      const mem = createFeedMemory();
+      takeArrivals(mem, [alert("a", "warning", { openedAt: "2026-10-12T11:58:00Z" })], { complete: false });
+      const fresh = takeArrivals(mem, [alert("old", "warning", { openedAt: "2026-10-12T11:30:00Z" }), alert("new", "warning", { openedAt: "2026-10-12T11:59:00Z" })], {
+        complete: false,
+      });
+      expect(fresh.map((a) => a.id)).toEqual(["new"]);
+    });
   });
 
   it("alert.changed RESOLVED không bao giờ ra toast và không mở banner", () => {

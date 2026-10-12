@@ -94,6 +94,8 @@ function fakeStore(
     setUserLocale: async () => 1,
   };
   const store: any = {
+    // ADR-188: đồng hồ DB cố định (không giờ thật).
+    dbNow: async () => new Date('2026-10-12T10:00:00.000Z'),
     operatorAlertsAcrossTenants: async (f: any) => {
       calls.push(f);
       return opts.rows ?? [];
@@ -151,6 +153,8 @@ describe('GET /api/v1/alerts — kiểm đầu vào (400 bad_request kèm field)
     expect(out.items[0]).not.toHaveProperty('cursorAt');
     expect(out.items[0]).not.toHaveProperty('tenantId');
     expect(out.next).toBeNull();
+    // ADR-188: mốc `asOf` = đồng hồ DB lúc đọc (không phải đồng hồ trình duyệt) — console lấy mốc toast/badge từ đây.
+    expect(out.asOf).toBe('2026-10-12T10:00:00.000Z');
   });
 });
 

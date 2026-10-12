@@ -95,7 +95,10 @@ export interface FeedMemory {
   seen: Set<string>;
   /** id nhận qua `alert.changed` (state OPEN) trong phiên — chỉ những cảnh báo này được bật banner. */
   socketOpened: Set<string>;
-  /** Lúc lấy mốc (ms). Review L3: cảnh báo mở TRƯỚC mốc mà lần đầu không thấy (danh sách bị cắt) không phải "vừa đến". */
+  /**
+   * Mốc (ms, ĐỒNG HỒ SERVER — ADR-188). Review L3: cảnh báo mở TRƯỚC mốc mà lần đầu không thấy (danh sách bị cắt) không
+   * phải "vừa đến". -∞ khi lần đầu đầy đủ.
+   */
   baselineAt: number;
   /** id đang có toast — review L4: rời danh sách OPEN đầy đủ hoặc được "Đã xem" thì gỡ toast (toast dính không treo mãi). */
   toasted: Set<string>;
@@ -111,16 +114,40 @@ export function noteSocketNotice(mem: FeedMemory, n: Pick<AlertChangedNotice, "i
   return true;
 }
 
+/** Thông tin trang danh sách đi kèm (ADR-188): mốc ĐỒNG HỒ SERVER + danh sách có bị cắt không. */
+export interface FeedMeta {
+  /** `asOf` của `GET /alerts` — đồng hồ DB lúc đọc. Vắng (server cũ) -> rơi về max(openedAt) đã thấy. */
+  asOf?: string | null;
+  /** `next === null`: danh sách OPEN đầy đủ, không bị cắt. */
+  complete?: boolean;
+}
+
+/**
+ * Mốc "mới" của lần tải đầu — CHỈ từ dữ liệu server, không bao giờ `Date.now()` của trình duyệt (ADR-188: máy người
+ * dùng lệch giờ làm nuốt toast mới hoặc bật lại cảnh báo cũ). Lần đầu ĐẦY ĐỦ -> không cần mốc (-∞): mọi OPEN đã thấy hết,
+ * id lạ về sau chắc chắn mới — kể cả khi `opened_at` (đầu lượt evaluator) sớm hơn `asOf` vì lượt commit muộn. Bị cắt ->
+ * `asOf` (đồng hồ DB), vắng thì max(openedAt) của trang (đồng hồ server ghi `opened_at`).
+ */
+function serverBaseline(rows: readonly AlertView[], meta: FeedMeta): number {
+  if (meta.complete) return Number.NEGATIVE_INFINITY;
+  const asOf = meta.asOf ? Date.parse(meta.asOf) : Number.NaN;
+  if (Number.isFinite(asOf)) return asOf;
+  const opened = rows.map((r) => Date.parse(r.openedAt)).filter(Number.isFinite);
+  return opened.length ? Math.max(...opened) : Number.NEGATIVE_INFINITY;
+}
+
 /**
  * Cảnh báo vừa đến kể từ lần trước. Lần đầu (mốc): nhớ hết, trả [] — KHÔNG banner/toast cho cảnh báo cũ lúc tải trang
- * (CB:T15). Sau đó: dòng OPEN chưa thấy, chưa được ai "Đã xem".
+ * (CB:T15). Sau đó: dòng OPEN chưa thấy, chưa được ai "Đã xem". Mốc thời gian chỉ chặn id lạ mở TRƯỚC lần tải đầu bị
+ * cắt (L3) và giữ CỐ ĐỊNH: các lần sau đã có tập `seen` (cùng nguồn server) — dời mốc theo asOf mới chỉ thêm rủi ro nuốt
+ * cảnh báo commit muộn trong một lượt.
  */
-export function takeArrivals(mem: FeedMemory, rows: readonly AlertView[], now = Date.now()): AlertView[] {
+export function takeArrivals(mem: FeedMemory, rows: readonly AlertView[], meta: FeedMeta = {}): AlertView[] {
   const open = rows.filter((r) => r.state === "OPEN");
   if (!mem.primed) {
     for (const r of open) mem.seen.add(r.id);
     mem.primed = true;
-    mem.baselineAt = now;
+    mem.baselineAt = serverBaseline(open, meta);
     return [];
   }
   // Review L3: mở trước mốc mà chưa từng thấy (lần đầu bị cắt ở 100 dòng) = cảnh báo CŨ — trừ khi có alert.changed của nó.

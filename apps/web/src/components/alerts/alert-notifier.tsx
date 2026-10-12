@@ -66,7 +66,9 @@ export function AlertNotifier() {
     setBanner((b) => bannerSync(b, data.items, complete, now));
     // Review L4: toast của cảnh báo đã "Đã xem" hoặc đã đóng thì gỡ (toast critical dính không treo mãi).
     for (const id of toastsToDismiss(mem, data.items, complete)) toast.dismiss(`alert-${id}`);
-    for (const a of takeArrivals(mem, data.items, now)) {
+    // ADR-188: mốc "mới" theo đồng hồ SERVER (`asOf` của API), không Date.now() của trình duyệt — `now` ở trên chỉ để hẹn
+    // giờ hoạt ảnh banner cục bộ.
+    for (const a of takeArrivals(mem, data.items, { asOf: data.asOf, complete })) {
       const route = routeArrival(a, mem);
       if (route.kind === "banner") {
         setBanner((b) => bannerAdd(b, a));

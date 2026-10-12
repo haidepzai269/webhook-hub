@@ -56,6 +56,8 @@ export interface AlertPage {
   items: AlertView[];
   next: string | null;
   prev: string | null;
+  /** ADR-188: đồng hồ DB lúc server đọc (ISO) — mốc "cảnh báo mới" cho toast/banner. Vắng ở server cũ. */
+  asOf?: string;
 }
 
 /** `GET /api/v1/alerts/summary`. */

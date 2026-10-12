@@ -19,6 +19,7 @@ export type AlertStore = Pick<
   | 'operatorAlertSummaryAcrossTenants'
   | 'operatorFindAlertTenant'
   | 'operatorFindAlertTenants'
+  | 'dbNow'
   | 'tenantTx'
   | 'forTenant'
   | 'findExistingProjectIds'
@@ -77,13 +78,16 @@ export async function listAlerts(store: AlertStore, q: AlertListQuery) {
   };
   const limit = parseLimit(q.limit, ALERT_LIST_MAX); // mặc định LIST_PAGE_SIZE
   const page = parsePageCursor(q.cursor || q.before, q.after);
+  // ADR-188: `asOf` = đồng hồ DB, đọc TRƯỚC danh sách (dòng commit giữa hai câu vẫn nằm trong trang -> đã thấy). Console
+  // lấy mốc "cảnh báo mới" từ đây, không từ Date.now() của trình duyệt.
+  const asOf = await store.dbNow();
   const out = await runPage(
     (dir, cursor) => store.operatorAlertsAcrossTenants({ ...filter, dir, cursor, limit }),
     page,
     limit,
     (r) => ({ at: r.cursorAt, id: r.id }),
   );
-  return { items: out.items.map(alertView), next: out.next, prev: out.prev };
+  return { items: out.items.map(alertView), next: out.next, prev: out.prev, asOf: asOf.toISOString() };
 }
 
 export async function alertSummary(store: AlertStore) {

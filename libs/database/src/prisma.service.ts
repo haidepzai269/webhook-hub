@@ -219,6 +219,15 @@ export class PrismaService {
   }
 
   /**
+   * Đồng hồ DB (`now()`) — mốc `asOf` của danh sách cảnh báo (ADR-188): console so "cảnh báo nào mới" theo đồng hồ
+   * SERVER, không theo `Date.now()` của trình duyệt (máy người dùng lệch giờ). Không chạm bảng nào -> không cần scope.
+   */
+  public async dbNow(): Promise<Date> {
+    const [r] = await this.client.$queryRaw<{ now: Date }[]>(Prisma.sql`SELECT now() AS now`);
+    return r.now;
+  }
+
+  /**
    * Tóm tắt cho chuông: tổng OPEN theo mức + chưa xem tính trên TOÀN bảng (không trần), và chi tiết theo từng project
    * (chỉ project có cảnh báo OPEN, tối đa `limit` project — tổng không phụ thuộc trần này).
    */
