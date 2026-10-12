@@ -288,32 +288,40 @@ export class PrismaService {
 
   // ================== Email cảnh báo: escape hatch của VÒNG GỬI (CB5, SPEC §6, DINH-CHINH D1/D2, ADR-173) ==================
   // `alert_emails` mang tenant_id + RLS. Vòng gửi trong hub-worker làm việc THEO NGƯỜI, xuyên project (trần 6/giờ/người,
-  // dòng "…và k khác" gộp email của mọi project) -> đi qua ĐÚNG năm hàm có tên dưới đây (systemTx), như `cleanup.job`.
+  // dòng "…và k khác" gộp email của mọi project) -> đi qua ĐÚNG các hàm có tên dưới đây (systemTx), như `cleanup.job`.
   // Chỉ `apps/hub-worker/src/scheduler/alert-email.sender.ts` gọi — gate `alert-email-outbox` giữ điều này.
+  // Mọi mốc thời gian là ĐỒNG HỒ DB (`now()`), không đồng hồ của worker (review CB5 T-1). Lease = giá trị `next_attempt_at`
+  // (dạng text, đủ µs) — mọi lần ghi kết quả đều kèm token này (fencing, review CB5 TB-2).
 
   /**
    * Lấy tối đa `limit` email PENDING đến hạn bằng `FOR UPDATE SKIP LOCKED` trong một transaction NGẮN: tăng `attempts`,
-   * đặt lease `next_attempt_at = now + leaseMs`, COMMIT — việc gửi diễn ra NGOÀI transaction (không giữ khoá/kết nối
-   * trong lúc gọi nhà mail). Trả kèm ngữ cảnh để kiểm lại điều kiện lúc gửi và dựng thư: cảnh báo, project, người nhận,
-   * tuỳ chọn, tên đối tượng. KHÔNG có URL/cấu hình đích (thư chỉ hiện tên — CB:T9).
+   * đặt lease `next_attempt_at = now() + leaseMs`, COMMIT — gửi diễn ra NGOÀI transaction. Trước đó, dòng hết lease mà đã
+   * dùng hết `maxAttempts` (worker chết giữa chừng nhiều lần) -> FAILED luôn (review T-2). Trả kèm ngữ cảnh để kiểm lại điều
+   * kiện + dựng thư (KHÔNG URL/cấu hình đích — CB:T9). `tenantIds`: CHỈ test dùng (DB kiểm chứng dùng chung) — production
+   * không truyền.
    */
-  public alertEmailOutboxClaim(now: Date, limit: number, leaseMs: number): Promise<AlertEmailClaim[]> {
+  public alertEmailOutboxClaim(o: { limit: number; leaseMs: number; maxAttempts: number; tenantIds?: string[] }): Promise<AlertEmailClaim[]> {
+    const scope = o.tenantIds ? Prisma.sql`AND tenant_id = ANY(${o.tenantIds}::uuid[])` : Prisma.empty;
     return this.systemTx('alert email: lấy lô PENDING (SKIP LOCKED)', async (tx) => {
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE hub.alert_emails SET state = 'FAILED', next_attempt_at = NULL,
+               last_error = COALESCE(last_error, 'lease hết hạn sau lần thử cuối')
+        WHERE state = 'PENDING' AND attempts >= ${o.maxAttempts} AND next_attempt_at <= now() ${scope}`);
       const picked = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
         WITH picked AS (
           SELECT id FROM hub.alert_emails
-          WHERE state = 'PENDING' AND created_at <= ${now} AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
+          WHERE state = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= now()) ${scope}
           ORDER BY created_at, id
-          LIMIT ${limit}
+          LIMIT ${o.limit}
           FOR UPDATE SKIP LOCKED)
         UPDATE hub.alert_emails e
-        SET attempts = e.attempts + 1, next_attempt_at = ${new Date(now.getTime() + leaseMs)}
+        SET attempts = e.attempts + 1, next_attempt_at = now() + make_interval(secs => ${o.leaseMs / 1000}::double precision)
         FROM picked WHERE e.id = picked.id
         RETURNING e.id`);
       if (picked.length === 0) return [];
       return tx.$queryRaw<AlertEmailClaim[]>(Prisma.sql`
         SELECT e.id, e.tenant_id AS "tenantId", e.alert_id AS "alertId", e.user_id AS "userId", e.kind::text AS kind,
-               e.attempts, e.created_at AS "createdAt",
+               e.attempts, e.created_at AS "createdAt", e.next_attempt_at::text AS lease,
                a.rule, a.severity::text AS severity, a.subject_type::text AS "subjectType", a.subject_id AS "subjectId",
                a.state::text AS "alertState", a.facts, a.opened_at AS "openedAt", a.resolved_at AS "resolvedAt",
                p.slug AS "projectSlug", p.name AS "projectName",
@@ -334,13 +342,30 @@ export class PrismaService {
   }
 
   /**
-   * Trần 6/giờ/người: số email ĐÃ GỬI của người này từ `since` (index một phần `alert_emails_user_sent_idx`) + id các
-   * email bị trần chặn (`SUPPRESSED`, `cap`) chưa được gộp vào thư nào — email gửi kế tiếp mang dòng "…và k khác".
+   * Gia hạn lease NGAY TRƯỚC KHI GỬI một dòng — chỉ khi lease vẫn là của mình (`lease` khớp). 0 dòng = worker khác đã lấy
+   * lại (lease cũ hết hạn) -> KHÔNG được gửi. Trả token mới + trạng thái email OPEN của cùng (cảnh báo, người) — thư
+   * RESOLVED chỉ gửi khi thư OPEN đã xong (review T-3).
    */
-  public alertEmailOutboxCapState(userId: string, since: Date, rollupLimit = 500): Promise<{ sentInWindow: number; rollupIds: string[] }> {
+  public alertEmailOutboxRenew(id: string, lease: string, leaseMs: number): Promise<{ lease: string; openState: string | null } | null> {
+    return this.systemTx('alert email: gia hạn lease', async (tx) => {
+      const rows = await tx.$queryRaw<{ lease: string; openState: string | null }[]>(Prisma.sql`
+        UPDATE hub.alert_emails e SET next_attempt_at = now() + make_interval(secs => ${leaseMs / 1000}::double precision)
+        WHERE e.id = ${id}::uuid AND e.state = 'PENDING' AND e.next_attempt_at = ${lease}::timestamptz
+        RETURNING e.next_attempt_at::text AS lease,
+          (SELECT o.state::text FROM hub.alert_emails o WHERE o.alert_id = e.alert_id AND o.user_id = e.user_id AND o.kind = 'OPEN') AS "openState"`);
+      return rows[0] ?? null;
+    });
+  }
+
+  /**
+   * Trần 6/giờ/người: số email ĐÃ GỬI của người này trong `windowMs` theo đồng hồ DB (index một phần
+   * `alert_emails_user_sent_idx`) + id các email bị trần chặn (`cap`) chưa gộp vào thư nào.
+   */
+  public alertEmailOutboxCapState(userId: string, windowMs: number, rollupLimit = 500): Promise<{ sentInWindow: number; rollupIds: string[] }> {
     return this.systemTx('alert email: trần theo người', async (tx) => {
       const [c] = await tx.$queryRaw<{ n: number }[]>(Prisma.sql`
-        SELECT count(*)::int AS n FROM hub.alert_emails WHERE user_id = ${userId}::uuid AND state = 'SENT' AND sent_at > ${since}`);
+        SELECT count(*)::int AS n FROM hub.alert_emails
+        WHERE user_id = ${userId}::uuid AND state = 'SENT' AND sent_at > now() - make_interval(secs => ${windowMs / 1000}::double precision)`);
       const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
         SELECT id FROM hub.alert_emails
         WHERE user_id = ${userId}::uuid AND state = 'SUPPRESSED' AND suppressed_reason = 'cap' AND rolled_into IS NULL
@@ -349,13 +374,13 @@ export class PrismaService {
     });
   }
 
-  /** Đã gửi: SENT + `sent_at`; các dòng `cap` đã nêu trong thư được đánh dấu `rolled_into` (k chỉ đếm một lần). */
-  public alertEmailOutboxMarkSent(id: string, now: Date, rolledIds: string[] = []): Promise<boolean> {
+  /** Đã gửi (chỉ khi lease còn của mình): SENT + `sent_at = now()`; các dòng `cap` đã nêu trong thư -> `rolled_into`. */
+  public alertEmailOutboxMarkSent(id: string, lease: string, rolledIds: string[] = []): Promise<boolean> {
     return this.systemTx('alert email: đã gửi', async (tx) => {
       const n = await tx.$executeRaw(Prisma.sql`
-        UPDATE hub.alert_emails SET state = 'SENT', sent_at = ${now}, next_attempt_at = NULL, last_error = NULL
-        WHERE id = ${id}::uuid AND state = 'PENDING'`);
-      if (rolledIds.length > 0) {
+        UPDATE hub.alert_emails SET state = 'SENT', sent_at = now(), next_attempt_at = NULL, last_error = NULL
+        WHERE id = ${id}::uuid AND state = 'PENDING' AND next_attempt_at = ${lease}::timestamptz`);
+      if (n === 1 && rolledIds.length > 0) {
         await tx.$executeRaw(Prisma.sql`
           UPDATE hub.alert_emails SET rolled_into = ${id}::uuid
           WHERE id = ANY(${rolledIds}::uuid[]) AND state = 'SUPPRESSED' AND rolled_into IS NULL`);
@@ -364,36 +389,40 @@ export class PrismaService {
     });
   }
 
-  /** Không gửi: SUPPRESSED kèm lý do (`cap` | `ineligible:<…>`). Chỉ dòng còn PENDING. */
-  public alertEmailOutboxMarkSuppressed(id: string, reason: string): Promise<boolean> {
+  /** Không gửi: SUPPRESSED kèm lý do (`cap` | `ineligible:<…>`). Chỉ dòng còn PENDING và lease còn của mình. */
+  public alertEmailOutboxMarkSuppressed(id: string, lease: string, reason: string): Promise<boolean> {
     return this.systemTx('alert email: không gửi', async (tx) => {
       const n = await tx.$executeRaw(Prisma.sql`
         UPDATE hub.alert_emails SET state = 'SUPPRESSED', suppressed_reason = ${reason.slice(0, 64)}, next_attempt_at = NULL
-        WHERE id = ${id}::uuid AND state = 'PENDING'`);
+        WHERE id = ${id}::uuid AND state = 'PENDING' AND next_attempt_at = ${lease}::timestamptz`);
       return n === 1;
     });
   }
 
   /**
-   * Gửi lỗi: `attempts` (đã tăng lúc lấy) ≥ `maxAttempts` -> FAILED; còn lại PENDING với `next_attempt_at = retryAt`.
-   * `release` = trả dòng chưa kịp gửi (shutdown): bớt lại lần thử đã tính lúc lấy, đến hạn ngay.
+   * Gửi lỗi (lease còn của mình): `attempts` ≥ `maxAttempts` -> FAILED; còn lại PENDING, `next_attempt_at = now() + retryMs`.
+   * `release` = trả dòng chưa gửi (shutdown, hết ngân sách lượt, hoãn thư RESOLVED): bớt lại lần thử đã tính lúc lấy,
+   * đến hạn sau `delayMs` (mặc định ngay).
    */
   public alertEmailOutboxMarkFailure(
     id: string,
-    o: { error: string; maxAttempts: number; retryAt: Date } | { release: true },
+    lease: string,
+    o: { error: string; maxAttempts: number; retryMs: number } | { release: true; delayMs?: number },
   ): Promise<'FAILED' | 'PENDING' | null> {
     return this.systemTx('alert email: gửi lỗi', async (tx) => {
       const rows =
         'release' in o
           ? await tx.$queryRaw<{ state: string }[]>(Prisma.sql`
-              UPDATE hub.alert_emails SET attempts = GREATEST(attempts - 1, 0), next_attempt_at = NULL
-              WHERE id = ${id}::uuid AND state = 'PENDING' RETURNING state::text AS state`)
+              UPDATE hub.alert_emails
+              SET attempts = GREATEST(attempts - 1, 0), next_attempt_at = now() + make_interval(secs => ${(o.delayMs ?? 0) / 1000}::double precision)
+              WHERE id = ${id}::uuid AND state = 'PENDING' AND next_attempt_at = ${lease}::timestamptz RETURNING state::text AS state`)
           : await tx.$queryRaw<{ state: string }[]>(Prisma.sql`
               UPDATE hub.alert_emails
               SET last_error = ${o.error.slice(0, 200)},
                   state = CASE WHEN attempts >= ${o.maxAttempts} THEN 'FAILED'::"hub"."AlertEmailState" ELSE 'PENDING'::"hub"."AlertEmailState" END,
-                  next_attempt_at = CASE WHEN attempts >= ${o.maxAttempts} THEN NULL ELSE ${o.retryAt}::timestamptz END
-              WHERE id = ${id}::uuid AND state = 'PENDING' RETURNING state::text AS state`);
+                  next_attempt_at = CASE WHEN attempts >= ${o.maxAttempts} THEN NULL
+                                         ELSE now() + make_interval(secs => ${o.retryMs / 1000}::double precision) END
+              WHERE id = ${id}::uuid AND state = 'PENDING' AND next_attempt_at = ${lease}::timestamptz RETURNING state::text AS state`);
       return (rows[0]?.state as 'FAILED' | 'PENDING' | undefined) ?? null;
     });
   }
@@ -450,6 +479,8 @@ export interface AlertEmailClaim {
   kind: 'OPEN' | 'RESOLVED';
   attempts: number;
   createdAt: Date;
+  /** Lease (= `next_attempt_at` dạng text, đủ µs) — token fencing cho mọi lần ghi kết quả. */
+  lease: string;
   rule: string;
   severity: 'critical' | 'warning' | 'info';
   subjectType: 'destination' | 'source' | 'project';

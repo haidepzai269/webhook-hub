@@ -26,6 +26,7 @@ describe('MailSender (log | resend | capture)', () => {
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     expect(calls[0].init.headers.authorization).toBe('Bearer re_test');
     expect(JSON.parse(calls[0].init.body)).toEqual({ from: 'Hub <onboarding@resend.dev>', to: ['an@vi-du.vn'], subject: msg.subject, html: msg.html, text: msg.text });
+    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal); // review CB5 TB-3: request Resend có hạn chót (10s)
     await expect(s.send(msg)).rejects.toThrow(/422/);
   });
 

@@ -28,6 +28,9 @@ export interface MailSender {
 
 export const MAIL_SENDER = Symbol('MAIL_SENDER');
 
+/** Trần một request tới API Resend (cùng mức với driver gmail). */
+export const RESEND_TIMEOUT_MS = 10_000;
+
 export function createMailSender(env: Record<string, string | undefined> = process.env, fetchImpl: typeof fetch = fetch): MailSender {
   const driver = (env.MAIL_DRIVER ?? 'log').trim().toLowerCase() || 'log';
   if (driver === 'log') {
@@ -59,6 +62,8 @@ export function createMailSender(env: Record<string, string | undefined> = proce
           method: 'POST',
           headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
           body: JSON.stringify({ from, to: [m.to], subject: m.subject, html: m.html, text: m.text }),
+          // review CB5 TB-3: như driver gmail — một request treo không giữ vòng gửi email cảnh báo / request auth mãi.
+          signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
         });
         if (!res.ok) throw new Error(`Resend trả HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
       },

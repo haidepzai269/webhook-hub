@@ -309,7 +309,7 @@ CB, ADR-165..173 — thay cho "tự cảnh báo" ⭐ cũ và cờ chết `alert_
   đánh giá chỉ tốn thêm truy vấn, vẫn đúng một dòng OPEN. Đóng theo `id` của ảnh chụp. Redis mất → mất realtime, cảnh báo vẫn đúng (BB-2).
 - **Email = outbox theo NGƯỜI** `hub.alert_emails(alert_id, user_id, kind)`: dòng PENDING tạo cùng transaction đổi trạng thái,
   chống flapping 30 phút (đã có ở evaluator); vòng gửi `AlertEmailSender` trong `hub-worker` (CB5, ADR-173): lấy lô `FOR UPDATE SKIP LOCKED`
-  trong transaction NGẮN qua escape hatch có tên (`alertEmailOutbox…`, xuyên project như cleanup) + lease `next_attempt_at`, gửi NGOÀI
+  trong transaction NGẮN qua escape hatch có tên (`alertEmailOutbox…`, xuyên project như cleanup) + lease `next_attempt_at` (đồng hồ DB, gia hạn có điều kiện ngay trước mỗi lần gửi — fencing), gửi NGOÀI
   transaction, kiểm lại điều kiện lúc gửi, trần 6/giờ/người (vượt → `SUPPRESSED`, thư kế tiếp có "…và k cảnh báo khác"), 3 lần lỗi →
   `FAILED`; gửi lỗi không bao giờ chặn evaluator. Thư vi/en theo `users.locale`, câu luật dùng chung với console
   (`libs/common/src/alerts/text.ts`), không payload/header/secret/URL đích. Tuỳ chọn `alert_preferences` gắn người (ADR-166/167),
