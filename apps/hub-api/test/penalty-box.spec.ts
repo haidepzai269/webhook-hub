@@ -169,7 +169,7 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     // hộp thuần: hết hạn cặp tốt -> lại bị chặn
     let now = 0;
     const box = new PenaltyBox(cfg({ threshold404: 2, goodTtlMs: 1000, banMs: 600_000 }), {}, () => now);
-    box.markGood(gh, 'k');
+    box.markGood(gh, 'k', 't');
     box.recordUnknownSource(gh);
     box.recordUnknownSource(gh);
     expect(box.checkIp(gh, 'k').blocked).toBe(false);
@@ -201,18 +201,18 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
   it('review lượt 2 CHẶN A: cache tốt chia theo sourceKey — 1 key × N IP (N > trần) không đẩy được cặp tốt của key khác; bảng ngoài loại key hoạt động cũ nhất', () => {
     const box = new PenaltyBox(cfg({ threshold404: 2, maxEntries: 1000, goodIpsPerKey: 64, maxGoodKeys: 3 }));
     const gh = '140.82.115.40';
-    box.markGood(gh, 'key-nan-nhan');
+    box.markGood(gh, 'key-nan-nhan', 'tenant-Y');
     // kẻ xấu: source riêng, 50k request ký đúng, mỗi request một /64 khác nhau
-    for (let i = 0; i < 50_000; i++) box.markGood(`2001:db8:${(i >> 16) & 0xffff}:${i & 0xffff}::1`, 'key-ke-xau');
+    for (let i = 0; i < 50_000; i++) box.markGood(`2001:db8:${(i >> 16) & 0xffff}:${i & 0xffff}::1`, 'key-ke-xau', 'tenant-X');
     expect(box.goodSize()).toBe(64 + 1);
     box.recordUnknownSource(gh);
     box.recordUnknownSource(gh); // IP GitHub bị ban qua chiêu 404
     expect(box.checkIp(gh, 'key-nan-nhan').blocked).toBe(false); // cặp tốt của nạn nhân còn nguyên
     expect(box.checkIp(gh, 'khong_co').blocked).toBe(true);
     // muốn đẩy key thật ra phải có nhiều key hợp lệ ĐANG hoạt động hơn trần bảng ngoài
-    box.markGood('198.51.100.1', 'k1');
-    box.markGood('198.51.100.1', 'k2');
-    box.markGood('198.51.100.1', 'k3');
+    box.markGood('198.51.100.1', 'k1', 'tenant-1');
+    box.markGood('198.51.100.1', 'k2', 'tenant-2');
+    box.markGood('198.51.100.1', 'k3', 'tenant-3');
     expect(box.checkIp(gh, 'key-nan-nhan').blocked).toBe(true);
   });
 
@@ -253,10 +253,8 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     }
     for (const ip of ['172.32.0.1', '100.128.0.1', '203.0.113.7', '2001:db8::1', 'fec0::1', '::ffff:cb00:7107']) expect([ip, isLocalOrPrivateIp(ip)]).toEqual([ip, false]);
     expect(ipKey('::ffff:cb00:7107')).toBe('203.0.113.7');
-    const skippedPrivate = jest.fn();
-    const box = new PenaltyBox(cfg({ threshold404: 2 }), { onSkippedPrivate: skippedPrivate });
+    const box = new PenaltyBox(cfg({ threshold404: 2 }));
     for (let i = 0; i < 10; i++) box.recordUnknownSource('172.18.0.5'); // NAT của Docker
-    expect(skippedPrivate).toHaveBeenCalledTimes(10); // không câm: metric skipped{cause="private_ip"}
     expect(box.checkIp('172.18.0.5').blocked).toBe(false);
     expect(box.size()).toBe(0);
     const off = new PenaltyBox(cfg({ threshold404: 2, enabled: false }));
@@ -273,5 +271,44 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     expect((await svc.ingestWebhook(req('x21', '203.0.113.150'))).status).toBe(429);
     spy.mockRestore();
     expect(await apiRegistry.metrics()).toMatch(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED"\} [1-9]/);
+  });
+
+  it('review lượt 3 CHẶN 1: trần TỔNG số cặp tốt được tôn trọng (50k key × 64 IP không làm phình RAM), loại key hoạt động cũ nhất', () => {
+    const box = new PenaltyBox(cfg({ goodIpsPerKey: 16, maxGoodKeys: 10_000, goodMaxEntries: 2_000, goodKeysPerTenant: 1_000_000 }));
+    for (let key = 0; key < 500; key++) {
+      for (let i = 0; i < 64; i++) box.markGood(`198.${key >> 8}.${key & 255}.${i}`, `k${key}`, `t${key % 7}`);
+      expect(box.goodSize()).toBeLessThanOrEqual(2_000);
+    }
+    expect(box.goodSize()).toBe(2_000); // 125 key × 16 IP
+    expect(box.goodKeyCount()).toBe(125);
+    expect(resolvePenaltyConfig({})).toMatchObject({ goodIpsPerKey: 16, maxGoodKeys: 10_000, goodMaxEntries: 100_000, goodKeysPerTenant: 64 });
+    const keys = new PenaltyBox(cfg({ maxGoodKeys: 100, goodKeysPerTenant: 1_000_000 }));
+    for (let key = 0; key < 1_000; key++) keys.markGood('203.0.113.1', `k${key}`, `t${key}`);
+    expect(keys.goodKeyCount()).toBe(100);
+  });
+
+  it('review lượt 3 NÊN 2: tenant X tạo 1000 key tốt không đẩy được key của tenant Y (LRU theo tenant)', () => {
+    const box = new PenaltyBox(cfg({ threshold404: 2, goodKeysPerTenant: 64, maxGoodKeys: 10_000 }));
+    const gh = '140.82.115.50';
+    box.markGood(gh, 'key-Y', 'tenant-Y');
+    for (let i = 0; i < 1_000; i++) box.markGood(gh, `key-X-${i}`, 'tenant-X');
+    expect(box.goodKeyCount()).toBe(64 + 1);
+    box.recordUnknownSource(gh);
+    box.recordUnknownSource(gh);
+    expect(box.checkIp(gh, 'key-Y').blocked).toBe(false);
+    expect(box.checkIp(gh, 'key-X-999').blocked).toBe(false); // key mới nhất của X còn
+    expect(box.checkIp(gh, 'key-X-0').blocked).toBe(true); // X chỉ đẩy được key của chính nó
+  });
+
+  it('review lượt 3 NÊN 3: một request từ IP private chỉ tăng hub_ingest_penalty_skipped_private_total đúng 1', async () => {
+    const { svc } = build({ srcA: src('A') });
+    const metric = async () => Number(/hub_ingest_penalty_skipped_private_total (\d+)/.exec(await apiRegistry.metrics())?.[1] ?? 0);
+    const before = await metric();
+    expect((await svc.ingestWebhook(req('srcA', '172.18.0.5', sign('sai')))).status).toBe(401); // checkIp + checkPair + record
+    expect(await metric()).toBe(before + 1);
+    expect((await svc.ingestWebhook(req('srcA', '172.18.0.5'))).status).toBe(200); // + markGood
+    expect(await metric()).toBe(before + 2);
+    await svc.ingestWebhook(req('srcA', '203.0.113.5'));
+    expect(await metric()).toBe(before + 2);
   });
 });

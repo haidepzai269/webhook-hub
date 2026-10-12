@@ -85,10 +85,16 @@ export const trafficFlushDropped = new Counter({
   registers: [apiRegistry],
 });
 
-/** Review lượt 2: request /hooks không được hộp phạt chấm điểm. `private_ip` > 50% lưu lượng /hooks = cấu hình IP thật sai. */
-export const penaltySkipped = new Counter({
-  name: 'hub_ingest_penalty_skipped_total',
-  help: 'Số request /hooks hộp phạt bỏ qua không chấm điểm (private_ip = IP loopback/private/dùng chung)',
-  labelNames: ['cause'] as const,
+/** D9: request /hooks có IP loopback/private — hộp phạt bỏ qua. > 50% lưu lượng /hooks (trừ provider api) = cấu hình IP thật sai. */
+export const penaltySkippedPrivate = new Counter({
+  name: 'hub_ingest_penalty_skipped_private_total',
+  help: 'Số request /hooks hộp phạt không chấm điểm vì IP loopback/private/dùng chung (đếm một lần mỗi request)',
+  registers: [apiRegistry],
+});
+
+/** Review lượt 3: tổng số cặp tốt (ip, sourceKey) trong bộ nhớ — có trần EDGE_PENALTY_GOOD_MAX_ENTRIES. */
+export const penaltyGoodEntries = new Gauge({
+  name: 'hub_ingest_penalty_good_entries',
+  help: 'Số cặp (IP, sourceKey) đã verify đúng đang nhớ ở instance này (trần EDGE_PENALTY_GOOD_MAX_ENTRIES)',
   registers: [apiRegistry],
 });

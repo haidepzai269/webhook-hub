@@ -597,9 +597,10 @@ Trạng thái trong bộ nhớ từng instance: **0 lệnh Redis, 0 truy vấn D
 
 **Cặp tốt** (đính chính sau review): (IP, sourceKey) đã verify đúng trong `EDGE_PENALTY_GOOD_TTL` (24h) — luật (a) không
 chặn cặp tốt, luật (b) với cặp tốt dùng ngưỡng × `EDGE_PENALTY_401_GOOD_MULTIPLIER` (10). Cache tốt chia theo sourceKey
-(≤ `EDGE_PENALTY_GOOD_IPS_PER_KEY` = 64 IP mỗi key, bảng key có trần, loại key hoạt động cũ nhất), chỉ ghi khi đã qua rate
-limit. IP loopback/private/dùng chung (kể cả 169.254/16, 100.64/10, fe80::/10) không chấm điểm — đếm ở
-`hub_ingest_penalty_skipped_total{cause="private_ip"}` (`EDGE_PENALTY_ENABLED=0` tắt hẳn). Ban có trần riêng ≤ 50% `EDGE_PENALTY_MAX_ENTRIES`; đầy thì không phạt thêm (log + `hub_ingest_penalty_bans_skipped_total`).
+(≤ 16 IP mỗi key, ≤ 64 key mỗi tenant, ≤ 10k key và ≤ 100k mục tổng ≈ 11MB — gauge `hub_ingest_penalty_good_entries`;
+loại key hoạt động cũ nhất), chỉ ghi khi đã qua rate limit. IP loopback/private/dùng chung (kể cả 169.254/16, 100.64/10,
+fe80::/10) không chấm điểm — đếm một lần mỗi request ở `hub_ingest_penalty_skipped_private_total` (D9;
+`EDGE_PENALTY_ENABLED=0` tắt hẳn). Ban có trần riêng ≤ 50% `EDGE_PENALTY_MAX_ENTRIES`; đầy thì không phạt thêm (log + `hub_ingest_penalty_bans_skipped_total`).
 
 Bị chặn → `429 ip_temporarily_blocked` + `Retry-After` (giây còn lại). Log `warn` một lần lúc bắt đầu phạt. Metric
 `hub_ingest_penalty_bans_total{reason}`, `hub_ingest_penalty_blocked_total{reason}`, `hub_ingest_penalty_entries`,

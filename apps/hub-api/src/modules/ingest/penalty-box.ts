@@ -18,8 +18,9 @@ import { logger } from '@hub/common';
  * - "Cặp tốt": (ip, sourceKey) đã verify ĐÚNG (và qua rate limit) trong `goodTtlMs` gần nhất. Luật (a) KHÔNG chặn cặp tốt
  *   (flood 404 vào IP chung của GitHub không cắt được source đang chạy của tenant khác); luật (b) với cặp tốt dùng ngưỡng
  *   × `good401Multiplier` (mặc định ×10) — không miễn vô hạn.
- * - Cache tốt CHIA THEO sourceKey: mỗi key một LRU nhỏ (`goodIpsPerKey`, mặc định 64) -> một key không đẩy được cặp của key
- *   khác; bảng ngoài theo key có trần `maxGoodKeys` (= maxEntries), loại key hoạt động cũ nhất.
+ * - Cache tốt CHIA THEO sourceKey: mỗi key một LRU nhỏ (`goodIpsPerKey`, mặc định 16) -> một key không đẩy được cặp của key
+ *   khác. Mỗi tenant tối đa `goodKeysPerTenant` key (LRU theo tenant -> một tenant chỉ đẩy được key của chính nó). Bảng
+ *   ngoài có trần `maxGoodKeys` (10k) và trần TỔNG số mục `goodMaxEntries` (100k ≈ 11MB); vượt thì loại key hoạt động cũ nhất.
  * - Ban hết hạn được quét ở đầu Map `banned` (banMs cố định -> thứ tự chèn = thứ tự hết hạn); `banned` có trần riêng
  *   (≤ 50% `maxEntries`) — đầy thì không tạo ban mới (fail-open, có log + metric); khoá vừa chèn không bao giờ bị loại.
  * - IP loopback/private/dùng chung (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, ::1, fc00::/7, fe80::/10,
@@ -40,10 +41,14 @@ export interface PenaltyConfig {
   goodTtlMs?: number;
   /** Trần số ban đồng thời. Mặc định 50% `maxEntries`. */
   maxBanned?: number;
-  /** Trần số sourceKey trong cache tốt (LRU theo hoạt động). Mặc định = `maxEntries`. */
+  /** Trần số sourceKey trong cache tốt (LRU theo hoạt động). Mặc định 10.000. */
   maxGoodKeys?: number;
-  /** Trần số IP tốt mỗi sourceKey (LRU riêng). Mặc định 64. */
+  /** Trần số IP tốt mỗi sourceKey (LRU riêng). Mặc định 16. */
   goodIpsPerKey?: number;
+  /** Trần TỔNG số cặp tốt (mọi key). Mặc định 100.000 (≈ 11MB). */
+  goodMaxEntries?: number;
+  /** Trần số key tốt của MỘT tenant (LRU theo tenant). Mặc định 64. */
+  goodKeysPerTenant?: number;
   /** Ngưỡng luật (b) với cặp tốt = threshold401 × hệ số này. Mặc định 10. */
   good401Multiplier?: number;
 }
@@ -64,8 +69,6 @@ export interface PenaltyHooks {
   onBlocked?(reason: PenaltyReason): void;
   /** Đủ ngưỡng nhưng `banned` đã đầy -> KHÔNG phạt (fail-open có tiếng). */
   onBanSkipped?(reason: PenaltyReason, cause: 'capacity'): void;
-  /** IP loopback/private/dùng chung -> không chấm điểm (metric `skipped{cause="private_ip"}`). */
-  onSkippedPrivate?(): void;
 }
 
 const WINDOW_MS = 60_000;
@@ -86,7 +89,10 @@ export function resolvePenaltyConfig(env: Record<string, string | undefined> = p
     windowMs: WINDOW_MS,
     enabled: env.EDGE_PENALTY_ENABLED !== '0',
     goodTtlMs: clampEnvInt(env.EDGE_PENALTY_GOOD_TTL, 86_400, 300, 7 * 86_400) * 1000,
-    goodIpsPerKey: clampEnvInt(env.EDGE_PENALTY_GOOD_IPS_PER_KEY, 64, 4, 1_024),
+    goodIpsPerKey: clampEnvInt(env.EDGE_PENALTY_GOOD_IPS_PER_KEY, 16, 4, 1_024),
+    maxGoodKeys: clampEnvInt(env.EDGE_PENALTY_GOOD_MAX_KEYS, 10_000, 100, 1_000_000),
+    goodMaxEntries: clampEnvInt(env.EDGE_PENALTY_GOOD_MAX_ENTRIES, 100_000, 2_000, 2_000_000),
+    goodKeysPerTenant: clampEnvInt(env.EDGE_PENALTY_GOOD_KEYS_PER_TENANT, 64, 1, 10_000),
     good401Multiplier: clampEnvInt(env.EDGE_PENALTY_401_GOOD_MULTIPLIER, 10, 2, 100),
   };
 }
@@ -161,6 +167,13 @@ function expandIpv6(s: string): string[] | null {
   return out.length === 8 ? out : null;
 }
 
+interface GoodKey {
+  tenantId: string;
+  ips: Map<string, number>;
+  /** Hạn của lần markGood gần nhất (TTL cố định -> hạn muộn nhất của key). */
+  lastExp: number;
+}
+
 interface Counting {
   count: number;
   windowStart: number;
@@ -179,7 +192,12 @@ export class PenaltyBox {
   /** Khoá đang bị phạt — thứ tự chèn = thứ tự hết hạn (banMs cố định). */
   private readonly banned = new Map<string, Ban>();
   /** Cặp tốt: sourceKey -> (ipKey -> hết hạn lúc). Cả hai tầng là LRU (Map: chạm = xoá rồi chèn lại). */
-  private readonly good = new Map<string, Map<string, number>>();
+  private readonly good = new Map<string, GoodKey>();
+  /** tenantId -> các sourceKey tốt của tenant đó (LRU theo hoạt động). */
+  private readonly tenantKeys = new Map<string, Set<string>>();
+  private goodEntries = 0;
+  private readonly goodMaxEntries: number;
+  private readonly goodKeysPerTenant: number;
   private readonly maxBanned: number;
   private readonly maxGoodKeys: number;
   private readonly goodIpsPerKey: number;
@@ -194,8 +212,10 @@ export class PenaltyBox {
   ) {
     this.enabled = cfg.enabled !== false;
     this.maxBanned = Math.max(1, cfg.maxBanned ?? Math.floor(cfg.maxEntries / 2));
-    this.maxGoodKeys = Math.max(1, cfg.maxGoodKeys ?? cfg.maxEntries);
-    this.goodIpsPerKey = Math.max(1, cfg.goodIpsPerKey ?? 64);
+    this.maxGoodKeys = Math.max(1, cfg.maxGoodKeys ?? 10_000);
+    this.goodIpsPerKey = Math.max(1, cfg.goodIpsPerKey ?? 16);
+    this.goodMaxEntries = Math.max(this.goodIpsPerKey, cfg.goodMaxEntries ?? 100_000);
+    this.goodKeysPerTenant = Math.max(1, cfg.goodKeysPerTenant ?? 64);
     this.good401Multiplier = Math.max(1, cfg.good401Multiplier ?? 10);
     this.goodTtlMs = cfg.goodTtlMs ?? 86_400_000;
   }
@@ -212,9 +232,11 @@ export class PenaltyBox {
 
   /** Tổng số cặp tốt đang nhớ. */
   goodSize(): number {
-    let n = 0;
-    for (const m of this.good.values()) n += m.size;
-    return n;
+    return this.goodEntries;
+  }
+
+  goodKeyCount(): number {
+    return this.good.size;
   }
 
   /**
@@ -241,22 +263,41 @@ export class PenaltyBox {
   }
 
   /**
-   * Chữ ký ĐÚNG và đã qua rate limit -> nhớ cặp tốt `goodTtlMs`. LRU riêng mỗi sourceKey (một key không đẩy được cặp của
-   * key khác); bảng ngoài theo key loại key hoạt động cũ nhất khi vượt `maxGoodKeys`.
+   * Chữ ký ĐÚNG và đã qua rate limit -> nhớ cặp tốt `goodTtlMs`. Ba lớp trần: ≤ `goodIpsPerKey` IP mỗi key (key này không đẩy
+   * được key khác), ≤ `goodKeysPerTenant` key mỗi tenant (tenant này không đẩy được tenant khác), và trần tổng
+   * `maxGoodKeys` / `goodMaxEntries` (loại key hoạt động cũ nhất).
    */
-  markGood(ip: string | undefined, sourceKey: string): void {
+  markGood(ip: string | undefined, sourceKey: string, tenantId: string): void {
     const k = this.keyOf(ip);
     if (!k) return;
     const now = this.clock();
     this.sweepExpiredGood(now);
-    let ips = this.good.get(sourceKey);
-    if (ips) this.good.delete(sourceKey); // chạm key -> cuối (hoạt động mới nhất)
-    else ips = new Map();
-    this.good.set(sourceKey, ips);
-    ips.delete(k);
-    ips.set(k, now + this.goodTtlMs);
-    while (ips.size > this.goodIpsPerKey) ips.delete(ips.keys().next().value as string);
-    while (this.good.size > this.maxGoodKeys) this.good.delete(this.good.keys().next().value as string);
+    let e = this.good.get(sourceKey);
+    if (e) this.good.delete(sourceKey); // chạm key -> cuối (hoạt động mới nhất)
+    else e = { tenantId, ips: new Map(), lastExp: 0 };
+    this.good.set(sourceKey, e);
+    let tk = this.tenantKeys.get(e.tenantId);
+    if (!tk) {
+      tk = new Set();
+      this.tenantKeys.set(e.tenantId, tk);
+    }
+    tk.delete(sourceKey);
+    tk.add(sourceKey);
+    if (e.ips.delete(k)) this.goodEntries--;
+    const exp = now + this.goodTtlMs;
+    e.ips.set(k, exp);
+    e.lastExp = exp;
+    this.goodEntries++;
+    while (e.ips.size > this.goodIpsPerKey) {
+      e.ips.delete(e.ips.keys().next().value as string);
+      this.goodEntries--;
+    }
+    while (tk.size > this.goodKeysPerTenant) this.removeGoodKey(tk.values().next().value as string);
+    while (this.good.size > this.maxGoodKeys || this.goodEntries > this.goodMaxEntries) {
+      const oldest = this.good.keys().next().value as string;
+      if (oldest === sourceKey) break; // không bao giờ loại key vừa chạm (goodMaxEntries ≥ goodIpsPerKey)
+      this.removeGoodKey(oldest);
+    }
   }
 
   /** 404 do không tìm thấy source. */
@@ -287,36 +328,40 @@ export class PenaltyBox {
   /** Tắt / IP không hợp lệ / loopback-private -> null (không chấm điểm, không chặn). */
   private keyOf(ip: string | undefined): string | null {
     if (!this.enabled) return null;
-    if (isLocalOrPrivateIp(ip)) {
-      logger.debug({ ip }, 'Hộp phạt: bỏ qua IP loopback/private (có thể là IP dùng chung sau NAT/proxy)');
-      this.safeHook(() => this.hooks.onSkippedPrivate?.());
-      return null;
-    }
+    if (isLocalOrPrivateIp(ip)) return null; // metric `skipped_private` đếm MỘT lần mỗi request ở ingest
     return ipKey(ip);
   }
 
   private isGood(ip: string, sourceKey: string): boolean {
-    const ips = this.good.get(sourceKey);
-    const until = ips?.get(ip);
+    const e = this.good.get(sourceKey);
+    const until = e?.ips.get(ip);
     if (until === undefined) return false;
     if (until <= this.clock()) {
-      ips!.delete(ip);
-      if (ips!.size === 0) this.good.delete(sourceKey);
+      e!.ips.delete(ip);
+      this.goodEntries--;
+      if (e!.ips.size === 0) this.removeGoodKey(sourceKey);
       return false;
     }
     return true;
   }
 
-  /**
-   * Key ở đầu bảng ngoài là key hoạt động cũ nhất; TTL cố định nên IP cuối trong LRU của nó hết hạn muộn nhất — hết hạn thì
-   * cả key hết hạn. Dừng ở key đầu tiên còn hiệu lực (mỗi key tốn ≤ goodIpsPerKey bước).
-   */
+  private removeGoodKey(sourceKey: string): void {
+    const e = this.good.get(sourceKey);
+    if (!e) return;
+    this.goodEntries -= e.ips.size;
+    this.good.delete(sourceKey);
+    const tk = this.tenantKeys.get(e.tenantId);
+    if (tk) {
+      tk.delete(sourceKey);
+      if (tk.size === 0) this.tenantKeys.delete(e.tenantId);
+    }
+  }
+
+  /** Key ở đầu bảng là key hoạt động cũ nhất; `lastExp` = hạn muộn nhất của nó -> hết hạn thì cả key hết hạn. O(1) khấu hao. */
   private sweepExpiredGood(now: number): void {
-    for (const [key, ips] of this.good) {
-      let last = 0;
-      for (const v of ips.values()) last = v; // phần tử cuối
-      if (last > now) break;
-      this.good.delete(key);
+    for (const [key, e] of this.good) {
+      if (e.lastExp > now) break;
+      this.removeGoodKey(key);
     }
   }
 

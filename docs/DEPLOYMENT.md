@@ -439,9 +439,13 @@ EDGE_PENALTY_401_THRESHOLD=30  # số 401 sai chữ ký / 60s / cặp (IP, sourc
 EDGE_PENALTY_BAN_SECONDS=600   # thời gian phạt, kẹp 30–86400
 EDGE_PENALTY_ENABLED=1         # 0 = tắt hẳn hộp phạt (rollback). IP loopback/private không bao giờ bị chấm điểm
 EDGE_PENALTY_GOOD_TTL=86400    # giây nhớ một cặp (IP, sourceKey) đã verify đúng: IP đang bị phạt vẫn thông cặp này. Kẹp 300–604800
-EDGE_PENALTY_GOOD_IPS_PER_KEY=64     # số IP "tốt" nhớ cho MỖI sourceKey (LRU riêng — key này không đẩy được key khác). Kẹp 4–1024
+EDGE_PENALTY_GOOD_IPS_PER_KEY=16     # số IP "tốt" nhớ cho MỖI sourceKey (LRU riêng — key này không đẩy được key khác). Kẹp 4–1024
+EDGE_PENALTY_GOOD_KEYS_PER_TENANT=64 # số sourceKey tốt tối đa của MỘT project (LRU riêng — project này không đẩy được project khác). Kẹp 1–10000
+EDGE_PENALTY_GOOD_MAX_KEYS=10000     # trần số sourceKey trong cache tốt. Kẹp 100–1000000
+EDGE_PENALTY_GOOD_MAX_ENTRIES=100000 # trần TỔNG số cặp tốt (≈ 11MB) — RAM Render free 512MB cho cả hub-all. Kẹp 2000–2000000
+                                     # Theo dõi gauge hub_ingest_penalty_good_entries
 EDGE_PENALTY_401_GOOD_MULTIPLIER=10  # cặp tốt bị ban ở ngưỡng 401 × hệ số này (không miễn vô hạn). Kẹp 2–100
-                         # SAU DEPLOY: kiểm hub_ingest_penalty_skipped_total{cause="private_ip"} ≈ 0 (panel Grafana 10). Chiếm
+                         # SAU DEPLOY: kiểm hub_ingest_penalty_skipped_private_total ≈ 0 (panel Grafana 10). Chiếm
                          # > 50% /hooks = hub-api đang thấy IP của proxy/NAT, không phải IP thật -> hộp phạt không có tác dụng
 EDGE_PENALTY_MAX_ENTRIES=50000 # trần số khoá trong bộ nhớ (LRU, khoá đang phạt giữ lâu hơn). Kẹp 1000–1000000
 TRAFFIC_FLUSH_MS=60000   # hub-api (EG4, ADR-179): nhịp đẩy lưu lượng theo source từ bộ nhớ xuống Postgres, kẹp 5000–600000.

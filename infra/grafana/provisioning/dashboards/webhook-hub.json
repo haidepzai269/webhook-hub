@@ -449,7 +449,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Hộp phạt: khoá trong bộ nhớ, IP private bị bỏ qua, lưu lượng bị bỏ (EG2/EG4)",
-      "description": "hub_ingest_penalty_entries: số khoá hộp phạt đang giữ ở mỗi instance (trần EDGE_PENALTY_MAX_ENTRIES — chạm trần là đang bị dội nhiều IP). hub_traffic_flush_dropped_total: request của bảng lưu lượng bị bỏ vì ghi Postgres lỗi quá 10 phút (ADR-179). skipped_private = tỷ lệ request /hooks có IP loopback/private (hộp phạt bỏ qua): > 50% /hooks = cấu hình IP sai (hub-api thấy IP của proxy/NAT).",
+      "description": "hub_ingest_penalty_entries: số khoá hộp phạt đang giữ ở mỗi instance (trần EDGE_PENALTY_MAX_ENTRIES — chạm trần là đang bị dội nhiều IP). hub_traffic_flush_dropped_total: request của bảng lưu lượng bị bỏ vì ghi Postgres lỗi quá 10 phút (ADR-179). skipped_private = hub_ingest_penalty_skipped_private_total / request /hooks (provider!=\"api\") có IP loopback/private (hộp phạt bỏ qua): > 50% /hooks = cấu hình IP sai (hub-api thấy IP của proxy/NAT). hub_ingest_penalty_good_entries: số cặp tốt (trần EDGE_PENALTY_GOOD_MAX_ENTRIES).",
       "datasource": {
         "type": "prometheus",
         "uid": "hub-prometheus"
@@ -500,8 +500,17 @@
             "uid": "hub-prometheus"
           },
           "refId": "C",
-          "expr": "sum(increase(hub_ingest_penalty_skipped_total{cause=\"private_ip\"}[5m])) / clamp_min(sum(increase(hub_ingest_requests_total[5m])), 1)",
-          "legendFormat": "skipped_private / mọi /hooks"
+          "expr": "sum(increase(hub_ingest_penalty_skipped_private_total[5m])) / clamp_min(sum(increase(hub_ingest_requests_total{provider!=\"api\"}[5m])), 1)",
+          "legendFormat": "skipped_private / /hooks (trừ api)"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "D",
+          "expr": "sum by (instance) (hub_ingest_penalty_good_entries)",
+          "legendFormat": "cặp tốt {{instance}}"
         }
       ]
     }
