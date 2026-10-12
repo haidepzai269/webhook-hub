@@ -6,6 +6,7 @@ import { logger } from '@hub/common';
 import { ConnectorError, ProviderConnector, ProviderRegistry, connectorBaseUrl } from '@hub/providers';
 import { unprocessable } from '../service-api/service-api.controller';
 import { hubError } from '../errors/hub-error';
+import { assertSourceLimit } from './source-limit';
 import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from './source-key';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -119,7 +120,7 @@ export class SourceConnectionService {
       });
   }
 
-  async connect(tenantId: string, actor: string, body: any) {
+  async connect(tenantId: string, actor: string, body: any, opts: { sourceLimitExempt?: boolean } = {}) {
     // H-1: `sourceId` trong body = gắn vào source CÓ SẴN (giống `POST /sources/:id/connect`).
     if (body?.sourceId !== undefined && body?.sourceId !== null && body?.sourceId !== '') return this.connectExisting(tenantId, actor, body.sourceId, body);
     const provider = body?.provider;
@@ -142,6 +143,7 @@ export class SourceConnectionService {
 
     // (3) TX: Source (+ SourceSecret v1 nếu secret ký có sẵn) + kết nối PENDING + audit -> COMMIT TRƯỚC khi gọi provider.
     const source = await this.tx(tenantId, async (repo) => {
+      await assertSourceLimit(repo, opts.sourceLimitExempt === true); // QT9 (Q11): trần source/project, operator miễn
       const s = await repo.createSource({
         provider,
         name,

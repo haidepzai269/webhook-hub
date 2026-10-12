@@ -283,6 +283,16 @@ Hoặc nhờ người vận hành tăng hạn mức.
 curl -si -X POST $API/hooks/github/$SOURCE_KEY -H 'content-type: application/json' -d '{}'
 ```
 
+## source_limit
+
+**409 (console + `/v1/p/:project/sources` + tạo key có `publish:events`).** Project đã có tối đa `SOURCE_LIMIT_PER_PROJECT`
+(mặc định 20) source **chưa lưu trữ** (SPEC-han-muc-dung-luong §10). Tham số: `limit`. Người vận hành không bị giới hạn.
+Key có `publish:events` tạo kèm một source `api` nên cũng tính vào trần.
+**Sửa:** lưu trữ ("Xoá" trên bản đồ luồng) source không dùng nữa, hoặc nhờ người vận hành.
+```bash
+curl -si -X POST $API/v1/p/cafe/sources -H "Authorization: Bearer $KEY" -d '{"provider":"github","name":"x","secret":"s"}'
+```
+
 ## destination_archived
 
 **409 (console).** Replay một delivery mà đích (hoặc subscription) của nó đã bị **Xoá** khỏi bản đồ luồng (lưu trữ,

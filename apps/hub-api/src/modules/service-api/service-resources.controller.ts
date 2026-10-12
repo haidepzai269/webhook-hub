@@ -21,6 +21,7 @@ import {
 } from './endpoint.service';
 import { longPoll } from './polling';
 import { hubError } from '../errors/hub-error';
+import { assertSourceLimit } from '../console/source-limit';
 import { parseSourceInput } from './source-input';
 import { generateSourceKey } from '../console/source-key';
 
@@ -384,6 +385,8 @@ export class ServiceResourcesController {
     const sourceKey = generateSourceKey(input.provider);
     const masterKey = getMasterKey();
     const created = await this.withAudit(req.tenantId!, async (repo) => {
+      // QT9 (Q11): trần source/project — API key không bao giờ là operator.
+      await assertSourceLimit(repo, false);
       const s = await repo.createSource({
         provider: input.provider,
         name: input.name,

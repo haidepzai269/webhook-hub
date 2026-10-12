@@ -193,6 +193,13 @@ export const ERROR_CATALOG = {
     params: ['field', 'code', 'subscriptionCount', 'deliveryCount'],
     fix: () => 'See "detail"; reload the resource and retry.',
   },
+  // QT9 (SPEC-han-muc-dung-luong §10, Q11): trần số source chưa lưu trữ mỗi project.
+  source_limit: {
+    status: 409,
+    message: 'This project has reached the maximum number of sources.',
+    params: ['limit'],
+    fix: (p) => `A project can have at most ${Number.isInteger(p.limit) ? p.limit : 'the allowed number of'} active sources. Archive ("Delete" on the flow map) a source you no longer use, or ask the hub operator.`,
+  },
   slug_taken: {
     status: 409,
     message: 'A project with this slug already exists.',

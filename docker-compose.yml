@@ -117,6 +117,8 @@ services:
       - INGEST_RATE_LIMIT_PER_MIN=${INGEST_RATE_LIMIT_PER_MIN:-100}
       # QT3 E5 (ADR-189): khoá chiều ghi (507) khi project đầy hạn mức. Local/hubv BẬT để đo/demo; production mặc định 0.
       - STORAGE_LOCK_ENABLED=${STORAGE_LOCK_ENABLED:-1}
+      # QT9 (Q11): trần source chưa lưu trữ mỗi project (409 source_limit), operator miễn
+      - SOURCE_LIMIT_PER_PROJECT=${SOURCE_LIMIT_PER_PROJECT:-20}
       # Deployed: đặt để chặn /metrics bằng Bearer token; local để trống
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       # AU6 (SPEC-auth §5.12, ADR-108): runtime = role hub_app (KHÔNG superuser, KHÔNG BYPASSRLS) -> RLS có hiệu lực.

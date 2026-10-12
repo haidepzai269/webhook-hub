@@ -174,6 +174,16 @@ export class TenantScopedRepository {
     return this.findSourceById(id);
   }
 
+  /**
+   * QT9 (§10, Q11): đếm source CHƯA lưu trữ sau khi khoá theo project trong transaction HIỆN TẠI (advisory xact lock, như
+   * `lockAndCountOwnedProjects`) — hai request tạo source song song không vượt trần. PHẢI gọi trên repo dựng trong `tx`
+   * (`forTenant(id, tx)`): trên client gốc mỗi lời gọi là một transaction riêng nên khoá nhả ngay.
+   */
+  async lockAndCountActiveSources(): Promise<number> {
+    await this.prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'source-create:' + this.tenantId}, 0))`;
+    return this.prisma.source.count({ where: { tenantId: this.tenantId, archivedAt: null } });
+  }
+
   async countSources(where: Prisma.SourceWhereInput = {}) {
     return this.prisma.source.count({
       where: { ...where, tenantId: this.tenantId },

@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { apiSourceKey } from './source-key';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
+import { assertSourceLimit } from './source-limit';
 
 export interface ApiKeyCreateData {
   serviceName: string;
@@ -9,6 +10,8 @@ export interface ApiKeyCreateData {
   keyHash: string;
   keyPrefix: string;
   actor: string;
+  /** QT9: operator không bị trần source/project (source `api` tạo kèm key có `publish:events`). */
+  sourceLimitExempt?: boolean;
 }
 
 /**
@@ -22,6 +25,7 @@ export async function createApiKeyWithSource(prisma: PrismaService, projectId: s
     const id = randomUUID();
     let sourceId: string | undefined;
     if (d.scopes.includes('publish:events')) {
+      await assertSourceLimit(repo, d.sourceLimitExempt === true); // QT9 (Q11): source `api` cũng tính vào trần
       const source = await repo.createSource({ provider: 'api', name: d.serviceName, sourceKey: apiSourceKey(id), isActive: true });
       sourceId = source.id;
     }

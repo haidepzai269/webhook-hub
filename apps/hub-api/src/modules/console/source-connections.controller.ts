@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
+import { RequestWithPrincipal } from '../service-api/principal';
+import { isOperatorRequest } from './source-limit';
 import { PrismaService } from '@hub/database';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
@@ -34,8 +36,8 @@ export class SourceConnectionsController {
   /** Luôn 201 kể cả FAILED (source giữ lại, `fix` nói cách sửa) — giống tạo endpoint. */
   @Post('sources/connect')
   @RequireScope('manage:sources')
-  connect(@CurrentTenant() tenantId: string, @CurrentUser() userId: string, @Body() body: any) {
-    return this.svc.connect(tenantId, `user:${userId}`, body);
+  connect(@CurrentTenant() tenantId: string, @CurrentUser() userId: string, @Body() body: any, @Req() req: RequestWithPrincipal) {
+    return this.svc.connect(tenantId, `user:${userId}`, body, { sourceLimitExempt: isOperatorRequest(req) });
   }
 
   /**

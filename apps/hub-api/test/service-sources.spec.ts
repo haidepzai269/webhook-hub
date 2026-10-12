@@ -23,7 +23,9 @@ describe('POST/GET /v1/p/:project/sources (S8)', () => {
           return row;
         }),
         findMany: jest.fn(async ({ where }: any) => sources.filter((s) => s.tenantId === where.tenantId)),
+        count: jest.fn(async ({ where }: any) => sources.filter((s) => s.tenantId === where.tenantId && !s.archivedAt).length), // QT9
       },
+      $executeRaw: jest.fn(async () => 0), // QT9: advisory lock của trần source
       auditLog: { create: jest.fn(async ({ data }: any) => audits.push(data)) },
     };
     const prisma: any = {

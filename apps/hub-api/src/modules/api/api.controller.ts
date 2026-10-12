@@ -27,6 +27,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { RequestWithPrincipal } from '../service-api/principal';
 import { hubError } from '../errors/hub-error';
+import { assertSourceLimit, isOperatorRequest } from '../console/source-limit';
 import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from '../console/source-key';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
@@ -152,7 +153,7 @@ export class ApiController {
 
   @Post('sources')
   @RequireScope('manage:sources')
-  async createSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
+  async createSource(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any, @Req() req?: RequestWithPrincipal) {
     const masterKey = getMasterKey();
     // S8: cùng bộ kiểm với /v1/p (provider hợp lệ, generic bắt buộc verificationConfig) -> 422 có tên trường.
     const input = parseSourceInput(body);
@@ -165,6 +166,8 @@ export class ApiController {
     const sourceKey: string = custom || generateSourceKey(input.provider);
 
     const source = await this.withAudit(tenantId, async (repo) => {
+      // QT9 (Q11): trần source/project, khoá đếm trong CÙNG transaction; operator miễn.
+      await assertSourceLimit(repo, isOperatorRequest(req));
       const created = await repo.createSource({
         provider: input.provider,
         name: input.name,

@@ -182,6 +182,7 @@ export class ProjectsController {
       keyHash: hashApiKey(key),
       keyPrefix: apiKeyPrefix(key),
       actor,
+      sourceLimitExempt: me(req).isOperator === true,
     });
     return {
       ...created,
