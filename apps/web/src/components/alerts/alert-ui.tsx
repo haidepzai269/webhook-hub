@@ -26,6 +26,13 @@ export const SEVERITY_COLOR: Record<AlertSeverity, string> = {
   info: "var(--info)",
 };
 
+/** Bộ token theo mức (styles/alerts.css): `--{tone}` viền/icon, `--{tone}-subtle` nền nhạt, `--{tone}-fg` chữ trên nền nhạt. */
+export const SEVERITY_TONE: Record<AlertSeverity, "danger" | "warning" | "info"> = {
+  critical: "danger",
+  warning: "warning",
+  info: "info",
+};
+
 export function SeverityDot({ severity, className }: { severity: AlertSeverity; className?: string }) {
   return (
     <span

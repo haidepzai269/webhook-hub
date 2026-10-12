@@ -6,13 +6,16 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { AlertSeverity } from "@/lib/alerts/types";
 
-import { ProjectChip, SEVERITY_COLOR, SeverityIcon } from "./alert-ui";
+import { ProjectChip, SEVERITY_COLOR, SEVERITY_TONE, SeverityIcon } from "./alert-ui";
 
 /**
  * CB4 §8.3: toast cảnh báo TUỲ BIẾN (không dùng toast mặc định của sonner) — icon mức, chip project, tiêu đề, MỘT dòng
  * mô tả, nút "Xem". warning tự đóng sau 6s, critical (project khác) dính tới khi đóng; rê chuột thì sonner dừng đếm;
  * tối đa 3 toast cùng lúc (`visibleToasts` của Toaster). Chữ đã dịch sẵn lúc tạo — component không cần context React.
+ * Viền bao quanh + icon + nhãn mức cùng tông theo mức (critical đỏ, warning hổ phách, info xanh dương). Hiện ở Toaster
+ * riêng `ALERT_TOASTER_ID` (giữa phía trên, dưới header) để toast thao tác thường vẫn ở góc phải.
  */
+export const ALERT_TOASTER_ID = "alerts";
 export interface AlertToastProps {
   toastId: string | number;
   severity: AlertSeverity;
@@ -26,17 +29,23 @@ export interface AlertToastProps {
 }
 
 function AlertToast(p: AlertToastProps) {
+  const tone = SEVERITY_TONE[p.severity];
   return (
     <div
       role="status"
-      className="flex w-[356px] max-w-[calc(100vw-2rem)] gap-3 rounded-lg border border-border border-l-4 bg-popover p-3 pr-2 text-popover-foreground shadow-lg"
-      style={{ borderLeftColor: SEVERITY_COLOR[p.severity] }}
+      className="flex w-full gap-3 rounded-lg border-[1.5px] bg-popover p-3 pr-2 text-popover-foreground shadow-lg"
+      style={{ borderColor: SEVERITY_COLOR[p.severity] }}
     >
       <SeverityIcon severity={p.severity} className="mt-0.5" />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex min-w-0 items-center gap-1.5">
           <ProjectChip name={p.projectName} />
-          <span className="truncate text-[11px] text-muted-foreground">{p.severityLabel}</span>
+          <span
+            className="truncate rounded-sm px-1.5 py-px font-medium text-[11px] leading-4"
+            style={{ backgroundColor: `var(--${tone}-subtle)`, color: `var(--${tone}-fg)` }}
+          >
+            {p.severityLabel}
+          </span>
         </div>
         <p className="line-clamp-2 font-medium text-sm leading-5">{p.title}</p>
         {p.description && (
@@ -73,5 +82,5 @@ function AlertToast(p: AlertToastProps) {
 /** Hiện toast cho một cảnh báo (id ổn định theo cảnh báo — gọi hai lần không ra hai toast). */
 export function showAlertToast(alertId: string, durationMs: number, props: Omit<AlertToastProps, "toastId">) {
   const id = `alert-${alertId}`;
-  toast.custom((tid) => <AlertToast {...props} toastId={tid} />, { id, duration: durationMs });
+  toast.custom((tid) => <AlertToast {...props} toastId={tid} />, { id, duration: durationMs, toasterId: ALERT_TOASTER_ID });
 }

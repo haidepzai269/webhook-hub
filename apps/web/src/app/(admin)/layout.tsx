@@ -52,7 +52,7 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
         <TooltipProvider>
           <PreferencesStoreProvider initialValues={PREFERENCE_DEFAULTS}>
             <QueryProvider>{children}</QueryProvider>
-            {/* CB4 §8.3: tối đa 3 toast cùng lúc (toast cảnh báo dùng chung Toaster này). Đẩy xuống dưới header 48px
+            {/* Toast thao tác thường (góc phải), tối đa 3 cùng lúc. Đẩy xuống dưới header 48px
                 (h-12) + 12px — không thì toast che badge Thời gian thực, nút cài đặt, chuông, ngôn ngữ, giao diện. */}
             <Toaster
               richColors
@@ -60,6 +60,18 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
               visibleToasts={3}
               offset={{ top: 60, right: 16 }}
               mobileOffset={{ top: 56, right: 12, left: 12 }}
+            />
+            {/* Toast CẢNH BÁO (CB4, toasterId "alerts" = ALERT_TOASTER_ID ở components/alerts/alert-toast.tsx): giữa phía
+                trên, dưới header; sonner trượt từ trên xuống khi vào, trượt lên + mờ khi ra (giảm chuyển động: chỉ mờ —
+                styles/alerts.css). `expand`: nhiều toast xếp dọc, không chồng lên nhau. Màn hẹp: gutter 16px hai bên. */}
+            <Toaster
+              id="alerts"
+              className="toaster group alert-toaster"
+              position="top-center"
+              expand
+              visibleToasts={3}
+              offset={{ top: 60 }}
+              mobileOffset={{ top: 56, right: 16, left: 16 }}
             />
           </PreferencesStoreProvider>
         </TooltipProvider>
