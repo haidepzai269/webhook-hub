@@ -4,12 +4,13 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 const THEME_CYCLE = ["light", "dark", "system"] as const;
-const THEME_LABEL = { light: "Sáng", dark: "Tối", system: "Theo hệ thống" } as const;
 
 export function ThemeSwitcher() {
+  const t = useT();
   const { themeMode, setPreference } = usePreferencesStore(
     useShallow((state) => ({
       themeMode: state.values.theme_mode,
@@ -22,13 +23,10 @@ export function ThemeSwitcher() {
     setPreference("theme_mode", THEME_CYCLE[(currentIndex + 1) % THEME_CYCLE.length]);
   };
 
+  const label = t("header.theme.aria", { mode: t(`common.theme.${themeMode}`) });
+
   return (
-    <Button
-      size="icon"
-      variant="outline"
-      onClick={cycleTheme}
-      aria-label={`Giao diện: ${THEME_LABEL[themeMode]}. Bấm để đổi`}
-    >
+    <Button size="icon" variant="outline" onClick={cycleTheme} aria-label={label} title={label}>
       <Monitor className="hidden [html[data-theme-mode=system]_&]:block" />
       <Sun className="hidden dark:block [html[data-theme-mode=system]_&]:hidden" />
       <Moon className="block dark:hidden [html[data-theme-mode=system]_&]:hidden" />

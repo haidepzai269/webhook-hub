@@ -43,10 +43,12 @@ export const createPreferencesStore = (initialValues: Partial<PreferenceValueMap
       void persistPreference(key, value);
     },
 
+    // "Khôi phục mặc định" của bảng giao diện — ngôn ngữ không phải tuỳ chỉnh giao diện nên giữ nguyên.
     resetPreferences: () => {
       let resolvedThemeMode: ResolvedThemeMode = "light";
 
       for (const key of PREFERENCE_KEYS) {
+        if (key === "language") continue;
         const value = PREFERENCE_DEFAULTS[key];
         const resolved = applyPreference(key, value);
 
@@ -54,10 +56,10 @@ export const createPreferencesStore = (initialValues: Partial<PreferenceValueMap
         void persistPreference(key, value);
       }
 
-      set({
-        values: { ...PREFERENCE_DEFAULTS },
+      set((state) => ({
+        values: { ...PREFERENCE_DEFAULTS, language: state.values.language },
         resolvedThemeMode,
-      });
+      }));
     },
   }));
 };

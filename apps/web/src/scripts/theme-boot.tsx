@@ -66,6 +66,7 @@ export function ThemeBootScript() {
 
         root.classList.toggle("dark", resolvedMode === "dark");
         root.style.colorScheme = resolvedMode;
+        root.lang = preferences.language;
 
       } catch (e) {
         console.warn("ThemeBootScript error:", e);

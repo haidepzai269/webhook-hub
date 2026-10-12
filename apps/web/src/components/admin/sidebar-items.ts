@@ -14,60 +14,66 @@ import {
   Workflow,
 } from "lucide-react";
 
+import type { MessageKey } from "@/lib/i18n/dictionary";
+
+/**
+ * Nhãn KHÔNG nằm ở đây — chỉ khoá dịch (`@/lib/i18n/dictionary`), theo quy ước `nav.item.<id>` / `nav.group.<id>`.
+ * Đổi chữ hiển thị = sửa từ điển (cả vi lẫn en); `id`/`url` giữ nguyên.
+ */
 export interface NavItem {
   id: string;
-  title: string;
+  titleKey: MessageKey;
   url: string;
   icon: LucideIcon;
 }
 
 export interface NavGroup {
   id: string;
-  label: string;
+  labelKey: MessageKey;
   items: NavItem[];
 }
 
 export const sidebarItems: NavGroup[] = [
   {
     id: "flow",
-    label: "Luồng dữ liệu",
+    labelKey: "nav.group.flow",
     items: [
       // SPEC-event-flow-ui V3: màn đầu tiên — nhìn là biết luồng nào chạy, luồng nào crash.
-      { id: "flow-map", title: "Bản đồ luồng", url: "/dashboard/flow", icon: Network },
-      { id: "events", title: "Hành trình sự kiện", url: "/dashboard/events", icon: Activity },
-      { id: "deliveries", title: "Giao hàng (Deliveries)", url: "/dashboard/deliveries", icon: Send },
-      { id: "dlq", title: "DLQ", url: "/dashboard/dlq", icon: Skull },
+      { id: "flow-map", titleKey: "nav.item.flow-map", url: "/dashboard/flow", icon: Network },
+      { id: "events", titleKey: "nav.item.events", url: "/dashboard/events", icon: Activity },
+      { id: "deliveries", titleKey: "nav.item.deliveries", url: "/dashboard/deliveries", icon: Send },
+      { id: "dlq", titleKey: "nav.item.dlq", url: "/dashboard/dlq", icon: Skull },
     ],
   },
   {
     id: "overview",
-    label: "Tổng quan",
-    items: [{ id: "dashboard", title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
+    labelKey: "nav.group.overview",
+    items: [{ id: "dashboard", titleKey: "nav.item.dashboard", url: "/dashboard", icon: LayoutDashboard }],
   },
   {
     id: "project",
-    label: "Project",
+    labelKey: "nav.group.project",
     items: [
       // SK1 (SPEC-shop-ket-noi-project §3): tạo project + API key (copy connection string một lần).
-      { id: "projects", title: "Project", url: "/dashboard/projects", icon: FolderKanban },
-      { id: "api-keys", title: "API key", url: "/dashboard/api-keys", icon: KeyRound },
+      { id: "projects", titleKey: "nav.item.projects", url: "/dashboard/projects", icon: FolderKanban },
+      { id: "api-keys", titleKey: "nav.item.api-keys", url: "/dashboard/api-keys", icon: KeyRound },
     ],
   },
   {
     id: "config",
-    label: "Cấu hình",
+    labelKey: "nav.group.config",
     items: [
-      { id: "sources", title: "Nguồn (Sources)", url: "/dashboard/sources", icon: Inbox },
-      { id: "destinations", title: "Đích (Destinations)", url: "/dashboard/destinations", icon: Cable },
-      { id: "subscriptions", title: "Subscriptions", url: "/dashboard/subscriptions", icon: Workflow },
+      { id: "sources", titleKey: "nav.item.sources", url: "/dashboard/sources", icon: Inbox },
+      { id: "destinations", titleKey: "nav.item.destinations", url: "/dashboard/destinations", icon: Cable },
+      { id: "subscriptions", titleKey: "nav.item.subscriptions", url: "/dashboard/subscriptions", icon: Workflow },
     ],
   },
   {
     id: "tools",
-    label: "Công cụ",
+    labelKey: "nav.group.tools",
     items: [
-      { id: "playground", title: "Playground", url: "/dashboard/playground", icon: FlaskConical },
-      { id: "audit", title: "Nhật ký (Audit)", url: "/dashboard/audit", icon: ScrollText },
+      { id: "playground", titleKey: "nav.item.playground", url: "/dashboard/playground", icon: FlaskConical },
+      { id: "audit", titleKey: "nav.item.audit", url: "/dashboard/audit", icon: ScrollText },
     ],
   },
 ];

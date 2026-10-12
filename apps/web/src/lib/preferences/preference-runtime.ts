@@ -13,5 +13,6 @@ export function applyPreference<K extends PreferenceKey>(
   }
 
   document.documentElement.setAttribute(PREFERENCE_REGISTRY[key].attribute, value);
+  if (key === "language") document.documentElement.lang = value;
   return undefined;
 }

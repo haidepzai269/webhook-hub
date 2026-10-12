@@ -12,6 +12,7 @@
  */
 
 import { fontKeys } from "@/lib/fonts/registry";
+import { DEFAULT_LOCALE, LOCALES } from "@/lib/i18n/locales";
 
 import {
   CONTENT_LAYOUT_VALUES,
@@ -100,6 +101,14 @@ export const PREFERENCE_REGISTRY = {
     defaultValue: "icon",
     persistence: "client-cookie",
     attribute: "data-sidebar-collapsible",
+  }),
+
+  // Ngôn ngữ giao diện admin. Cookie (như theme) để layout server đọc được → SSR ra đúng nhãn, không nháy.
+  language: defineSSRPreference({
+    values: LOCALES,
+    defaultValue: DEFAULT_LOCALE,
+    persistence: "client-cookie",
+    attribute: "data-language",
   }),
 } as const;
 

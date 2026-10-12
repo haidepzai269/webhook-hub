@@ -22,12 +22,14 @@ import {
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
 import { logout as serverLogout } from "@/lib/hub/client";
+import { useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { sidebarItems } from "./sidebar-items";
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const path = usePathname();
+  const t = useT();
   const { sidebarVariant, sidebarCollapsible, isSynced } = usePreferencesStore(
     useShallow((s) => ({
       sidebarVariant: s.values.sidebar_variant,
@@ -66,15 +68,15 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
       <SidebarContent>
         {sidebarItems.map((group) => (
           <SidebarGroup key={group.id}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => (
                   <SidebarMenuItem key={item.id}>
-                    <SidebarMenuButton asChild tooltip={item.title} isActive={isActive(item.url)}>
+                    <SidebarMenuButton asChild tooltip={t(item.titleKey)} isActive={isActive(item.url)}>
                       <Link href={item.url}>
                         <item.icon />
-                        <span>{item.title}</span>
+                        <span>{t(item.titleKey)}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -87,17 +89,17 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Mở Shop">
+            <SidebarMenuButton asChild tooltip={t("nav.footer.open-shop")}>
               <a href="/shop" target="_blank" rel="noreferrer">
                 <ExternalLink />
-                <span>Mở Shop</span>
+                <span>{t("nav.footer.open-shop")}</span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Đăng xuất" onClick={logout}>
+            <SidebarMenuButton tooltip={t("nav.footer.logout")} onClick={logout}>
               <LogOut />
-              <span>Đăng xuất</span>
+              <span>{t("nav.footer.logout")}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

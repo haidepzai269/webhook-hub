@@ -9,12 +9,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { type FontKey, fontOptions } from "@/lib/fonts/registry";
+import { useT } from "@/lib/i18n/use-t";
 import type { ContentLayout, NavbarStyle, SidebarCollapsible, SidebarVariant } from "@/lib/preferences/layout";
 import { THEME_PRESET_OPTIONS, type ThemeMode, type ThemePreset } from "@/lib/preferences/theme";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-/** Bảng tuỳ chỉnh giao diện của Studio Admin, Việt hoá nhãn. */
+/** Bảng tuỳ chỉnh giao diện của Studio Admin; nhãn theo namespace `layout.*` (lib/i18n/messages/layout.ts). */
 export function LayoutControls() {
+  const t = useT();
   const { values, resolvedThemeMode, setPreference, resetPreferences } = usePreferencesStore(
     useShallow((state) => ({
       values: state.values,
@@ -33,25 +35,30 @@ export function LayoutControls() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button size="icon" variant="outline" aria-label="Tuỳ chỉnh giao diện">
+        <Button
+          size="icon"
+          variant="outline"
+          aria-label={t("header.layout-controls")}
+          title={t("header.layout-controls")}
+        >
           <Settings />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end">
         <div className="flex flex-col gap-5">
           <div className="space-y-1.5">
-            <h4 className="font-medium text-sm leading-none">Tuỳ chỉnh giao diện</h4>
-            <p className="text-muted-foreground text-xs">Lưu trong cookie của trình duyệt này.</p>
+            <h4 className="font-medium text-sm leading-none">{t("layout.title")}</h4>
+            <p className="text-muted-foreground text-xs">{t("layout.hint")}</p>
           </div>
           <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Bộ màu</Label>
+              <Label className="font-medium text-xs">{t("layout.preset")}</Label>
               <Select
                 value={values.theme_preset}
                 onValueChange={(v) => setPreference("theme_preset", v as ThemePreset)}
               >
                 <SelectTrigger size="sm" className="w-full text-xs">
-                  <SelectValue placeholder="Bộ màu" />
+                  <SelectValue placeholder={t("layout.preset")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -63,7 +70,7 @@ export function LayoutControls() {
                             backgroundColor: resolvedThemeMode === "dark" ? preset.primary.dark : preset.primary.light,
                           }}
                         />
-                        {preset.label}
+                        {preset.value === "default" ? t("layout.preset.default") : preset.label}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -72,10 +79,10 @@ export function LayoutControls() {
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Phông chữ</Label>
+              <Label className="font-medium text-xs">{t("layout.font")}</Label>
               <Select value={values.font} onValueChange={(v) => setPreference("font", v as FontKey)}>
                 <SelectTrigger size="sm" className="w-full text-xs">
-                  <SelectValue placeholder="Phông chữ" />
+                  <SelectValue placeholder={t("layout.font")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -90,7 +97,7 @@ export function LayoutControls() {
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Chế độ</Label>
+              <Label className="font-medium text-xs">{t("layout.mode")}</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -99,14 +106,14 @@ export function LayoutControls() {
                 value={values.theme_mode}
                 onValueChange={toggle<ThemeMode>((v) => setPreference("theme_mode", v))}
               >
-                <ToggleGroupItem value="light">Sáng</ToggleGroupItem>
-                <ToggleGroupItem value="dark">Tối</ToggleGroupItem>
-                <ToggleGroupItem value="system">Hệ thống</ToggleGroupItem>
+                <ToggleGroupItem value="light">{t("common.theme.light")}</ToggleGroupItem>
+                <ToggleGroupItem value="dark">{t("common.theme.dark")}</ToggleGroupItem>
+                <ToggleGroupItem value="system">{t("common.theme.system")}</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Độ rộng nội dung</Label>
+              <Label className="font-medium text-xs">{t("layout.content")}</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -115,13 +122,13 @@ export function LayoutControls() {
                 value={values.content_layout}
                 onValueChange={toggle<ContentLayout>((v) => setPreference("content_layout", v))}
               >
-                <ToggleGroupItem value="centered">Căn giữa</ToggleGroupItem>
-                <ToggleGroupItem value="full-width">Toàn màn hình</ToggleGroupItem>
+                <ToggleGroupItem value="centered">{t("layout.content.centered")}</ToggleGroupItem>
+                <ToggleGroupItem value="full-width">{t("layout.content.full-width")}</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Thanh trên cùng</Label>
+              <Label className="font-medium text-xs">{t("layout.navbar")}</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -130,13 +137,13 @@ export function LayoutControls() {
                 value={values.navbar_style}
                 onValueChange={toggle<NavbarStyle>((v) => setPreference("navbar_style", v))}
               >
-                <ToggleGroupItem value="sticky">Dính</ToggleGroupItem>
-                <ToggleGroupItem value="scroll">Cuộn theo</ToggleGroupItem>
+                <ToggleGroupItem value="sticky">{t("layout.navbar.sticky")}</ToggleGroupItem>
+                <ToggleGroupItem value="scroll">{t("layout.navbar.scroll")}</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Kiểu sidebar</Label>
+              <Label className="font-medium text-xs">{t("layout.sidebar")}</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -145,14 +152,14 @@ export function LayoutControls() {
                 value={values.sidebar_variant}
                 onValueChange={toggle<SidebarVariant>((v) => setPreference("sidebar_variant", v))}
               >
-                <ToggleGroupItem value="inset">Inset</ToggleGroupItem>
-                <ToggleGroupItem value="sidebar">Sidebar</ToggleGroupItem>
-                <ToggleGroupItem value="floating">Nổi</ToggleGroupItem>
+                <ToggleGroupItem value="inset">{t("layout.sidebar.inset")}</ToggleGroupItem>
+                <ToggleGroupItem value="sidebar">{t("layout.sidebar.sidebar")}</ToggleGroupItem>
+                <ToggleGroupItem value="floating">{t("layout.sidebar.floating")}</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Khi thu gọn sidebar</Label>
+              <Label className="font-medium text-xs">{t("layout.collapsible")}</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -161,13 +168,13 @@ export function LayoutControls() {
                 value={values.sidebar_collapsible}
                 onValueChange={toggle<SidebarCollapsible>((v) => setPreference("sidebar_collapsible", v))}
               >
-                <ToggleGroupItem value="icon">Chỉ icon</ToggleGroupItem>
-                <ToggleGroupItem value="offcanvas">Ẩn hẳn</ToggleGroupItem>
+                <ToggleGroupItem value="icon">{t("layout.collapsible.icon")}</ToggleGroupItem>
+                <ToggleGroupItem value="offcanvas">{t("layout.collapsible.offcanvas")}</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <Button type="button" size="sm" variant="outline" className="w-full text-xs" onClick={resetPreferences}>
-              Khôi phục mặc định
+              {t("layout.reset")}
             </Button>
           </div>
         </div>

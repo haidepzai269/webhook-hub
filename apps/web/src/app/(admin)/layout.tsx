@@ -20,11 +20,19 @@ export const metadata: Metadata = {
 
 // ADR-025: root layout của admin (Tailwind v4 + shadcn). Storefront có root layout riêng ở (shop).
 export default function AdminRootLayout({ children }: Readonly<{ children: ReactNode }>) {
-  const { theme_mode, theme_preset, content_layout, navbar_style, sidebar_variant, sidebar_collapsible, font } =
-    PREFERENCE_DEFAULTS;
+  const {
+    theme_mode,
+    theme_preset,
+    content_layout,
+    navbar_style,
+    sidebar_variant,
+    sidebar_collapsible,
+    font,
+    language,
+  } = PREFERENCE_DEFAULTS;
   return (
     <html
-      lang="vi"
+      lang={language}
       data-theme-mode={theme_mode}
       data-theme-preset={theme_preset}
       data-content-layout={content_layout}
@@ -32,6 +40,7 @@ export default function AdminRootLayout({ children }: Readonly<{ children: React
       data-sidebar-variant={sidebar_variant}
       data-sidebar-collapsible={sidebar_collapsible}
       data-font={font}
+      data-language={language}
       suppressHydrationWarning
     >
       <head>
