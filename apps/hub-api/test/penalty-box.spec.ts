@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { IngestService } from '../src/modules/ingest/ingest.service';
-import { PenaltyBox, PenaltyConfig, ipKey, resolvePenaltyConfig } from '../src/modules/ingest/penalty-box';
+import { PenaltyBox, PenaltyConfig, ipKey, isLocalOrPrivateIp, resolvePenaltyConfig } from '../src/modules/ingest/penalty-box';
 import { apiRegistry } from '../src/modules/metrics/metrics';
 
 /**
@@ -113,11 +113,11 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     expect(v6.checkIp('2001:db8:aa:bc::1').blocked).toBe(false);
 
     const box = new PenaltyBox(cfg({ threshold404: 2, maxEntries: 10 }));
-    box.recordUnknownSource('10.0.0.1');
-    box.recordUnknownSource('10.0.0.1'); // bị phạt (khoá cũ nhất)
-    for (let i = 0; i < 100; i++) box.recordUnknownSource(`10.1.${i >> 8}.${i & 255}`);
+    box.recordUnknownSource('203.0.113.1');
+    box.recordUnknownSource('203.0.113.1'); // bị phạt (khoá cũ nhất)
+    for (let i = 0; i < 100; i++) box.recordUnknownSource(`198.51.${i >> 8}.${i & 255}`);
     expect(box.size()).toBe(10);
-    expect(box.checkIp('10.0.0.1').blocked).toBe(true);
+    expect(box.checkIp('203.0.113.1').blocked).toBe(true);
   });
 
   it('[EG:T7] hộp phạt ném lỗi -> request vẫn chạy bình thường (fail-open)', async () => {
@@ -150,8 +150,94 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
   });
 
   it('tham số env được kẹp (giống resolveSendTimeoutMs)', () => {
-    expect(resolvePenaltyConfig({})).toMatchObject({ threshold404: 20, threshold401: 30, banMs: 600_000, maxEntries: 50_000 });
+    expect(resolvePenaltyConfig({})).toMatchObject({ threshold404: 20, threshold401: 30, banMs: 600_000, maxEntries: 50_000, enabled: true, goodTtlMs: 86_400_000 });
+    expect(resolvePenaltyConfig({ EDGE_PENALTY_ENABLED: '0', EDGE_PENALTY_GOOD_TTL: '1' })).toMatchObject({ enabled: false, goodTtlMs: 300_000 });
     expect(resolvePenaltyConfig({ EDGE_PENALTY_404_THRESHOLD: '1', EDGE_PENALTY_401_THRESHOLD: 'abc', EDGE_PENALTY_BAN_SECONDS: '999999999', EDGE_PENALTY_MAX_ENTRIES: '5' }))
       .toMatchObject({ threshold404: 5, threshold401: 30, banMs: 86_400_000, maxEntries: 1_000 });
+  });
+
+  it('[EG:T17] luật (a) không chặn CẶP TỐT (đã verify đúng) của IP đang bị phạt, vẫn chặn key lạ — flood 404 vào IP GitHub không cắt source của tenant khác', async () => {
+    const { svc, prisma } = build({ srcA: src('A') });
+    const gh = '140.82.115.20'; // IP hook chung của GitHub
+    expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200); // tenant A nhận bình thường -> cặp tốt
+    // kẻ xấu trỏ repo của nó vào key không tồn tại: 20 lần 404 từ CÙNG IP GitHub -> IP bị phạt
+    for (let i = 0; i < 20; i++) expect((await svc.ingestWebhook(req(`khong_co_${i}`, gh))).status).toBe(404);
+    const calls = prisma.findSourceBySourceKeyForIngest.mock.calls.length;
+    expect((await svc.ingestWebhook(req('khong_co_moi', gh))).status).toBe(429); // key lạ vẫn bị chặn trước DB
+    expect(prisma.findSourceBySourceKeyForIngest.mock.calls.length).toBe(calls);
+    expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200); // cặp tốt vẫn đi tiếp
+    // hộp thuần: hết hạn cặp tốt -> lại bị chặn
+    let now = 0;
+    const box = new PenaltyBox(cfg({ threshold404: 2, goodTtlMs: 1000, banMs: 600_000 }), {}, () => now);
+    box.markGood(gh, 'k');
+    box.recordUnknownSource(gh);
+    box.recordUnknownSource(gh);
+    expect(box.checkIp(gh, 'k').blocked).toBe(false);
+    expect(box.checkIp(gh, 'la').blocked).toBe(true);
+    expect(box.checkIp(gh).blocked).toBe(true);
+    now = 1001;
+    expect(box.checkIp(gh, 'k').blocked).toBe(true);
+  });
+
+  it('[EG:T18] luật (b) KHÔNG ban cặp tốt: kẻ biết key nạn nhân đặt secret sai ở GitHub -> chỉ đếm, giao hàng thật của nạn nhân từ IP đó vẫn 200', async () => {
+    const { svc } = build({ srcA: src('A') });
+    const skipped = jest.fn();
+    svc.penalty = new PenaltyBox(cfg(), { onBanSkipped: skipped });
+    const gh = '140.82.115.30';
+    expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200); // cặp tốt
+    for (let i = 0; i < 100; i++) expect((await svc.ingestWebhook(req('srcA', gh, sign('secret-cua-ke-xau')))).status).toBe(401);
+    expect((await svc.ingestWebhook(req('srcA', gh))).status).toBe(200);
+    expect(skipped).toHaveBeenCalledWith('bad_signature', 'good_pair');
+    expect(svc.penalty.activeBansFor('A')).toEqual([]);
+    // cặp CHƯA từng verify đúng vẫn bị ban như cũ
+    for (let i = 0; i < 30; i++) await svc.ingestWebhook(req('srcA', '203.0.113.99', sign('sai')));
+    expect((await svc.ingestWebhook(req('srcA', '203.0.113.99'))).status).toBe(429);
+  });
+
+  it('review CHẶN 1: ban hết hạn được quét, ban có trần riêng (≤50%), khoá vừa chèn không bị loại — hộp đầy không tự vô hiệu', () => {
+    let now = 0;
+    const skipped = jest.fn();
+    const box = new PenaltyBox(cfg({ threshold404: 2, maxEntries: 1000 }), { onBanSkipped: skipped }, () => now);
+    const ipOf = (i: number) => `203.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+    for (let i = 0; i < 1000; i++) {
+      box.recordUnknownSource(ipOf(i));
+      box.recordUnknownSource(ipOf(i));
+    }
+    expect(box.bannedSize()).toBe(500); // trần riêng của ban
+    expect(box.size()).toBeLessThanOrEqual(1000);
+    expect(skipped).toHaveBeenCalledWith('unknown_source', 'capacity'); // đầy -> không phạt, có tiếng
+    // đang đầy: IP mới vẫn được ĐẾM (khoá vừa chèn không bị loại ngay)
+    box.recordUnknownSource('198.51.100.1');
+    expect(box.size()).toBeLessThanOrEqual(1000);
+    now += 3_600_000; // mọi ban đã hết hạn
+    for (let i = 0; i < 50; i++) box.recordUnknownSource('198.51.100.77');
+    expect(box.checkIp('198.51.100.77').blocked).toBe(true);
+    expect(box.bannedSize()).toBe(1);
+  });
+
+  it('review NÊN 3: IP loopback/private không chấm điểm, không chặn; EDGE_PENALTY_ENABLED=0 tắt hẳn; IPv4-mapped dạng hex', () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1', 'fd00::1', 'fc12::5']) {
+      expect([ip, isLocalOrPrivateIp(ip)]).toEqual([ip, true]);
+    }
+    for (const ip of ['172.32.0.1', '203.0.113.7', '2001:db8::1', '::ffff:cb00:7107']) expect([ip, isLocalOrPrivateIp(ip)]).toEqual([ip, false]);
+    expect(ipKey('::ffff:cb00:7107')).toBe('203.0.113.7');
+    const box = new PenaltyBox(cfg({ threshold404: 2 }));
+    for (let i = 0; i < 10; i++) box.recordUnknownSource('172.18.0.5'); // NAT của Docker
+    expect(box.checkIp('172.18.0.5').blocked).toBe(false);
+    expect(box.size()).toBe(0);
+    const off = new PenaltyBox(cfg({ threshold404: 2, enabled: false }));
+    for (let i = 0; i < 10; i++) off.recordUnknownSource('203.0.113.7');
+    expect(off.checkIp('203.0.113.7').blocked).toBe(false);
+  });
+
+  it('review THẤP: metric lỗi không lật verdict blocked thành cho qua; 429 của hộp phạt ghi outcome BLOCKED', async () => {
+    const { svc } = build({});
+    for (let i = 0; i < 20; i++) await svc.ingestWebhook(req(`x${i}`, '203.0.113.150'));
+    const spy = jest.spyOn(require('../src/modules/metrics/metrics').penaltyEntries, 'set').mockImplementation(() => {
+      throw new Error('metric hỏng');
+    });
+    expect((await svc.ingestWebhook(req('x21', '203.0.113.150'))).status).toBe(429);
+    spy.mockRestore();
+    expect(await apiRegistry.metrics()).toMatch(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED"\} [1-9]/);
   });
 });

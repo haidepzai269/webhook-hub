@@ -111,6 +111,7 @@ Tách ra mua được ba thứ:
 
 ```
 0.  Hộp phạt theo IP (bộ nhớ, 0 Redis, 0 DB — §7.5, ADR-177): IP đang bị phạt vì dò sourceKey -> 429 -> DỪNG
+    (trừ cặp (IP, sourceKey) đã verify đúng trong 24h gần nhất — IP chung của provider không cắt source đang chạy)
 1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
 2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant)
        không tìm thấy -> 404 (+1 điểm phạt cho IP) -> DỪNG · tắt / đã lưu trữ -> 404 (không tính điểm) -> DỪNG
@@ -123,7 +124,6 @@ Tách ra mua được ba thứ:
     Redis chết -> fail-OPEN + log cảnh báo) -> vượt trần: 429 -> DỪNG
     SAU verify (EG3, ADR-178): request sai chữ ký KHÔNG tiêu hạn mức của source — kẻ biết một sourceKey thật không
     khoá được webhook thật của nạn nhân. Cái giá: thêm một HMAC cho request sai chữ ký (body ≤ 1MB).
-    (sau bước 2 vì khoá rate:source:{source.id} cần source.id; sourceKey rác bị 404 trước, không tốn EVAL Redis)
 4.  key = adapter.extractIdempotencyKey(req)
 5.  GET idem:{sourceId}:{key}          <- đường tắt, chỉ ĐỌC
        hit -> trả ACK duplicate -> DỪNG (không chạm DB)
@@ -594,6 +594,10 @@ Trạng thái trong bộ nhớ từng instance: **0 lệnh Redis, 0 truy vấn D
 | (a) 404 vì **không tìm thấy** source | IP (IPv6 gộp /64) | ≥ 20 / 60s | chặn mọi `/hooks/*` của IP 10 phút — kiểm **trước** khi nạp source |
 | (b) 401 sai chữ ký | (IP, sourceKey) | ≥ 30 / 60s | chặn chỉ cặp đó 10 phút |
 | 404 vì source tắt/đã lưu trữ · 2xx · trùng · 429 | — | không tính điểm | — |
+
+**Cặp tốt** (đính chính sau review): (IP, sourceKey) đã verify đúng trong `EDGE_PENALTY_GOOD_TTL` (24h) — luật (a) không
+chặn cặp tốt, luật (b) với cặp tốt chỉ đếm, không ban. IP loopback/private không chấm điểm (`EDGE_PENALTY_ENABLED=0` tắt
+hẳn). Ban có trần riêng ≤ 50% `EDGE_PENALTY_MAX_ENTRIES`; đầy thì không phạt thêm (log + `hub_ingest_penalty_bans_skipped_total`).
 
 Bị chặn → `429 ip_temporarily_blocked` + `Retry-After` (giây còn lại). Log `warn` một lần lúc bắt đầu phạt. Metric
 `hub_ingest_penalty_bans_total{reason}`, `hub_ingest_penalty_blocked_total{reason}`, `hub_ingest_penalty_entries`,

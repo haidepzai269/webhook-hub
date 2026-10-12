@@ -46,6 +46,11 @@ export function onShutdownFlush(fn: () => Promise<void>): () => void {
   };
 }
 
+/** Số bộ đang đăng ký (test: không rò sau `onModuleDestroy`). */
+export function shutdownFlusherCount(): number {
+  return extraFlushers.size;
+}
+
 /** `flush` chính + mọi bộ đã đăng ký, song song; lỗi riêng từng bộ chỉ log. */
 export async function flushAll(flush: () => Promise<void>): Promise<void> {
   const results = await Promise.allSettled([flush(), ...[...extraFlushers].map((f) => f())]);

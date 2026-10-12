@@ -2,7 +2,8 @@ import { createHmac } from 'crypto';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { IngestService } from '../src/modules/ingest/ingest.service';
 import { PenaltyBox } from '../src/modules/ingest/penalty-box';
-import { flushAll, onShutdownFlush } from '../src/shutdown';
+import { flushAll, onShutdownFlush, shutdownFlusherCount } from '../src/shutdown';
+import { addSpaceSaving } from '../src/modules/ingest/traffic-recorder';
 
 /**
  * EG4 (ADR-179): `traced()` cộng lưu lượng trong bộ nhớ — không I/O trên đường nóng; 404 sourceKey lạ không thuộc tenant nào
@@ -73,5 +74,24 @@ describe('EG4 ingest -> lưu lượng trong bộ nhớ', () => {
     off1();
     off2();
     expect(order.sort()).toEqual(['duplicates', 'traffic']);
+  });
+
+  it('IngestService đăng ký ghi nốt lưu lượng khi init và GỠ khi destroy (không rò bộ đăng ký)', async () => {
+    const before = shutdownFlusherCount();
+    const svc = new IngestService({ forTenant: () => ({ addSourceTraffic: jest.fn(), addIngestDuplicates: jest.fn() }) } as any, {} as any);
+    svc.onModuleInit();
+    expect(shutdownFlusherCount()).toBe(before + 1);
+    await svc.onModuleDestroy();
+    expect(shutdownFlusherCount()).toBe(before);
+  });
+
+  it('top_ips space-saving: đầy thì IP mới thay IP nhỏ nhất — IP gửi dồn dập đến SAU 64 IP khác vẫn lên top', () => {
+    const ips = new Map<string, number>();
+    for (let i = 0; i < 64; i++) addSpaceSaving(ips, `198.51.100.${i}`);
+    for (let i = 0; i < 50; i++) addSpaceSaving(ips, '203.0.113.7');
+    expect(ips.size).toBe(64);
+    const top = [...ips].sort((a, b) => b[1] - a[1])[0];
+    expect(top[0]).toBe('203.0.113.7');
+    expect(top[1]).toBeGreaterThanOrEqual(50);
   });
 });

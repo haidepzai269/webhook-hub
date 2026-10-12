@@ -22,6 +22,7 @@ import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
+import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
@@ -82,7 +83,7 @@ type Values = z.infer<ReturnType<typeof makeSchema>>;
 
 const fullUrl = (s: Source) => `${HUB_API_URL}${s.webhookUrl}`;
 
-const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
+const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubColumn<Source>[] => [
   {
     id: "name",
     header: t("common.name"),
@@ -152,7 +153,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
     enableHiding: false,
     cell: ({ row }) => (
       <div className="flex">
-        <TrafficButton id={row.original.id} />
+        {canTraffic && <TrafficButton id={row.original.id} />}
         <ConnectionButton id={row.original.id} />
       </div>
     ),
@@ -162,7 +163,8 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Source>[] => [
 export default function SourcesPage() {
   const t = useT();
   const locale = useLocale();
-  const columns = useMemo(() => makeColumns(t, locale), [t, locale]);
+  const canTraffic = useCanViewTraffic();
+  const columns = useMemo(() => makeColumns(t, locale, canTraffic), [t, locale, canTraffic]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSources();
   const create = useCreateSource();

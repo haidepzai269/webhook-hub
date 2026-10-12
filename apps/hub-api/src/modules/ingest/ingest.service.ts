@@ -18,7 +18,16 @@ import {
 import { Prisma } from '@prisma/client';
 import { REJECTED_META_KEY, RejectedRecordLimiter, sampleRejectedBody } from './rejected-sample';
 import { redactHeaders } from './redact-headers';
-import { ingestDuration, ingestRequests, penaltyBans, penaltyBlocked, penaltyEntries, trafficFlushDropped, unknownSourceTotal } from '../metrics/metrics';
+import {
+  ingestDuration,
+  ingestRequests,
+  penaltyBans,
+  penaltyBansSkipped,
+  penaltyBlocked,
+  penaltyEntries,
+  trafficFlushDropped,
+  unknownSourceTotal,
+} from '../metrics/metrics';
 import { DuplicateCounter } from './duplicate-counter';
 import { PenaltyBox, PenaltyVerdict, logBan, resolvePenaltyConfig } from './penalty-box';
 import { TrafficOutcome, TrafficRecorder } from './traffic-recorder';
@@ -114,7 +123,16 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       logBan(reason, ip, sourceKey, banSeconds);
     },
     onBlocked: (reason) => penaltyBlocked.inc({ reason }),
+    onBanSkipped: (reason, cause) => {
+      penaltyBansSkipped.inc({ reason, cause });
+      // `capacity` = hộp đầy ban -> không phạt (fail-open có tiếng). Log tối đa một lần mỗi phút.
+      if (cause === 'capacity' && Date.now() - this.lastCapacityLog > 60_000) {
+        this.lastCapacityLog = Date.now();
+        logger.warn({ reason }, 'Hộp phạt: số ban đã chạm trần -> KHÔNG phạt thêm (cho đi qua)');
+      }
+    },
   });
+  private lastCapacityLog = 0;
   /**
    * EG4 (ADR-179): lưu lượng theo (source, phút, outcome) — `record()` không I/O; đẩy xuống Postgres mỗi `TRAFFIC_FLUSH_MS`
    * qua `forTenant` (RLS). Ghi lỗi -> giữ tối đa 10 phút dữ liệu.
@@ -308,7 +326,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       } catch {
         /* provider lạ -> 'unknown' */
       }
-      const outcome = trace.outcome ?? (status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
+      const outcome = trace.outcome ?? (trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
       ingestRequests.inc({ provider: label, outcome });
       ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
     } catch {
@@ -325,8 +343,12 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     });
 
     // 0. EG2 luật (a): IP đang bị phạt vì dò sourceKey -> chặn TRƯỚC khi chạm Postgres (0 Redis, 0 DB).
-    const ipVerdict = this.penaltySafe(() => this.penalty.checkIp(req.ip), { blocked: false } as PenaltyVerdict);
-    if (ipVerdict.blocked) return blockedAck(ipVerdict.retryAfterSec, req, trace);
+    // Cặp (ip, sourceKey) đã verify đúng gần đây vẫn đi tiếp (IP chung của provider không cắt source đang chạy).
+    const ipVerdict = this.penaltySafe(() => this.penalty.checkIp(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
+    if (ipVerdict.blocked) {
+      trace.blocked = true;
+      return blockedAck(ipVerdict.retryAfterSec, req, trace);
+    }
 
     // 1. Kiểm tra kích thước payload <= 1MB
     if (req.rawBody.length > MAX_INGEST_PAYLOAD_BYTES) {
@@ -408,6 +430,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
       return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log);
     }
+    // EG2 (đính chính ADR-177): chữ ký đúng -> nhớ "cặp tốt" (bộ nhớ, 0 I/O).
+    this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey), undefined);
 
     // 3c. EG3 (ADR-178): rate limit theo source chạy SAU verify — chỉ request ký đúng mới tiêu hạn mức. Kẻ biết một
     // sourceKey thật bắn chữ ký sai không còn khoá được webhook thật của nạn nhân. Cửa sổ cố định 60s, 1 EVAL INCR+EXPIRE,
@@ -454,14 +478,20 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 
   /** EG2: hộp phạt lỗi thì cho request đi qua như chưa có hộp phạt (fail-open) — chỉ log. */
   private penaltySafe<T>(fn: () => T, fallback: T): T {
+    let r: T;
     try {
-      const r = fn();
-      penaltyEntries.set(this.penalty.size());
-      return r;
+      r = fn();
     } catch (err: any) {
       logger.warn({ err: err?.message }, 'Hộp phạt lỗi -> cho request đi qua (fail-open)');
       return fallback;
     }
+    // Metric tách khỏi `try` trên: lỗi metric không được lật kết luận `blocked` thành "cho qua".
+    try {
+      penaltyEntries.set(this.penalty.size());
+    } catch {
+      /* bỏ qua */
+    }
+    return r;
   }
 
   /** Mẫu request bị từ chối (§7.1, S1-4): ≤4KB body, ≤20 bản ghi/phút/source; vượt trần chỉ log. */

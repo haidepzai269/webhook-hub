@@ -58,6 +58,14 @@ export const penaltyBlocked = new Counter({
   registers: [apiRegistry],
 });
 
+/** Đính chính ADR-177: đủ ngưỡng nhưng KHÔNG phạt — `capacity` (số ban chạm trần) hoặc `good_pair` (cặp đã verify đúng). */
+export const penaltyBansSkipped = new Counter({
+  name: 'hub_ingest_penalty_bans_skipped_total',
+  help: 'Số lần đủ ngưỡng phạt nhưng không phạt (capacity = hộp đầy ban; good_pair = cặp IP+sourceKey đã verify đúng gần đây)',
+  labelNames: ['reason', 'cause'] as const,
+  registers: [apiRegistry],
+});
+
 export const penaltyEntries = new Gauge({
   name: 'hub_ingest_penalty_entries',
   help: 'Số khoá hộp phạt đang giữ trong bộ nhớ của instance này (có trần EDGE_PENALTY_MAX_ENTRIES)',

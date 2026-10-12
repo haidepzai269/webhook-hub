@@ -380,7 +380,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Lớp biên: sourceKey lạ + hộp phạt (EG2)",
-      "description": "Chỉ người vận hành (Grafana). hub_ingest_unknown_source_total: request /hooks vào sourceKey không tồn tại (404, không thuộc tenant nào — không lưu DB). hub_ingest_penalty_bans_total{reason}: lần BẮT ĐẦU tạm chặn (unknown_source = cả IP; bad_signature = cặp IP + sourceKey). hub_ingest_penalty_blocked_total{reason}: request bị chặn 429 ip_temporarily_blocked. Mỗi instance hub-api đếm riêng (ADR-177).",
+      "description": "Chỉ người vận hành (Grafana). hub_ingest_unknown_source_total: request /hooks vào sourceKey không tồn tại (404, không thuộc tenant nào — không lưu DB). hub_ingest_penalty_bans_total{reason}: lần BẮT ĐẦU tạm chặn (unknown_source = cả IP; bad_signature = cặp IP + sourceKey). hub_ingest_penalty_blocked_total{reason}: request bị chặn 429 ip_temporarily_blocked. Mỗi instance hub-api đếm riêng (ADR-177). hub_ingest_penalty_bans_skipped_total{reason,cause}: đủ ngưỡng nhưng không phạt — capacity (số ban chạm trần) hoặc good_pair (cặp đã verify đúng).",
       "datasource": {
         "type": "prometheus",
         "uid": "hub-prometheus"
@@ -433,6 +433,15 @@
           "refId": "C",
           "expr": "sum by (reason) (increase(hub_ingest_penalty_blocked_total[5m]))",
           "legendFormat": "bị chặn {{reason}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "D",
+          "expr": "sum by (reason, cause) (increase(hub_ingest_penalty_bans_skipped_total[5m]))",
+          "legendFormat": "không phạt {{reason}} ({{cause}})"
         }
       ]
     },

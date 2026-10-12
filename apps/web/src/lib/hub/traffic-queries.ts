@@ -2,9 +2,11 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import type { TrafficRange, TrafficView } from "@/lib/traffic/message";
+import { canViewTraffic, type TrafficRange, type TrafficView } from "@/lib/traffic/message";
 
 import { HubApiError, hubFetch } from "./client";
+import { useProjects } from "./flow-project";
+import { useIsOperator } from "./me-store";
 import { useProjectStore } from "./project-store";
 
 /** Số liệu được ghi theo lô 60 giây — làm mới mỗi phút là đủ. */
@@ -28,4 +30,12 @@ export function useSourceTraffic(sourceId: string | null, range: TrafficRange) {
     refetchInterval: TRAFFIC_REFRESH_MS,
     refetchIntervalInBackground: false,
   });
+}
+
+/** Người đang xem có `traffic:read` trên project đang chọn? (owner hoặc người vận hành — khớp ROLE_SCOPES của server) */
+export function useCanViewTraffic(): boolean {
+  const projectId = useProjectStore((s) => s.projectId);
+  const isOperator = useIsOperator();
+  const { data } = useProjects();
+  return canViewTraffic(data?.find((p) => p.id === projectId)?.role, isOperator);
 }

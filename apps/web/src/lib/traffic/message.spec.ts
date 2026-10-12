@@ -1,5 +1,5 @@
 import { translate } from "../i18n/dictionary";
-import { blockedNowText, trafficInsightText } from "./message";
+import { blockedNowText, canViewTraffic, trafficInsightText } from "./message";
 
 const tv = (locale: "vi" | "en") => (k: any, v?: any) => translate(locale, k, v);
 
@@ -43,5 +43,13 @@ describe("EG5 câu nhận định lưu lượng (web)", () => {
     expect(blockedNowText([{ ip: "1.1.1.1", remainingSec: 401 }], tv("vi"))).toBe(
       "Hub đang tạm chặn 1 IP gửi sai chữ ký vào nguồn này (còn 7 phút).",
     );
+  });
+
+  it("nút Lưu lượng: owner hoặc người vận hành; developer/viewer/chưa biết -> ẩn", () => {
+    expect(canViewTraffic("owner", false)).toBe(true);
+    expect(canViewTraffic(undefined, true)).toBe(true);
+    expect(canViewTraffic("developer", false)).toBe(false);
+    expect(canViewTraffic("viewer", false)).toBe(false);
+    expect(canViewTraffic(undefined, false)).toBe(false);
   });
 });

@@ -12,7 +12,8 @@ import { clampEnvInt, ipKey } from './penalty-box';
  * - Ghi lỗi (DB chậm/chết): giữ lại cho lượt sau, có trần `TRAFFIC_BUFFER_MAX_MS` (10 phút dữ liệu) — phần cũ hơn bị bỏ và
  *   đếm vào `hub_traffic_flush_dropped_total`. Số liệu quan sát: được phép thiếu, không được làm chậm ingest.
  * - Khoá ngoại (source vừa bị xoá giữa hai lượt) -> ghi từng dòng, bỏ dòng hỏng (như DuplicateCounter).
- * - `top_ips`: mỗi ô giữ tối đa `IPS_PER_CELL` IP khác nhau (IP mới quá trần chỉ được đếm vào `count`), ghi 5 IP nhiều nhất.
+ * - `top_ips`: mỗi ô giữ tối đa `IPS_PER_CELL` IP theo thuật toán space-saving (đầy thì IP mới THAY IP có đếm nhỏ nhất và
+ *   kế thừa đếm đó + 1) — IP gửi nhiều đến sau vẫn lên được top; ghi 5 IP nhiều nhất (xấp xỉ, đếm có thể dư tối đa = min).
  */
 export type TrafficOutcome = SourceTrafficRow['outcome'];
 export type TrafficSink = (tenantId: string, rows: SourceTrafficRow[]) => Promise<unknown>;
@@ -32,6 +33,29 @@ interface Cell {
   outcome: TrafficOutcome;
   count: number;
   ips: Map<string, number>;
+}
+
+/** Space-saving (Metwally 2005): bộ đếm có trần cho heavy hitter. Đầy -> thay phần tử nhỏ nhất, đếm = min + 1. */
+export function addSpaceSaving(ips: Map<string, number>, ip: string, cap = IPS_PER_CELL): void {
+  const cur = ips.get(ip);
+  if (cur !== undefined) {
+    ips.set(ip, cur + 1);
+    return;
+  }
+  if (ips.size < cap) {
+    ips.set(ip, 1);
+    return;
+  }
+  let minIp = '';
+  let min = Infinity;
+  for (const [k, v] of ips) {
+    if (v < min) {
+      min = v;
+      minIp = k;
+    }
+  }
+  ips.delete(minIp);
+  ips.set(ip, min + 1);
 }
 
 const OUTCOME_ORDER: Record<TrafficOutcome, number> = { ACCEPTED: 0, DUPLICATE: 1, REJECTED: 2, RATE_LIMITED: 3, BLOCKED: 4 };
@@ -67,11 +91,7 @@ export class TrafficRecorder {
     }
     cell.count++;
     const key = ipKey(ip);
-    if (key) {
-      const cur = cell.ips.get(key);
-      if (cur !== undefined) cell.ips.set(key, cur + 1);
-      else if (cell.ips.size < IPS_PER_CELL) cell.ips.set(key, 1);
-    }
+    if (key) addSpaceSaving(cell.ips, key);
     this.schedule();
   }
 

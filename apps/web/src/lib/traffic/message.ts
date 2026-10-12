@@ -91,3 +91,11 @@ export function blockedNowText(
   const minutes = Math.max(1, Math.ceil(Math.max(...list.map((b) => b.remainingSec)) / 60));
   return t("traffic.blocked-now", { count: list.length, minutes });
 }
+
+/**
+ * Review EG5: nút "Lưu lượng" chỉ hiện cho ai có `traffic:read` — owner của project hoặc người vận hành (server vẫn là
+ * trọng tài: 403 cho developer/viewer). Chưa biết role (đang tải) -> ẩn.
+ */
+export function canViewTraffic(role: string | undefined, isOperator: boolean): boolean {
+  return isOperator || role === "owner";
+}
