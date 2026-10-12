@@ -1,9 +1,148 @@
 # SPEC QT — Hạn mức dung lượng theo project (cảnh báo trước, khoá sau)
 
-> Phòng party viết ngày 2026-10-12. Mã test: `QT:T1–T27`. Thêm namespace `QT` vào `verify/spec-sources.json` theo khuôn KN.
-> **ADR dùng ADR-182..187.** ADR-174 thuộc docs-sync DS4, ADR-165..173 thuộc alerts (CB), ADR-175..179 và ADR-181 thuộc edge (EG), ADR-180 thuộc `feat/email-cuckoo`. Grep lại trước khi ghi.
+> Phòng party viết ngày 2026-10-12. Mã test: `QT:T1–T34` (T28–T34 thêm ở mục Đính chính). Thêm namespace `QT` vào `verify/spec-sources.json` theo khuôn KN.
+> **ADR dùng ADR-182..187 + ADR-189.** ADR-174 thuộc docs-sync DS4, ADR-165..173 thuộc alerts (CB), ADR-175..179 và ADR-181 thuộc edge (EG), ADR-180 thuộc `feat/email-cuckoo`, **ADR-188 dành cho fix toast theo đồng hồ server** (master). Grep lại trước khi ghi.
 
-> ⚠️ **CHƯA GIAO DEV.** Admin đã chốt toàn bộ (Q1–Q11). **Chỉ viết spec, chưa giao dev** (Admin quyết, 2026-10-12). LLM cho bộ gợi ý là việc sau.
+> ⚠️ **ĐÃ GIAO DEV 2026-10-12** (worktree `C:\wt\qt`, nhánh `feat/qt`). Admin đã chốt toàn bộ (Q1–Q11) và đính chính E1–E6 bên dưới. Agent dev đọc **mục Đính chính trước**, rồi đọc phần thân; mâu thuẫn thì mục Đính chính thắng. LLM cho bộ gợi ý là việc sau.
+
+## ĐÍNH CHÍNH SAU EG (2026-10-12, Admin chốt) — mục này thắng phần thân
+
+> Lý do có mục này: spec QT viết trước khi EG (chống quá tải) lên master. EG đã đổi thứ tự ingest (EG3, D3) và đã có bảng lưu lượng gộp trong bộ nhớ (EG4, migration `20261012090000_source_traffic`, `apps/hub-api/src/modules/ingest/traffic-recorder.ts`). QT dựa lên đó thay vì làm lại.
+> Phần thân bị thay thế: §2 (cách đo), §3 (bảng nấc), §4 (thứ tự, điều kiện 507), §6 (nhịp đo toàn cục), §7 (job đo), §8–§9 (ai thấy cảnh báo), §11 (ADR-183, thêm ADR-189), §12 (thêm T28–T34), §13.
+
+### E1. "Giữ lâu" được nhận tới trần cứng 110% (Admin chọn phương án Mary)
+
+**Vấn đề:** ở 100% mọi source bị 507 như nhau. Source mà user đã gắn "Giữ lâu" (thường là thanh toán) bị cắt cùng lúc với source rác. Hub không được đoán source nào quan trọng (BB-1), nhưng **user đã tự nói** qua cờ `sources.keep_longer`.
+
+**Nấc mới (thay bảng §3):**
+
+| Nấc | Vào khi | Hạ khi | Source thường | Source "Giữ lâu" |
+|---|---|---|---|---|
+| `OK` | < 70% | — | nhận | nhận |
+| `WARN_70` / `WARN_85` / `CRITICAL_95` | như §3 | thấp hơn ngưỡng 5 điểm | nhận | nhận |
+| `LOCKED` | ≥ 100% | **< 90%** (vùng đệm như cũ) | **507** | **nhận** |
+| `HARD_LOCKED` | ≥ **110%** | < 100% (về `LOCKED`, rồi theo vùng đệm của `LOCKED`) | 507 | **507** |
+
+- `110` là hằng số `HARD_LIMIT_PCT` trong `levelFor`, **không** phải env (bớt một núm vặn). Hạn mức user thấy vẫn là 100%. 10% là phần dôi để thanh toán không chết cùng rác, không phải hạn mức thứ hai.
+- Quyết định chặn là hàm thuần `isWriteBlocked(level, keepLonger, lockEnabled)`: `lockEnabled && (level === 'HARD_LOCKED' || (level === 'LOCKED' && !keepLonger))`. Dùng chung cho `/hooks` và publish. Không `if (provider === …)`.
+- **Hub không đoán nghiệp vụ (BB-1):** chỉ đọc cờ user tự gắn. Hub không tự gắn "Giữ lâu" cho source PayOS/Stripe.
+- Cờ "Giữ lâu" là lối thoát có giá: source gắn cờ không được gợi ý dọn và không bị dọn tự động (§5.3), nên càng gắn nhiều thì càng nhanh chạm 110%. Công tắc ở console phải nói câu này.
+- Email/webhook `hub.project.storage` phát cả ở `HARD_LOCKED` (đổi nấc là phát, như §3). Banner `LOCKED`: "Project đã ngừng nhận event mới, **trừ các source Giữ lâu** (còn nhận tới 110%)". Banner `HARD_LOCKED`: "Project đã ngừng nhận mọi event mới".
+- `levelFor(used, quota, prevLevel)` giữ nguyên chữ ký, thêm nấc `HARD_LOCKED`. Cột `project_usage.level` là varchar nên không cần đổi enum.
+
+### E2. Đo nhẹ: cộng dồn qua bộ gộp EG4 thay cho job quét 10 phút
+
+**Bỏ** job quét `pg_column_size` mỗi 10 phút ở §7 và bỏ `STORAGE_MEASURE_INTERVAL_MS`. Quét toàn bộ mỗi 10 phút trên Neon free là đọc lại cả DB 144 lần/ngày để biết một con số mà ingest đã cầm sẵn trong tay.
+
+**Đường nóng: +0 lượt DB, +0 lệnh Redis.**
+- `traced()` đã gọi `traffic.record(tenantId, sourceId, outcome, ip)` (EG4). Thêm tham số `bytes`: số byte **thực sự ghi** xuống DB, tức `rawBody.length` (= `octet_length(body_raw)`) khi `ACCEPTED`; độ dài mẫu đã lưu (≤ 4KB) khi `REJECTED` có ghi mẫu; còn lại là 0 (`DUPLICATE`, `RATE_LIMITED`, `BLOCKED`, 507). Ô trong `Map` cộng thêm `bytes`, không có I/O.
+- **Publish `/v1/p` cũng cộng:** `publishFromService` đã đi qua `traced()` với `trace.sourceId` = source `api` của key, nên tự cộng như `/hooks`.
+- Flush 60s (`TRAFFIC_FLUSH_MS`) như cũ: `ON CONFLICT … DO UPDATE SET count = count + excluded.count, bytes = bytes + excluded.bytes`. Không thêm câu nào, chỉ thêm một cột.
+- **Migration QT1:** `ALTER TABLE hub.source_traffic_minutely ADD COLUMN bytes bigint NOT NULL DEFAULT 0` + `ALTER TYPE hub."TrafficOutcome" ADD VALUE 'STORAGE_FULL'` (request bị 507 hiện trong khối "Lưu lượng", bytes = 0).
+
+**Công thức (thay §2 về cách tính, định nghĩa "dung lượng" giữ nguyên):**
+
+```
+used_bytes = calibrated_bytes                                        -- mốc quét thật gần nhất
+           + bloat_factor × Σ bytes(source_traffic_minutely, minute > date_trunc('minute', calibrated_at))
+           − freed_since_calibration                                 -- tổng byte các lệnh dọn đã trả về sau mốc
+```
+
+- **Cột mới của `project_usage`:** `calibrated_bytes`, `calibrated_at`, `freed_since_calibration`, `bloat_factor` (numeric). `used_bytes` vẫn là cột lưu sẵn để đọc nhanh.
+- `bloat_factor` = (tổng dung lượng theo định nghĩa §2) / (tổng `octet_length(body_raw)`) đo ở lần hiệu chỉnh, kẹp trong `[1, 4]`, mặc định 2 khi chưa đủ dữ liệu. Lý do: ingest chỉ biết `body_raw`; còn `events.payload`, `deliveries`, `delivery_attempts` sinh ra sau ở worker. Không nhân hệ số thì số cộng dồn luôn thấp hơn thật và khoá trễ.
+- **Phút chứa mốc hiệu chỉnh** coi như thuộc về lần quét (không cộng lại). Sai số ≤ 1 phút traffic, chấp nhận.
+- Số liệu **vẫn là ước tính**. Console, email và webhook giữ chữ "ước tính", kèm "hiệu chỉnh lần cuối lúc …".
+
+**Ba job trong `hub-worker` (ADR-020, không tiến trình mới), mỗi job có khoá Redis như cleanup:**
+
+| Job | Nhịp | Làm gì |
+|---|---|---|
+| **Cập nhật nấc** | `STORAGE_LEVEL_INTERVAL_MS`, mặc định **60s** (cùng nhịp flush) | **Một truy vấn gộp** xuyên project: `SUM(bytes)` theo `tenant_id` của `source_traffic_minutely` sau mốc của từng project (join `project_usage`). Chỉ project có số đổi mới bị ghi lại `used_bytes` + `level`, rồi chạy luồng cảnh báo khi đổi nấc. Đọc xuyên project qua **escape hatch có tên** (`systemTx('storage: level tick', …)`, tiền lệ `cleanup.job.ts`), có test riêng. Chốt toàn cục §6 (`pg_database_size`) chạy trong job này, tối đa 10 phút một lần (đếm trong bộ nhớ). |
+| **Hiệu chỉnh** | `STORAGE_RECALIBRATE_INTERVAL_MS`, mặc định **24h** | Quét thật như §7 cũ (từng project một, mỗi project một truy vấn gộp theo source, không giữ transaction dài). Đặt lại mốc: `calibrated_bytes`, `calibrated_at = now()`, `freed_since_calibration = 0`, `bloat_factor`. Tính `by_source`, `by_bucket`, chạy `RuleAdvisor` (§5.6). Project nào có `calibrated_at` cũ hơn `TRAFFIC_RETENTION_DAYS − 1` ngày thì hiệu chỉnh bắt buộc ở lượt kế, vì bảng traffic sắp bị dọn mất phần sau mốc. |
+| **Dọn** (tay, tự động, retention 7 ngày) | theo lệnh / cleanup | Mỗi lô `DELETE`/`UPDATE … RETURNING` tính luôn số byte giải phóng theo **cùng công thức** §2 trên các dòng bị đụng, cộng vào `freed_since_calibration` của tenant trong cùng transaction, rồi **tính lại nấc ngay** (mở khoá không phải chờ 60s). Phần CASCADE (`deliveries`, `delivery_attempts`) không lấy được qua `RETURNING` thì ước bằng `bloat_factor`; lần hiệu chỉnh kế sửa sai. |
+
+- **Dự báo "còn ~X giờ"** = (quota − used) / (`bloat_factor` × Σ bytes 24h gần nhất của bảng traffic / 24). Không cần thêm bảng lịch sử.
+- `by_bucket`, gợi ý dọn và số MB của từng gợi ý có thể **cũ tới 24h**. Console ghi "tính lúc …". API `apply` vẫn tính lại gợi ý tại thời điểm gọi như §5.6.
+- Độ trễ của nấc: ≤ 60s flush + ≤ 60s job ≈ **2 phút** (trước đây ≤ 10 phút). Flush lỗi thì EG4 giữ đệm tối đa 10 phút, nên số chỉ đến trễ, không mất (trừ khi vượt trần đệm, khi đó `hub_traffic_flush_dropped_total` tăng và lần hiệu chỉnh kế sửa).
+- **C++ / StatsKernel:** ngoài phạm vi (Admin tạm gác).
+
+### E3. Owner thấy cảnh báo dung lượng của project mình (thay §8, §9 phần cảnh báo)
+
+- **Trường `audience` trên định nghĩa luật** (`rules.ts`): `'operator' | 'owners+operator'`, mặc định `'operator'`. Chỉ `project.storage_warn`, `project.storage_critical`, `project.storage_locked` (bao cả `HARD_LOCKED`) là `owners+operator`. **Các luật CB cũ giữ operator-only.** Không thêm cột vào `hub.alerts`; lọc theo `rule IN ownerVisibleRules()` lấy từ `rules.ts`.
+- **API alerts lọc theo quyền:**
+  - Operator: như cũ, thấy mọi luật của mọi project.
+  - Owner (không phải operator): `GET /alerts`, `/alerts/summary` trả **chỉ** alert có luật audience owners của **các project mình là owner**. Đọc qua escape hatch có tên mới (vd. `ownerAlertsAcrossTenants(userId)`, join membership `role = owner`), có test riêng. Trước đây trả 403, giờ trả danh sách đã lọc.
+  - Developer/viewer: 403 như cũ.
+  - Hành động trên alert (ack, mute) và `/me/alert-preferences` giữ operator-only. Owner chỉ tắt được email 70% và 85% (§8), công tắc đặt ở trang Dung lượng.
+- **Realtime:** evaluator đưa `audience` vào payload `hub:realtime:alerts`. Gateway luôn emit `alert.changed` vào room `project:<id>:ops` như cũ; luật audience owners thì **emit thêm** vào room `project:<id>:owners`. Room này chỉ owner được join; gateway kiểm vai trò lúc join và R-3 quét lại như room ops (mất vai trò owner thì rời room, không ngắt socket).
+- **Web:** chuông, banner, toast và trang "Cảnh báo" hiện cho owner, chỉ chứa cảnh báo dung lượng của project mình. Mục "Cảnh báo" ở `/dashboard/settings` vẫn chỉ operator thấy.
+- **Đồng hồ:** toast/badge dựa trên mốc `asOf` do server trả (fix song song trên master, ADR-188). QT **không** tự viết logic đồng hồ phía client. Nếu fix chưa merge khi làm QT6 thì rebase lên nó trước.
+- Email đi qua outbox `hub.alert_emails` như §8 (evaluator tạo dòng cho từng owner trong cùng transaction đổi nấc, trần 6/giờ/người tính chung).
+
+### E4. Thứ tự ingest theo code thật (thay §4 "Thứ tự")
+
+Theo `apps/hub-api/src/main.ts` và `docs/ARCHITECTURE.md` §3.1 hiện tại (sau commit `cac3c8e`):
+
+```
+[nginx EG1 nếu EDGE_NGINX=1]
+→ helmet, cookie, requestId/khuôn lỗi, CORS
+→ guard /hooks (installHooksPathGuard: sai hoa thường → 404 như nginx)
+→ gate hộp phạt (installPenaltyGate: 0 DB, 0 Redis, CHƯA đọc body → 429 + Connection: close)
+→ body parser (/hooks 1MB, rawBody)
+→ ingest: adapter theo provider → hộp phạt kiểm lại (IP)
+→ 2.  nạp source: findSourceBySourceKeyForIngest + JOIN project_usage lấy level (cùng một câu, +0 lượt DB)
+      không có / tắt / đã lưu trữ → 404
+→ 2q. [KHOÁ QT] isWriteBlocked(level, keepLonger, STORAGE_LOCK_ENABLED) → 507 project_storage_full → DỪNG
+→ 2a. hộp phạt theo cặp (IP, sourceKey)
+→ 3.  verify chữ ký
+→ 3c. rate limit theo source (EG3, 1 EVAL)
+→ 4–8 như ARCHITECTURE §3.1 (GET idem, BEGIN … COMMIT, SET NX sau COMMIT, ACK)
+```
+
+- Brief ban đầu ghi gate đứng trước guard; code thật đặt **guard trước gate** (commit `cac3c8e`). Spec theo code.
+- **Publish `/v1/p`:** `ApiKeyGuard` → `findSourceById` (join `project_usage.level` vào chính câu này) → **[KHOÁ QT]** → rate limit → `persistAccepted`.
+- **Đánh đổi đã chấp nhận:**
+  - Project bị khoá vẫn bị Node đọc body (tới 1MB) trước khi trả 507, vì gate không chạm DB nên không biết trạng thái khoá. Không đưa trạng thái khoá vào gate.
+  - 507 trả **trước** verify, nên ai biết `sourceKey` cũng biết project đang đầy. Chấp nhận: `sourceKey` vốn là bí mật chia với provider. Đổi lại: request vào project khoá không tốn HMAC, không tốn `EVAL`.
+- Lỗi khi đọc `level` (join trả null, dữ liệu hỏng) → fail-open, coi như `OK`, ghi log (giữ §4).
+- QT3 phải sửa dòng `[SPEC QT, chưa code …]` trong `ARCHITECTURE.md` §3.1 thành bước 2q thật, **trong cùng PR**.
+
+### E5. Cờ an toàn khi tự deploy (coordinator yêu cầu)
+
+Deploy tự động lên production có thể chạy ban đêm. Không được để nó **tự khoá project thật** hay **tự xoá dữ liệu thật** khi Admin chưa kiểm số đo cộng dồn (E2) trên dữ liệu thật.
+
+| Biến | Mặc định trong code / production | hubv + local compose | Khi = 0 |
+|---|---|---|---|
+| `STORAGE_LOCK_ENABLED` | **0** | 1 | Vẫn đo, vẫn đổi nấc, vẫn email/webhook/banner. **Không trả 507.** Tăng metric `hub_ingest_storage_would_reject_total` để biết nếu bật thì đã chặn bao nhiêu |
+| `STORAGE_AUTO_CLEAN_ENABLED` | **0** | 1 | Policy mặc định vẫn **seed** theo Q10 và hiện trên console, nhưng job dọn tự động **không chạy**. Dọn tay vẫn chạy |
+
+- Console và email phải nói thật khi cờ tắt. Ở `LOCKED` với `STORAGE_LOCK_ENABLED=0`: "Đã vượt hạn mức. Khoá chưa bật trên hệ thống này, event vẫn được nhận." Khối "Dọn tự động": "Đã cài, chưa chạy (người vận hành chưa bật)".
+- Đọc cờ một lần lúc khởi động. Đổi cờ = đổi env + restart. Tắt lại là rollback tức thì.
+- **Checklist bật** (QT8 ghi vào `docs/DEPLOYMENT.md`):
+  1. Deploy với cả hai cờ = 0.
+  2. Chờ ≥ 24h để có ít nhất một lượt hiệu chỉnh. So `used_bytes` cộng dồn ngay trước hiệu chỉnh với số quét thật. Chênh > 20% thì chưa bật, xem lại `bloat_factor`.
+  3. Xem danh sách project ≥ 95%. Owner đã nhận email chưa?
+  4. Bật `STORAGE_LOCK_ENABLED=1`. Theo dõi `hub_ingest_storage_rejected_total`.
+  5. Xem policy dọn tự động của từng project thật, rồi bật `STORAGE_AUTO_CLEAN_ENABLED=1`.
+  6. Ghi ngày bật từng cờ vào `DEPLOYMENT.md`.
+
+### E6. ADR
+
+- Đã grep `docs/adr/README.md` (2026-10-12): cao nhất là ADR-181. QT dùng **ADR-182..187** như §11 và **ADR-189**. **ADR-188 dành cho fix toast theo đồng hồ server**, không dùng.
+- **ADR-183 đổi nội dung:** đo bằng cách cộng dồn `bytes` qua bộ gộp EG4 (+0 DB, +0 Redis trên đường nóng), hiệu chỉnh bằng quét thật mỗi 24h, lệnh dọn trừ số byte giải phóng. Đánh đổi: số liệu ước tính; trôi tới 24h giữa hai lần hiệu chỉnh và phụ thuộc `bloat_factor`.
+- **ADR-189 (mới):** (a) "Giữ lâu" nhận tới 110% (`HARD_LOCKED`); (b) cờ `STORAGE_LOCK_ENABLED` và `STORAGE_AUTO_CLEAN_ENABLED` mặc định 0 ở production; (c) owner thấy cảnh báo dung lượng qua `audience`. Đánh đổi: (a) thêm một nấc và hub dôi 10% ổ cho source user tự gắn cờ; (b) production chưa thật sự khoá cho tới khi Admin bật tay; (c) luật cảnh báo có hai loại người nhận.
+
+### Test bổ sung (nối tiếp §12)
+
+| Mã | Kiểm |
+|---|---|
+| QT:T28 | `levelFor`: ≥110% → `HARD_LOCKED`; `HARD_LOCKED` hạ về `LOCKED` khi < 100%; `LOCKED` hạ khi < 90%. `isWriteBlocked`: đủ bảng (nấc × `keepLonger` × `lockEnabled`) |
+| QT:T29 | `LOCKED`: source "Giữ lâu" nhận 200, source thường 507. `HARD_LOCKED`: cả hai 507. Áp dụng như nhau cho `/hooks` và publish. Không tốn lệnh Redis khi 507 |
+| QT:T30 | `STORAGE_LOCK_ENABLED=0`: `LOCKED`/`HARD_LOCKED` vẫn 200, nấc + email + webhook vẫn chạy, `hub_ingest_storage_would_reject_total` tăng. `STORAGE_AUTO_CLEAN_ENABLED=0`: policy đã seed nhưng job không dọn; bật lên thì dọn |
+| QT:T31 | Cộng dồn: `ACCEPTED` cộng `rawBody.length`, `DUPLICATE`/`RATE_LIMITED`/507 cộng 0, publish cũng cộng; flush cộng `bytes` đúng khi hai instance cùng ghi. `redis-budget.spec.ts` và số truy vấn đường ingest **không đổi** (T6, T7) |
+| QT:T32 | `used_bytes` = mốc + `bloat_factor` × Σ bytes sau mốc − đã giải phóng. Hiệu chỉnh đặt lại mốc và `freed_since_calibration = 0`. Mốc quá cũ so với retention traffic thì bị hiệu chỉnh bắt buộc |
+| QT:T33 | Lệnh dọn (tay, tự động, retention) trả số byte giải phóng, cộng vào `freed_since_calibration` cùng transaction, nấc hạ **ngay** (mở khoá khi < 90%) không chờ job 60s |
+| QT:T34 | Audience: owner thấy alert `project.storage_*` của project mình qua API + room `project:<id>:owners`, **không** thấy luật CB khác và không thấy project khác. Developer/viewer 403. Operator thấy mọi thứ như cũ. Mất vai trò owner thì rời room (R-3) |
 
 ## 0. Admin đã quyết
 
@@ -17,7 +156,7 @@
 | Q6 | User được dọn: nội dung event, lịch sử gửi, mẫu request bị từ chối. **`audit_logs` không bao giờ cho xoá.** |
 | Q7 | Dọn **theo tuổi + mức độ quan trọng**. Mức độ quan trọng do **hub tự gợi ý** (§5.3). |
 | Q8 | **Có dọn tự động.** User tự cài đặt dọn tự động những gì (§5.4). |
-| Q10 | **Mặc định dọn tự động:** bật cho **Rác** (xoá hẳn) + **Dọn mức Thấp sau 3 ngày**. Thuật ngữ: dùng chữ **"Dọn"** thay cho "Dọn" ở mọi chỗ (§5.1). |
+| Q10 | **Mặc định dọn tự động:** bật cho **Rác** (xoá hẳn) + **Dọn mức Thấp sau 3 ngày**. Thuật ngữ: dùng chữ **"Dọn"** thay cho "Tỉa" ở mọi chỗ (§5.1). |
 | Q11 | **Trần số source mỗi project = 20** (§10). |
 | Q9 | **Có webhook gợi ý dọn** (`hub.project.cleanup_suggested`, §5.6). Trước mắt gợi ý **theo luật**; sau này Admin tích hợp **LLM** làm bộ gợi ý. |
 
@@ -254,7 +393,8 @@ interface CleanupSuggestion {
 | ADR | Nội dung 3 dòng |
 |---|---|
 | ADR-182 | Hạn mức dung lượng theo project: cảnh báo nhiều nấc qua email + console + webhook `hub.project.storage`, rồi khoá chiều ghi (507), vùng đệm 100/90. Đánh đổi: provider gửi lại rồi bỏ, nên mất event nếu owner bỏ mặc. |
-| ADR-183 | Đo bằng job worker, trạng thái gắn vào câu nạp source có sẵn. Đánh đổi: số liệu trễ ≤ 10 phút và chỉ là ước tính. |
+| ADR-183 | *(Đã đổi theo E2.)* Đo bằng cộng dồn `bytes` qua bộ gộp EG4 + hiệu chỉnh quét thật mỗi 24h + lệnh dọn trừ số đã giải phóng; trạng thái gắn vào câu nạp source có sẵn. Đánh đổi: số liệu ước tính, trôi tới 24h giữa hai lần hiệu chỉnh. |
+| ADR-189 | *(E1, E3, E5.)* "Giữ lâu" nhận tới 110% (`HARD_LOCKED`); `STORAGE_LOCK_ENABLED` / `STORAGE_AUTO_CLEAN_ENABLED` mặc định 0 ở production; owner thấy cảnh báo dung lượng qua `audience`. Đánh đổi: thêm một nấc, production chưa khoá thật tới khi Admin bật, luật có hai loại người nhận. |
 | ADR-184 | Dọn hai kiểu: dọn (giữ dòng gầy, BB-2 còn) và xoá hẳn (mất chống trùng). User chọn, chạy lô trong worker, có sàn retry window, `audit_logs` không xoá được. Đánh đổi: dọn không replay được. |
 | ADR-185 | Cấp vượt hạn mức + chốt toàn cục 80% cho operator. Đánh đổi: tổng hạn mức có thể vượt ổ thật. |
 | ADR-187 | Gợi ý dọn là interface `CleanupAdvisor` (hôm nay `rules@1`, sau `llm`), hàng rào an toàn nằm ngoài advisor, advisor không bao giờ thực thi; webhook `hub.project.cleanup_suggested` + API `apply` tính lại khi gọi. Đánh đổi: thêm một lớp trừu tượng khi mới có một bản cài. |
@@ -296,15 +436,15 @@ interface CleanupSuggestion {
 
 | Story | Nội dung | Phụ thuộc |
 |---|---|---|
-| **QT1** | Migration `project_usage`, `storage_policies` + RLS, `projects.storage_quota_mb`, `sources.keep_longer`, `*.trimmed_at`; `levelFor` + `importanceOf` thuần + test | — |
-| **QT2** | Job đo trong worker (theo source + theo mức quan trọng) + metric + chốt toàn cục | QT1 |
-| **QT3** | Khoá chiều ghi ở ingest + publish (join câu có sẵn) | QT1 |
-| **QT4** | Dọn tay: API `clean`, dọn + xoá hẳn theo lô, `GET storage` + gợi ý | QT1, QT2 |
+| **QT1** | Migration `project_usage` (kèm cột mốc hiệu chỉnh E2), `storage_policies` + RLS, `projects.storage_quota_mb`, `sources.keep_longer`, `*.trimmed_at`, `source_traffic_minutely.bytes`, outcome `STORAGE_FULL`; `levelFor` (có `HARD_LOCKED`) + `isWriteBlocked` + `importanceOf` thuần + test | — |
+| **QT2** | Đo theo E2: `traffic.record` cộng `bytes` (cả publish), job cập nhật nấc 60s, job hiệu chỉnh 24h (theo source + mức quan trọng), metric, chốt toàn cục | QT1, **EG4** (đã trên master) |
+| **QT3** | Khoá chiều ghi ở ingest + publish (join câu có sẵn), bước 2q theo E4, "Giữ lâu" tới 110%, cờ `STORAGE_LOCK_ENABLED`; sửa `ARCHITECTURE.md` §3.1 cùng PR | QT1 |
+| **QT4** | Dọn tay: API `clean`, dọn + xoá hẳn theo lô, lệnh dọn trả số byte giải phóng (E2), `GET storage` + gợi ý | QT1, QT2 |
 | **QT4b** | Gợi ý dọn: `CleanupAdvisor` + `RuleAdvisor` + hàng rào + lưu `suggestions` + API `apply` + webhook `hub.project.cleanup_suggested` (+ catalog) | QT2, QT4 |
-| **QT5** | Dọn tự động: `storage_policies` API + chạy trong cleanup job | QT4 |
-| **QT6** | Cảnh báo: email theo nấc + webhook `hub.project.storage` (+ catalog), nối CB sau | QT2 |
-| **QT7** | Console: trang Dung lượng, gợi ý, dọn tự động, cờ "Giữ lâu", banner, event đã dọn, ô ghi đè của operator | QT4, QT5, QT6 |
-| **QT8** | ADR-182..187, `DEPLOYMENT.md` (`PROJECT_STORAGE_QUOTA_MB`, `DB_DISK_BUDGET_MB`, `STORAGE_MEASURE_INTERVAL_MS`), `ARCHITECTURE.md` thêm mục "Cô lập tài nguyên", `EVENT-CATALOG.md`, spec-sources | tất cả |
+| **QT5** | Dọn tự động: `storage_policies` API + chạy trong cleanup job, cờ `STORAGE_AUTO_CLEAN_ENABLED`; retention 7 ngày cũng trừ số byte giải phóng | QT4 |
+| **QT6** | Cảnh báo: email theo nấc + webhook `hub.project.storage` (+ catalog); **`audience` owners+operator** cho luật `project.storage_*` (API lọc theo quyền, room `project:<id>:owners`, chuông/banner/toast/trang Cảnh báo cho owner theo `asOf` server) | QT2, CB (master), fix toast ADR-188 |
+| **QT7** | Console: trang Dung lượng ("ước tính", "hiệu chỉnh lúc …"), gợi ý, dọn tự động, cờ "Giữ lâu", banner (gồm `HARD_LOCKED` và câu khi cờ tắt), event đã dọn, ô ghi đè của operator | QT4, QT5, QT6 |
+| **QT8** | ADR-182..187 + ADR-189, `DEPLOYMENT.md` (`PROJECT_STORAGE_QUOTA_MB`, `DB_DISK_BUDGET_MB`, `STORAGE_LEVEL_INTERVAL_MS`, `STORAGE_RECALIBRATE_INTERVAL_MS`, `STORAGE_LOCK_ENABLED`, `STORAGE_AUTO_CLEAN_ENABLED` + checklist bật E5), `ARCHITECTURE.md` thêm mục "Cô lập tài nguyên", `EVENT-CATALOG.md`, spec-sources | tất cả |
 | **QT9** | `SOURCE_LIMIT_PER_PROJECT=20`: kiểm khi tạo source (console + API), 409 `source_limit` đúng khuôn lỗi, console hiện "N/20 source" | — |
 
 - **Không được cắt:** QT1–QT4, QT4b và QT6. Có cảnh báo mà không có lối thoát thì vô nghĩa, có khoá mà không có dọn là bẫy, và có khoá mà không cảnh báo là phản bội Q2.
@@ -324,6 +464,6 @@ interface CleanupSuggestion {
 
 ## Xong khi
 
-- [ ] QT:T1–T27 xanh.
-- [ ] Demo: đặt `PROJECT_STORAGE_QUOTA_MB=1` ở local, bắn k6 vào một source, thấy email + webhook ở 70/85/95, thấy 507, bấm gợi ý "Dọn mức Thấp" rồi mở khoá; bật dọn tự động và thấy lượt sau tự chạy. Project khác không bị ảnh hưởng suốt quá trình.
+- [ ] QT:T1–T34 xanh.
+- [ ] Demo: đặt `PROJECT_STORAGE_QUOTA_MB=1`, `STORAGE_LOCK_ENABLED=1`, `STORAGE_AUTO_CLEAN_ENABLED=1` ở local, bắn k6 vào một source, thấy email + webhook ở 70/85/95, thấy 507, bấm gợi ý "Dọn mức Thấp" rồi mở khoá; bật dọn tự động và thấy lượt sau tự chạy. Project khác không bị ảnh hưởng suốt quá trình.
 - [ ] Spec CB có ghi chú yêu cầu thay đổi người nhận (§8), hoặc Admin quyết để sau.
