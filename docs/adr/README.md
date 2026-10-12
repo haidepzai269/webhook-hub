@@ -1591,3 +1591,48 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 - Request bị treo lâu hơn lease có thể khiến provider bị gọi hai lần; trường hợp này dựa vào việc provider chặn trùng theo `remote_key` (PayOS mã 231).
 - Shop đang ở trần 600 dòng, nên việc tích hợp vào Shop chờ Admin chọn (SPEC §12 Q1).
 **Admin chốt (2026-10-12, append):** Q1 — Shop **chuyển sang tạo link PayOS qua hub** làm mặc định. Gọi thẳng chỉ còn khi Shop có đủ 3 key. Không bao giờ thử chế độ này rồi rơi sang chế độ kia trong cùng một lần tạo link, vì có thể ra hai link trả được tiền (SPEC §9). Được nâng trần `apps/shop/src` bằng ADR riêng ghi cùng commit. Q2 — AC6 để sau. Q3 — lease 30 s. Chưa code.
+
+## ADR-180 — Bloom filter gợi ý email đã tồn tại trên form đăng ký; đảo một phần R-6 có chủ đích (2026-10-12)
+
+**Vấn đề:** R-6 (ADR-120) làm `POST /auth/register` trả cùng 201 cho email mới và email đã có. Người dùng gõ lại email cũ không biết mình đã có tài khoản. Admin muốn form đăng ký báo ngay (SPEC `_bmad-output/planning-artifacts/auth/SPEC-email-cuckoo.md`, kèm đính chính).
+**Chọn:**
+- **Endpoint `POST /auth/email-check {email}` → `200 {available}`.** Dùng POST để email không vào URL hay access log. Không cookie, không cần đăng nhập. Sai định dạng → 400 `bad_request`. Rate limit 20/phút/IP cộng trần toàn cục 600/phút (`AuthRateLimiter`, `EVAL` ngoài đường nóng). Vượt → 429 `too_many_attempts` kèm `Retry-After`. `/auth/register`, `/auth/login`, `/auth/forgot-password` **giữ nguyên R-6**.
+- **Bloom filter trong bộ nhớ mỗi instance hub-api** (`bloom-filters@3.0.4`, `BloomFilter.create(EMAIL_FILTER_CAPACITY, 0.001)`, bọc trong `EmailFilterService`). Âm tính → trả ngay, **0 truy vấn DB**. Dương tính → xác nhận bằng PG (`findUserByEmail`), nên không bao giờ báo "đã dùng" sai. Chưa dựng xong, hoặc số phần tử vượt dung lượng (`degraded`) → hỏi thẳng DB. BB-2: filter là đường tắt, `UNIQUE(users.email)` vẫn là trọng tài.
+- **Khoá** = `sha256(normalizeEmail(email))`, dùng chung chuẩn hoá của auth. Tin pub/sub qua Upstash chỉ mang hash.
+- **Vòng đời:**
+  - Dựng nền lúc boot từ `hub.users`, keyset `(id)` lô 1 000 qua `IdentityRepository.listUserEmailsAfter`.
+  - Dựng lại định kỳ `EMAIL_FILTER_REBUILD_MS` (10 phút) vào bản **mới** rồi hoán đổi. Email thêm trong lúc dựng đi vào cả hai bản.
+  - Thêm ở **một** chỗ: `AuthService.createUserWithFirstProject`, sau khi `$transaction` trả về (sau COMMIT). Cả ba đường mật khẩu, GitHub, Google đi qua đây. Operator do seed tạo (tiến trình khác) chỉ vào filter ở lượt dựng lại.
+- **Đồng bộ:** `PUBLISH hub:auth:email-filter {op:'add', h, from}`. Instance phát tự thêm tại chỗ và bỏ tin vọng lại của chính mình. **Không mở connection subscriber thứ hai:** `redis/redis-channels.ts` là registry kênh dùng chung connection subscriber sẵn có của `RealtimeGateway`.
+- **Metric:** `hub_email_filter_checks_total{result=negative|positive_confirmed|false_positive|db_fallback}` và `hub_email_filter_size`. Tiền tố `hub_` theo quy ước của mọi metric khác.
+- **Giao diện `/register`:** debounce 400 ms, `AbortController`. `available:false` → gợi ý kèm link `/login` và `/forgot-password`, vùng `aria-live="polite"` gắn `aria-describedby`. 429 hoặc lỗi → im lặng. **Không bao giờ chặn submit.** Email mang sang trang kia qua `sessionStorage` (đọc một lần rồi xoá), không qua query string.
+
+**Vì sao Bloom, không Cuckoo (spec ban đầu chọn Cuckoo vì xoá được):** `CuckooFilter` của `bloom-filters@3.0.4` có hai lỗi.
+- **Âm tính giả khi đẩy chỗ.** Vị trí thay thế ở `cuckoo-filter.js:221-224` tính lệch `_locations` (XOR rồi mới mod, `Math.abs` trên int32 âm). Đo được 34 353/100 000 email đã thêm bị báo "chưa có" ở mức đầy 95%, và 24/50 000 email ngay ở mức đầy 38%.
+- **Fingerprint tính theo byte nhưng dùng như số ký tự hex.** Kết quả: dương tính giả 2,9% thay vì 0,1%.
+
+Gói `cuckoo-filter@1.1.4` thì `require` lỗi ngay (thiếu `cbor-js`). Bloom cùng thư viện đo được 0 âm tính giả. Repo không có đường xoá user hay đổi email, và lượt dựng lại định kỳ chữa được nếu sau này có. Bỏ hẳn op `remove`.
+
+**Số đo (Node 22, 100 000 khoá sha256, `capacity` 100 000, FPR 0,001):**
+
+| Chỉ số | Giá trị |
+|---|---|
+| Kích thước filter | 1 437 759 bit, k = 10 |
+| Bitset (`arrayBuffers`) | +176 KB |
+| `heapUsed` | +259 KB |
+| Tổng mỗi bản | ≈ 435 KB |
+| Đỉnh lúc dựng lại (hai bản cùng sống) | ≈ 0,9 MB |
+| Dương tính giả đo được | 0,106–0,118% |
+| CPU dựng 100k khoá | 1,2–1,35 s, chia theo lô 1 000 xen với `await` |
+
+**Đánh đổi:**
+- **Mở một oracle dò email.** Giảm thiểu bằng 20/phút/IP cộng 600/phút toàn cục. Lượt bị chặn ghi `auth_audit` với `emailHash`; không log email thô.
+- **Âm tính giả tạm thời.** Có thể xảy ra ở instance mất tin pub/sub hoặc khi Redis chết, kéo dài tối đa tới lượt dựng lại. Hậu quả chỉ là mất một gợi ý; đăng ký vẫn đúng nhờ UNIQUE và R-6.
+- **Thêm một lượt quét `users` mỗi 10 phút mỗi instance** (100 truy vấn keyset với 100k user).
+- **Thêm một module dùng subscriber của gateway.** Gateway không chạy thì filter chỉ mất đồng bộ.
+- **Ngân sách Redis R1 không đổi:** không lệnh nào trên đường nóng ingest/delivery; `redis-budget.spec.ts` xanh.
+
+**Bổ sung (review lượt 1, 2026-10-12, append):**
+- **TB-1: chỉ audit lần vượt trần đầu tiên của mỗi cửa sổ.** Mọi lần bị rate limit ở auth đều theo luật này: các scope qua `limit()` (login, register, refresh, OAuth callback, email-check), khoá email của login, và hạn mức mail. `auth_audit` chỉ ghi `auth.rate_limited` khi `count === limit + 1`. Các lần bị chặn sau đó chỉ trả 429, không INSERT. Trước đây mỗi request bị chặn ghi một dòng, nên một IP bắn 5k req/s thành 5k INSERT/s. Mỗi khoá, mỗi cửa sổ vẫn có đúng một dòng cho biết ai bị chặn và từ lúc nào. Lượt `release()` của login đúng mật khẩu có thể làm một cửa sổ có thêm dòng, nhưng số dòng vẫn bị chặn trên.
+- **T-1: subscriber Redis của gateway subscribe lại ở mỗi lần `ready`.** Handler `message` được gắn một lần, ngoài promise `connect()`. Kênh đăng ký lúc `reconnecting` sẽ được subscribe ở lần `ready` kế tiếp. Lỗi của lần `connect()` đầu được log; ioredis tự thử lại (đã kiểm: promise bị reject, trạng thái `reconnecting`, sau đó `ready`). Trước đây trường hợp này làm realtime và đồng bộ filter chết vĩnh viễn.
+- **T-2: kẻ tấn công có thể làm cạn trần toàn cục 600/phút để tắt gợi ý của mọi người.** Đây là đánh đổi có chủ đích: trần toàn cục chính là thứ giới hạn việc dò email hàng loạt từ nhiều IP. Bị chặn thì form vẫn hoạt động bình thường (429 thì im lặng, không bao giờ chặn submit, server vẫn là trọng tài). Hậu quả chỉ là tạm mất gợi ý.

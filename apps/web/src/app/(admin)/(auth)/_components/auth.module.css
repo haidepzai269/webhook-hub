@@ -348,6 +348,26 @@
   font-size: 13px;
 }
 
+/* ADR-180: gợi ý "email đã có tài khoản". Vùng aria-live luôn trong DOM; rỗng thì không chiếm chỗ (KHÔNG display:none —
+   vùng bị ẩn hẳn thì trình đọc màn hình có thể không đọc khi nội dung xuất hiện). */
+.fieldHint {
+  margin-top: 6px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.fieldHint:empty {
+  margin-top: 0;
+}
+
+.fieldHint a {
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .serverError {
   margin-bottom: 12px;
   border: 1px solid color-mix(in oklab, var(--destructive) 40%, transparent);

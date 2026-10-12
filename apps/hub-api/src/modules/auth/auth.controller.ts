@@ -149,6 +149,17 @@ export class AuthController {
     return r.body;
   }
 
+  /**
+   * ADR-180: gợi ý trên form đăng ký — email đã có tài khoản chưa. POST để email không lọt vào URL / access log.
+   * Không cookie, không cần đăng nhập. 20/phút/IP + 600/phút toàn cục -> 429 kèm Retry-After.
+   */
+  @Post('email-check')
+  @HttpCode(HttpStatus.OK)
+  emailCheck(@Req() req: Request, @Body() body: any) {
+    requireJsonBody(req);
+    return this.auth.emailCheck(body ?? {}, reqCtx(req));
+  }
+
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: any) {

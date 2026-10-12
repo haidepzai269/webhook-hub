@@ -1,14 +1,15 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { MailCheck } from "lucide-react";
 
 import { useT } from "@/lib/i18n/use-t";
 
-import { AuthShell } from "../_components/auth-shell";
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
+import { AuthShell } from "../_components/auth-shell";
+import { takeEmailPrefill } from "../_components/email-prefill";
 
 /**
  * R-5 (review AU) — trang TRẦN, bản đầy đủ là việc của phiên UI. `POST /auth/forgot-password` luôn 202 dù email có
@@ -19,6 +20,12 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
+
+  // ADR-180: tới từ gợi ý "email đã có tài khoản" ở /register -> điền sẵn email (sessionStorage, không qua URL).
+  useEffect(() => {
+    const prefill = takeEmailPrefill();
+    if (prefill) setEmail(prefill);
+  }, []);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();

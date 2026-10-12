@@ -536,6 +536,12 @@ Cho phép dải private **chỉ** khi `NODE_ENV=development` (sink/echo trong m�
   cost 12, sai email/sai mật khẩu cùng body, rate limit theo IP + email (Redis là đường tắt, mất Redis thì đếm trong bộ
   nhớ). Socket.IO dùng **vé** 60 giây (khoá riêng) xin qua `/auth/socket-ticket?projectId=`. Web proxy `/api/*`,
   `/auth/*` để cookie là first-party.
+- **Gợi ý "email đã có tài khoản"** (ADR-180) — đảo một phần R-6 có chủ đích, chỉ ở form đăng ký:
+  - **Endpoint:** `POST /auth/email-check {email}` → `{available}`.
+  - **Bloom filter trong bộ nhớ mỗi instance hub-api.** Âm tính trả ngay, 0 truy vấn DB; dương tính xác nhận bằng PG. Chưa dựng xong hoặc vượt `EMAIL_FILTER_CAPACITY` thì đi thẳng DB.
+  - **Trọng tài vẫn là `UNIQUE(users.email)`** (BB-2). Register, login, forgot-password giữ R-6.
+  - **Cập nhật filter:** thêm sau COMMIT ở `createUserWithFirstProject`; đồng bộ qua pub/sub `hub:auth:email-filter` (chỉ hash, dùng chung subscriber của gateway); dựng lại mỗi `EMAIL_FILTER_REBUILD_MS`.
+  - **Chống dò:** oracle dò email được chặn bằng 20/phút/IP cộng 600/phút toàn cục.
 - **RLS bắt buộc** (AU6, ADR-108): runtime chạy bằng role `hub_app` (không superuser, không BYPASSRLS — app thoát nếu sai).
   Mọi bảng nghiệp vụ bật `FORCE ROW LEVEL SECURITY`; repo tự đặt `app.project_id` cho mỗi truy vấn; lối xuyên project
   DUY NHẤT là `PrismaService.systemTx`. Ba lớp cô lập: guard (membership) → repository (`tenant_id`) → Postgres (RLS).

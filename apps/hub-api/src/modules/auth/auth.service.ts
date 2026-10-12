@@ -12,6 +12,7 @@ import { IssuedSession } from './cookies';
 import { authError, TooManyAttempts } from './auth-errors';
 import { UserPrincipal } from '../service-api/principal';
 import { notifyAccessRevoked } from '../realtime/access-revocation';
+import { EmailFilterService } from './email-filter.service';
 
 export interface ReqCtx {
   ip: string | null;
@@ -42,6 +43,9 @@ const LIMITS = {
   refreshIp: { limit: 60, windowS: 60 },
   // GO-4 (ADR-128): mỗi callback OAuth hợp lệ làm hub-api POST tới token endpoint của nhà cung cấp -> chặn khuếch đại.
   oauthCallbackIp: { limit: 20, windowS: 60 },
+  // ADR-180: `/auth/email-check` là oracle dò email -> trần theo IP VÀ trần toàn cục (dò hàng loạt từ nhiều IP).
+  emailCheckIp: { limit: 20, windowS: 60 },
+  emailCheckGlobal: { limit: 600, windowS: 60 },
 };
 
 /** Bỏ dấu tiếng Việt, kebab — slug project đầu tiên (SPEC-auth §5.8). */
@@ -56,6 +60,15 @@ export function slugFromName(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 50);
   return s.length >= 3 ? s : `project-${s}`.replace(/-+$/, '');
+}
+
+/**
+ * ADR-180 (review TB-1): audit `auth.rate_limited` CHỈ ở lần vượt trần ĐẦU TIÊN của cửa sổ (`count === limit + 1`).
+ * Các lần bị chặn sau đó chỉ ném 429 — nếu không, một IP bắn 5k req/s = 5k INSERT/s vào auth_audit (khuếch đại ghi DB).
+ * Một dòng audit / khoá / cửa sổ vẫn đủ để thấy "ai đang bị chặn, từ lúc nào".
+ */
+function firstOverflow(d: { count: number }, limit: number): boolean {
+  return d.count === limit + 1;
 }
 
 function str(v: unknown, max: number): string {
@@ -75,6 +88,8 @@ export class AuthService {
     private readonly limiter: AuthRateLimiter,
     @Optional() @Inject(AUTH_CLOCK) private readonly now: () => Date = () => new Date(),
     @Optional() @Inject(MAIL_SENDER) private readonly mail: MailSender = createMailSender({ MAIL_DRIVER: 'log' }),
+    // ADR-180: vắng (test dựng tay) -> không gợi ý từ filter, `/auth/email-check` hỏi thẳng DB.
+    @Optional() @Inject(EmailFilterService) private readonly emailFilter: Pick<EmailFilterService, 'recordCreated' | 'isAvailable'> | null = null,
   ) {}
 
 
@@ -141,7 +156,7 @@ export class AuthService {
   ): Promise<{ userId: string; projectId: string }> {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        return await this.store.$transaction(async (tx) => {
+        const created = await this.store.$transaction(async (tx) => {
           const idn = this.store.identity(tx);
           let slug = slugFromName(data.name);
           if (attempt > 0 || (await idn.isProjectSlugTaken(slug))) slug = `${slug.slice(0, 50)}-${randomBytes(2).toString('hex')}`;
@@ -159,6 +174,9 @@ export class AuthService {
           await idn.recordAuthAudit({ userId: user.id, action: 'user.registered', ip: ctx.ip });
           return { userId: user.id, projectId };
         });
+        // ADR-180: SAU COMMIT (như SET NX của ingest) — tx lỗi thì không tới đây. Một chỗ cho cả mật khẩu/GitHub/Google.
+        this.emailFilter?.recordCreated(data.email);
+        return created;
       } catch (e) {
         if ((e as { code?: string })?.code !== 'P2002') throw e;
         // P2002 trên email = đăng ký đồng thời cùng email: trả hình dạng giống hệt nhánh "đã tồn tại".
@@ -169,6 +187,22 @@ export class AuthService {
     throw new Error('Không tạo được slug project duy nhất sau 3 lần');
   }
 
+
+  // ------------------------------------------------------------------ gợi ý email đã có (ADR-180)
+
+  /**
+   * `POST /auth/email-check {email}` -> `{available}`. Đảo một phần R-6 có chủ đích (ADR-180): đây là oracle dò email,
+   * nên rate limit theo IP + trần toàn cục; `/auth/register` vẫn R-6. Không log email thô (chỉ hash trong audit 429).
+   */
+  async emailCheck(input: { email?: unknown }, ctx: ReqCtx): Promise<{ available: boolean }> {
+    const email = normalizeEmail(typeof input?.email === 'string' ? input.email : '');
+    if (!isValidEmail(email)) throw authError(HttpStatus.BAD_REQUEST, 'bad_request', { field: 'email', message: 'Email không hợp lệ' });
+    await this.limit('emailCheckIp', `rl:emailcheck:ip:${ctx.ip ?? 'unknown'}`, email);
+    await this.limit('emailCheckGlobal', 'rl:emailcheck:all', email);
+    if (!this.emailFilter) return { available: !(await this.store.identity().findUserByEmail(email)) };
+    const r = await this.emailFilter.isAvailable(email);
+    return { available: r.available };
+  }
 
   // ------------------------------------------------------------------ đăng nhập (§5.2, §5.3)
 
@@ -182,7 +216,7 @@ export class AuthService {
     // 1..N, chỉ 5 lượt đầu tới bcrypt. (Trước: đọc rồi mới tăng sau khi sai -> 18 request song song lọt cả 18.)
     const lock = await this.limiter.hit(emailKey, LIMITS.loginEmailFailures.limit, LIMITS.loginEmailFailures.windowS);
     if (!lock.allowed) {
-      await this.audit(null, 'auth.rate_limited', ctx.ip, { scope: 'login_email', emailHash: sha256Hex(email) });
+      if (firstOverflow(lock, LIMITS.loginEmailFailures.limit)) await this.audit(null, 'auth.rate_limited', ctx.ip, { scope: 'login_email', emailHash: sha256Hex(email) });
       throw new TooManyAttempts(lock.retryAfterS);
     }
 
@@ -440,7 +474,7 @@ export class AuthService {
     for (const [suffix, limit, windowS] of [['m', 1, 60], ['d', 5, 86_400]] as const) {
       const d = await this.limiter.hit(`rl:mail:${purpose}:${suffix}:${h}`, limit, windowS);
       if (!d.allowed) {
-        await this.audit(null, 'auth.rate_limited', null, { scope: `mail_${purpose}`, emailHash: h });
+        if (firstOverflow(d, limit)) await this.audit(null, 'auth.rate_limited', null, { scope: `mail_${purpose}`, emailHash: h });
         throw new TooManyAttempts(d.retryAfterS);
       }
     }
@@ -508,7 +542,7 @@ export class AuthService {
     const { limit, windowS } = LIMITS[kind];
     const d = await this.limiter.hit(key, limit, windowS);
     if (!d.allowed) {
-      await this.audit(null, 'auth.rate_limited', null, { scope: kind, ...(email ? { emailHash: sha256Hex(email) } : {}) });
+      if (firstOverflow(d, limit)) await this.audit(null, 'auth.rate_limited', null, { scope: kind, ...(email ? { emailHash: sha256Hex(email) } : {}) });
       throw new TooManyAttempts(d.retryAfterS);
     }
   }

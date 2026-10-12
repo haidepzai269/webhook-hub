@@ -406,6 +406,10 @@ WEB_PROXY_SECRET=        # R-2/ADR-110: ≥ 32 ký tự, GIỐNG HỆT biến c�
                          # trong `x-hub-client-ip` kèm secret này; API chỉ tin khi khớp (timingSafeEqual). Để trống =
                          # rate limit theo IP của console thành giới hạn CHUNG toàn hệ thống (khoá theo email vẫn đúng)
 INTERNAL_TOKEN=          # cho /api/internal/reconcile
+EMAIL_FILTER_CAPACITY=100000   # ADR-180: dung lượng Bloom filter gợi ý email đã có (/auth/email-check), FPR 0,1%.
+                         # ≈ 435 KB/instance ở 100k (đỉnh ≈ 0,9 MB lúc dựng lại). Số user vượt -> degraded, mọi kiểm tra
+                         # đi DB (vẫn đúng, chậm hơn) + log cảnh báo -> tăng biến này
+EMAIL_FILTER_REBUILD_MS=600000 # ADR-180: chu kỳ dựng lại filter từ hub.users (bù tin pub/sub bị mất). 0 = chỉ dựng lúc boot
 
 # --- Provider (nạp vào source_secrets, không đọc trực tiếp trong adapter) ---
 PAYOS_CLIENT_ID= PAYOS_API_KEY= PAYOS_CHECKSUM_KEY=

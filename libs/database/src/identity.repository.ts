@@ -54,6 +54,19 @@ export class IdentityRepository {
     return this.db.user.findUnique({ where: { id } });
   }
 
+  /**
+   * Bloom filter email (ADR-180): đọc email theo lô, keyset trên khoá chính `id` (không OFFSET — lô sau không chậm dần).
+   * Chỉ trả `id` + `email`, không kéo mật khẩu băm ra khỏi DB.
+   */
+  listUserEmailsAfter(afterId: string | null, take: number) {
+    return this.db.user.findMany({
+      where: afterId ? { id: { gt: afterId } } : {},
+      orderBy: { id: 'asc' },
+      take,
+      select: { id: true, email: true },
+    });
+  }
+
   createUser(data: { email: string; name: string; passwordHash: string | null; emailVerifiedAt?: Date | null; isOperator?: boolean; githubId?: string | null; googleSub?: string | null }) {
     return this.db.user.create({ data });
   }

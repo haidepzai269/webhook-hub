@@ -30,6 +30,29 @@ describeDb('IdentityRepository (Postgres)', () => {
     expect((await idn.findUserByEmail(email))?.passwordHash).toBe('hash-1');
   });
 
+  it('listUserEmailsAfter (ADR-180): keyset theo id tăng dần, đủ lô không trùng không sót, chỉ id + email', async () => {
+    const mine: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const u = await idn.createUser({ email: `bf${i}-${run}@t.vn`, name: 'BF', passwordHash: 'khong-duoc-lo' });
+      users.push(u.id);
+      mine.push(u.id);
+    }
+    const seen: string[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const rows = await idn.listUserEmailsAfter(after, 2);
+      for (const r of rows) {
+        expect(Object.keys(r).sort()).toEqual(['email', 'id']);
+        if (after) expect(r.id > after).toBe(true);
+        seen.push(r.id);
+      }
+      if (rows.length < 2) break;
+      after = rows[rows.length - 1].id;
+    }
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(seen).toEqual(expect.arrayContaining(mine));
+  });
+
   it('isProjectSlugTaken + ensureMembership idempotent (giữ role cũ) + listMemberships + findMembershipRole', async () => {
     const u = await idn.createUser({ email: `m-${run}@t.vn`, name: 'M', passwordHash: null });
     users.push(u.id);

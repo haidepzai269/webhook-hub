@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { MailCheck } from "lucide-react";
+import Link from "next/link";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm } from "react-hook-form";
+import { MailCheck } from "lucide-react";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
@@ -13,6 +14,7 @@ import { useT } from "@/lib/i18n/use-t";
 
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
+import { rememberEmailPrefill } from "../_components/email-prefill";
 
 /**
  * AU1 — form TRẦN (DINH-CHINH-AUTH §3: màn đăng ký đầy đủ để phiên UI). Luật mật khẩu thật do server kiểm
@@ -26,7 +28,11 @@ const makeSchema = (t: TranslateFn) =>
         .trim()
         .min(1, { message: t("auth.validation.email-required") })
         .email({ message: t("auth.validation.email-invalid") }),
-      name: z.string().trim().min(1, { message: t("auth.validation.name-required") }).max(100),
+      name: z
+        .string()
+        .trim()
+        .min(1, { message: t("auth.validation.name-required") })
+        .max(100),
       password: z.string().min(10, { message: t("auth.validation.password-min") }),
       confirmPassword: z.string().min(1, { message: t("auth.validation.confirm-required") }),
     })
@@ -37,6 +43,43 @@ const makeSchema = (t: TranslateFn) =>
 
 type RegisterValues = z.infer<ReturnType<typeof makeSchema>>;
 
+const EMAIL_FORMAT = z.string().email();
+const EMAIL_CHECK_DEBOUNCE_MS = 400;
+
+/**
+ * ADR-180: gợi ý "email đã có tài khoản" — gõ xong email đúng định dạng, chờ 400ms rồi `POST /auth/email-check` (qua
+ * proxy web). Request cũ bị huỷ (AbortController). 429 / lỗi mạng / lỗi khác -> im lặng. CHỈ là gợi ý: không bao giờ chặn
+ * nút submit — server (UNIQUE email + R-6) mới là trọng tài. Trả `true` khi server nói email đã được dùng.
+ */
+function useEmailTaken(rawEmail: string): boolean {
+  const [taken, setTaken] = useState<{ email: string; taken: boolean } | null>(null);
+  const email = rawEmail.trim();
+  useEffect(() => {
+    if (!EMAIL_FORMAT.safeParse(email).success) return;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      fetch("/auth/email-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+        signal: ctrl.signal,
+      })
+        .then(async (res) => {
+          if (!res.ok) return;
+          const data = (await res.json()) as { available?: unknown };
+          if (typeof data.available === "boolean") setTaken({ email, taken: !data.available });
+        })
+        .catch(() => undefined);
+    }, EMAIL_CHECK_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [email]);
+  // Kết quả của email KHÁC (đã gõ tiếp) không còn đúng -> không hiện.
+  return Boolean(taken?.taken && taken.email === email);
+}
+
 // Nhãn là KHOÁ i18n; placeholder là khoá `auth.*` hoặc chuỗi không chữ (••••).
 const FIELDS: readonly {
   name: keyof RegisterValues;
@@ -45,9 +88,21 @@ const FIELDS: readonly {
   autoComplete: string;
   placeholder: MessageKey | string;
 }[] = [
-  { name: "email", label: "auth.field.email", type: "email", autoComplete: "email", placeholder: "auth.placeholder.email" },
+  {
+    name: "email",
+    label: "auth.field.email",
+    type: "email",
+    autoComplete: "email",
+    placeholder: "auth.placeholder.email",
+  },
   { name: "name", label: "auth.field.name", type: "text", autoComplete: "name", placeholder: "auth.placeholder.name" },
-  { name: "password", label: "auth.field.password", type: "password", autoComplete: "new-password", placeholder: "••••••••••" },
+  {
+    name: "password",
+    label: "auth.field.password",
+    type: "password",
+    autoComplete: "new-password",
+    placeholder: "••••••••••",
+  },
   {
     name: "confirmPassword",
     label: "auth.field.confirm-password",
@@ -69,6 +124,21 @@ export function RegisterForm() {
     resolver: (values, context, options) => zodResolver(schemaRef.current)(values, context, options),
     defaultValues: { email: "", name: "", password: "", confirmPassword: "" },
   });
+
+  const emailTaken = useEmailTaken(useWatch({ control: form.control, name: "email" }) ?? "");
+  const takenHint = emailTaken ? (
+    <>
+      {t("auth.register.email-taken")}{" "}
+      <Link href="/login" onClick={() => rememberEmailPrefill(form.getValues("email").trim())}>
+        {t("auth.register.email-taken.login")}
+      </Link>{" "}
+      {t("auth.register.email-taken.or")}{" "}
+      <Link href="/forgot-password" onClick={() => rememberEmailPrefill(form.getValues("email").trim())}>
+        {t("auth.register.email-taken.forgot")}
+      </Link>
+      ?
+    </>
+  ) : null;
 
   // Đổi ngôn ngữ khi đang hiện lỗi → kiểm tra lại các ô đó để câu lỗi theo ngôn ngữ mới.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `schema` là tín hiệu đổi ngôn ngữ, không đọc trong thân effect.
@@ -129,6 +199,7 @@ export function RegisterForm() {
               placeholder={placeholder.startsWith("auth.") ? t(placeholder as MessageKey) : placeholder}
               autoComplete={autoComplete}
               error={fieldState.error?.message}
+              hint={name === "email" ? takenHint : undefined}
             />
           )}
         />

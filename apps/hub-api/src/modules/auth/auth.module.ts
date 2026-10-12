@@ -13,6 +13,7 @@ import { AUTH_CONFIG, loadAuthConfig } from './auth-config';
 import { AuthRateLimiter } from './rate-limit';
 import { RedisService } from '../redis/redis.service';
 import { createMailSender, MAIL_SENDER } from '@hub/common';
+import { EmailFilterService, loadEmailFilterConfig } from './email-filter.service';
 
 /**
  * SPEC-auth AU1. JwtModule KHÔNG có secret mặc định: mỗi lần ký/verify truyền secret + thuật toán + iss/aud
@@ -26,6 +27,12 @@ import { createMailSender, MAIL_SENDER } from '@hub/common';
     { provide: AuthRateLimiter, inject: [RedisService], useFactory: (redis: RedisService) => new AuthRateLimiter(redis.client) },
     // SPEC-auth §5.9: MAIL_DRIVER=log|resend|gmail|capture (capture ở production -> app thoát, test-only-config.ts)
     { provide: MAIL_SENDER, useFactory: () => createMailSender() },
+    // ADR-180: Bloom filter email trong bộ nhớ; PUBLISH qua client lệnh sẵn có, SUBSCRIBE qua connection của gateway.
+    {
+      provide: EmailFilterService,
+      inject: [PrismaService, RedisService],
+      useFactory: (prisma: PrismaService, redis: RedisService) => new EmailFilterService(prisma, redis.client, loadEmailFilterConfig()),
+    },
     AuthService,
     SessionGuard,
     SocketTicketService,

@@ -15,6 +15,7 @@ import { useT } from "@/lib/i18n/use-t";
 
 import styles from "../_components/auth.module.css";
 import { AuthField } from "../_components/auth-field";
+import { takeEmailPrefill } from "../_components/email-prefill";
 import { safeNext } from "../_components/next-path";
 
 const makeSchema = (t: TranslateFn) =>
@@ -105,6 +106,12 @@ export function LoginForm() {
     const names = Object.keys(form.formState.errors) as (keyof LoginValues)[];
     if (names.length) void form.trigger(names);
   }, [schema, form]);
+
+  // ADR-180: tới từ gợi ý "email đã có tài khoản" ở /register -> điền sẵn email (sessionStorage, không qua URL).
+  useEffect(() => {
+    const email = takeEmailPrefill();
+    if (email) form.setValue("email", email);
+  }, [form]);
 
   // Đã đăng nhập (cookie còn sống) → về dashboard. Không đọc token: cookie phiên là HttpOnly (SPEC-auth §4).
   useEffect(() => {

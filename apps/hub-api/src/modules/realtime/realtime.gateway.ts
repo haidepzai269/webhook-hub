@@ -15,6 +15,7 @@ import { TraceNotifier } from '../ingest/ingest.service';
 import { AUTH_CONFIG, AuthConfig } from '../auth/auth-config';
 import { verifySocketTicket } from '../auth/tokens';
 import { onAccessRevoked } from './access-revocation';
+import { dispatchRedisMessage, onRedisChannelAdded, registeredRedisChannels } from '../redis/redis-channels';
 
 /** R-3: chu kỳ quét lại session + membership của socket đang mở (lưới an toàn cho instance khác / Redis không dùng). */
 const RECHECK_MS = Number(process.env.SOCKET_RECHECK_MS) > 0 ? Number(process.env.SOCKET_RECHECK_MS) : 30_000;
@@ -68,6 +69,8 @@ export class RealtimeGateway
   private counters = new Map<string, TickCounter>();
   private recheckTimer?: NodeJS.Timeout;
   private offRevoked?: () => void;
+  private offChannelAdded?: () => void;
+  private lastSubWarn = 0;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -90,17 +93,28 @@ export class RealtimeGateway
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisSub = new Redis(redisUrl, { lazyConnect: true });
 
-    this.redisSub.connect().then(() => {
-      this.redisSub.subscribe(...Object.keys(REALTIME_CHANNELS), (err) => {
-        if (err) {
-          logger.warn({ err }, 'Lỗi đăng ký kênh Redis pub/sub cho realtime');
-        } else {
-          logger.info('Đã kết nối Redis pub/sub cho Socket.IO');
-        }
-      });
-
-      this.redisSub.on('message', (channel, message) => this.handleRedisMessage(channel, message));
-    }).catch(() => {});
+    // ADR-180: CÙNG connection này phục vụ cả kênh của module khác (redis-channels.ts) — không mở subscriber thứ hai.
+    // Review T-1: handler gắn NGOÀI promise connect; subscribe ở MỖI lần 'ready' (lần đầu, và sau mỗi lần kết nối lại —
+    // gồm cả khi lần connect đầu lỗi: ioredis vẫn tự thử lại, trước đây `.then` không bao giờ chạy -> realtime chết vĩnh viễn).
+    // Kênh đăng ký lúc chưa ready (connecting/reconnecting) được subscribe ở lần 'ready' kế tiếp.
+    this.redisSub.on('message', (channel, message) => {
+      if (REALTIME_CHANNELS[channel]) this.handleRedisMessage(channel, message);
+      else dispatchRedisMessage(channel, message);
+    });
+    this.redisSub.on('ready', () => this.subscribeAll());
+    this.redisSub.on('error', (err: Error) => {
+      const t = Date.now();
+      if (t - this.lastSubWarn < 60_000) return;
+      this.lastSubWarn = t;
+      logger.warn({ err: err.message }, 'Redis subscriber realtime lỗi -> ioredis tự kết nối lại, subscribe lại khi ready');
+    });
+    this.offChannelAdded = onRedisChannelAdded((channel) => {
+      if (this.redisSub.status !== 'ready') return; // chưa ready: lần 'ready' tới sẽ subscribe đủ
+      this.redisSub.subscribe(channel).catch((err: Error) => logger.warn({ err: err.message, channel }, 'Không subscribe được kênh Redis'));
+    });
+    this.redisSub.connect().catch((err: Error) =>
+      logger.warn({ err: err.message }, 'Redis subscriber realtime: kết nối lần đầu lỗi -> ioredis tự thử lại, subscribe khi ready'),
+    );
 
     // Định kỳ 5s gửi metrics.tick theo từng tenant đang có người xem
     this.metricsTimer = setInterval(() => {
@@ -113,6 +127,14 @@ export class RealtimeGateway
       }
       this.counters.clear();
     }, 5000);
+  }
+
+  /** Subscribe kênh realtime + mọi kênh đã đăng ký ở registry. Gọi ở MỖI lần 'ready' (SUBSCRIBE trùng là vô hại). */
+  private subscribeAll() {
+    this.redisSub.subscribe(...Object.keys(REALTIME_CHANNELS), ...registeredRedisChannels(), (err) => {
+      if (err) logger.warn({ err }, 'Lỗi đăng ký kênh Redis pub/sub cho realtime');
+      else logger.info('Đã kết nối Redis pub/sub cho Socket.IO');
+    });
   }
 
   /**
@@ -218,6 +240,7 @@ export class RealtimeGateway
     clearInterval(this.metricsTimer);
     if (this.recheckTimer) clearInterval(this.recheckTimer);
     this.offRevoked?.();
+    this.offChannelAdded?.();
     this.redisSub?.quit().catch(() => {});
   }
 

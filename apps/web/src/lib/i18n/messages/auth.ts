@@ -62,6 +62,10 @@ export const auth = defineMessages("auth", {
     "auth.register.submitting": "Đang đăng ký…",
     "auth.register.failed": "Đăng ký thất bại (HTTP {status}).",
     "auth.register.sent-before": "Đã gửi liên kết kích hoạt tới",
+    "auth.register.email-taken": "Email này đã có tài khoản.",
+    "auth.register.email-taken.login": "Đăng nhập",
+    "auth.register.email-taken.or": "hoặc",
+    "auth.register.email-taken.forgot": "quên mật khẩu",
     "auth.register.sent-after":
       "Mở liên kết trong email, đặt mật khẩu để kích hoạt và vào trang tổng quan. Không thấy thư? Đăng ký lại bằng cùng email để nhận liên kết mới.",
     "auth.verify.title": "Kích hoạt tài khoản",
@@ -181,6 +185,10 @@ export const auth = defineMessages("auth", {
     "auth.register.submitting": "Signing up…",
     "auth.register.failed": "Sign-up failed (HTTP {status}).",
     "auth.register.sent-before": "An activation link was sent to",
+    "auth.register.email-taken": "This email already has an account.",
+    "auth.register.email-taken.login": "Sign in",
+    "auth.register.email-taken.or": "or",
+    "auth.register.email-taken.forgot": "reset your password",
     "auth.register.sent-after":
       "Open the link in the email and set a password to activate and enter the dashboard. No email? Sign up again with the same address to get a new link.",
     "auth.verify.title": "Activate account",

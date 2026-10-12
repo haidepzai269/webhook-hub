@@ -1,4 +1,4 @@
-import { Counter, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 /**
  * Chỉ số Prometheus của hub-api (S3-4). Đếm TRONG BỘ NHỚ của tiến trình — 0 lệnh Redis (ngân sách R1).
@@ -19,5 +19,23 @@ export const ingestDuration = new Histogram({
   help: 'Thời gian xử lý một request /hooks (nhận -> COMMIT -> ACK)',
   labelNames: ['provider'] as const,
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+  registers: [apiRegistry],
+});
+
+/**
+ * ADR-180: kiểm email đã tồn tại qua Bloom filter. `negative` = filter nói chưa có (0 truy vấn DB);
+ * `positive_confirmed` / `false_positive` = filter nói có, DB xác nhận / bác bỏ; `db_fallback` = filter chưa sẵn sàng
+ * hoặc đã vượt dung lượng -> hỏi thẳng DB.
+ */
+export const emailFilterChecks = new Counter({
+  name: 'hub_email_filter_checks_total',
+  help: 'Số lần kiểm email đã tồn tại theo kết quả của Bloom filter',
+  labelNames: ['result'] as const,
+  registers: [apiRegistry],
+});
+
+export const emailFilterSize = new Gauge({
+  name: 'hub_email_filter_size',
+  help: 'Số email đã nạp vào Bloom filter của instance này',
   registers: [apiRegistry],
 });
