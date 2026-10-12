@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { authSecretProblems } from './modules/auth/auth-config';
 import { installErrorHandling } from './modules/errors/install';
-import { configureBodyParsers } from './body-parsers';
+import { configureBodyParsers, installHooksPathGuard } from './body-parsers';
 import { IngestService } from './modules/ingest/ingest.service';
 import { installPenaltyGate } from './modules/ingest/penalty-gate';
 import { installShutdown } from './shutdown';
@@ -76,6 +76,10 @@ async function bootstrap() {
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
   app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials
+
+  // EG1 (ADR-175 bổ sung lượt 5): `/HOOKS/...` (sai hoa thường) -> 404 như nginx, đặt TRƯỚC gate để IP sạch và IP bị ban
+  // nhận cùng phản hồi.
+  installHooksPathGuard(app);
 
   // D3 (ADR-177): gate hộp phạt NGAY TRƯỚC body parser — IP/cặp đang bị phạt nhận 429 + Connection: close, Node không đọc
   // body (tới 1MB). Chỉ kiểm; chấm điểm vẫn ở ingest. Cùng instance PenaltyBox với IngestService (DI).

@@ -51,7 +51,7 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     process.env.MASTER_KEY = MASTER;
   });
 
-  it('[EG:T1] 20 lần 404 do source==null từ một IP -> request thứ 21 nhận 429 ip_temporarily_blocked + Retry-After, KHÔNG gọi findSourceBySourceKeyForIngest', async () => {
+  it('[EG:T1] (phần a) 20 lần 404 do source==null từ một IP -> request thứ 21 nhận 429 ip_temporarily_blocked + Retry-After, KHÔNG gọi findSourceBySourceKeyForIngest', async () => {
     const { svc, prisma } = build({});
     for (let i = 0; i < 20; i++) expect((await svc.ingestWebhook(req(`rac_${i}`, '203.0.113.7'))).status).toBe(404);
     expect(prisma.findSourceBySourceKeyForIngest).toHaveBeenCalledTimes(20);

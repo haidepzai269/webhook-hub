@@ -1,10 +1,10 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
-> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái lấy từ lần `verify` cuối (2026-10-12T09:44:55.433Z, commit 9dbad75).
+> Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái (ghép tay sau rebase vì cột trạng thái sinh trên Windows không có L1/L2, báo sai `BB:4` ❌ do CRLF): mã đã có trên `feat/edge` giữ trạng thái của bản đó (lần `verify` 2026-10-12T09:44:55.433Z, commit 9dbad75); mã EG1 mới + `EG:T19` theo lần chạy Windows của 9d7b9f0 (L1/L2 chưa chạy). Sinh lại trên Linux/CI trước khi merge.
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 342 mã khai báo · 271 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 342 mã khai báo · 277 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -177,19 +177,25 @@ Tổng: 342 mã khai báo · 271 mã có test · 0 mồ côi · 24 mồ côi có
 | `DX:UX14` | SPEC-dev-experience.md | L0 | libs/hub-sdk/test/listen.spec.ts:174 | ✅ pass |
 | `DX:UX15` | SPEC-dev-experience.md | L0 | libs/hub-sdk/test/listen.spec.ts:191 | ✅ pass |
 | `DX:UX16` | SPEC-dev-experience.md | L0 | libs/hub-sdk/test/trigger.spec.ts:45 | ✅ pass |
-| `EG:T1` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:54 | ✅ pass |
+| `EG:T1` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:54<br>apps/hub-api/test/penalty-gate.spec.ts:250 | ✅ pass |
+| `EG:T2` | SPEC-chong-qua-tai.md · EG1 | L2 | verify/scenarios/edge-e2e.ts:62 | chưa chạy |
+| `EG:T3` | SPEC-chong-qua-tai.md · EG1 | L0 | apps/hub-api/test/edge-nginx.spec.ts:73<br>apps/hub-api/test/edge-nginx.spec.ts:99<br>apps/hub-api/test/edge-nginx.spec.ts:117<br>apps/hub-api/test/source-connections.spec.ts:31 | ✅ pass |
 | `EG:T4` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:74 | ✅ pass |
 | `EG:T5` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:86 | ✅ pass |
 | `EG:T6` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:101 | ✅ pass |
 | `EG:T7` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:123 | ✅ pass |
 | `EG:T8` | SPEC-chong-qua-tai.md · EG3 | L0 | apps/hub-api/test/redis-budget.spec.ts:256 | ✅ pass |
+| `EG:T9` | SPEC-chong-qua-tai.md · EG1 | L0 | apps/hub-api/test/edge-nginx.spec.ts:288<br>apps/hub-api/test/edge-nginx.spec.ts:395<br>apps/hub-api/test/edge-nginx.spec.ts:408 | ⏭ skip |
+| `EG:T10` | SPEC-chong-qua-tai.md · EG1 | L0,L2 | apps/hub-api/test/body-limit.spec.ts:126<br>apps/hub-api/test/edge-nginx.spec.ts:65<br>apps/hub-api/test/edge-nginx.spec.ts:127<br>apps/hub-api/test/edge-nginx.spec.ts:147<br>apps/hub-api/test/edge-nginx.spec.ts:178<br>apps/hub-api/test/edge-nginx.spec.ts:492<br>verify/scenarios/edge-e2e.ts:151 | ✅ pass |
+| `EG:T11` | SPEC-chong-qua-tai.md · EG1 | L0,L2 | apps/hub-api/test/edge-nginx.spec.ts:217<br>apps/hub-api/test/edge-nginx.spec.ts:248<br>apps/hub-api/test/edge-nginx.spec.ts:469<br>apps/hub-api/test/edge-nginx.spec.ts:525<br>verify/scenarios/edge-e2e.ts:89 | ⏭ skip |
 | `EG:T12` | SPEC-chong-qua-tai.md · EG3 | L1 | apps/hub-api/test/ingest-ratelimit-after-verify-db.spec.ts:43 | ✅ pass |
 | `EG:T13` | SPEC-chong-qua-tai.md · EG4 | L1 | apps/hub-api/test/source-traffic-db.spec.ts:31 | ✅ pass |
 | `EG:T14` | SPEC-chong-qua-tai.md · EG5 | L1 | apps/hub-api/test/source-traffic-api-db.spec.ts:47 | ✅ pass |
 | `EG:T15` | SPEC-chong-qua-tai.md · EG5 | L0 | libs/common/test/traffic-insight.spec.ts:8 | ✅ pass |
+| `EG:T16` | SPEC-chong-qua-tai.md · EG1 | L0 | apps/hub-api/test/edge-nginx.spec.ts:270 | ✅ pass |
 | `EG:T17` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:159 | ✅ pass |
 | `EG:T18` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-box.spec.ts:182 | ✅ pass |
-| `EG:T19` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-gate.spec.ts:110 | chưa chạy |
+| `EG:T19` | SPEC-chong-qua-tai.md · EG2 | L0 | apps/hub-api/test/penalty-gate.spec.ts:113<br>apps/hub-api/test/penalty-gate.spec.ts:229<br>apps/hub-api/test/penalty-gate.spec.ts:242 | chưa chạy |
 | `KN:T1` | SPEC-ket-noi.md · KN1 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy: image hub-api của hubv chưa rebuild với code KN (phiên dev không được restart/rebuild hubv — VF đang chạy chaos). Logic phủ ở L1 [KN:U1]-[KN:U4] (console-endpoints-db.spec.ts). |
 | `KN:T2` | SPEC-ket-noi.md · KN3 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + PAYOS_FAKE_BASE_URL/CONNECTOR_INGEST_BASE_URL trong .env.verify). Luồng tương đương chạy ở L1 với fake PayOS của sink trong tiến trình: payos-connect-db.spec.ts [KN:U8] (phần b). |
 | `KN:T3` | SPEC-ket-noi.md · KN4 | — | — | mồ côi có lý do: L2 trên hubv chưa chạy (cần rebuild image + STRIPE_FAKE_BASE_URL trong .env.verify). Tương đương ở L1 với fake Stripe của sink trong tiến trình: stripe-connect-db.spec.ts [KN:U14][KN:U15] + [KN4] status/ngắt (DELETE tới đúng we_). |
@@ -200,18 +206,18 @@ Tổng: 342 mã khai báo · 271 mã có test · 0 mồ côi · 24 mồ côi có
 | `KN:U4` | SPEC-ket-noi.md · KN1 | L1 | apps/hub-api/test/console-endpoints-db.spec.ts:104 | ✅ pass |
 | `KN:U5` | SPEC-ket-noi.md · KN1 | L0 | apps/hub-api/test/console-endpoints.spec.ts:9 | ✅ pass |
 | `KN:U6` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/source-connections.spec.ts:22 | ✅ pass |
-| `KN:U7` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/source-connections.spec.ts:31 | ✅ pass |
+| `KN:U7` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/source-connections.spec.ts:41 | ✅ pass |
 | `KN:U8` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:63<br>apps/hub-api/test/source-connections-db.spec.ts:74 | ✅ pass |
 | `KN:U9` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/source-connections-db.spec.ts:86 | ✅ pass |
 | `KN:U10` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/source-connections-db.spec.ts:99 | ✅ pass |
 | `KN:U11` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/source-connections-db.spec.ts:127 | ✅ pass |
-| `KN:U12` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/payos-connector.spec.ts:25<br>apps/hub-api/test/source-connections.spec.ts:42 | ✅ pass |
+| `KN:U12` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/payos-connector.spec.ts:25<br>apps/hub-api/test/source-connections.spec.ts:52 | ✅ pass |
 | `KN:U13` | SPEC-ket-noi.md · KN3 | L0 | apps/hub-api/test/payos-connector.spec.ts:12 | ✅ pass |
 | `KN:U14` | SPEC-ket-noi.md · KN4 | L1 | apps/hub-api/test/stripe-connect-db.spec.ts:60 | ✅ pass |
 | `KN:U15` | SPEC-ket-noi.md · KN4 | L1 | apps/hub-api/test/stripe-connect-db.spec.ts:81 | ✅ pass |
 | `KN:U16` | SPEC-ket-noi.md · KN3 | L0,L1,L2 | apps/hub-api/test/flow-probe-trace.spec.ts:43<br>apps/hub-api/test/ingest-payos-probe.spec.ts:61<br>apps/hub-api/test/ingest-payos-probe.spec.ts:72<br>apps/hub-api/test/ingest-payos-probe.spec.ts:91<br>apps/hub-api/test/polling-db.spec.ts:172<br>apps/hub-worker/test/normalize-consumer.spec.ts:168<br>apps/hub-worker/test/normalize-consumer.spec.ts:188<br>libs/common/test/flow/build-event-flow.spec.ts:135<br>libs/common/test/flow/build-event-flow.spec.ts:146<br>libs/providers/test/payos-confirm-probe.spec.ts:42<br>libs/providers/test/payos-confirm-probe.spec.ts:61<br>libs/providers/test/payos-confirm-probe.spec.ts:71<br>libs/providers/test/payos-confirm-probe.spec.ts:76<br>tools/hub-sim/test/hub-sim.spec.ts:100<br>verify/scenarios/ingest-e2e.ts:188 | ✅ pass |
 | `KN:U17` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/source-connections-db.spec.ts:152 | ✅ pass |
-| `KN:U18` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/source-connections.spec.ts:53 | ✅ pass |
+| `KN:U18` | SPEC-ket-noi.md · KN2 | L0 | apps/hub-api/test/source-connections.spec.ts:63 | ✅ pass |
 | `KN:U19` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:110 | ✅ pass |
 | `KN:U20` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:130 | ✅ pass |
 | `KN:U21` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:180 | ✅ pass |
@@ -304,6 +310,6 @@ Tổng: 342 mã khai báo · 271 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (195 file, 1268 khai báo it/test)
+## File test (196 file, 1288 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

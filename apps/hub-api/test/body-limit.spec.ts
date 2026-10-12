@@ -5,7 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { createHmac } from 'crypto';
 import { MAX_API_BODY_BYTES, MAX_INGEST_PAYLOAD_BYTES, RawWebhookRequest } from '@hub/common';
 import { GithubAdapter } from '@hub/providers';
-import { configureBodyParsers } from '../src/body-parsers';
+import { configureBodyParsers, HOOKS_NOT_FOUND_FIX, installHooksPathGuard } from '../src/body-parsers';
 import { IngestController } from '../src/modules/ingest/ingest.controller';
 import { IngestService } from '../src/modules/ingest/ingest.service';
 import { installErrorHandling } from '../src/modules/errors/install';
@@ -45,7 +45,10 @@ async function start(withParsers: boolean): Promise<{ app: INestApplication; bas
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   installErrorHandling(app);
   app.enableCors(corsOptions({ CORS_ORIGINS: ALLOWED_ORIGIN }));
-  if (withParsers) configureBodyParsers(app);
+  if (withParsers) {
+    installHooksPathGuard(app); // như main.ts: guard /hooks ở gốc, trước gate + body parser
+    configureBodyParsers(app);
+  }
   await app.listen(0, '127.0.0.1');
   return { app, base: (await app.getUrl()).replace('[::1]', '127.0.0.1') };
 }
@@ -124,7 +127,7 @@ describe('[ADR-162] body parser limit = MAX_INGEST_PAYLOAD_BYTES, rawBody giữ 
     for (const p of ['/HOOKS/github/src_x', '/Hooks/github/src_x', '/hOoKs/github/src_x?x=1']) {
       const res = await fetch(`${base}${p}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'push', 'x-request-id': 'rid-case-test-1' }, body: '{}' });
       const body = await res.json();
-      expect([p, res.status, body.error, body.requestId, typeof body.fix, body.docsUrl]).toEqual([p, 404, 'not_found', 'rid-case-test-1', 'string', 'docs/ERRORS.md#not_found']);
+      expect([p, res.status, body.error, body.requestId, body.fix, body.docsUrl]).toEqual([p, 404, 'not_found', 'rid-case-test-1', HOOKS_NOT_FOUND_FIX, 'docs/ERRORS.md#not_found']);
     }
     expect(seen).toHaveLength(0);
     const ok = await post(Buffer.from('{}'), 'application/json');

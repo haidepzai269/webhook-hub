@@ -62,6 +62,14 @@ const WIDE_MAPPED = ['::ffff:0:0/96', '::ffff:0.0.0.0/97', '::ffff:0.0.0.0/100',
 const NARROW_MAPPED = ['::ffff:10.0.0.0/104', '::ffff:a00:0/104', '::ffff:10.250.250.6', '::ffff:10.250.250.0/125', '2001:db8::/32'];
 
 describe('EG1 — template nginx + envsubst', () => {
+  it('[EG:T10] (phần g) 404 tĩnh /hooks của nginx và 404 của lớp hub-api cùng một câu `fix` (review EG1 lượt 4, Thấp-B)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { HOOKS_NOT_FOUND_FIX } = require('../src/body-parsers');
+    const loc = /location ~\* "\^\/hooks\(\/\|\$\)" \{[\s\S]*?return 404 '([^']*)'/.exec(TEMPLATE);
+    expect(loc).not.toBeNull();
+    expect(loc![1]).toContain(`"fix":"${HOOKS_NOT_FOUND_FIX}"`);
+  });
+
   it('[EG:T3] (phần a) mọi sourceKey do seed, apiSourceKey (api_<uuid>), generateSourceKey (src_<provider>_<ulid>) và key tự đặt đúng SOURCE_KEY_RE đều khớp regex location /hooks/* — regex ĐỌC TỪ TEMPLATE, hàm sinh key là hàm THẬT', () => {
     const re: RegExp = edge.sourceKeyLocationRegex();
     // D13: luật key phía ghi (SOURCE_KEY_RE) TRÙNG ĐÚNG phần sourceKey của regex nginx — không chặt hơn, không lỏng hơn.

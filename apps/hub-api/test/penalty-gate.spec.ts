@@ -4,7 +4,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { request as httpRequest } from 'http';
 import { PrismaService } from '@hub/database';
-import { configureBodyParsers } from '../src/body-parsers';
+import { configureBodyParsers, HOOKS_NOT_FOUND_FIX, installHooksPathGuard } from '../src/body-parsers';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { corsOptions } from '../src/cors';
 import { installErrorHandling } from '../src/modules/errors/install';
 import { IngestController } from '../src/modules/ingest/ingest.controller';
@@ -38,6 +40,7 @@ async function start(): Promise<{ app: INestApplication; port: number }> {
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   installErrorHandling(app);
   app.enableCors(corsOptions({ CORS_ORIGINS: 'http://console.allowed.test' }));
+  installHooksPathGuard(app); // như main.ts: TRƯỚC gate (EG1 + D3 gộp)
   installPenaltyGate(app);
   configureBodyParsers(app);
   await app.listen(0, '127.0.0.1');
@@ -107,7 +110,7 @@ const metric = async (re: RegExp) => Number(re.exec(await apiRegistry.metrics())
 const blockedGithub = () => metric(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED"\} (\d+)/);
 const penaltyBlockedIp = () => metric(/hub_ingest_penalty_blocked_total\{reason="unknown_source"\} (\d+)/);
 
-describe('[EG:T19] D3 gate hộp phạt trước body parser', () => {
+describe('[EG:T19] (phần a) D3 gate hộp phạt trước body parser', () => {
   let app: INestApplication;
   let port = 0;
   let box: PenaltyBox;
@@ -219,6 +222,48 @@ describe('[EG:T19] D3 gate hộp phạt trước body parser', () => {
     expect(parseHookPath('/hooks/github/k', ['/in'])).toBeNull();
     // route lồng nhau: route đầu sai số đoạn -> thử route sau (THẤP-3)
     expect(parseHookPath('/in/x/github/k', ['/in', '/in/x'])).toEqual({ provider: 'github', sourceKey: 'k' });
+  });
+
+  // Gộp EG1 + D3 (review EG lượt 6 S1/S4, EG1 lượt 4 Thấp-A/B): `/HOOKS/...` (sai hoa thường) bị 404 TRƯỚC gate — IP sạch
+  // và IP bị ban nhận CÙNG phản hồi (không lộ trạng thái phạt), body không bị đọc, ingest không chạy.
+  it('[EG:T19] (phần b) /HOOKS sai hoa thường: IP bị ban và IP sạch nhận cùng 404 not_found (fix nói về URL webhook), không đọc body', async () => {
+    const bodies: any[] = [];
+    for (const ip of [BANNED, '198.51.100.77']) {
+      for (const path of ['/HOOKS/github/src_gate', '/Hooks/github/src_gate?x=1', 'HTTP://HUB.TEST/HOOKS/github/src_gate']) {
+        const r = await rawPost(port, path, ip, 1024 * 1024, 16 * 1024);
+        expect([ip, path, r.status, r.body.error, r.body.fix]).toEqual([ip, path, 404, 'not_found', HOOKS_NOT_FOUND_FIX]);
+        bodies.push({ ...r.body, requestId: undefined });
+      }
+    }
+    expect(new Set(bodies.map((b) => JSON.stringify(b))).size).toBe(1);
+    expect(ingestSpy).not.toHaveBeenCalled();
+  });
+
+  it('[EG:T19] (phần c) absolute-form chữ thường không bị 404 oan ở lớp hub-api (Thấp-A EG1 R4): IP sạch tới ingest, IP bị ban 429 ở gate', async () => {
+    const clean = await rawPost(port, 'http://hub.test/hooks/github/src_abs', '198.51.100.78', 2, 2);
+    expect(clean.status).toBe(404); // source không tồn tại (Prisma giả) -> 404 của INGEST, không phải của guard
+    expect(ingestSpy).toHaveBeenCalledTimes(1);
+    const banned = await rawPost(port, 'http://hub.test/hooks/github/src_abs', BANNED, 1024 * 1024, 16 * 1024);
+    expect(banned.status).toBe(429);
+  });
+
+  it('[EG:T1] (phần b) qua proxy tin cậy (như edge): 20 lần 404 từ IP A chặn A, KHÔNG chặn IP B — hộp phạt khoá theo req.ip, không theo IP proxy', async () => {
+    const A = '192.0.2.10';
+    const B = '192.0.2.11';
+    for (let i = 0; i < 20; i++) expect((await rawPost(port, `/hooks/github/khong_co_${i}`, A, 2, 2)).status).toBe(404);
+    expect((await rawPost(port, '/hooks/github/khong_co_x', A, 1024 * 1024, 1024)).status).toBe(429);
+    const b = await rawPost(port, '/hooks/github/khong_co_x', B, 2, 2);
+    expect([b.status, b.body.error]).not.toEqual([429, 'ip_temporarily_blocked']);
+    expect(b.status).toBe(404);
+    // L2 (qua container edge thật, req.ip do nginx real_ip đặt) — CHƯA CHẠY (không Docker trên máy này).
+  });
+
+  it('main.ts: thứ tự guard /hooks -> gate hộp phạt -> body parser (khoá thứ tự, S4)', () => {
+    const src = readFileSync(join(__dirname, '../src/main.ts'), 'utf8');
+    const at = (s: string) => src.indexOf(s);
+    expect(at('installHooksPathGuard(app)')).toBeGreaterThan(at('app.enableCors('));
+    expect(at('installHooksPathGuard(app)')).toBeLessThan(at('installPenaltyGate(app)'));
+    expect(at('installPenaltyGate(app)')).toBeLessThan(at('configureBodyParsers(app)'));
   });
 
   it('gate không gọi tới Redis/DB và GET / route khác đi thẳng qua', () => {
