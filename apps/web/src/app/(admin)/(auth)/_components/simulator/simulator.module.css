@@ -19,7 +19,8 @@
 /* Canvas Hành trình — co giãn theo chỗ trống, tối thiểu đủ một hàng chặng + một nhánh giao. */
 .canvas {
   flex: 1;
-  min-height: 380px;
+  /* Co theo chiều cao khung nhìn: mô phỏng toàn màn hình không được làm trang cuộn trên laptop thấp. */
+  min-height: clamp(200px, 42dvh, 380px);
   overflow: hidden;
   border: 1px solid var(--v-line);
   border-radius: 12px;
