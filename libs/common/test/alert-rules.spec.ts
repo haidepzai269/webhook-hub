@@ -5,6 +5,8 @@ import {
   AUTH_REJECTED_WINDOW_MS,
   AttemptSample,
   BACKLOG_MIN,
+  CALM_MIN_SPACING_MS,
+  CONNECTION_PENDING_STUCK_MS,
   CLIENT_ERROR_MIN_STREAK,
   DEAD_SPIKE_MIN,
   DEFAULT_EMAIL_RULES,
@@ -39,7 +41,8 @@ const NOW = new Date('2026-10-12T07:00:00.000Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
 const LIVE: SubjectLifecycle = { isActive: true, archivedAt: null };
 const fresh: RuleContext = { now: NOW, current: null };
-const openWith = (facts: Record<string, unknown> = {}, openedAt = ago(HOUR)): RuleContext => ({ now: NOW, current: { openedAt, facts } });
+const openWith = (facts: Record<string, unknown> = {}, openedAt = ago(HOUR), now = NOW): RuleContext => ({ now, current: { openedAt, facts } });
+const LATER = new Date(NOW.getTime() + CALM_MIN_SPACING_MS);
 /** n attempt cùng status, mới nhất trước, cách nhau 1 phút, mới nhất cách now 1 phút. */
 const attempts = (statuses: (number | null)[]): AttemptSample[] => statuses.map((status, i) => ({ status, at: ago((i + 1) * MIN) }));
 
@@ -71,6 +74,21 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     expect(evalAuthRejected({ destination: LIVE, attempts: [{ status: 401, at: ago(STREAK_QUIET_CLOSE_MS) }], dead: 3 }, cur).open).toBe(false);
     expect(evalAuthRejected({ destination: LIVE, attempts: [{ status: 401, at: ago(STREAK_QUIET_CLOSE_MS - 1) }], dead: 3 }, cur).open).toBe(true);
     expect(evalAuthRejected({ destination: LIVE, attempts: [], dead: 0 }, cur).open).toBe(false);
+
+    // TB1: 401×3 → 200 → 500 ĐÓNG (có 2xx mới hơn mốc lastAttemptAt), dù attempt mới nhất là 500
+    const opened = evalAuthRejected({ destination: LIVE, attempts: attempts([401, 401, 401]), dead: 3 }, fresh);
+    const seq: AttemptSample[] = [{ status: 500, at: ago(MIN / 4) }, { status: 200, at: ago(MIN / 2) }, ...attempts([401, 401, 401])];
+    expect(evalAuthRejected({ destination: LIVE, attempts: seq, dead: 3 }, openWith(opened.facts))).toMatchObject({ open: false, facts: { httpStatus: 200 } });
+    // 2xx CŨ hơn mốc đã xét không đóng lại lần nữa
+    const oldOk: AttemptSample[] = [{ status: 500, at: ago(MIN / 4) }, { status: 401, at: ago(MIN / 2) }, { status: 200, at: ago(40 * MIN) }];
+    expect(evalAuthRejected({ destination: LIVE, attempts: oldOk, dead: 3 }, openWith({ lastAttemptAt: ago(MIN / 2).toISOString() })).open).toBe(true);
+    // TB1: im = 30 phút không có attempt CÙNG LOẠI — 500 liên tục không giữ mở cảnh báo 401 cũ
+    const only500: AttemptSample[] = [{ status: 500, at: ago(MIN) }, { status: 500, at: ago(5 * MIN) }];
+    expect(evalAuthRejected({ destination: LIVE, attempts: only500, dead: 3 }, openWith({ lastMatchAt: ago(STREAK_QUIET_CLOSE_MS).toISOString() })).open).toBe(false);
+    expect(evalAuthRejected({ destination: LIVE, attempts: only500, dead: 3 }, openWith({ lastMatchAt: ago(10 * MIN).toISOString() }))).toMatchObject({
+      open: true,
+      facts: { lastMatchAt: ago(10 * MIN).toISOString(), lastAttemptAt: ago(MIN).toISOString() },
+    });
   });
 
   it('[CB:T1] (phần b) destination.client_error: 3× 4xx khác (404/422) mở; 401/403/408/429 không tính; đóng khi 2xx', () => {
@@ -98,13 +116,24 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     expect(evalDestinationFailing({ destination: LIVE, statuses: mid }, openWith({ calmStreak: 1 }))).toMatchObject({ open: true, facts: { calmStreak: 0 } });
     const calm = [500, ...Array(9).fill(200)]; // 10% < 20%
     const first = evalDestinationFailing({ destination: LIVE, statuses: calm }, openWith({ calmStreak: 0 }));
-    expect(first).toMatchObject({ open: true, facts: { calmStreak: 1 } });
-    expect(evalDestinationFailing({ destination: LIVE, statuses: calm }, openWith(first.facts)).open).toBe(false);
+    expect(first).toMatchObject({ open: true, facts: { calmStreak: 1, lastCalmAt: NOW.toISOString() } });
+    // Thấp 3: evaluator thứ hai đếm ngay sau (chưa đủ một chu kỳ) -> KHÔNG tính lượt êm thứ hai
+    expect(evalDestinationFailing({ destination: LIVE, statuses: calm }, openWith(first.facts, ago(HOUR), new Date(LATER.getTime() - 1)))).toMatchObject({
+      open: true,
+      facts: { calmStreak: 1, lastCalmAt: NOW.toISOString() },
+    });
+    expect(evalDestinationFailing({ destination: LIVE, statuses: calm }, openWith(first.facts, ago(HOUR), LATER)).open).toBe(false);
     // đúng 20% không phải "< 20%" -> không tính lượt êm
     const twenty = [500, 500, ...Array(8).fill(200)];
     expect(evalDestinationFailing({ destination: LIVE, statuses: twenty }, openWith({ calmStreak: 1 })).open).toBe(true);
     // không còn attempt nào (0%) cũng là êm
     expect(evalDestinationFailing({ destination: LIVE, statuses: [] }, openWith({ calmStreak: 1 })).open).toBe(false);
+    // Thấp 4: mẫu < FAILING_MIN_ATTEMPTS (dù toàn lỗi) cũng là lượt êm -> 2 lượt thì đóng
+    expect(evalDestinationFailing({ destination: LIVE, statuses: Array(9).fill(500) }, openWith({ calmStreak: 0 }))).toMatchObject({ open: true, facts: { calmStreak: 1 } });
+    expect(evalDestinationFailing({ destination: LIVE, statuses: Array(9).fill(500) }, openWith({ calmStreak: 1 })).open).toBe(false);
+    // Q2: tách theo loại
+    expect(evalDestinationFailing({ destination: LIVE, statuses: half }, fresh).facts.byClass).toEqual({ server_error: 1, no_response: 2, throttled: 2, unexpected: 0 });
+    expect(evalDestinationFailing({ destination: LIVE, statuses: [302, 302, 503, 200] }, fresh).facts.byClass).toEqual({ server_error: 1, no_response: 0, throttled: 0, unexpected: 2 });
   });
 
   it('[CB:T1] (phần d) destination.circuit_open: OPEN mở; HALF_OPEN không mở mới nhưng giữ cái đang mở; CLOSED đóng', () => {
@@ -137,12 +166,13 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     expect(evalSignatureFailing({ source: LIVE, nonProbeRequests: 11, nonProbeInvalid: 5 }, fresh).open).toBe(false);
     const one = evalSignatureFailing({ source: LIVE, nonProbeRequests: 10, nonProbeInvalid: 1 }, openWith({ calmStreak: 0 }));
     expect(one.open).toBe(true);
-    expect(evalSignatureFailing({ source: LIVE, nonProbeRequests: 10, nonProbeInvalid: 1 }, openWith(one.facts)).open).toBe(false);
+    expect(evalSignatureFailing({ source: LIVE, nonProbeRequests: 10, nonProbeInvalid: 1 }, openWith(one.facts)).open).toBe(true); // cùng lượt
+    expect(evalSignatureFailing({ source: LIVE, nonProbeRequests: 10, nonProbeInvalid: 1 }, openWith(one.facts, ago(HOUR), LATER)).open).toBe(false);
     expect(evalSignatureFailing({ source: LIVE, nonProbeRequests: 10, nonProbeInvalid: 3 }, openWith({ calmStreak: 1 })).open).toBe(true);
   });
 
   it('[CB:T1] (phần g) source.connection_broken: FAILED/DRIFTED mở (nhãn provider từ dữ liệu — D5); PENDING giữ; CONNECTED đóng; ngắt kết nối đóng có lý do', () => {
-    const conn = (status: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DRIFTED' | 'DISCONNECTED') => ({ status, lastError: 'e', lastFix: 'f' });
+    const conn = (status: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DRIFTED' | 'DISCONNECTED', updatedAt = ago(MIN)) => ({ status, lastError: 'e', lastFix: 'f', updatedAt });
     expect(evalConnectionBroken({ source: LIVE, connection: conn('CONNECTED'), providerLabel: 'X' }, fresh).open).toBe(false);
     expect(evalConnectionBroken({ source: LIVE, connection: conn('PENDING'), providerLabel: 'X' }, fresh).open).toBe(false);
     for (const s of ['FAILED', 'DRIFTED'] as const) {
@@ -155,6 +185,13 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     expect(evalConnectionBroken({ source: LIVE, connection: conn('CONNECTED'), providerLabel: 'X' }, openWith()).open).toBe(false);
     expect(evalConnectionBroken({ source: LIVE, connection: conn('DISCONNECTED'), providerLabel: 'X' }, openWith())).toMatchObject({ open: false, facts: { reason: 'disconnected' } });
     expect(evalConnectionBroken({ source: LIVE, connection: null, providerLabel: 'X' }, openWith())).toMatchObject({ open: false, facts: { reason: 'disconnected' } });
+    // Q3: PENDING kẹt ≥ 15 phút = hỏng; ngay dưới thì chưa
+    expect(CONNECTION_PENDING_STUCK_MS).toBe(15 * MIN);
+    expect(evalConnectionBroken({ source: LIVE, connection: conn('PENDING', ago(15 * MIN - 1)), providerLabel: 'X' }, fresh).open).toBe(false);
+    expect(evalConnectionBroken({ source: LIVE, connection: conn('PENDING', ago(15 * MIN)), providerLabel: 'X' }, fresh)).toMatchObject({
+      open: true,
+      facts: { status: 'PENDING', stuckSince: ago(15 * MIN).toISOString() },
+    });
   });
 
   it('[CB:T1] (phần h) source.silent: < 20 sự kiện/7 ngày không có luật; ngưỡng = max(6h, 4×trung vị); có sự kiện mới thì đóng (baseline trượt không đóng)', () => {
@@ -196,7 +233,7 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     expect(evalDestinationFailing({ destination: inactive, statuses: Array(20).fill(500) }, fresh).facts.reason).toBe('inactive');
     expect(evalCircuitOpen({ destination: inactive, circuitState: 'OPEN' }, openWith()).facts.reason).toBe('inactive');
     expect(evalSignatureFailing({ source: archived, nonProbeRequests: 10, nonProbeInvalid: 10 }, fresh).facts.reason).toBe('archived');
-    expect(evalConnectionBroken({ source: inactive, connection: { status: 'FAILED', lastError: null, lastFix: null }, providerLabel: 'X' }, fresh).facts.reason).toBe('inactive');
+    expect(evalConnectionBroken({ source: inactive, connection: { status: 'FAILED', lastError: null, lastFix: null, updatedAt: NOW }, providerLabel: 'X' }, fresh).facts.reason).toBe('inactive');
     expect(evalSourceSilent({ source: archived, nonProbeAccepted7d: 50, medianGapMs: MIN, lastNonProbeEventAt: ago(48 * HOUR) }, openWith()).facts.reason).toBe('archived');
   });
 });

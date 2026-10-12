@@ -40,6 +40,14 @@ export const FAILING_OPEN_RATIO = 0.5;
 /** Đóng khi tỉ lệ < 20% trong 2 lượt đánh giá liền (hysteresis). */
 export const FAILING_CLOSE_RATIO = 0.2;
 export const CALM_EVALS_TO_CLOSE = 2;
+/**
+ * Review CB1 (Thấp 3): một lượt "êm" chỉ được đếm khi cách lượt êm trước ≥ ~một chu kỳ đánh giá — hai evaluator chạy song
+ * song (D4, không khoá) không được rút "2 lượt liền" thành vài giây. 0.9 × chu kỳ để chịu lệch hẹn giờ.
+ */
+export const CALM_MIN_SPACING_MS = Math.round(0.9 * ALERT_EVAL_INTERVAL_MS);
+
+/** `source.connection_broken` (review CB1, Q3): PENDING lâu hơn 15 phút = kết nối kẹt, coi như hỏng. */
+export const CONNECTION_PENDING_STUCK_MS = 15 * MIN;
 
 /** `delivery.dead_spike`: ≥ 10 delivery mới DEAD trong 1 giờ (D9: không tính DEAD vì đích/subscription đã lưu trữ). */
 export const DEAD_SPIKE_WINDOW_MS = HOUR;
@@ -142,6 +150,12 @@ function calmStreakOf(current: RuleContext['current']): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+/** Thời điểm (ms) lấy từ một trường ISO trong facts; không có / hỏng -> NaN. */
+function factTime(facts: AlertFacts | undefined, key: string): number {
+  const v = facts?.[key];
+  return typeof v === 'string' ? Date.parse(v) : NaN;
+}
+
 /**
  * Hysteresis tỉ lệ (failing / signature): mở khi `openNow`; đang mở thì chỉ đóng sau `CALM_EVALS_TO_CLOSE` lượt liền
  * tỉ lệ < ngưỡng đóng. Vùng giữa (đóng ≤ r < mở) giữ trạng thái hiện tại và reset bộ đếm êm.
@@ -151,12 +165,18 @@ function ratioHysteresis<F extends AlertFacts>(
   openNow: boolean,
   calmNow: boolean,
   facts: F,
-): RuleDecision<F & { calmStreak?: number }> {
+): RuleDecision<F & { calmStreak?: number; lastCalmAt?: string }> {
   if (!ctx.current) return { open: openNow, facts };
   if (openNow || !calmNow) return { open: true, facts: { ...facts, calmStreak: 0 } };
-  const calm = calmStreakOf(ctx.current) + 1;
-  if (calm >= CALM_EVALS_TO_CLOSE) return { open: false, facts: { ...facts, calmStreak: calm } };
-  return { open: true, facts: { ...facts, calmStreak: calm } };
+  const prevCalmAt = factTime(ctx.current.facts, 'lastCalmAt');
+  const prevStreak = calmStreakOf(ctx.current);
+  // Lượt êm quá sát lượt êm trước (evaluator khác vừa đếm) -> không đếm thêm, giữ nguyên bộ đếm.
+  if (prevStreak > 0 && !Number.isNaN(prevCalmAt) && ctx.now.getTime() - prevCalmAt < CALM_MIN_SPACING_MS) {
+    return { open: true, facts: { ...facts, calmStreak: prevStreak, lastCalmAt: ctx.current.facts.lastCalmAt as string } };
+  }
+  const calm = prevStreak + 1;
+  const next = { ...facts, calmStreak: calm, lastCalmAt: iso(ctx.now) };
+  return { open: calm < CALM_EVALS_TO_CLOSE, facts: next };
 }
 
 // ------------------------------------------------------------------ destination.auth_rejected / client_error
@@ -173,7 +193,10 @@ export interface StreakFacts extends AlertFacts {
   count?: number;
   httpStatus?: number | null;
   sinceAt?: string;
+  /** Mốc: attempt mới nhất đã xét ở lượt trước — lượt sau chỉ tìm 2xx trong các attempt MỚI hơn mốc này. */
   lastAttemptAt?: string;
+  /** Attempt CÙNG loại (401/403 hoặc 4xx khác) gần nhất — đóng "im" tính theo mốc này. */
+  lastMatchAt?: string;
   dead?: number;
 }
 
@@ -195,6 +218,7 @@ function streakRule(
     if (classifyHttpOutcome(a.status) !== outcome) break;
     streak++;
   }
+  const match = input.attempts.find((a) => classifyHttpOutcome(a.status) === outcome);
   const facts: StreakFacts =
     streak > 0
       ? {
@@ -202,17 +226,30 @@ function streakRule(
           httpStatus: latest.status,
           sinceAt: iso(input.attempts[streak - 1].at),
           lastAttemptAt: iso(latest.at),
+          lastMatchAt: iso(latest.at),
           dead: input.dead,
         }
       : {};
 
   if (!ctx.current) return { open: streak >= minStreak, facts };
 
-  // Đang mở: đóng khi attempt mới nhất 2xx, hoặc lâu STREAK_QUIET_CLOSE_MS không có attempt mới.
-  if (!latest || now - latest.at.getTime() >= STREAK_QUIET_CLOSE_MS) return { open: false, facts: { ...ctx.current.facts, ...facts } };
-  if (classifyHttpOutcome(latest.status) === 'success') return { open: false, facts: { ...ctx.current.facts, ...facts, httpStatus: latest.status } };
-  // Lỗi khác loại (vd 500 xen giữa) chưa phải bằng chứng đã sửa -> giữ mở, giữ số liệu cũ nếu chuỗi mới ngắn hơn.
-  return { open: true, facts: streak > 0 ? { ...ctx.current.facts, ...facts } : ctx.current.facts };
+  // Đang mở (review CB1, TB1):
+  // 1) Đóng nếu BẤT KỲ attempt nào mới hơn mốc đã xét là 2xx — 401×3 → 200 → 500 vẫn đóng (đích đã nhận được ít nhất một lần).
+  const prev = ctx.current.facts;
+  const seen = factTime(prev, 'lastAttemptAt');
+  const newer = Number.isNaN(seen) ? input.attempts : input.attempts.filter((a) => a.at.getTime() > seen);
+  const success = newer.find((a) => classifyHttpOutcome(a.status) === 'success');
+  const watermark = latest ? { lastAttemptAt: iso(new Date(Math.max(latest.at.getTime(), Number.isNaN(seen) ? 0 : seen))) } : {};
+  if (success) return { open: false, facts: { ...prev, ...facts, ...watermark, httpStatus: success.status } };
+  // 2) Đóng "im" khi 30 phút không có attempt CÙNG LOẠI (không phải "không có attempt nào": 500 liên tục không che 401 cũ).
+  //    Mốc lấy max(input, facts) — input có LIMIT, attempt cùng loại có thể đã trôi khỏi danh sách.
+  const lastMatch = Math.max(match ? match.at.getTime() : -Infinity, factTime(prev, 'lastMatchAt') || -Infinity);
+  const lastMatchFacts = Number.isFinite(lastMatch) ? { lastMatchAt: iso(new Date(lastMatch)) } : {};
+  if (!Number.isFinite(lastMatch) || now - lastMatch >= STREAK_QUIET_CLOSE_MS) {
+    return { open: false, facts: { ...prev, ...facts, ...watermark, ...lastMatchFacts } };
+  }
+  // 3) Còn lại giữ mở; số liệu chuỗi cũ giữ nếu chuỗi mới ngắn hơn (lỗi khác loại xen giữa).
+  return { open: true, facts: { ...prev, ...(streak > 0 ? facts : {}), ...watermark, ...lastMatchFacts } };
 }
 
 /** `destination.auth_rejected` (critical): 401/403 liên tiếp — retry vô ích, mỗi sự kiện DEAD ngay và im lặng. */
@@ -238,6 +275,9 @@ export interface FailingFacts extends AlertFacts {
   failed?: number;
   pct?: number;
   calmStreak?: number;
+  lastCalmAt?: string;
+  /** Review CB1 (Q2): tách theo loại để câu chữ nói đúng ("429 — bên nhận bảo chậm lại", "3xx — kiểm tra URL"). */
+  byClass?: { server_error: number; no_response: number; throttled: number; unexpected: number };
 }
 
 export function evalDestinationFailing(input: FailingInput, ctx: RuleContext): RuleDecision<FailingFacts> {
@@ -245,9 +285,16 @@ export function evalDestinationFailing(input: FailingInput, ctx: RuleContext): R
   if (closed) return closed;
   const total = input.statuses.length;
   const failed = input.statuses.filter((s) => isRetryableFailure(s)).length;
+  const byClass = { server_error: 0, no_response: 0, throttled: 0, unexpected: 0 };
+  for (const s of input.statuses) {
+    const o = classifyHttpOutcome(s);
+    if (o in byClass) byClass[o as keyof typeof byClass]++;
+  }
   const r = ratio(failed, total);
-  const facts: FailingFacts = { total, failed, pct: Math.round(r * 100) };
-  return ratioHysteresis(ctx, total >= FAILING_MIN_ATTEMPTS && r >= FAILING_OPEN_RATIO, r < FAILING_CLOSE_RATIO, facts);
+  const facts: FailingFacts = { total, failed, pct: Math.round(r * 100), byClass };
+  const enough = total >= FAILING_MIN_ATTEMPTS;
+  // Review CB1 (Thấp 4): mẫu quá nhỏ (< FAILING_MIN_ATTEMPTS) cũng là lượt êm — đích hết lưu lượng thì cảnh báo không treo mãi.
+  return ratioHysteresis(ctx, enough && r >= FAILING_OPEN_RATIO, !enough || r < FAILING_CLOSE_RATIO, facts);
 }
 
 // ------------------------------------------------------------------ destination.circuit_open
@@ -314,7 +361,13 @@ export function evalSignatureFailing(input: SignatureInput, ctx: RuleContext): R
 export interface ConnectionInput {
   source: SubjectLifecycle;
   /** null = source không có kết nối hub->provider. */
-  connection: { status: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DRIFTED' | 'DISCONNECTED'; lastError: string | null; lastFix: string | null } | null;
+  connection: {
+    status: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DRIFTED' | 'DISCONNECTED';
+    lastError: string | null;
+    lastFix: string | null;
+    /** `source_connections.updated_at` — PENDING quá `CONNECTION_PENDING_STUCK_MS` là kẹt. */
+    updatedAt: Date;
+  } | null;
   /** D5: nhãn provider lấy từ dữ liệu (registry/adapter), không viết cứng trong câu. */
   providerLabel: string;
 }
@@ -327,7 +380,11 @@ export function evalConnectionBroken(input: ConnectionInput, ctx: RuleContext): 
   const facts: AlertFacts = { status: c.status, providerLabel: input.providerLabel, lastError: c.lastError, lastFix: c.lastFix };
   if (c.status === 'FAILED' || c.status === 'DRIFTED') return { open: true, facts };
   if (c.status === 'CONNECTED') return { open: false, facts };
-  // PENDING: đang kết nối lại — không mở mới, đang mở thì giữ tới khi CONNECTED.
+  // PENDING quá 15 phút: lượt kết nối đã chết giữa chừng -> coi như hỏng (review CB1, Q3).
+  if (ctx.now.getTime() - c.updatedAt.getTime() >= CONNECTION_PENDING_STUCK_MS) {
+    return { open: true, facts: { ...facts, stuckSince: iso(c.updatedAt) } };
+  }
+  // PENDING mới: đang kết nối lại — không mở mới, đang mở thì giữ tới khi CONNECTED.
   return { open: !!ctx.current, facts: ctx.current ? { ...ctx.current.facts, status: c.status } : facts };
 }
 

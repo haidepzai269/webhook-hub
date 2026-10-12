@@ -1604,6 +1604,16 @@ Chi tiết ở `planning-artifacts/hub-multi-service/SPEC-dev-experience.md`.
 
 **Đánh đổi:** Hai worker cùng chạy sẽ làm cùng một việc hai lần (gấp đôi truy vấn tổng hợp mỗi 60s), nhưng kết quả vẫn đúng một dòng OPEN (CB:T2). Prisma 6 không khai được index có `WHERE`, nên index này chỉ có ở migration `20261012050000_alerts` và `schema.prisma` chỉ ghi chú lại. Hysteresis (ví dụ "< 20% trong 2 lượt liền") được lưu trong `facts.calmStreak` của chính dòng OPEN, không cần bảng trạng thái riêng.
 
+**Bổ sung (review CB1, 2026-10-12, append):**
+- **`opened` lấy từ `xmax = 0`.** Trong `INSERT … ON CONFLICT DO UPDATE`, dòng vừa chèn có `xmax = 0`; dòng bị cập nhật thì `xmax` khác 0. Đây là hành vi nội bộ của Postgres, ổn định từ 9.5 và được dùng rộng rãi, nhưng tài liệu không cam kết. Test `[CB:T2]` sẽ đỏ nếu hành vi này đổi.
+- **Chấp nhận một lần "opened" thứ hai theo D4.** Evaluator A đóng cảnh báo đúng lúc evaluator B (dữ liệu cũ hơn) upsert, nên B có thể tạo một dòng OPEN mới và nhận `opened = true`. Bất biến "≤ 1 dòng OPEN" vẫn giữ. Email trùng bị chặn bởi luật chống flapping 30 phút (đếm trên `alert_emails`), còn realtime chỉ có thêm một thông báo.
+- **Lượt "êm" của hysteresis** chỉ được đếm khi cách lượt êm trước ít nhất `CALM_MIN_SPACING_MS` (≈ 0.9 × chu kỳ), lưu ở `facts.lastCalmAt`. Nhờ vậy hai evaluator song song không rút "2 lượt liền" thành vài giây. Với `destination.failing`, mẫu nhỏ hơn `FAILING_MIN_ATTEMPTS` cũng tính là lượt êm.
+- **Luật chuỗi (`auth_rejected`/`client_error`):**
+  - Đóng khi bất kỳ attempt nào mới hơn mốc `facts.lastAttemptAt` là 2xx.
+  - Đóng "im lặng" khi 30 phút không có attempt **cùng loại** (`facts.lastMatchAt`).
+- **Lý do đóng `'disconnected'`.** `source.connection_broken` đóng với lý do này khi kết nối bị ngắt hoặc không còn. PENDING quá `CONNECTION_PENDING_STUCK_MS` (15 phút) bị coi là hỏng.
+- **`ackAlert` chạy được trên cảnh báo đã RESOLVED.** Vô hại: nó chỉ ghi "đã xem" và không mở lại cảnh báo.
+
 ---
 
 ## ADR-166 — `alert_preferences` gắn người dùng nên đi qua `IdentityRepository`, không có `tenant_id` — có chủ ý, không phải lỗ BB-5 (CB1, 2026-10-12)

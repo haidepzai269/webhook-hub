@@ -467,6 +467,8 @@ export class IdentityRepository {
   /**
    * Ghi tuỳ chọn (một câu upsert). Dòng MỚI không truyền `emailRules` nhận `DEFAULT_EMAIL_RULES` (mọi luật critical, §3.2).
    * Kiểm "chỉ operator" là việc của route (403 khuôn lỗi) — repo không đoán quyền.
+   * CB4/CB5 (review CB1): route PHẢI kiểm `emailRules` ⊆ `ALERT_RULE_CODES` (@hub/common) và mọi `mutedProjects` là
+   * project đang tồn tại TRƯỚC khi gọi hàm này — repo ghi nguyên văn (mảng uuid không có khoá ngoại).
    */
   upsertAlertPreferences(userId: string, data: AlertPreferencesInput) {
     return this.db.alertPreference.upsert({
