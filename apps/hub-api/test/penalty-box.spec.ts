@@ -311,4 +311,22 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     await svc.ingestWebhook(req('srcA', '203.0.113.5'));
     expect(await metric()).toBe(before + 2);
   });
+
+  it('review lần 4 NÊN: chạm trần toàn cục thì loại key cũ nhất của tenant giữ NHIỀU key nhất — 157 tenant × 64 key không đẩy được victim', () => {
+    const box = new PenaltyBox(cfg({ threshold404: 2 })); // trần mặc định: 10k key, 64 key/tenant
+    const gh = '140.82.115.60';
+    box.markGood(gh, 'victim', 'tenant-victim');
+    for (let t = 0; t < 157; t++) for (let k = 0; k < 64; k++) box.markGood(gh, `t${t}-k${k}`, `tenant-${t}`);
+    expect(box.goodKeyCount()).toBe(10_000);
+    box.recordUnknownSource(gh);
+    box.recordUnknownSource(gh);
+    expect(box.checkIp(gh, 'victim').blocked).toBe(false); // victim (1 key) còn nguyên
+    // tenant 1–2 key chỉ bị đụng khi mọi tenant đã xuống còn chừng ấy: trần 3 key, 3 tenant mỗi tenant 1 key + 1 tenant 2 key
+    const small = new PenaltyBox(cfg({ maxGoodKeys: 3, goodKeysPerTenant: 64 }));
+    small.markGood(gh, 'a1', 'A');
+    small.markGood(gh, 'b1', 'B');
+    small.markGood(gh, 'b2', 'B');
+    small.markGood(gh, 'c1', 'C'); // B giữ nhiều nhất -> b1 bị loại, không phải a1 (cũ nhất toàn cục)
+    expect([...['a1', 'b1', 'b2', 'c1']].map((k) => (small as any).good.has(k))).toEqual([true, false, true, true]);
+  });
 });
