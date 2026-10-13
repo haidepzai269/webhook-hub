@@ -170,6 +170,24 @@ export const ERROR_CATALOG = {
     message: 'Unsupported Content-Type.',
     fix: () => 'Send Content-Type: application/json.',
   },
+  // ---- /hooks: bắt tay + method (PK4, ADR-205) ----
+  method_not_allowed: {
+    status: 405,
+    message: 'This webhook URL does not accept this HTTP method.',
+    fix: () =>
+      'Webhook URLs accept POST. GET is accepted only for a "query-echo" handshake carrying the configured parameter once; HEAD only when the source declares a "head-ok" handshake. Check the handshake of the source in the console (Sources → custom source).',
+  },
+  handshake_invalid: {
+    status: 400,
+    message: 'The handshake request could not be answered.',
+    fix: () =>
+      'The value to echo must be printable ASCII without spaces, 1–256 characters (for hmac-echo: A-Z a-z 0-9 _ -, at most 128), and the configured field must be present. Check the handshake settings of the source against the provider documentation.',
+  },
+  uri_too_long: {
+    status: 414,
+    message: 'The query string is too long.',
+    fix: () => 'Send at most 8KB of query string to /hooks URLs.',
+  },
   // ---- trạng thái / xung đột ----
   source_inactive: {
     status: 409,
@@ -332,8 +350,10 @@ export function codeForStatus(status: number): HubErrorCode {
     case 401: return 'unauthenticated';
     case 403: return 'forbidden';
     case 404: return 'not_found';
+    case 405: return 'method_not_allowed';
     case 409: return 'conflict';
     case 413: return 'payload_too_large';
+    case 414: return 'uri_too_long';
     case 415: return 'unsupported_media_type';
     case 422: return 'validation_failed';
     case 429: return 'rate_limited';

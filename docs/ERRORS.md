@@ -279,6 +279,28 @@ head -c 2000000 /dev/zero | tr '\0' a | curl -si $API/v1/p/cafe/events -H "Autho
 curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY" -H 'content-type: text/xml' -d '<a/>'
 ```
 
+## method_not_allowed
+
+**405.** URL webhook (`/hooks/<provider>/<sourceKey>`) không nhận method này. POST luôn được. GET chỉ dành cho bắt tay `query-echo` và request phải mang đúng một lần tham số đã khai. HEAD chỉ được nhận khi nguồn khai bắt tay `head-ok` (Intercom kiểm URL bằng HEAD, ADR-205 bổ sung). Hub không ghi DB và không phạt điểm.
+**Sửa:** kiểm khối "Bắt tay" của nguồn trong console (Nguồn → nguồn tuỳ chỉnh), đối chiếu với tài liệu của nhà cung cấp.
+```bash
+curl -si -X PUT $HUB/hooks/generic/$SOURCE_KEY
+curl -si "$HUB/hooks/generic/$SOURCE_KEY?challenge=abc"   # 405 nếu nguồn không khai query-echo với param challenge
+```
+
+## handshake_invalid
+
+**400.** Request bắt tay khớp cấu hình nhưng hub không trả lời được: giá trị cần trả lại không thuộc ASCII in được, có dấu cách, dài hơn 256 ký tự (với `hmac-echo` thì token phải là A-Z a-z 0-9 _ -, tối đa 128), hoặc thiếu trường đã khai. Hub không ghi DB và không phạt điểm.
+**Sửa:** đối chiếu tên trường / tiêu đề trong khối "Bắt tay" với request mẫu của nhà cung cấp (tab Lắng nghe).
+```bash
+curl -si $HUB/hooks/generic/$SOURCE_KEY -H 'content-type: application/json' -d '{"type":"url_verification","challenge":"có dấu cách"}'
+```
+
+## uri_too_long
+
+**414.** Chuỗi query của URL `/hooks/*` dài quá 8KB. Hub chặn trước khi đọc nguồn (0 truy vấn DB).
+**Sửa:** gửi query ngắn hơn 8KB. Nhà cung cấp đặt token trong query thì nên chuyển sang tiêu đề.
+
 ## source_inactive
 
 **409.** Source `api` mà key dùng để publish đang bị tắt.
