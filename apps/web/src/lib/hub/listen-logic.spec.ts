@@ -5,6 +5,9 @@ import {
   ACK_REJECT_STATUSES,
   ACK_SUCCESS_STATUSES,
   ALGO_IN_PREFIX as SERVER_ALGO_IN_PREFIX,
+  COMMON_REQUEST_HEADER_PREFIXES as SERVER_COMMON_PREFIXES,
+  COMMON_REQUEST_HEADERS as SERVER_COMMON_HEADERS,
+  ECHO_RESPONDS,
   type GenericConfig,
   HANDSHAKE_KINDS,
   secretProblem,
@@ -14,7 +17,11 @@ import {
 import {
   ACK_REJECT_CHOICES,
   ACK_SUCCESS_CHOICES,
+  AFTER_VERIFY_CHOICES,
   ALGO_IN_PREFIX,
+  COMMON_REQUEST_HEADER_PREFIXES,
+  COMMON_REQUEST_HEADERS,
+  ECHO_RESPOND_CHOICES,
   buildGenericConfig,
   connectionState,
   diagnosisParts,
@@ -33,6 +40,7 @@ import {
   pendingSubscribeUrl,
   playgroundSources,
   RESERVED_NAMESPACES,
+  subscribeTopicArn,
   SECRET_MAX,
   SECRET_MIN,
   TEMPLATE_FORM_DEFAULTS,
@@ -123,6 +131,15 @@ describe("[PK:T10] (phần d) PK4 console: Lắng nghe hiện \"Đã bắt tay �
     expect(connectionState([hs("h4", { kind: "hmac-echo" }, "2026-10-13T10:00:04Z"), acc])).toMatchObject({ kind: "connected", lastFailure: null });
   });
 
+  it("review PK4 T-1: subscribeTopicArn đọc TopicArn của link SNS để console hiện (dev kiểm topic có phải của mình)", () => {
+    expect(subscribeTopicArn("https://sns.us-west-2.amazonaws.com/?Action=ConfirmSubscription&TopicArn=arn:aws:sns:us-west-2:123456789012:MyTopic&Token=t")).toBe(
+      "arn:aws:sns:us-west-2:123456789012:MyTopic",
+    );
+    for (const u of ["https://sns.us-west-2.amazonaws.com/?Action=ConfirmSubscription&Token=t", "https://x/?TopicArn=<script>", "không phải url"]) {
+      expect([u, subscribeTopicArn(u)]).toEqual([u, null]);
+    }
+  });
+
   it("pendingSubscribeUrl + isSnsSubscribeUrl: chỉ https sns.<vùng>.amazonaws.com mới là link SNS thật", () => {
     const url = "https://sns.us-west-2.amazonaws.com/?Action=ConfirmSubscription&Token=t";
     expect(pendingSubscribeUrl([hs("h", { kind: "manual-url", subscribeUrl: url }, "2026-10-13T10:00:01Z")])).toBe(url);
@@ -145,8 +162,12 @@ describe("[PK:T10] (phần d) PK4 console: Lắng nghe hiện \"Đã bắt tay �
 });
 
 describe("PK4 form tay: khối Bắt tay + Phản hồi dựng đúng khuôn server (validateGenericConfig + parseSourceInput)", () => {
-  it("lựa chọn của form = tập của server (kiểu bắt tay, mã ack)", () => {
+  it("lựa chọn của form = tập của server (kiểu bắt tay, mã ack, khuôn echo, header chung)", () => {
     expect(HANDSHAKE_CHOICES.filter((k) => k !== "none")).toEqual([...HANDSHAKE_KINDS]);
+    expect([...ECHO_RESPOND_CHOICES]).toEqual([...ECHO_RESPONDS]);
+    expect([...AFTER_VERIFY_CHOICES]).toEqual(["no", "yes"]);
+    expect([...COMMON_REQUEST_HEADERS]).toEqual([...SERVER_COMMON_HEADERS]);
+    expect([...COMMON_REQUEST_HEADER_PREFIXES]).toEqual([...SERVER_COMMON_PREFIXES]);
     expect(ACK_SUCCESS_CHOICES.map(Number)).toEqual([...ACK_SUCCESS_STATUSES]);
     expect(ACK_REJECT_CHOICES.map(Number)).toEqual([...ACK_REJECT_STATUSES]);
   });
@@ -160,6 +181,10 @@ describe("PK4 form tay: khối Bắt tay + Phản hồi dựng đúng khuôn ser
       { ...FORM, hsKind: "header-echo", hsHeader: "X-Hook-Secret", ackSuccess: "204" },
       { ...FORM, hsKind: "hmac-echo", hsWhenName: "event", hsWhenEquals: "endpoint.url_validation", hsTokenParent: "payload", hsTokenField: "plainToken", hsMacField: "encryptedToken" },
       { ...FORM, hsKind: "manual-url", hsWhenName: "Type", hsWhenEquals: "SubscriptionConfirmation", hsUrlField: "SubscribeURL", ackSuccess: "202", ackReject: "503" },
+      // Sửa review PK4: afterVerify (T-1), respond json + head-ok (ADR-205 bổ sung).
+      { ...FORM, hsKind: "body-echo", hsWhenName: "type", hsWhenEquals: "url_verification", hsEchoField: "challenge", hsAfterVerify: "yes", hsRespond: "json" },
+      { ...FORM, hsKind: "manual-url", hsWhenName: "Type", hsWhenEquals: "SubscriptionConfirmation", hsUrlField: "SubscribeURL", hsAfterVerify: "yes" },
+      { ...FORM, hsKind: "head-ok" },
     ];
     for (const f of forms) {
       expect(genericFormIssues(f, "secret-123456")).toEqual([]);
@@ -191,6 +216,14 @@ describe("PK4 form tay: khối Bắt tay + Phản hồi dựng đúng khuôn ser
       [{ hsKind: "header-echo", hsHeader: "x y" }, "hsHeader", "handshake.header"],
       [{ hsKind: "hmac-echo", hsWhenName: "event", hsWhenEquals: "v", hsTokenField: "t", hsMacField: "t" }, "hsMacField", "handshake.macField"],
       [{ hsKind: "manual-url", hsWhenName: "Type", hsWhenEquals: "v", hsUrlField: "" }, "hsUrlField", "handshake.urlField"],
+      // Review PK4 TB-2: bắt tay trùng header chữ ký / khoá chống trùng / header chung, when.field = trường chống trùng.
+      [{ hsKind: "header-echo", hsHeader: "X-Sig" }, "hsHeader", "handshake.header"],
+      [{ hsKind: "header-echo", hsHeader: "content-type" }, "hsHeader", "handshake.header"],
+      [{ hsKind: "header-echo", hsHeader: "cf-ray" }, "hsHeader", "handshake.header"],
+      [{ hsKind: "body-echo", hsWhenKind: "header", hsWhenName: "user-agent", hsWhenEquals: "v", hsEchoField: "c" }, "hsWhenName", "handshake.when.header"],
+      [{ hsKind: "body-echo", hsWhenName: "transId", hsWhenEquals: "v", hsEchoField: "c" }, "hsWhenName", "handshake.when.field"],
+      [{ hsKind: "manual-url", hsWhenKind: "header", hsWhenName: "x-request-id", hsWhenEquals: "v", hsUrlField: "u", idKind: "header", idValue: "x-request-id" }, "hsWhenName", "handshake.when.header"],
+      [{ hsKind: "header-echo", hsHeader: "svix-signature", scheme: "standard-webhooks", idValue: "" }, "hsHeader", "handshake.header"],
     ];
     for (const [patch, path, serverField] of cases) {
       const f = { ...FORM, ...patch };

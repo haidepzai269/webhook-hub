@@ -82,6 +82,37 @@ function grepAcrossLines(re: RegExp) {
   };
 }
 
+/**
+ * Review PK4 T-3: so chữ ký / khoá / token bằng `===`/`!==` (không constant-time). Một dòng vi phạm khi, SAU khi bỏ các phép
+ * so với hằng (chuỗi literal, số, null/undefined/true/false — gồm `typeof x === 'string'`, `h.kind === 'hmac-echo'`), dòng
+ * vẫn còn `===`/`!==` VÀ có một định danh "nhạy cảm": tách camelCase/snake_case, có một từ là signature|sig|hmac|digest|
+ * token|secret|expected|presented (`validateSignedTemplate` không tính: "signed" không phải "sig"). Định danh là TÊN cấu
+ * hình (đuôi Field/Param/Header/Parent/Kind/Re/Format/Name…, vd `tokenField`, `verifyTokenParam`) không tính: đó là so tên
+ * trường của config, không phải giá trị bí mật. Nội dung chuỗi literal không tính.
+ */
+const SIG_WORDS = new Set(['signature', 'signatures', 'sig', 'sigs', 'hmac', 'digest', 'token', 'tokens', 'secret', 'secrets', 'expected', 'presented']);
+const CONFIG_NAME_SUFFIX_RE = /(Field|Fields|Param|Header|Headers|Parent|Kind|Kinds|Re|RE|Format|Name|Names|Location|Encoding|Scheme|Schemes)$/;
+const LITERAL = String.raw`(?:'[^']*'|"[^"]*"|\x60[^\x60]*\x60|-?\d[\d_.]*\b|null\b|undefined\b|true\b|false\b)`;
+const CMP_LITERAL_RE = new RegExp(String.raw`(?:===|!==)\s*${LITERAL}|${LITERAL}\s*(?:===|!==)`, 'g');
+const identWords = (id: string): string[] =>
+  id
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_$]+/)
+    .map((w) => w.toLowerCase())
+    .filter(Boolean);
+const isSensitiveIdent = (id: string): boolean => !CONFIG_NAME_SUFFIX_RE.test(id) && identWords(id).some((w) => SIG_WORDS.has(w));
+export function sigCompareCheck(text: string): { line: number; text: string }[] {
+  const out: { line: number; text: string }[] = [];
+  text.split(/\r?\n/).forEach((ln, i) => {
+    if (isComment(ln)) return;
+    const code = ln.replace(/\s\/\/.*$/, '').replace(CMP_LITERAL_RE, ' ');
+    if (!/===|!==/.test(code)) return;
+    const idents = code.replace(new RegExp(LITERAL, 'g'), ' ').match(/[A-Za-z_$][\w$]*/g) ?? [];
+    if (idents.some(isSensitiveIdent)) out.push({ line: i + 1, text: ln.trim().slice(0, 200) });
+  });
+  return out;
+}
+
 const ACCOUNT_RE = /(?<![\d.])\d{9,14}(?![\d.])/;
 
 /**
@@ -268,17 +299,23 @@ export const GATES: Gate[] = [
   },
   {
     id: 'sig-compare',
-    rule: 'Chữ ký: không `===`/`!==` trên dòng có signature|hmac|digest trong libs/providers/src (dùng timingSafeEqual)',
-    source: 'CLAUDE.md, ADR-058',
-    include: (f) => isSrc(f) && f.startsWith('libs/providers/src/'),
-    // Bỏ phép kiểm KIỂU (`typeof x === 'string'`) và so với null/undefined: không phải so sánh giá trị bí mật.
-    check: grepLines(/(signature|hmac|digest)[\s\S]*(===|!==)|(===|!==)[\s\S]*(signature|hmac|digest)/i, {
-      skipComments: true,
-      transform: (ln) =>
-        ln
-          .replace(/typeof\s+[\w.$[\]'"]+\s*(===|!==)\s*['"]\w+['"]/g, '')
-          .replace(/(===|!==)\s*(null|undefined)\b/g, ''),
-    }),
+    rule:
+      'Chữ ký/khoá: không `===`/`!==` trên dòng có biến tên signature|sig|hmac|digest|token|secret|expected|presented trong libs/providers/src + ingest hub-api (dùng timingSafeEqual; so với hằng / tên trường config không tính)',
+    source: 'CLAUDE.md, ADR-058, review PK4 T-3',
+    include: (f) => isSrc(f) && (f.startsWith('libs/providers/src/') || f.startsWith('apps/hub-api/src/modules/ingest/')),
+    check: sigCompareCheck,
+    exceptions: [
+      {
+        file: 'libs/providers/src/generic-config.ts',
+        match: 'kv[.]timestamp === kv[.]sig[)]',
+        reason: '`kv.sig` là TÊN khoá trong header khoá=giá trị (vd `v1`) của config, không phải giá trị chữ ký — so hai tên khoá cấu hình.',
+      },
+      {
+        file: 'libs/providers/src/signed-template.ts',
+        match: 'k === s[.]kv[.]sig[)]',
+        reason: 'So TÊN khoá đọc từ header (`v1`, `h1`) với tên khoá khai trong config — giá trị chữ ký so riêng bằng timingSafeCompare.',
+      },
+    ],
   },
   {
     id: 'topology',

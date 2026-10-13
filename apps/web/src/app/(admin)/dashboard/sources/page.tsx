@@ -29,6 +29,8 @@ import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
 import {
   ACK_REJECT_CHOICES,
+  AFTER_VERIFY_CHOICES,
+  ECHO_RESPOND_CHOICES,
   ACK_SUCCESS_CHOICES,
   buildGenericConfig,
   GENERIC_SCHEMES,
@@ -141,6 +143,7 @@ const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
   "hs-when-invalid": "page.sources.generic.hs.when-invalid",
   "hs-field-invalid": "page.sources.generic.hs.field-invalid",
   "hs-header-invalid": "page.sources.generic.hs.header-invalid",
+  "hs-conflict": "page.sources.generic.hs.conflict",
 };
 
 /**
@@ -190,6 +193,8 @@ const makeSchema = (t: TranslateFn) =>
       hsTokenField: z.string(),
       hsMacField: z.string(),
       hsUrlField: z.string(),
+      hsAfterVerify: z.enum(AFTER_VERIFY_CHOICES),
+      hsRespond: z.enum(ECHO_RESPOND_CHOICES),
       ackSuccess: z.enum(ACK_SUCCESS_CHOICES),
       ackReject: z.enum(ACK_REJECT_CHOICES),
     })

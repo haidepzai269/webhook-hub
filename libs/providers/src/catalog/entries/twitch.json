@@ -50,7 +50,7 @@
       "timestampHeader": "twitch-eventsub-message-timestamp",
       "timestampFormat": "iso8601",
       "idHeader": "twitch-eventsub-message-id",
-      "toleranceSec": 300,
+      "toleranceSec": 600,
       "idempotency": {
         "header": "twitch-eventsub-message-id"
       },
@@ -63,7 +63,8 @@
         },
         "echo": {
           "field": "challenge"
-        }
+        },
+        "afterVerify": true
       }
     }
   },
@@ -76,7 +77,7 @@
   ],
   "secretSource": "hub",
   "docs": "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",
-  "docsVersion": "Tài liệu không nêu cửa sổ thời gian -> toleranceSec 300 (mặc định của hub). Gửi lại giữ nguyên message id (trang EventSub, mục xử lý bản trùng). Bắt tay webhook_callback_verification: 200 text/plain, challenge thô.",
+  "docsVersion": "Cửa sổ thời gian 10 phút (trang EventSub, mục replay: \"message_timestamp ... isn't older than 10 minutes\", đọc 2026-10-14) -> toleranceSec 600. Gửi lại giữ nguyên message id (cùng trang). Bắt tay webhook_callback_verification: 200 text/plain, challenge thô; request bắt tay có ký -> afterVerify (chỉ trả lời khi chữ ký đúng).",
   "confidence": "cao",
   "sources": [
     "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",

@@ -3,7 +3,7 @@ import { HttpMethod, IngestResult, NormalizedEvent, ProviderType, RawWebhookRequ
 import { swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
 import { AdapterContext, Diagnosis, HandshakeOutcome, HandshakePhase, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
-import { GenericConfig, HMAC_ALGOS, HandshakeConfig, HandshakeKind, HandshakeWhen, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
+import { GenericConfig, HMAC_ALGOS, HandshakeConfig, HandshakeWhen, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
 import { kvHasKey, presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
 import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
@@ -28,27 +28,32 @@ export class GenericAdapter implements ProviderAdapter {
 
   /**
    * PK4 (§6.2, E27): POST luôn được. GET CHỈ khi source khai `query-echo` VÀ request mang đúng MỘT tham số `param` — GET là
-   * để bắt tay, không để nhận sự kiện (§15). HEAD và mọi method khác -> false (lõi trả 405, không ghi DB, không phạt).
+   * để bắt tay, không để nhận sự kiện (§15). HEAD CHỈ khi source khai `head-ok` (ADR-205 bổ sung, sửa E27: Intercom kiểm URL
+   * bằng HEAD) — lõi trả 200 rỗng, không bao giờ verify/persist. Method khác -> false (lõi trả 405, không ghi DB, không phạt).
    */
   acceptsMethod(method: HttpMethod, ctx?: AdapterContext, req?: RawWebhookRequest): boolean {
     if (method === 'POST') return true;
-    if (method !== 'GET') return false;
     const h = configOf(ctx)?.handshake;
+    if (method === 'HEAD') return h?.kind === 'head-ok';
+    if (method !== 'GET') return false;
     return h?.kind === 'query-echo' && queryValues(req?.query, h.param).length === 1;
   }
 
   /**
    * PK4 (§6.1, E3/E9/E13/E27, ADR-205): bắt tay theo `handshake` của source. `before-verify` (2h): query/body/header-echo,
-   * manual-url. `after-verify` (3h, lõi chỉ gọi khi verify QUA): hmac-echo — ký `plainToken` bằng đúng secret đã verify.
-   * Echo chỉ trả `^[\x21-\x7E]{1,256}$` dạng `text/plain; charset=utf-8` (E27: không phản chiếu nội dung tuỳ ý).
+   * manual-url. `after-verify` (3h, lõi chỉ gọi khi verify QUA): hmac-echo — ký `plainToken` bằng đúng secret đã verify; và
+   * body-echo / manual-url có `afterVerify: true` (review PK4 T-1: provider KÝ request bắt tay — Slack, Twitch — thì kẻ biết
+   * sourceKey không giả được "Đã bắt tay ✓" hay cấy SubscribeURL).
+   * Echo chỉ trả `^[\x21-\x7E]{1,256}$` dạng `text/plain; charset=utf-8` (E27), hoặc JSON `{<field>: echo}` khi `respond: 'json'`.
    */
   handshake(req: RawWebhookRequest, secrets: string[], ctx: AdapterContext | undefined, phase: HandshakePhase): HandshakeOutcome | null {
     const h = configOf(ctx)?.handshake;
     if (!h) return null;
     const method = req.method ?? 'POST';
     if (phase === 'after-verify') {
-      if (!isMacEcho(h) || method !== 'POST' || !whenMatches(h.when, req)) return null;
-      return hmacEcho(h, req, secrets, ctx);
+      if (method !== 'POST') return null;
+      if (h.kind === 'hmac-echo') return whenMatches(h.when, req) ? hmacEcho(h, req, secrets, ctx) : null;
+      return runsAfterVerify(h) ? this.postHandshake(h, req, ctx) : null;
     }
     if (h.kind === 'query-echo') {
       if (method !== 'GET') return null;
@@ -62,10 +67,18 @@ export class GenericAdapter implements ProviderAdapter {
       }
       return echoText(challenge[0], { kind: h.kind });
     }
-    if (method !== 'POST') return null;
+    if (method !== 'POST' || runsAfterVerify(h)) return null;
+    return this.postHandshake(h, req, ctx);
+  }
+
+  /** Bắt tay qua POST (header-echo, body-echo, manual-url) — pha do `handshake` quyết. hmac-echo/head-ok/query-echo -> null. */
+  private postHandshake(h: HandshakeConfig, req: RawWebhookRequest, ctx: AdapterContext | undefined): HandshakeOutcome | null {
     if (h.kind === 'header-echo') {
       const v = headerOf(req, h.header);
       if (v === null) return null;
+      // Review PK4 TB-2: request mang chữ ký của cấu hình là SỰ KIỆN (đi verify), không phải bắt tay — nhầm header bắt tay
+      // (Asana `x-hook-signature` thay `x-hook-secret`) không được nuốt sự kiện thật (200 không COMMIT).
+      if (this.extractSignature(req, ctx) !== null) return null;
       if (!ECHO_RE.test(v)) return { kind: 'invalid', message: `giá trị header ${h.header} ngoài tập ký tự cho phép (ASCII in được, ≤ 256)` };
       return { kind: 'respond', status: 200, body: null, headers: { [h.header]: v }, meta: { kind: h.kind } };
     }
@@ -73,16 +86,17 @@ export class GenericAdapter implements ProviderAdapter {
       if (!whenMatches(h.when, req)) return null;
       const v = bodyObject(req)?.[h.echo.field];
       if (typeof v !== 'string') return { kind: 'invalid', message: `body thiếu trường chuỗi ${h.echo.field} để trả lại` };
-      return echoText(v, { kind: h.kind });
+      return h.respond === 'json' ? echoJson(h.echo.field, v, { kind: h.kind }) : echoText(v, { kind: h.kind });
     }
     if (h.kind === 'manual-url') {
       if (!whenMatches(h.when, req)) return null;
       const url = bodyObject(req)?.[h.urlField];
-      // Hub KHÔNG gọi URL lấy từ request (SSRF, §15) — chỉ lưu để console hiện cho dev tự bấm. Chỉ https, ≤ 2048 ký tự.
-      const shown = typeof url === 'string' && url.length <= 2048 && /^https:\/\/[^\s]+$/.test(url) ? url : null;
+      // Hub KHÔNG gọi URL lấy từ request (SSRF, §15) — chỉ lưu để console hiện cho dev tự bấm. Chỉ https, ≤ 1024 ký tự (review
+      // PK4 T-2: dòng bắt tay chỉ lưu meta ≤ 1KB).
+      const shown = typeof url === 'string' && url.length <= SUBSCRIBE_URL_MAX && /^https:\/\/[^\s]+$/.test(url) ? url : null;
       return { kind: 'respond', status: 200, body: null, meta: { kind: h.kind, subscribeUrl: shown } };
     }
-    return null; // hmac-echo: chỉ sau verify (E3)
+    return null; // hmac-echo: chỉ sau verify (E3); head-ok: lõi tự trả HEAD
   }
 
   extractIdempotencyKey(req: RawWebhookRequest, ctx?: AdapterContext): string {
@@ -208,10 +222,10 @@ export class GenericAdapter implements ProviderAdapter {
         ? { ok: false, reason: 'missing_idempotency_key', expectedHeader: idempotencyHeader(c, headers) }
         : { ok: false, reason: 'missing_idempotency_key', expectedField: id.field };
     }
-    const candidates = (expected: string) =>
+    const candidates = (expectedHeader: string) =>
       Object.keys(headers)
         .map((h) => h.toLowerCase())
-        .filter((h) => h !== expected && !h.startsWith('__') && CANDIDATE_HEADER_RE.test(h))
+        .filter((h) => h !== expectedHeader && !h.startsWith('__') && CANDIDATE_HEADER_RE.test(h))
         .sort();
     if (c.scheme === 'standard-webhooks') {
       // PK1 (ADR-202): chẩn đoán theo bộ header ĐANG CÓ (webhook-* hoặc svix-*), không trộn.
@@ -413,10 +427,11 @@ function verifyWith(c: GenericConfig, req: RawWebhookRequest, secrets: string[],
 // ───────────────────────── PK4: bắt tay (SPEC-provider-khac §6, ADR-205) ─────────────────────────
 
 /** E27: giá trị echo — ASCII in được, 1–256 ký tự (không khoảng trắng, không CR/LF -> không chèn header); trả text/plain + nosniff. */
-/** E3: kiểu bắt tay duy nhất chạy SAU verify (tách hằng: gate sig-compare cấm so sánh trên dòng nhắc tên thuật toán). */
-const AFTER_VERIFY_KIND: HandshakeKind = 'hmac-echo';
 type MacEcho = Extract<HandshakeConfig, { kind: 'hmac-echo' }>;
-const isMacEcho = (h: HandshakeConfig): h is MacEcho => h.kind === AFTER_VERIFY_KIND;
+/** Review PK4 T-1: body-echo / manual-url có `afterVerify: true` chạy ở pha after-verify (provider ký request bắt tay). */
+const runsAfterVerify = (h: HandshakeConfig): boolean => (h.kind === 'body-echo' || h.kind === 'manual-url') && h.afterVerify === true;
+/** Review PK4 T-2: link SubscribeURL lưu trong meta dòng bắt tay — dòng chỉ giữ meta ≤ 1KB. */
+export const SUBSCRIBE_URL_MAX = 1024;
 const ECHO_RE = /^[\x21-\x7E]{1,256}$/;
 /** E3: plainToken của hmac-echo — không `:`/`{`/`.` nên không bao giờ trùng khuôn chuỗi ký sự kiện (`v0:{ts}:{body}`). */
 export const HMAC_ECHO_TOKEN_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -442,6 +457,12 @@ function bodyObject(req: RawWebhookRequest): Record<string, unknown> | null {
 function whenMatches(w: HandshakeWhen, req: RawWebhookRequest): boolean {
   const v = 'header' in w ? headerOf(req, w.header) : bodyObject(req)?.[w.field];
   return typeof v === 'string' && v === w.equals;
+}
+
+/** ADR-205 bổ sung: `respond: 'json'` (monday) — `{<field>: v}` application/json, CÙNG tập ký tự ECHO_RE; khoá là tên trường đã khai. */
+function echoJson(field: string, v: string, meta: Record<string, unknown>): HandshakeOutcome {
+  if (!ECHO_RE.test(v)) return { kind: 'invalid', message: 'giá trị cần trả lại ngoài tập ký tự cho phép (ASCII in được, 1–256 ký tự)' };
+  return { kind: 'respond', status: 200, body: { [field]: v }, contentType: 'application/json', headers: { 'X-Content-Type-Options': 'nosniff' }, meta };
 }
 
 function echoText(v: string, meta: Record<string, unknown>): HandshakeOutcome {

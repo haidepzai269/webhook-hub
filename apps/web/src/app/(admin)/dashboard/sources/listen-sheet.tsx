@@ -6,7 +6,7 @@ import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/hub/format";
-import { connectionState, diagnosisParts, type InspectDiagnosis, isSnsSubscribeUrl, pendingSubscribeUrl } from "@/lib/hub/listen-logic";
+import { connectionState, diagnosisParts, type InspectDiagnosis, isSnsSubscribeUrl, pendingSubscribeUrl, subscribeTopicArn } from "@/lib/hub/listen-logic";
 import { useSourceInspect } from "@/lib/hub/queries";
 import type { Source } from "@/lib/hub/types";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
@@ -121,6 +121,8 @@ function SubscribeUrlNotice({ url }: { url: string | null }) {
   const t = useT();
   if (!url) return null;
   const trusted = isSnsSubscribeUrl(url);
+  // Review PK4 T-1: link ConfirmSubscription THẬT của topic người khác vẫn qua kiểm tên miền — hiện TopicArn để dev đối chiếu.
+  const topicArn = subscribeTopicArn(url);
   return (
     <div className="rounded-md border border-amber-500/50 p-3 text-sm">
       <p className="font-medium">{t("page.sources.listen.subscribe-url.title")}</p>
@@ -131,6 +133,9 @@ function SubscribeUrlNotice({ url }: { url: string | null }) {
       ) : (
         <code className="break-all">{url}</code>
       )}
+      <p className="mt-1">
+        {t("page.sources.listen.subscribe-url.topic")} <code className="break-all">{topicArn ?? t("page.sources.listen.subscribe-url.topic-unknown")}</code>
+      </p>
       <p className={trusted ? "mt-1 text-muted-foreground" : "mt-1 text-destructive"}>
         {t(trusted ? "page.sources.listen.subscribe-url.warning" : "page.sources.listen.subscribe-url.untrusted")}
       </p>

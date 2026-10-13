@@ -11,5 +11,5 @@
     "PK5",
     "docs"
   ],
-  "pendingReason": "Bắt tay đòi phản hồi JSON chứa challenge (theo nghiên cứu; chưa đối chiếu lại tài liệu) — echo của PK4 là text/plain (E27); phần lớn webhook không ký -> PK5."
+  "pendingReason": "Bắt tay đã có (body-echo respond:\"json\" trả {\"challenge\": …}, tài liệu webhooks đọc 2026-10-14: \"return the token as a challenge field of your response JSON body\"; body bắt tay chỉ có challenge -> cần when khớp trường có mặt, chưa có). Còn chặn: chỉ một phần request có JWT ở Authorization (webhook tạo bằng integration app token) -> PK5; tài liệu không nêu id chống trùng giữ nguyên khi gửi lại (triggerUuid chưa mô tả)."
 }

@@ -65,7 +65,8 @@
         },
         "echo": {
           "field": "challenge"
-        }
+        },
+        "afterVerify": true
       }
     }
   },
@@ -78,7 +79,7 @@
   ],
   "secretSource": "provider",
   "docs": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
-  "docsVersion": "Chỉ Events API (JSON). Interactivity / slash command gửi form không có event_id -> 422. Bắt tay url_verification: trả challenge dạng text/plain (tài liệu nhận plaintext, form hoặc JSON). event_id \"globally unique\"; tài liệu chưa nói rõ giữ nguyên khi gửi lại (cùng rủi ro như typeform).",
+  "docsVersion": "Chỉ Events API (JSON). Interactivity / slash command gửi form không có event_id -> 422. Bắt tay url_verification: trả challenge dạng text/plain (tài liệu nhận plaintext, form hoặc JSON). event_id \"globally unique\"; tài liệu chưa nói rõ giữ nguyên khi gửi lại (cùng rủi ro như typeform). Request url_verification có ký (tài liệu dặn verify trước khi trả lời) -> afterVerify: chỉ trả challenge khi chữ ký đúng.",
   "confidence": "cao",
   "sources": [
     "https://docs.slack.dev/authentication/verifying-requests-from-slack",

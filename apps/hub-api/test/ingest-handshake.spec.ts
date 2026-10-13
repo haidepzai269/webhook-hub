@@ -229,7 +229,7 @@ describe('[PK:T10] (phần a) 5 biến thể bắt tay: đúng khuôn, 0 outbox 
   });
 });
 
-describe('[PK:T35] hmac-echo (E3): không bao giờ là máy ký hộ', () => {
+describe('[PK:T35] (phần a) hmac-echo (E3): không bao giờ là máy ký hộ', () => {
   it('request bắt tay KHÔNG ký / ký sai -> không echo: rejectStatus (401), không có chữ ký trong body, recordBadSignature', async () => {
     for (const headers of [{ 'content-type': 'application/json' }, zoomSigned('{"other":1}')]) {
       const t = build(ZOOM);
@@ -452,21 +452,39 @@ describe('[PK:T10] (phần c) Lắng nghe: dòng bắt tay -> diagnosis handshak
 describe('[PK:T10] (phần e) mục danh mục chuyển sang entries ở PK4 (slack, twitch): config của mục bắt tay được qua ingest thật', () => {
   const cfg = (id: string) => (CATALOG.find((e) => e.id === id)!.handler as { config: unknown }).config;
 
-  it('slack: url_verification -> 200 challenge; event_callback ký đúng -> ACCEPTED', async () => {
-    const t = build(cfg('slack'));
-    const hs = await t.svc.ingestWebhook(req({ body: JSON.stringify({ token: 'XXYYZZ', challenge: 'PLACEHOLDER_ch_1', type: 'url_verification' }) }));
-    expect(hs).toMatchObject({ status: 200, body: 'PLACEHOLDER_ch_1' });
-    const body = JSON.stringify({ type: 'event_callback', event_id: 'Ev123ABC456', event: { type: 'x' } });
+  const slackSigned = (body: string, key = SECRET) => {
     const ts = String(Math.floor(Date.now() / 1000));
-    const ok = await t.svc.ingestWebhook(req({ body, headers: { 'x-slack-request-timestamp': ts, 'x-slack-signature': `v0=${hex(SECRET, `v0:${ts}:${body}`)}` } }));
+    return { 'x-slack-request-timestamp': ts, 'x-slack-signature': `v0=${hex(key, `v0:${ts}:${body}`)}` };
+  };
+
+  it('slack (afterVerify, review T-1): url_verification KÝ ĐÚNG -> 200 challenge; KHÔNG ký -> 401 + phạt, không echo; event_callback ký đúng -> ACCEPTED', async () => {
+    const t = build(cfg('slack'));
+    const hsBody = JSON.stringify({ token: 'XXYYZZ', challenge: 'PLACEHOLDER_ch_1', type: 'url_verification' });
+    const unsigned = await t.svc.ingestWebhook(req({ body: hsBody }));
+    expect(unsigned.status).toBe(401);
+    expect(JSON.stringify(unsigned.body)).not.toContain('PLACEHOLDER_ch_1');
+    expect(t.bad).toHaveBeenCalledTimes(1);
+    const hs = await t.svc.ingestWebhook(req({ body: hsBody, headers: slackSigned(hsBody) }));
+    expect(hs).toMatchObject({ status: 200, body: 'PLACEHOLDER_ch_1' });
+    expect(t.redisCalls()).toBe(0); // bắt tay sau verify vẫn trước EG3
+    const body = JSON.stringify({ type: 'event_callback', event_id: 'Ev123ABC456', event: { type: 'x' } });
+    const ok = await t.svc.ingestWebhook(req({ body, headers: slackSigned(body) }));
     expect(ok.status).toBe(200);
     expect(t.tx.outbox.create).toHaveBeenCalledTimes(1);
   });
 
-  it('twitch: webhook_callback_verification -> 200 challenge thô; notification ký đúng -> ACCEPTED', async () => {
+  it('twitch (afterVerify, toleranceSec 600): webhook_callback_verification ký đúng -> 200 challenge thô; không ký -> 401; notification ký đúng -> ACCEPTED', async () => {
     const t = build(cfg('twitch'));
+    expect((cfg('twitch') as { toleranceSec: number }).toleranceSec).toBe(600); // review T-4: tài liệu EventSub "10 minutes"
     const vbody = JSON.stringify({ challenge: 'pogchamp-kappa-360noscope-vohiyo', subscription: { status: 'webhook_callback_verification_pending' } });
-    const hs = await t.svc.ingestWebhook(req({ body: vbody, headers: { 'twitch-eventsub-message-type': 'webhook_callback_verification' } }));
+    const unsigned = await t.svc.ingestWebhook(req({ body: vbody, headers: { 'twitch-eventsub-message-type': 'webhook_callback_verification' } }));
+    expect(unsigned.status).toBe(401);
+    expect(JSON.stringify(unsigned.body)).not.toContain('pogchamp');
+    const vid = 'f1c2a387-161a-49f9-a165-0f21d7a4e1c4';
+    const vts = new Date(Date.now() - 9 * 60_000).toISOString(); // 9 phút trước: trong cửa sổ 10 phút của Twitch
+    const hs = await t.svc.ingestWebhook(
+      req({ body: vbody, headers: { 'twitch-eventsub-message-type': 'webhook_callback_verification', 'twitch-eventsub-message-id': vid, 'twitch-eventsub-message-timestamp': vts, 'twitch-eventsub-message-signature': `sha256=${hex(SECRET, vid + vts + vbody)}` } }),
+    );
     expect(hs).toMatchObject({ status: 200, body: 'pogchamp-kappa-360noscope-vohiyo' });
     const body = JSON.stringify({ subscription: { type: 'channel.follow' }, event: { user_id: '1' } });
     const id = 'e76c6bd4-55c9-4987-8304-da1588d8988b';
@@ -476,5 +494,277 @@ describe('[PK:T10] (phần e) mục danh mục chuyển sang entries ở PK4 (sl
     );
     expect(ok.status).toBe(200);
     expect(t.tx.outbox.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ───────────────────────── Sửa review PK4 ─────────────────────────
+
+describe('[PK:T35] (phần b) review T-1: afterVerify — bắt tay chỉ trả lời SAU verify (provider ký request bắt tay)', () => {
+  const SLACK_AV = { ...SLACK, handshake: { ...SLACK.handshake, afterVerify: true } };
+  const slackHeaders = (body: string, key = SECRET) => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    return { 'x-slack-request-timestamp': ts, 'x-slack-signature': `v0=${hex(key, `v0:${ts}:${body}`)}` };
+  };
+  const hsBody = JSON.stringify({ challenge: 'PLACEHOLDER_av_1', type: 'url_verification' });
+
+  it('body-echo afterVerify: KHÔNG ký / ký sai -> rejectStatus + recordBadSignature, không echo, không dòng handshake', async () => {
+    for (const headers of [{}, slackHeaders(hsBody, `other-${process.pid}`)]) {
+      const t = build(SLACK_AV);
+      const r = await t.svc.ingestWebhook(req({ body: hsBody, headers }));
+      expect(r.status).toBe(401);
+      expect(JSON.stringify(r.body)).not.toContain('PLACEHOLDER_av_1');
+      expect(t.bad).toHaveBeenCalledTimes(1);
+      const row = t.tx.rawEvent.create.mock.calls[0][0].data;
+      expect(row.signatureValid).toBe(false);
+      expect(row.headers.__hub_meta.reason).toBeUndefined();
+    }
+  });
+
+  it('body-echo afterVerify: ký đúng -> 200 echo, dòng handshake, 0 lệnh Redis (trước EG3), không outbox', async () => {
+    const t = build(SLACK_AV);
+    const r = await t.svc.ingestWebhook(req({ body: hsBody, headers: slackHeaders(hsBody) }));
+    expect(r).toMatchObject({ status: 200, body: 'PLACEHOLDER_av_1', contentType: 'text/plain; charset=utf-8' });
+    expectHandshakeRow(t.tx);
+    expect(t.redisCalls()).toBe(0);
+    expect(t.bad).not.toHaveBeenCalled();
+  });
+
+  it('manual-url afterVerify: kẻ biết sourceKey không cấy được SubscribeURL (không ký -> 401, không lưu link)', async () => {
+    const SNS_AV = { ...ASANA, handshake: { kind: 'manual-url', when: { field: 'Type', equals: 'SubscriptionConfirmation' }, urlField: 'SubscribeURL', afterVerify: true } };
+    const body = JSON.stringify({ Type: 'SubscriptionConfirmation', SubscribeURL: 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=arn:aws:sns:us-east-1:000000000000:attacker' });
+    const t = build(SNS_AV);
+    const r = await t.svc.ingestWebhook(req({ body }));
+    expect(r.status).toBe(401);
+    expect(JSON.stringify(t.tx.rawEvent.create.mock.calls)).not.toContain('subscribeUrl');
+    const ok = build(SNS_AV);
+    const signed = await ok.svc.ingestWebhook(req({ body, headers: { 'x-hook-signature': hex(SECRET, body) } }));
+    expect(signed.status).toBe(200);
+    expect(expectHandshakeRow(ok.tx).headers.__hub_meta.handshake.subscribeUrl).toContain('TopicArn=');
+  });
+
+  it('adapter: pha before-verify KHÔNG trả lời bắt tay afterVerify; pha after-verify mới trả lời', () => {
+    const a = new GenericAdapter();
+    expect(a.handshake(req({ body: hsBody }) as any, [SECRET], { verificationConfig: SLACK_AV }, 'before-verify')).toBeNull();
+    expect(a.handshake(req({ body: hsBody }) as any, [SECRET], { verificationConfig: SLACK_AV }, 'after-verify')).toMatchObject({ kind: 'respond', body: 'PLACEHOLDER_av_1' });
+    // Không khai afterVerify: ngược lại (giữ hành vi PK4 cho provider không ký request bắt tay).
+    expect(a.handshake(req({ body: hsBody }) as any, [SECRET], { verificationConfig: SLACK }, 'after-verify')).toBeNull();
+  });
+
+  it('validator: afterVerify chỉ cho body-echo / manual-url, giá trị boolean', () => {
+    const field = (handshake: unknown) => {
+      try {
+        parseSourceInput({ provider: 'generic', name: 'x', secret: SECRET, verificationConfig: { ...ASANA, handshake } });
+        return null;
+      } catch (e: any) {
+        return e?.response?.field;
+      }
+    };
+    expect(field({ kind: 'header-echo', header: 'x-hook-secret', afterVerify: true })).toBe('verificationConfig.handshake.afterVerify');
+    expect(field({ kind: 'query-echo', param: 'challenge', afterVerify: true })).toBe('verificationConfig.handshake.afterVerify');
+    expect(field({ kind: 'hmac-echo', when: { field: 'event', equals: 'v' }, tokenField: 't', macField: 'm', afterVerify: true })).toBe('verificationConfig.handshake.afterVerify');
+    expect(field({ ...SLACK.handshake, afterVerify: 'yes' })).toBe('verificationConfig.handshake.afterVerify');
+    expect(field({ ...SLACK.handshake, afterVerify: true })).toBeNull();
+  });
+});
+
+describe('[PK:T10] (phần g) review TB-2: bắt tay không được nuốt sự kiện thật (2xx không COMMIT)', () => {
+  const field = (vc: unknown) => {
+    try {
+      parseSourceInput({ provider: 'generic', name: 'x', secret: SECRET, verificationConfig: vc });
+      return null;
+    } catch (e: any) {
+      return e?.response?.field;
+    }
+  };
+
+  it('validator 422: header-echo trùng header chữ ký / khoá chống trùng / header chung', () => {
+    for (const header of ['x-hook-signature', 'x-request-id', 'content-type', 'user-agent', 'content-length', 'accept', 'accept-encoding', 'host', 'authorization', 'x-forwarded-for', 'cf-ray']) {
+      expect([header, field({ ...ASANA, handshake: { kind: 'header-echo', header } })]).toEqual([header, 'verificationConfig.handshake.header']);
+    }
+    expect(field(ASANA)).toBeNull();
+    // standard-webhooks: mọi sự kiện mang webhook-* / svix-*.
+    const sw = { scheme: 'standard-webhooks', eventType: 'acme.event' };
+    for (const header of ['webhook-signature', 'svix-id', 'webhook-timestamp']) {
+      expect([header, field({ ...sw, handshake: { kind: 'header-echo', header } })]).toEqual([header, 'verificationConfig.handshake.header']);
+    }
+    // static-token basic: authorization.
+    expect(field({ scheme: 'static-token', location: 'basic', idempotency: { header: 'x-id' }, eventType: 'acme.event', handshake: { kind: 'header-echo', header: 'authorization' } })).toBe(
+      'verificationConfig.handshake.header',
+    );
+  });
+
+  it('validator 422: when.header trùng header chữ ký / timestamp / id / khoá chống trùng / header chung; when.field trùng trường chống trùng', () => {
+    for (const header of ['x-zm-signature', 'x-zm-request-timestamp', 'x-zm-request-id', 'user-agent', 'content-type']) {
+      expect([header, field({ ...ZOOM, handshake: { ...ZOOM.handshake, when: { header, equals: 'v' } } })]).toEqual([header, 'verificationConfig.handshake.when.header']);
+    }
+    const twitchIdHeader = { ...SLACK, template: '{id}{timestamp}{body}', idHeader: 'twitch-eventsub-message-id', handshake: { ...TWITCH_WHEN, when: { header: 'twitch-eventsub-message-id', equals: 'v' } } };
+    expect(field(twitchIdHeader)).toBe('verificationConfig.handshake.when.header');
+    expect(field({ ...SLACK, handshake: { ...SLACK.handshake, when: { field: 'event_id', equals: 'v' } } })).toBe('verificationConfig.handshake.when.field');
+    expect(field({ ...SNS, handshake: { ...SNS.handshake, when: { header: 'x-amz-sns-message-id', equals: 'v' } } })).toBe('verificationConfig.handshake.when.header');
+    // Cấu hình thật vẫn qua.
+    for (const ok of [SLACK, { ...SLACK, handshake: TWITCH_WHEN }, SNS, ZOOM]) expect(field(ok)).toBeNull();
+  });
+
+  it('ingest: header-echo KHÔNG áp khi request mang header chữ ký của config — sự kiện thật (có cả x-hook-secret) đi verify -> ACCEPTED', async () => {
+    const t = build(ASANA);
+    const body = '{"events":[{"action":"changed"}]}';
+    const r = await t.svc.ingestWebhook(req({ body, headers: { 'x-hook-secret': `hs-${process.pid}`, 'x-hook-signature': hex(SECRET, body), 'x-request-id': 'r-tb2' } }));
+    expect(r.status).toBe(200);
+    expect(r.headers).toBeUndefined(); // không echo
+    expect(t.tx.outbox.create).toHaveBeenCalledTimes(1);
+    expect(t.tx.rawEvent.create.mock.calls[0][0].data.status).toBe('ACCEPTED');
+    // Ký sai + mang header bắt tay -> 401 (không phải 200 bắt tay).
+    const t2 = build(ASANA);
+    const bad = await t2.svc.ingestWebhook(req({ body, headers: { 'x-hook-secret': `hs-${process.pid}`, 'x-hook-signature': 'deadbeef', 'x-request-id': 'r-tb2' } }));
+    expect(bad.status).toBe(401);
+    expect(t2.bad).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('[PK:T10] (phần h) review T-2: dòng bắt tay chỉ lưu meta (≤ 1KB, không body), trần riêng 5/phút/source', () => {
+  it('dòng bắt tay: bodyRaw rỗng, body {}, meta ≤ 1KB; vẫn trả lời', async () => {
+    const t = build(SLACK);
+    const pad = 'x'.repeat(3000);
+    const body = JSON.stringify({ type: 'url_verification', challenge: 'PLACEHOLDER_t2', pad });
+    const r = await t.svc.ingestWebhook(req({ body }));
+    expect(r).toMatchObject({ status: 200, body: 'PLACEHOLDER_t2' });
+    const row = expectHandshakeRow(t.tx);
+    expect(Buffer.from(row.bodyRaw).length).toBe(0);
+    expect(row.body).toEqual({});
+    expect(JSON.stringify(row).includes(pad)).toBe(false);
+    expect(Buffer.byteLength(JSON.stringify(row.headers.__hub_meta))).toBeLessThanOrEqual(1024);
+    expect(row.headers.__hub_meta).toMatchObject({ reason: 'handshake', bodyOmitted: true, originalBytes: body.length });
+  });
+
+  it('manual-url: SubscribeURL > 1024 ký tự -> không lưu link (meta vẫn ≤ 1KB)', async () => {
+    const t = build(SNS);
+    const url = `https://sns.us-west-2.amazonaws.com/?Action=ConfirmSubscription&Token=${'a'.repeat(1100)}`;
+    await t.svc.ingestWebhook(req({ body: JSON.stringify({ Type: 'SubscriptionConfirmation', SubscribeURL: url }) }));
+    const meta = expectHandshakeRow(t.tx).headers.__hub_meta;
+    expect(meta.handshake.subscribeUrl).toBeNull();
+    expect(Buffer.byteLength(JSON.stringify(meta))).toBeLessThanOrEqual(1024);
+  });
+
+  it('7 lần bắt tay trong một phút: cả 7 được trả lời 200, chỉ 5 dòng ghi DB; trần REJECTED thường (20) không bị tiêu', async () => {
+    const t = build(DROPBOX);
+    for (let i = 0; i < 7; i++) {
+      const r = await t.svc.ingestWebhook(req({ method: 'GET', query: `challenge=c${i}` }));
+      expect(r).toMatchObject({ status: 200, body: `c${i}` });
+    }
+    expect(t.tx.rawEvent.create).toHaveBeenCalledTimes(5);
+    // Đường ký sai vẫn còn đủ trần riêng của nó.
+    const badPost = await t.svc.ingestWebhook(req({ body: '{"a":1}', headers: { 'x-dropbox-signature': 'deadbeef', 'x-request-id': 'r' } }));
+    expect(badPost.status).toBe(401);
+    expect(t.tx.rawEvent.create).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe('[PK:T11] (phần e) ADR-205 bổ sung: HEAD `head-ok` -> 200 rỗng qua mọi tầng chắn; không khai -> 405', () => {
+  const HEAD_OK = { scheme: 'hmac', header: 'x-hub-signature', algo: 'sha1', prefix: 'sha1=', idempotency: { field: 'id' }, eventType: 'intercom.notification', handshake: { kind: 'head-ok' } };
+
+  it('HEAD + head-ok -> 200 body null; 0 ghi DB, 0 Redis, không verify, không phạt, không lưu lượng / trace', async () => {
+    const notifier = { traceIngested: jest.fn() };
+    const t = build(HEAD_OK);
+    const svc = new IngestService(t.prisma, t.redis, notifier);
+    const bad = jest.spyOn(svc.penalty, 'recordBadSignature');
+    const traffic = jest.spyOn(svc.traffic, 'record');
+    const verify = jest.spyOn(ProviderRegistry.get('generic'), 'verify');
+    const r = await svc.ingestWebhook(req({ method: 'HEAD' }));
+    expect(r).toEqual({ status: 200, body: null });
+    expect(t.tx.rawEvent.create).not.toHaveBeenCalled();
+    expect(t.prisma.rawEvent.create).not.toHaveBeenCalled();
+    expect(t.redisCalls()).toBe(0);
+    for (const s of [bad, traffic, verify, notifier.traceIngested]) expect(s).not.toHaveBeenCalled();
+  });
+
+  it('HEAD vẫn qua checkIp / PK0 / QT3 / checkPair: chặn thì không 200', async () => {
+    const ipBlocked = build(HEAD_OK);
+    jest.spyOn(ipBlocked.svc.penalty, 'checkIp').mockReturnValue({ blocked: true, retryAfterSec: 30 } as any);
+    expect((await ipBlocked.svc.ingestWebhook(req({ method: 'HEAD' }))).status).toBe(429);
+
+    const pairBlocked = build(HEAD_OK);
+    jest.spyOn(pairBlocked.svc.penalty, 'checkPair').mockReturnValue({ blocked: true, retryAfterSec: 30 } as any);
+    expect((await pairBlocked.svc.ingestWebhook(req({ method: 'HEAD' }))).status).toBe(429);
+
+    const wrongSegment = build(HEAD_OK);
+    expect((await wrongSegment.svc.ingestWebhook({ ...req({ method: 'HEAD' }), provider: 'github' as const })).status).toBe(404);
+
+    const full = build(HEAD_OK);
+    full.svc.storageLockEnabled = true;
+    full.prisma.findSourceBySourceKeyForIngest.mockResolvedValue({
+      id: 'src-1', tenantId: 'tenant-a', provider: 'generic', isActive: true, archivedAt: null, verificationConfig: HEAD_OK, storageLevel: 'HARD_LOCKED', secrets: [],
+    });
+    expect((await full.svc.ingestWebhook(req({ method: 'HEAD' }))).status).toBe(507);
+  });
+
+  it('source không khai head-ok -> HEAD 405; source head-ok -> GET 405, POST ký đúng vẫn ACCEPTED', async () => {
+    for (const cfg of [DROPBOX, ASANA, SLACK]) {
+      const t = build(cfg);
+      expect((await t.svc.ingestWebhook(req({ method: 'HEAD', query: 'challenge=1' }))).status).toBe(405);
+    }
+    const t = build(HEAD_OK);
+    expect((await t.svc.ingestWebhook(req({ method: 'GET', query: 'challenge=1' }))).status).toBe(405);
+    const body = JSON.stringify({ type: 'notification_event', id: 'notif_1', topic: 'company.created', data: {} });
+    const sig = createHmac('sha1', SECRET).update(body).digest('hex');
+    const ok = await t.svc.ingestWebhook(req({ body, headers: { 'x-hub-signature': `sha1=${sig}` } }));
+    expect(ok.status).toBe(200);
+    expect(t.tx.outbox.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('validator: head-ok không có khoá nào khác', () => {
+    expect(() => parseSourceInput({ provider: 'generic', name: 'x', secret: SECRET, verificationConfig: { ...HEAD_OK, handshake: { kind: 'head-ok', header: 'x' } } })).toThrow(
+      expect.objectContaining({ response: expect.objectContaining({ field: 'verificationConfig.handshake.header' }) }),
+    );
+  });
+
+  it('danh mục: intercom (head-ok) — HEAD 200, sự kiện ký sha1 -> ACCEPTED', async () => {
+    const cfg = (CATALOG.find((e) => e.id === 'intercom')!.handler as { config: unknown }).config;
+    const t = build(cfg);
+    expect(await t.svc.ingestWebhook(req({ method: 'HEAD' }))).toEqual({ status: 200, body: null });
+    const body = JSON.stringify({ type: 'notification_event', topic: 'company.created', id: 'notif_2', data: { type: 'notification_event_data', item: {} } });
+    const r = await t.svc.ingestWebhook(req({ body, headers: { 'x-hub-signature': `sha1=${createHmac('sha1', SECRET).update(body).digest('hex')}` } }));
+    expect(r.status).toBe(200);
+    expect(t.tx.outbox.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('[PK:T11] (phần d) review T-5: 405 không vào lưu lượng / trace của tenant', () => {
+  it('GET không phải bắt tay, HEAD không khai head-ok -> 405, traffic.record + traceIngested không được gọi', async () => {
+    for (const [cfg, r0] of [
+      [SLACK, req({ method: 'GET', query: 'challenge=1' })],
+      [ASANA, req({ method: 'HEAD' })],
+      [DROPBOX, req({ method: 'GET', query: '' })],
+    ] as const) {
+      const notifier = { traceIngested: jest.fn() };
+      const t = build(cfg);
+      const svc = new IngestService(t.prisma, t.redis, notifier);
+      const traffic = jest.spyOn(svc.traffic, 'record');
+      const r = await svc.ingestWebhook(r0);
+      expect(r.status).toBe(405);
+      expect(traffic).not.toHaveBeenCalled();
+      expect(notifier.traceIngested).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('[PK:T10] (phần i) ADR-205 bổ sung: body-echo respond "json" (monday) — {<field>: echo}, cùng ECHO_RE', () => {
+  const MONDAY = { ...ASANA, handshake: { kind: 'body-echo', when: { field: 'type', equals: 'challenge' }, echo: { field: 'challenge' }, respond: 'json' } };
+
+  it('trả JSON {challenge: v} application/json + nosniff; giá trị ngoài tập -> 400', async () => {
+    const t = build(MONDAY);
+    const r = await t.svc.ingestWebhook(req({ body: JSON.stringify({ type: 'challenge', challenge: 'abc_123' }) }));
+    expect(r).toMatchObject({ status: 200, body: { challenge: 'abc_123' }, contentType: 'application/json' });
+    expect(r.headers).toMatchObject({ 'X-Content-Type-Options': 'nosniff' });
+    expectHandshakeRow(t.tx);
+    for (const v of ['a b', 'y'.repeat(257), 'é']) {
+      const t2 = build(MONDAY);
+      expect((await t2.svc.ingestWebhook(req({ body: JSON.stringify({ type: 'challenge', challenge: v }) }))).status).toBe(400);
+    }
+  });
+
+  it('validator: respond chỉ "text" | "json"', () => {
+    expect(() => parseSourceInput({ provider: 'generic', name: 'x', secret: SECRET, verificationConfig: { ...MONDAY, handshake: { ...MONDAY.handshake, respond: 'xml' } } })).toThrow(
+      expect.objectContaining({ response: expect.objectContaining({ field: 'verificationConfig.handshake.respond' }) }),
+    );
   });
 });

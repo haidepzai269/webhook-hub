@@ -762,6 +762,17 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
     - **intercom, trello: đòi HEAD 200 khi tạo — mâu thuẫn E27 (HEAD → 405). Cần phòng quyết** (mở HEAD = 200 rỗng cho source khai `acceptHead`?);
     - asana, notion: cần `adoptSecret` → PK6; aws-sns: còn RSA → PK5.
   - **Chưa làm (ngoài phạm vi PK4):** nhãn EG5 "bị từ chối / chưa cấu hình" (E8, đi với `not_configured` ở PK6); `docs/ERRORS.md` thêm `method_not_allowed`, `handshake_invalid` (PK8 §11.3); lệnh `countSignatureBySource` đã loại reason nhưng test DB (`alert-evaluator-db.spec.ts`) chưa chạy được ở máy này (không docker) — CI chạy.
+- **Sửa review PK4 (2026-10-14, Amelia, REVIEW-PK4):**
+  - **CI:** `method_not_allowed`, `handshake_invalid`, `uri_too_long` (414 nay trả mã thay câu tiếng Việt) vào catalog lỗi + `docs/ERRORS.md`; `[DX:UX4]` xanh.
+  - **TB-1:** `consoleSource(row)` (source-input.ts) — một hàm map cho list/create/PATCH console; service API vẫn `publicSource`. Test `source-response-redact.spec.ts` qua cả 5 route; đột biến bỏ map (consoleSource hoặc PATCH riêng) → đỏ.
+  - **TB-2:** 422 khi header bắt tay / `when.header` trùng header mọi sự kiện mang (chữ ký, timestamp, id, khoá chống trùng, `webhook-*`/`svix-*`, `authorization` của basic) hoặc header chung (`COMMON_REQUEST_HEADERS` + tiền tố `accept-`/`x-forwarded-`/`cf-` — thêm `cf-` vì cloudflared gắn vào mọi request); `when.field` = trường chống trùng → 422. Ingest: `header-echo` bỏ qua request mang chữ ký của config. Form console cùng luật (`hs-conflict`).
+  - **T-1:** `afterVerify: true` chỉ cho body-echo / manual-url (header-echo không: request bắt tay Asana không ký, và request có chữ ký đã bị loại khỏi header-echo; query-echo là GET không ký; hmac-echo vốn sau verify) — giá trị khác boolean → 422. Bật cho slack, twitch. Console hiện TopicArn (`subscribeTopicArn`). **PK5 aws-sns phải ghim TopicArn theo cấu hình source.**
+  - **T-2:** dòng bắt tay meta-only, trần riêng 5/phút/source (`HANDSHAKE_ROWS_PER_MINUTE`); SubscribeURL lưu ≤ 1024 ký tự (trước 2048) để meta ≤ 1KB.
+  - **T-3:** gate `sig-compare` mới (tách camelCase; `validateSignedTemplate` không bị bắt vì "signed" ≠ "sig"); sửa thật hai chỗ: base64 khứ hồi của secret (`decodeHmacKey`) so bằng `timingSafeCompare`, biến `expected` (tên header trong chẩn đoán) đổi thành `expectedHeader`. Ngoại lệ có lý do: `kv.timestamp === kv.sig`, `k === s.kv.sig` (so TÊN khoá).
+  - **T-4:** twitch 600s; fixture `[PK:T9]` Twitch 600.
+  - **T-5:** `[PK:T11] (phần d)` — 405 không gọi `traffic.record` / `traceIngested`; đột biến đặt tenant+outcome trước chốt method → đỏ.
+  - **Phòng quyết:** kiểu `head-ok` (HEAD → 200 rỗng sau gate/checkIp/PK0/QT3/checkPair, không ghi, không phạt, 0 Redis; không khai → 405) và `body-echo respond:"json"` — ADR-205 bổ sung. Intercom sang `entries/` (24 mục / 67 pending). monday giữ pending: body bắt tay chỉ có `challenge` nên không có cặp `when` hằng để nhận ra (cần `when` "trường có mặt" — chưa làm), phần lớn không ký (PK5), không có id chống trùng được cam kết. Trello giữ pending (chữ ký trên body + URL callback). Okta/Graph giữ pending.
+  - **Tag test:** không có mã mới trong §17 — dùng phần mới của mã PK4 sẵn có: TB-1 `[PK:T10] (phần f)`, TB-2 `(phần g)`, T-2 `(phần h)`, respond json `(phần i)`, head-ok `[PK:T11] (phần e)`, T-5 `(phần d)`, afterVerify `[PK:T35] (phần b)`.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 
@@ -780,7 +791,7 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 | `[PK:T8]` | PK3 | Template sai luật → 422 đúng tên trường |
 | `[PK:T9]` | PK3 | Fixture Slack/Stripe/Paddle(/Zendesk/Box/Twitch nếu có) qua; lệch tolerance+1 → false; phát lại → false |
 | `[PK:T10]` | PK4 | 5 biến thể bắt tay đúng khuôn, 0 outbox/SET NX, dòng REJECTED `handshake`; `manual-url` không gọi ra ngoài |
-| `[PK:T11]` | PK4 | GET vào source không `query-echo` → 405; sai verify token → rejectStatus + phạt; HEAD → 405 |
+| `[PK:T11]` | PK4 | GET vào source không `query-echo` → 405; sai verify token → rejectStatus + phạt; HEAD → 405 (trừ source khai `head-ok` → 200 rỗng, ADR-205 bổ sung) |
 | `[PK:T12]` | PK4 | rejectStatus 503 + chữ ký sai → 503, REJECTED, điểm phạt tăng; cấu hình 2xx → 422 |
 | `[PK:T13]` | PK4 | adoptSecret ở trạng thái chờ; chưa xác nhận không verify; xác nhận mới thành SourceSecret (E20) |
 | `[PK:T35]` | PK4 | hmac-echo: plainToken có `:`/`{` → không ký; bắt tay không ký → không echo (E3) |

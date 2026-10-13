@@ -104,6 +104,25 @@ describe('grep gác cổng §7.3', () => {
     expect(r[0].violations.map((v) => v.line)).toEqual([1]);
   });
 
+  it('review PK4 T-3: so token/khoá bằng === / !== (providers + ingest) -> đỏ; so với hằng, so tên trường config, kiểm độ dài -> không báo', () => {
+    const EQ = '=' + '==';
+    const NE = '!' + '==';
+    const f = files({
+      'libs/providers/src/b.ts': [
+        `if (presented.length ${NE} 1 || !expected || presented[0] ${NE} expected) return reject;`, // 1: so token
+        `const isMac = (h) => h.kind ${EQ} 'hmac-echo';`, // 2: so với hằng chuỗi
+        `if (h.macField ${EQ} h.tokenField) return bad();`, // 3: tên trường config
+        `if (secret ${EQ} provided) ok();`, // 4: so secret
+        `if (c.scheme ${EQ} TEMPLATE_SCHEME) return validateSignedTemplate(c);`, // 5: "signed" không phải "sig"
+        `if (token.length ${EQ} 0) return null;`, // 6: độ dài
+      ].join('\n'),
+      'apps/hub-api/src/modules/ingest/x.ts': `if (verifyToken ${NE} req.query.t) deny();`,
+      'apps/hub-api/src/modules/other/y.ts': `if (verifyToken ${NE} req.query.t) deny();`, // ngoài phạm vi
+    });
+    const r = runGates([byId('sig-compare')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['libs/providers/src/b.ts:1', 'libs/providers/src/b.ts:4', 'apps/hub-api/src/modules/ingest/x.ts:1']);
+  });
+
   it('test: .only / it.skip mới → đỏ; khởi tạo PrismaClient trong spec ngoài helper → đỏ', () => {
     const f = files({
       'apps/x/test/a.spec.ts': 'it' + ONLY + "'x', f);\nconst p = new " + 'PrismaClient();',

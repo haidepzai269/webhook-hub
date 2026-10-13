@@ -62,6 +62,8 @@ interface TraceState {
   bytes?: number;
   /** QT3 (ADR-182): bị 507 vì project đầy — tenant đã biết, không phát trace, lưu lượng outcome STORAGE_FULL (bytes 0). */
   storageFull?: boolean;
+  /** ADR-205 bổ sung: HEAD `head-ok` trả 200 rỗng — chỉ metric `HEAD_OK`, không lưu lượng, không trace. */
+  headOk?: boolean;
 }
 
 /** EG4: outcome của trace -> outcome của bảng lưu lượng (ERROR không lưu — đã có metric + log). */
@@ -100,13 +102,20 @@ function rejectAck(
   }
 }
 
-/** PK4: 405 cho method adapter không nhận (GET ngoài `query-echo`, HEAD — E27). Không ghi DB, không phạt. */
+/** PK4: 405 cho method adapter không nhận (GET ngoài `query-echo`, HEAD không khai `head-ok` — E27). Không ghi DB, không phạt. */
 const METHOD_NOT_ALLOWED: IngestResponse = { status: 405, body: { error: 'method_not_allowed' } };
+/** Review PK4 T-2: trần dòng bắt tay ghi DB / phút / source (trong bộ nhớ, như S1-4). */
+export const HANDSHAKE_ROWS_PER_MINUTE = 5;
 
 @Injectable()
 export class IngestService implements OnModuleInit, OnModuleDestroy {
   /** S1-4: trần 20 bản ghi REJECTED/phút/source, trong bộ nhớ (không tốn Redis). */
   private readonly rejectedLimiter = new RejectedRecordLimiter();
+  /**
+   * Review PK4 T-2: dòng bắt tay không bị phạt (provider thật bắt tay lặp lại) nên trần RIÊNG, chặt hơn — 5 dòng/phút/source,
+   * và chỉ lưu meta (không body). Vượt trần vẫn trả lời bắt tay, chỉ không ghi DB.
+   */
+  private readonly handshakeLimiter = new RejectedRecordLimiter(HANDSHAKE_ROWS_PER_MINUTE);
   /**
    * CB6 (ADR-171): bản trùng không có dòng raw_events -> đếm trong bộ nhớ, ghi Postgres mỗi ~5s (nhận định `I-dup`).
    * `record()` không I/O: ACK trùng không chậm thêm, ngân sách Redis không đổi.
@@ -357,9 +366,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     }
     // Lõi kẹp: bắt tay là phản hồi thành công của provider — chỉ 200/202/204.
     const status = SUCCESS_STATUSES.has(h.status) ? h.status : 200;
+    // Review PK4 T-2: chỉ meta (không body, ≤ 1KB) + trần riêng 5/phút/source — dòng bắt tay không bị phạt nên phải rẻ.
     trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, trace.correlationId, log, {
-      reason: 'handshake',
-      handshake: h.meta,
+      meta: { reason: 'handshake', handshake: h.meta },
+      metaOnly: true,
     });
     trace.outcome = 'REJECTED';
     log.info({ kind: h.meta?.kind }, 'Đã trả lời bắt tay của provider');
@@ -378,7 +388,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   private recordMetrics(provider: string, trace: TraceState, status: number, startedAt: number) {
     try {
       const label = providerMetricLabel(provider);
-      const outcome = trace.outcome ?? (trace.storageFull ? 'STORAGE_FULL' : trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
+      const outcome = trace.outcome ?? (trace.headOk ? 'HEAD_OK' : trace.storageFull ? 'STORAGE_FULL' : trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
       ingestRequests.inc({ provider: label, outcome });
       ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
     } catch {
@@ -411,7 +421,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // 1 (PK4, E27): trần chuỗi query 8KB — GET bắt tay đọc query; query khổng lồ không đi tiếp tới DB/adapter.
     if ((req.query ?? '').length > MAX_INGEST_QUERY_CHARS) {
       log.warn('Query vượt quá 8KB');
-      return { status: 414, body: { error: 'Query quá dài (tối đa 8KB)' } };
+      return { status: 414, body: { error: 'uri_too_long', message: 'Query quá dài (tối đa 8KB)' } };
     }
 
     // Nạp adapter
@@ -466,10 +476,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
         }
       },
     };
-    // 2 (PK4, §6.2, E27): method. Không cài `acceptsMethod` = chỉ POST; HEAD luôn 405. 405 không ghi DB, không phạt, không vào
+    // 2 (PK4, §6.2, E27): method. Không cài `acceptsMethod` = chỉ POST; HEAD chỉ khi adapter nhận (`head-ok`, ADR-205 bổ sung). 405 không ghi DB, không phạt, không vào
     // lưu lượng (đặt TRƯỚC `trace.tenantId`) — URL đúng mà sai method là lỗi cấu hình, không phải dò sourceKey.
     const method = req.method ?? 'POST';
-    if (method === 'HEAD' || !(adapter.acceptsMethod ? adapter.acceptsMethod(method, ctx, req) : method === 'POST')) {
+    if (!(adapter.acceptsMethod ? adapter.acceptsMethod(method, ctx, req) : method === 'POST')) {
       log.warn({ method }, 'Method không được nhận ở source này -> 405');
       return METHOD_NOT_ALLOWED;
     }
@@ -489,6 +499,13 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     if (pairVerdict.blocked) {
       trace.blocked = true;
       return blockedAck(pairVerdict.retryAfterSec, req.headers, trace.correlationId);
+    }
+    // 2a' (ADR-205 bổ sung, sửa E27): HEAD chỉ tới đây khi adapter nhận (`head-ok` — Intercom kiểm URL bằng HEAD). Đã qua hộp
+    // phạt, checkIp, PK0, QT3, checkPair -> 200 rỗng. KHÔNG giải mã secret, không verify, không ghi DB, không phạt, 0 Redis;
+    // không vào lưu lượng / trace (không có outcome). HEAD không bao giờ đi tiếp tới verify / persist.
+    if (method === 'HEAD') {
+      trace.headOk = true;
+      return { status: 200, body: null };
     }
 
     // Giải mã danh sách secrets còn hiệu lực
@@ -659,22 +676,28 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     signatureValid: boolean,
     correlationId: string,
     log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void },
-    /** PK4 (E8, E29): `reason: 'handshake'` (+ `handshake`) — `countSignatureBySource` loại dòng có reason. */
-    extraMeta?: Record<string, unknown>,
+    /**
+     * PK4 (E8, E29): `meta.reason: 'handshake'` (+ `handshake`) — `countSignatureBySource` loại dòng có reason. `metaOnly`
+     * (review PK4 T-2): không lưu body (bytes rỗng, body `{}`), trần riêng `HANDSHAKE_ROWS_PER_MINUTE`.
+     */
+    extra?: { meta?: Record<string, unknown>; metaOnly?: boolean },
   ): Promise<number> {
     const sourceId = source.id;
-    if (!this.rejectedLimiter.tryAcquire(sourceId)) {
-      log.warn({ sourceId }, 'Vượt trần 20 bản ghi REJECTED/phút cho source này -> không lưu raw_event, chỉ log');
+    const limiter = extra?.metaOnly ? this.handshakeLimiter : this.rejectedLimiter;
+    if (!limiter.tryAcquire(sourceId)) {
+      log.warn({ sourceId, metaOnly: extra?.metaOnly === true }, 'Vượt trần bản ghi REJECTED/phút cho source này -> không lưu raw_event, chỉ log');
       return 0;
     }
-    const sample = sampleRejectedBody(req.rawBody, req.body);
+    const sample = extra?.metaOnly
+      ? { bodyRaw: Buffer.alloc(0), body: {}, meta: { bodyOmitted: true, originalBytes: req.rawBody.length } }
+      : sampleRejectedBody(req.rawBody, req.body);
     try {
       // AU6: raw_events có RLS (theo source) -> ghi trong transaction của đúng project.
       await this.prisma.tenantTx(source.tenantId, (tx) => tx.rawEvent.create({
         data: {
           sourceId,
           idempotencyKey: `rejected_${correlationId}`,
-          headers: { ...(storedHeaders as any), [REJECTED_META_KEY]: { ...sample.meta, ...(extraMeta ?? {}) } },
+          headers: { ...(storedHeaders as any), [REJECTED_META_KEY]: { ...sample.meta, ...(extra?.meta ?? {}) } },
           body: sample.body as any,
           bodyRaw: new Uint8Array(sample.bodyRaw),
           contentType: req.contentType,

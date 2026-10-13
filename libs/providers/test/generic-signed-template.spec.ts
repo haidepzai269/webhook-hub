@@ -146,7 +146,8 @@ const FIXTURES: Fixture[] = [
   {
     name: 'Twitch',
     // Thuật toán: https://dev.twitch.tv/docs/eventsub/handling-webhook-events/ (message-id + message-timestamp + body nối liền,
-    // "sha256=" + hex; timestamp RFC 3339 tới nano giây). Tài liệu KHÔNG nêu cửa sổ -> fixture dùng mặc định 300 của hub.
+    // "sha256=" + hex; timestamp RFC 3339 tới nano giây). Cửa sổ 10 phút: https://dev.twitch.tv/docs/eventsub/ ("isn't older than
+    // 10 minutes", review PK4 T-4, đọc 2026-10-14) -> toleranceSec 600, khớp mục danh mục.
     // Body: thông báo channel.follow mẫu ở cùng trang (rút gọn).
     docs: 'https://dev.twitch.tv/docs/eventsub/handling-webhook-events/',
     config: {
@@ -155,7 +156,7 @@ const FIXTURES: Fixture[] = [
       timestampHeader: 'twitch-eventsub-message-timestamp',
       timestampFormat: 'iso8601',
       idHeader: 'twitch-eventsub-message-id',
-      toleranceSec: 300,
+      toleranceSec: 600,
     },
     idempotency: { header: 'twitch-eventsub-message-id' },
     body: '{"subscription":{"id":"f1c2a387-161a-49f9-a165-0f21d7a4e1c4","type":"channel.follow","version":"2","status":"enabled","cost":0,"condition":{"broadcaster_user_id":"1337","moderator_user_id":"1337"},"transport":{"method":"webhook","callback":"https://example.com/webhooks/callback"},"created_at":"2019-11-16T10:11:12.634234626Z"},"event":{"user_id":"1234","user_login":"cool_user","user_name":"Cool_User","broadcaster_user_id":"1337","broadcaster_user_login":"cooler_user","broadcaster_user_name":"Cooler_User","followed_at":"2020-07-15T18:16:11.17106713Z"}}',

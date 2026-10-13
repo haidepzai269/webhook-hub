@@ -32,7 +32,7 @@ import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from '../console/so
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
-import { parseSourceInput, publicVerificationConfig } from '../service-api/source-input';
+import { consoleSource, parseSourceInput } from '../service-api/source-input';
 import { inspectSourceRows } from '../service-api/source-inspect';
 import { consoleDestination } from './destination-view';
 import { badParam, parseEnumParam, parseTextParam, parseTimeRange, parseUuidParam } from './list-params';
@@ -145,12 +145,8 @@ export class ApiController {
     const repo = this.prisma.forTenant(tenantId);
     // ADR-161: mặc định ẩn source đã lưu trữ.
     const sources = await repo.findSources({ archivedAt: null });
-    return sources.map(({ secrets, ...s }) => ({
-      ...s,
-      verificationConfig: publicVerificationConfig((s as { verificationConfig?: unknown }).verificationConfig), // PK4: không trả verifyTokenEnc
-      secretVersions: secrets.length,
-      webhookUrl: `/hooks/${s.provider}/${s.sourceKey}`,
-    }));
+    // Review PK4 TB-1: cùng một hàm map với create/PATCH — không secrets, không verifyTokenEnc.
+    return sources.map((s) => ({ ...consoleSource(s), webhookUrl: `/hooks/${s.provider}/${s.sourceKey}` }));
   }
 
   @Post('sources')
@@ -192,9 +188,8 @@ export class ApiController {
       });
       return created;
     });
-    // Không trả ciphertext secret ra trình duyệt.
-    const { secrets, ...rest } = source as any;
-    return { ...rest, verificationConfig: publicVerificationConfig(rest.verificationConfig), secretVersions: Array.isArray(secrets) ? secrets.length : 0 };
+    // Không trả ciphertext secret / verifyTokenEnc ra trình duyệt (review PK4 TB-1: một hàm map chung).
+    return consoleSource(source);
   }
 
   /**
@@ -230,8 +225,8 @@ export class ApiController {
       await repo.createAuditLog({ action: 'source.update', entityType: 'source', entityId: id, actor, reason: optionalReason(body?.reason), metadata: data });
       return u;
     });
-    const { secrets, ...rest } = updated as any;
-    return { ...rest, secretVersions: Array.isArray(secrets) ? secrets.length : 0 };
+    // Review PK4 TB-1: PATCH trước đây trả nguyên verificationConfig (lọt verifyTokenEnc) — nay cùng hàm map với list/create.
+    return consoleSource(updated);
   }
 
   // --- Destinations ---

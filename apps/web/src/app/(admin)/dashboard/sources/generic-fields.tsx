@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ACK_REJECT_CHOICES,
   ACK_SUCCESS_CHOICES,
+  AFTER_VERIFY_CHOICES,
+  ECHO_RESPOND_CHOICES,
   ALGO_IN_PREFIX,
   GENERIC_SCHEMES,
   type GenericFormValues,
@@ -75,6 +77,15 @@ const HANDSHAKE_KEY: Record<GenericFormValues["hsKind"], MessageKey> = {
   "header-echo": "page.sources.generic.hs.kind.header-echo",
   "hmac-echo": "page.sources.generic.hs.kind.hmac-echo",
   "manual-url": "page.sources.generic.hs.kind.manual-url",
+  "head-ok": "page.sources.generic.hs.kind.head-ok",
+};
+const AFTER_VERIFY_KEY: Record<GenericFormValues["hsAfterVerify"], MessageKey> = {
+  no: "page.sources.generic.hs.after-verify.no",
+  yes: "page.sources.generic.hs.after-verify.yes",
+};
+const RESPOND_KEY: Record<GenericFormValues["hsRespond"], MessageKey> = {
+  text: "page.sources.generic.hs.respond.text",
+  json: "page.sources.generic.hs.respond.json",
 };
 const WHEN_KIND_KEY: Record<GenericFormValues["hsWhenKind"], MessageKey> = {
   field: "page.sources.generic.hs.when-kind.field",
@@ -96,7 +107,7 @@ function SelectField({
   hint,
 }: {
   control: Control<SourceFormValues>;
-  name: "scheme" | "algo" | "encoding" | "keyEncoding" | "location" | "idKind" | "sigMode" | "kvSep" | "timestampFormat" | "hsKind" | "hsWhenKind" | "ackSuccess" | "ackReject";
+  name: "scheme" | "algo" | "encoding" | "keyEncoding" | "location" | "idKind" | "sigMode" | "kvSep" | "timestampFormat" | "hsKind" | "hsWhenKind" | "hsAfterVerify" | "hsRespond" | "ackSuccess" | "ackReject";
   label: string;
   options: readonly { value: string; label: string }[];
   hint?: string;
@@ -500,8 +511,26 @@ function HandshakeFields({ control }: { control: Control<SourceFormValues> }) {
         </>
       )}
       {kind === "body-echo" && (
-        <TextField control={control} name="hsEchoField" id="src-hs-echo" label={t("page.sources.generic.hs.echo-field")} placeholder="challenge" hint={t("page.sources.generic.hs.echo-field-hint")} />
+        <>
+          <TextField control={control} name="hsEchoField" id="src-hs-echo" label={t("page.sources.generic.hs.echo-field")} placeholder="challenge" hint={t("page.sources.generic.hs.echo-field-hint")} />
+          <SelectField
+            control={control}
+            name="hsRespond"
+            label={t("page.sources.generic.hs.respond")}
+            options={ECHO_RESPOND_CHOICES.map((k) => ({ value: k, label: t(RESPOND_KEY[k]) }))}
+          />
+        </>
       )}
+      {(kind === "body-echo" || kind === "manual-url") && (
+        <SelectField
+          control={control}
+          name="hsAfterVerify"
+          label={t("page.sources.generic.hs.after-verify")}
+          options={AFTER_VERIFY_CHOICES.map((k) => ({ value: k, label: t(AFTER_VERIFY_KEY[k]) }))}
+          hint={t("page.sources.generic.hs.after-verify-hint")}
+        />
+      )}
+      {kind === "head-ok" && <p className="text-sm text-muted-foreground">{t("page.sources.generic.hs.head-ok-hint")}</p>}
       {kind === "header-echo" && (
         <TextField control={control} name="hsHeader" id="src-hs-header" label={t("page.sources.generic.hs.header")} placeholder="x-hook-secret" hint={t("page.sources.generic.hs.header-hint")} />
       )}

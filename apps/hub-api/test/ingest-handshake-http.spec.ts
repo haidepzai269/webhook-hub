@@ -98,4 +98,16 @@ describe('[PK:T11] (phần b) PK4 qua HTTP thật: GET bắt tay, HEAD 405, echo
     expect(res.headers.get('x-hook-secret')).toBe(v);
     expect(await res.text()).toBe('');
   });
+  it('ADR-205 bổ sung: HEAD + head-ok -> 200 không body, không ghi DB; body-echo respond json -> application/json {challenge}', async () => {
+    currentConfig = { ...BASE_CFG, handshake: { kind: 'head-ok' } };
+    const head = await fetch(`${base}/hooks/generic/src_http_k`, { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+    expect(tx.rawEvent.create).not.toHaveBeenCalled();
+    currentConfig = { ...BASE_CFG, handshake: { kind: 'body-echo', when: { field: 'type', equals: 'challenge' }, echo: { field: 'challenge' }, respond: 'json' } };
+    const res = await fetch(`${base}/hooks/generic/src_http_k`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"type":"challenge","challenge":"abc_1"}' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^application\/json/);
+    expect(await res.json()).toEqual({ challenge: 'abc_1' });
+  });
 });

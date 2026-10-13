@@ -185,6 +185,76 @@ export const CATALOG_DATA: CatalogEntry[] = [
     ]
   },
   {
+    "id": "intercom",
+    "name": "Intercom",
+    "aliases": [
+      "intercom"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-hub-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "type",
+          "topic",
+          "id",
+          "data"
+        ],
+        "optional": [
+          "app_id",
+          "created_at",
+          "delivery_attempts",
+          "first_sent_at",
+          "self"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "x-hub-signature",
+        "algo": "sha1",
+        "encoding": "hex",
+        "prefix": "sha1=",
+        "idempotency": {
+          "field": "id"
+        },
+        "eventType": "intercom.notification",
+        "handshake": {
+          "kind": "head-ok"
+        }
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "client_secret của app Intercom (Developer Hub → app → Basic Info)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "sha1Reason": "Intercom chỉ ký bằng HMAC-SHA1 (X-Hub-Signature: sha1=<hex 40>, trang Webhook models); hub vẫn so constant-time.",
+    "docs": "https://developers.intercom.com/docs/references/webhooks/webhook-models",
+    "docsVersion": "Kiểm URL bằng HEAD lúc thêm endpoint (trang Setting up webhooks, đọc 2026-10-14) -> bắt tay head-ok. Chữ ký HMAC-SHA1 hex trên body JSON bằng client_secret, tiền tố sha1=. Khoá chống trùng `id` của notification (\"Intercom defined id representing the notification\"); tài liệu chưa nói rõ giữ nguyên khi gửi lại (có delivery_attempts / first_sent_at) — cùng rủi ro như slack, typeform. Không có cửa sổ thời gian ký.",
+    "confidence": "trung bình",
+    "sources": [
+      "https://developers.intercom.com/docs/references/webhooks/webhook-models",
+      "https://developers.intercom.com/docs/webhooks/setting-up-webhooks"
+    ]
+  },
+  {
     "id": "jira",
     "name": "Jira Cloud (Atlassian)",
     "aliases": [
@@ -837,7 +907,8 @@ export const CATALOG_DATA: CatalogEntry[] = [
           },
           "echo": {
             "field": "challenge"
-          }
+          },
+          "afterVerify": true
         }
       }
     },
@@ -850,7 +921,7 @@ export const CATALOG_DATA: CatalogEntry[] = [
     ],
     "secretSource": "provider",
     "docs": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
-    "docsVersion": "Chỉ Events API (JSON). Interactivity / slash command gửi form không có event_id -> 422. Bắt tay url_verification: trả challenge dạng text/plain (tài liệu nhận plaintext, form hoặc JSON). event_id \"globally unique\"; tài liệu chưa nói rõ giữ nguyên khi gửi lại (cùng rủi ro như typeform).",
+    "docsVersion": "Chỉ Events API (JSON). Interactivity / slash command gửi form không có event_id -> 422. Bắt tay url_verification: trả challenge dạng text/plain (tài liệu nhận plaintext, form hoặc JSON). event_id \"globally unique\"; tài liệu chưa nói rõ giữ nguyên khi gửi lại (cùng rủi ro như typeform). Request url_verification có ký (tài liệu dặn verify trước khi trả lời) -> afterVerify: chỉ trả challenge khi chữ ký đúng.",
     "confidence": "cao",
     "sources": [
       "https://docs.slack.dev/authentication/verifying-requests-from-slack",
@@ -1075,7 +1146,7 @@ export const CATALOG_DATA: CatalogEntry[] = [
         "timestampHeader": "twitch-eventsub-message-timestamp",
         "timestampFormat": "iso8601",
         "idHeader": "twitch-eventsub-message-id",
-        "toleranceSec": 300,
+        "toleranceSec": 600,
         "idempotency": {
           "header": "twitch-eventsub-message-id"
         },
@@ -1088,7 +1159,8 @@ export const CATALOG_DATA: CatalogEntry[] = [
           },
           "echo": {
             "field": "challenge"
-          }
+          },
+          "afterVerify": true
         }
       }
     },
@@ -1101,7 +1173,7 @@ export const CATALOG_DATA: CatalogEntry[] = [
     ],
     "secretSource": "hub",
     "docs": "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",
-    "docsVersion": "Tài liệu không nêu cửa sổ thời gian -> toleranceSec 300 (mặc định của hub). Gửi lại giữ nguyên message id (trang EventSub, mục xử lý bản trùng). Bắt tay webhook_callback_verification: 200 text/plain, challenge thô.",
+    "docsVersion": "Cửa sổ thời gian 10 phút (trang EventSub, mục replay: \"message_timestamp ... isn't older than 10 minutes\", đọc 2026-10-14) -> toleranceSec 600. Gửi lại giữ nguyên message id (cùng trang). Bắt tay webhook_callback_verification: 200 text/plain, challenge thô; request bắt tay có ký -> afterVerify (chỉ trả lời khi chữ ký đúng).",
     "confidence": "cao",
     "sources": [
       "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",

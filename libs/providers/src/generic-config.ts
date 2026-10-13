@@ -1,4 +1,5 @@
 import { PAYMENT_TYPE_KEYS, isReservedType } from '@hub/common';
+import { timingSafeCompare } from '@hub/crypto';
 
 /**
  * Cấu hình GenericAdapter (`sources.verification_config`, SPEC §4.8 + §4.14.4). Kiểm lúc TẠO source — sai trả
@@ -29,24 +30,35 @@ export type SignatureLocation =
  * một của body HOẶC header) — không biểu thức.
  */
 export type HandshakeWhen = { field: string; equals: string } | { header: string; equals: string };
-export type HandshakeKind = 'query-echo' | 'body-echo' | 'header-echo' | 'hmac-echo' | 'manual-url';
+export type HandshakeKind = 'query-echo' | 'body-echo' | 'header-echo' | 'hmac-echo' | 'manual-url' | 'head-ok';
 export type HandshakeConfig =
   /** GET ?<param>=X -> 200 text/plain X (Meta, Dropbox, WebSub). `verifyTokenEnc`: token so khớp, AES-GCM (E13), KHÔNG phải SourceSecret. */
   | { kind: 'query-echo'; param: string; verifyTokenParam?: string; verifyTokenEnc?: string }
-  /** POST, `when` khớp -> 200 text/plain giá trị body.<echo.field> (Slack url_verification, Twitch). */
-  | { kind: 'body-echo'; when: HandshakeWhen; echo: { field: string } }
+  /**
+   * POST, `when` khớp -> 200 text/plain giá trị body.<echo.field> (Slack url_verification, Twitch). `respond: 'json'` -> 200
+   * `application/json` `{<echo.field>: giá trị}` (monday) — cùng ECHO_RE, khoá JSON là tên trường đã khai (ADR-205 bổ sung).
+   * `afterVerify: true` (review PK4 T-1): chỉ trả lời SAU verify qua — cho provider KÝ request bắt tay (Slack, Twitch).
+   */
+  | { kind: 'body-echo'; when: HandshakeWhen; echo: { field: string }; respond?: 'json'; afterVerify?: true }
   /** POST có header <header> -> 200, trả lại đúng header đó (Asana X-Hook-Secret). `adoptSecret` chỉ ở chế độ thu (PK6). */
   | { kind: 'header-echo'; header: string }
   /** POST, `when` khớp, CHỈ SAU verify qua (E3) -> 200 JSON {<tokenField>: t, <macField>: hex(HMAC-SHA256(secret, t))} (Zoom). */
   | { kind: 'hmac-echo'; when: HandshakeWhen; tokenField: string; tokenParent?: string; macField: string }
   /** POST, `when` khớp -> lưu mẫu, console hiện body.<urlField> cho dev tự bấm (SNS SubscribeURL). Hub KHÔNG gọi ra. */
-  | { kind: 'manual-url'; when: HandshakeWhen; urlField: string };
+  | { kind: 'manual-url'; when: HandshakeWhen; urlField: string; afterVerify?: true }
+  /**
+   * ADR-205 bổ sung (sửa E27): HEAD -> 200 rỗng (Intercom kiểm URL bằng HEAD). HEAD vẫn qua hộp phạt, checkIp, PK0, QT3,
+   * checkPair; không ghi DB, không phạt, 0 Redis. Source không khai -> HEAD 405 như cũ.
+   */
+  | { kind: 'head-ok' };
 /** PK4 §6.3: mã HTTP của ack. Từ chối KHÔNG bao giờ là 2xx (BB-3, EG2). */
 export interface AckConfig {
   successStatus?: 200 | 202 | 204;
   rejectStatus?: 401 | 403 | 503;
 }
-export const HANDSHAKE_KINDS: readonly HandshakeKind[] = ['query-echo', 'body-echo', 'header-echo', 'hmac-echo', 'manual-url'];
+export const HANDSHAKE_KINDS: readonly HandshakeKind[] = ['query-echo', 'body-echo', 'header-echo', 'hmac-echo', 'manual-url', 'head-ok'];
+/** `body-echo.respond`: `text` (mặc định, không lưu) | `json`. */
+export const ECHO_RESPONDS = ['text', 'json'] as const;
 export const ACK_SUCCESS_STATUSES = [200, 202, 204] as const;
 export const ACK_REJECT_STATUSES = [401, 403, 503] as const;
 /** Giá trị hằng của `when.equals` (vd `url_verification`, `webhook_callback_verification`, `SubscriptionConfirmation`). */
@@ -168,7 +180,7 @@ export function decodeHmacKey(secret: string, keyEncoding: KeyEncoding): Buffer 
   if (keyEncoding === 'hex') return HEX_KEY_RE.test(secret) ? Buffer.from(secret, 'hex') : null;
   if (!B64_KEY_RE.test(secret)) return null;
   const key = Buffer.from(secret, 'base64');
-  if (key.toString('base64').replace(/=+$/, '') !== secret.replace(/=+$/, '')) return null;
+  if (!timingSafeCompare(key.toString('base64').replace(/=+$/, ''), secret.replace(/=+$/, ''))) return null;
   return key.length > 0 ? key : null;
 }
 
@@ -273,7 +285,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if (c.timezone !== undefined) config.timezone = c.timezone;
   if (tail.handshake) config.handshake = tail.handshake;
   if (tail.ack) config.ack = tail.ack;
-  return { ok: true, config };
+  return handshakeConflict(config) ?? { ok: true, config };
 }
 
 type Tail =
@@ -413,14 +425,30 @@ function parseHandshake(h: unknown): Parsed<HandshakeConfig> {
       };
     }
     case 'body-echo': {
-      const extra = only(['when', 'echo']);
+      const extra = only(['when', 'echo', 'respond', 'afterVerify']);
       if (extra) return fail(extra, `body-echo không có ${extra}`);
       const w = parseWhen(h.when, 'handshake.when');
       if ('bad' in w) return w;
       if (!isObj(h.echo) || Object.keys(h.echo).length !== 1) return fail('echo', 'echo là {field}');
       const e = field('echo.field', h.echo.field);
       if (e) return e;
-      return { value: { kind: 'body-echo', when: w.value!, echo: { field: h.echo.field } } };
+      if (h.respond !== undefined && !(ECHO_RESPONDS as readonly unknown[]).includes(h.respond)) return fail('respond', 'respond là "text" (mặc định) | "json"');
+      const av = afterVerifyOf(h.afterVerify);
+      if (av === null) return fail('afterVerify', AFTER_VERIFY_MESSAGE);
+      return {
+        value: {
+          kind: 'body-echo',
+          when: w.value!,
+          echo: { field: h.echo.field },
+          ...(h.respond === 'json' ? { respond: 'json' as const } : {}),
+          ...(av ? { afterVerify: true as const } : {}),
+        },
+      };
+    }
+    case 'head-ok': {
+      const extra = only([]);
+      if (extra) return fail(extra, `head-ok không có ${extra}`);
+      return { value: { kind: 'head-ok' } };
     }
     case 'header-echo': {
       // E20 + PK4: adoptSecret chỉ có nghĩa ở chế độ thu (PK6 — secret nhận được ở trạng thái chờ, dev xác nhận). Source PK4
@@ -453,15 +481,96 @@ function parseHandshake(h: unknown): Parsed<HandshakeConfig> {
       };
     }
     case 'manual-url': {
-      const extra = only(['when', 'urlField']);
+      const extra = only(['when', 'urlField', 'afterVerify']);
       if (extra) return fail(extra, `manual-url không có ${extra}`);
       const w = parseWhen(h.when, 'handshake.when');
       if ('bad' in w) return w;
       const e = field('urlField', h.urlField);
       if (e) return e;
-      return { value: { kind: 'manual-url', when: w.value!, urlField: h.urlField } };
+      const av = afterVerifyOf(h.afterVerify);
+      if (av === null) return fail('afterVerify', AFTER_VERIFY_MESSAGE);
+      return { value: { kind: 'manual-url', when: w.value!, urlField: h.urlField, ...(av ? { afterVerify: true as const } : {}) } };
     }
   }
+}
+
+const AFTER_VERIFY_MESSAGE = 'afterVerify là true | false (true: chỉ trả lời bắt tay khi request bắt tay ký đúng theo cấu hình — Slack, Twitch)';
+/** `afterVerify`: vắng/false -> false; true -> true; giá trị khác -> null (422). */
+function afterVerifyOf(v: unknown): boolean | null {
+  if (v === undefined || v === false) return false;
+  return v === true ? true : null;
+}
+
+/**
+ * Review PK4 TB-2: header bắt tay mà MỌI request của provider (hoặc mọi request HTTP) đều mang thì mọi sự kiện thật bị coi là
+ * bắt tay: 200, không COMMIT, provider không gửi lại — mất sự kiện qua đường cấu hình (BB-3). Tập header "chung": do client
+ * HTTP / proxy / Cloudflare tunnel gắn vào mọi request.
+ */
+export const COMMON_REQUEST_HEADERS: readonly string[] = [
+  'accept',
+  'authorization',
+  'connection',
+  'content-encoding',
+  'content-length',
+  'content-type',
+  'cookie',
+  'expect',
+  'forwarded',
+  'host',
+  'te',
+  'transfer-encoding',
+  'user-agent',
+  'via',
+  'x-real-ip',
+];
+/** Tiền tố header chung: `accept-*`, `x-forwarded-*`, `cf-*` (cloudflared gắn cf-ray, cf-connecting-ip…). */
+export const COMMON_REQUEST_HEADER_PREFIXES: readonly string[] = ['accept-', 'x-forwarded-', 'cf-'];
+/** Header của chuẩn Standard Webhooks (cả bộ Svix) — source standard-webhooks đọc chúng ở mọi sự kiện. */
+const SW_HEADERS = ['webhook-id', 'webhook-timestamp', 'webhook-signature', 'svix-id', 'svix-timestamp', 'svix-signature'];
+
+/** Header mà MỌI sự kiện của config mang: chữ ký, timestamp, id, khoá chống trùng (config đã kiểm khuôn). */
+export function eventHeadersOf(c: Omit<GenericConfig, 'handshake'>): string[] {
+  const out: string[] = [];
+  if (c.header) out.push(c.header);
+  if (c.scheme === 'static-token' && c.location === 'basic') out.push('authorization');
+  if (c.scheme === 'standard-webhooks') out.push(...SW_HEADERS);
+  if (c.signature) out.push(...('kv' in c.signature ? [c.signature.header] : c.signature.headers));
+  if (c.timestampHeader) out.push(c.timestampHeader);
+  if (c.idHeader) out.push(c.idHeader);
+  if ('header' in c.idempotency) out.push(c.idempotency.header);
+  return out;
+}
+
+export const isCommonRequestHeader = (h: string): boolean =>
+  COMMON_REQUEST_HEADERS.includes(h) || COMMON_REQUEST_HEADER_PREFIXES.some((p) => h.startsWith(p));
+
+/**
+ * Review PK4 TB-2: bắt tay không được "nuốt" sự kiện thật. 422 khi header của `header-echo` hoặc `when.header` là header mọi
+ * sự kiện của config mang (chữ ký/timestamp/id/khoá chống trùng) hoặc header chung; khi `when.field` trùng trường chống trùng.
+ */
+function handshakeConflict(c: GenericConfig): ConfigCheck | null {
+  const h = c.handshake;
+  if (!h) return null;
+  const event = eventHeadersOf(c);
+  const clash = (name: string) =>
+    event.includes(name)
+      ? `${name} là header mọi sự kiện của cấu hình này đều mang (chữ ký / timestamp / id / khoá chống trùng) — mọi sự kiện sẽ bị coi là bắt tay và mất`
+      : isCommonRequestHeader(name)
+        ? `${name} là header chung của mọi request HTTP — mọi sự kiện sẽ bị coi là bắt tay và mất`
+        : null;
+  if (h.kind === 'header-echo') {
+    const m = clash(h.header);
+    if (m) return bad('handshake.header', m);
+  }
+  if ('when' in h) {
+    if ('header' in h.when) {
+      const m = clash(h.when.header);
+      if (m) return bad('handshake.when.header', m);
+    } else if ('field' in c.idempotency && h.when.field === c.idempotency.field) {
+      return bad('handshake.when.field', `${h.when.field} là trường chống trùng — mọi sự kiện đều mang; chọn trường chỉ request bắt tay mới có (vd type)`);
+    }
+  }
+  return null;
 }
 
 /** PK4 §6.3: `ack` — successStatus 200|202|204, rejectStatus 401|403|503. 2xx khi từ chối = lối vòng qua EG2 -> 422. */
@@ -619,5 +728,5 @@ function validateSignedTemplate(c: Record<string, any>): ConfigCheck {
   if (c.timezone !== undefined) config.timezone = c.timezone;
   if (tail.handshake) config.handshake = tail.handshake;
   if (tail.ack) config.ack = tail.ack;
-  return { ok: true, config };
+  return handshakeConflict(config) ?? { ok: true, config };
 }

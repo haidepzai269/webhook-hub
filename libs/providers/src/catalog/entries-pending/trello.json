@@ -10,5 +10,5 @@
     "PK5",
     "docs"
   ],
-  "pendingReason": "Ký body + URL callback (S6) -> PK5; khi tạo gửi HEAD đòi 200, E27 chốt HEAD -> 405 (mâu thuẫn, ghi §16)."
+  "pendingReason": "HEAD 200 lúc tạo đã có (bắt tay head-ok, ADR-205 bổ sung). Còn chặn: chữ ký HMAC-SHA1 base64 trên body + URL callback (phải biết URL công khai, S6) -> PK5."
 }

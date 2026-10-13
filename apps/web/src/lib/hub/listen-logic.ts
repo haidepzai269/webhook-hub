@@ -111,7 +111,11 @@ export const TIMESTAMP_FORMAT_CHOICES = ["unix", "unix-ms", "iso8601"] as const;
 export const ALGO_IN_PREFIX = "<algo>=";
 
 /** PK4 (§6.1, ADR-205): kiểu bắt tay — `none` = không khai. Cùng tập `HANDSHAKE_KINDS` của server (test đối chiếu). */
-export const HANDSHAKE_CHOICES = ["none", "query-echo", "body-echo", "header-echo", "hmac-echo", "manual-url"] as const;
+export const HANDSHAKE_CHOICES = ["none", "query-echo", "body-echo", "header-echo", "hmac-echo", "manual-url", "head-ok"] as const;
+/** Review PK4 T-1: body-echo / manual-url chỉ trả lời sau khi chữ ký request bắt tay hợp lệ (Slack, Twitch). */
+export const AFTER_VERIFY_CHOICES = ["no", "yes"] as const;
+/** ADR-205 bổ sung: body-echo trả văn bản thuần (mặc định) hoặc JSON `{<trường>: giá trị}` (monday). Cùng `ECHO_RESPONDS` của server. */
+export const ECHO_RESPOND_CHOICES = ["text", "json"] as const;
 export const WHEN_KIND_CHOICES = ["field", "header"] as const;
 /** PK4 §6.3: mã HTTP của ack (chuỗi trong form). Từ chối KHÔNG có 2xx. */
 export const ACK_SUCCESS_CHOICES = ["200", "202", "204"] as const;
@@ -163,6 +167,10 @@ export interface GenericFormValues {
   hsMacField: string;
   /** manual-url: trường chứa link xác nhận (SNS `SubscribeURL`). */
   hsUrlField: string;
+  /** body-echo / manual-url: chỉ trả lời sau verify (review PK4 T-1). */
+  hsAfterVerify: (typeof AFTER_VERIFY_CHOICES)[number];
+  /** body-echo: văn bản thuần hay JSON. */
+  hsRespond: (typeof ECHO_RESPOND_CHOICES)[number];
   ackSuccess: (typeof ACK_SUCCESS_CHOICES)[number];
   ackReject: (typeof ACK_REJECT_CHOICES)[number];
 }
@@ -183,6 +191,8 @@ export const HANDSHAKE_FORM_DEFAULTS: Pick<
   | "hsTokenField"
   | "hsMacField"
   | "hsUrlField"
+  | "hsAfterVerify"
+  | "hsRespond"
   | "ackSuccess"
   | "ackReject"
 > = {
@@ -199,6 +209,8 @@ export const HANDSHAKE_FORM_DEFAULTS: Pick<
   hsTokenField: "",
   hsMacField: "",
   hsUrlField: "",
+  hsAfterVerify: "no",
+  hsRespond: "text",
   ackSuccess: "200",
   ackReject: "401",
 };
@@ -286,7 +298,13 @@ export function buildHandshake(v: GenericFormValues): Record<string, unknown> | 
       return { kind: v.hsKind, param: v.hsParam.trim(), ...(vtp ? { verifyTokenParam: vtp, verifyToken: v.hsVerifyToken } : {}) };
     }
     case "body-echo":
-      return { kind: v.hsKind, when: when(), echo: { field: v.hsEchoField.trim() } };
+      return {
+        kind: v.hsKind,
+        when: when(),
+        echo: { field: v.hsEchoField.trim() },
+        ...(v.hsRespond === "json" ? { respond: "json" } : {}),
+        ...(v.hsAfterVerify === "yes" ? { afterVerify: true } : {}),
+      };
     case "header-echo":
       return { kind: v.hsKind, header: v.hsHeader.trim().toLowerCase() };
     case "hmac-echo": {
@@ -294,7 +312,9 @@ export function buildHandshake(v: GenericFormValues): Record<string, unknown> | 
       return { kind: v.hsKind, when: when(), ...(parent ? { tokenParent: parent } : {}), tokenField: v.hsTokenField.trim(), macField: v.hsMacField.trim() };
     }
     case "manual-url":
-      return { kind: v.hsKind, when: when(), urlField: v.hsUrlField.trim() };
+      return { kind: v.hsKind, when: when(), urlField: v.hsUrlField.trim(), ...(v.hsAfterVerify === "yes" ? { afterVerify: true } : {}) };
+    case "head-ok":
+      return { kind: v.hsKind };
     default:
       return null;
   }
@@ -395,7 +415,8 @@ export type GenericFormIssue =
   | "hs-verify-token-invalid"
   | "hs-when-invalid"
   | "hs-field-invalid"
-  | "hs-header-invalid";
+  | "hs-header-invalid"
+  | "hs-conflict";
 
 /** PK4: như `WHEN_EQUALS_RE` / `VERIFY_TOKEN_RE` / echo của server (test đối chiếu). */
 const WHEN_EQUALS_RE = /^[\x21-\x7E]{1,128}$/;
@@ -459,7 +480,72 @@ function handshakeIssues(v: GenericFormValues): { path: keyof GenericFormValues;
     when();
     field("hsUrlField", v.hsUrlField);
   }
+  out.push(...handshakeConflicts(v));
   return out;
+}
+
+/**
+ * Review PK4 TB-2: như `COMMON_REQUEST_HEADERS` / `COMMON_REQUEST_HEADER_PREFIXES` / `eventHeadersOf` của server (test đối
+ * chiếu) — header bắt tay mà mọi sự kiện đều mang thì mọi sự kiện bị coi là bắt tay (200 không lưu, mất sự kiện).
+ */
+export const COMMON_REQUEST_HEADERS = [
+  "accept",
+  "authorization",
+  "connection",
+  "content-encoding",
+  "content-length",
+  "content-type",
+  "cookie",
+  "expect",
+  "forwarded",
+  "host",
+  "te",
+  "transfer-encoding",
+  "user-agent",
+  "via",
+  "x-real-ip",
+] as const;
+export const COMMON_REQUEST_HEADER_PREFIXES = ["accept-", "x-forwarded-", "cf-"] as const;
+const SW_HEADERS = ["webhook-id", "webhook-timestamp", "webhook-signature", "svix-id", "svix-timestamp", "svix-signature"];
+
+/** Header mọi sự kiện của cấu hình form mang: chữ ký, timestamp, id, khoá chống trùng. */
+export function formEventHeaders(v: GenericFormValues): string[] {
+  const c = buildGenericConfig({ ...v, hsKind: "none" }) as Record<string, any>;
+  const out: string[] = [];
+  if (typeof c.header === "string") out.push(c.header);
+  if (c.scheme === "static-token" && c.location === "basic") out.push("authorization");
+  if (c.scheme === "standard-webhooks") out.push(...SW_HEADERS);
+  if (c.signature) out.push(...(c.signature.kv ? [c.signature.header] : (c.signature.headers ?? [])));
+  if (typeof c.timestampHeader === "string") out.push(c.timestampHeader);
+  if (typeof c.idHeader === "string") out.push(c.idHeader);
+  if (c.idempotency && typeof c.idempotency.header === "string") out.push(c.idempotency.header);
+  return out;
+}
+
+function handshakeConflicts(v: GenericFormValues): { path: keyof GenericFormValues; issue: GenericFormIssue }[] {
+  const event = formEventHeaders(v);
+  const clash = (name: string) =>
+    event.includes(name) || (COMMON_REQUEST_HEADERS as readonly string[]).includes(name) || COMMON_REQUEST_HEADER_PREFIXES.some((p) => name.startsWith(p));
+  const usesWhen = v.hsKind === "body-echo" || v.hsKind === "hmac-echo" || v.hsKind === "manual-url";
+  if (v.hsKind === "header-echo" && clash(v.hsHeader.trim().toLowerCase())) return [{ path: "hsHeader", issue: "hs-conflict" }];
+  if (usesWhen && v.hsWhenKind === "header" && clash(v.hsWhenName.trim().toLowerCase())) return [{ path: "hsWhenName", issue: "hs-conflict" }];
+  if (usesWhen && v.hsWhenKind === "field" && idKindOf(v) === "field" && v.hsWhenName.trim() !== "" && v.hsWhenName.trim() === v.idValue.trim()) {
+    return [{ path: "hsWhenName", issue: "hs-conflict" }];
+  }
+  return [];
+}
+
+/**
+ * Review PK4 T-1: `TopicArn` trong link SubscribeURL của SNS — console hiện rõ để dev kiểm topic có phải của mình (kẻ biết
+ * sourceKey gửi được link ConfirmSubscription THẬT của topic khác). null nếu không có / không đọc được.
+ */
+export function subscribeTopicArn(url: string): string | null {
+  try {
+    const arn = new URL(url).searchParams.get("TopicArn");
+    return arn && /^arn:aws(-[a-z]+)*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_.-]{1,256}$/.test(arn) ? arn : null;
+  } catch {
+    return null;
+  }
 }
 
 /** PK3: luật `signed-template` của server (`validateSignedTemplate`) cho các ô form. */

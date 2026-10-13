@@ -92,3 +92,17 @@ export function publicVerificationConfig(vc: unknown): unknown {
   const { verifyTokenEnc: _enc, ...rest } = h;
   return { ...c, handshake: { ...rest, verifyTokenSet: true } };
 }
+
+/**
+ * Review PK4 TB-1: bản trả ra CONSOLE của một source — MỘT hàm cho list / create / PATCH (`/api/v1/sources*`): không bao giờ
+ * `secrets` (ciphertext; chỉ số version), `verificationConfig` qua `publicVerificationConfig` (không `verifyTokenEnc`).
+ * Route mới trả source phải đi qua đây (service API dùng `publicSource`, cũng gọi `publicVerificationConfig`).
+ */
+export function consoleSource(row: unknown): Record<string, unknown> {
+  const { secrets, ...rest } = (row ?? {}) as Record<string, unknown>;
+  return {
+    ...rest,
+    verificationConfig: publicVerificationConfig(rest.verificationConfig),
+    secretVersions: Array.isArray(secrets) ? secrets.length : 0,
+  };
+}

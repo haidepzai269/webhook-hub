@@ -1,0 +1,6 @@
+# origin: constructed; source: https://developers.intercom.com/docs/references/webhooks/webhook-models
+POST /webhook HTTP/1.1
+Content-Type: application/json
+X-Hub-Signature: sha1=0000000000000000000000000000000000000000
+
+{"type":"notification_event","topic":"company.created","id":"notif_00000000-0000-0000-0000-000000000000","app_id":"abc123","created_at":1392731331,"delivery_attempts":1,"first_sent_at":1392731331,"data":{"type":"notification_event_data","item":{"type":"company","id":"5310d8e8598c9a0b24000005"}}}
