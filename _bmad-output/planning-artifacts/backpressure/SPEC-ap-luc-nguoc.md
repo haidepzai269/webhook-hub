@@ -104,7 +104,9 @@
 - **Permit giới hạn ĐỒNG THỜI, không giới hạn tốc độ:** khi DB lỗi nhanh (ECONNREFUSED) vài giây đầu (tới khi factor lên 1, ~4s) số lần gọi/s vẫn theo prefetch × tốc độ broker; sau đó chế độ dò ≤ 1 / 5s. Lúc hồi phục permits tăng dần theo factor (đồng thời 2 → 20).
 - **Bảng mã (nợ §16 của BP1):** thêm 57P01/57P02/57P03 và lớp 08 (Postgres cắt kết nối) vào `transient` của `classifyInfraError` (cả `PrismaClientUnknownRequestError` theo nội dung lẫn lỗi driver có `code`) — `classifyNormalizeError` gọi lại hàm này nên đổi theo. amqplib "Channel closed" GIỮ `unknown` (không phải lỗi DB, không được làm lệch bộ điều khiển `db`).
 - **Channel zombie (nợ §16):** channel consumer đóng riêng → worker thoát như mất connection (orchestrator dựng lại).
-- Spill (giữ quá 60s) không có trần thời gian: chỉ xảy ra khi factor > 0, tức trong lúc DB ốm.
+- **Một factor, hai semaphore (review BP5 TB-1):** §7.1 "một controller cho mỗi dependency" giữ nguyên (một tín hiệu, một factor), nhưng normalize và delivery mỗi bên một semaphore MAX = prefetch 20. Một semaphore chung làm 20 delivery treo HTTP ở đích chậm chiếm hết permit, normalize của mọi tenant xếp hàng sau — lỗi đích làm chậm tenant khác (§0). Lúc khoẻ thông lượng như trước BP5 (40 đồng thời / tiến trình). Chế độ dò: 1 message / 5s cho MỖI lane.
+- **Spill có trần (review BP5 TH-1):** spill normalize gắn/giữ `x-normalize-deferred-since`, dùng chung `NORMALIZE_MAX_DEFER_MS`; quá trần thì đốt lượt rồi DLQ. Cửa sổ retry cộng thêm một vòng 30s (≈ 7h16m10s). Spill delivery không cần trần (Postgres giữ delivery đang chờ; QT/retention chừa chúng — ADR-199).
+- `gracefulStop` tách khỏi `main.ts` (`src/shutdown.ts`) để test thứ tự C5.
 
 ## 0. Bối cảnh
 

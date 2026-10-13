@@ -581,6 +581,9 @@ BACKPRESSURE_SET_POINT=0.05  # hub-worker: áp lực ngược cho DB (BP5, ADR-2
 BACKPRESSURE_PROBE_INTERVAL_MS=5000 # chế độ dò: 1 message / khoảng này khi lùi hẳn
 BACKPRESSURE_HOLD_MAX_MS=60000 # giữ message chờ permit tối đa (phải < consumer_timeout của RabbitMQ), quá thì hoãn không đốt lượt
 NORMALIZE_MAX_DEFER_MS=3600000 # normalize hoãn không đốt lượt khi DB ốm; chỉ đặt THẤP hơn mặc định
+# BP5 (ADR-200): channel consumer RabbitMQ đóng bất thường -> hub-worker THOÁT (log kèm mã/lý do lỗi channel). Ở chế độ hub-all
+# supervisor dừng cả hub-api, Render dựng lại container: ingest gián đoạn tới khi lên lại; provider tự retry (BB-3) nên không
+# mất sự kiện; message chưa ack được RabbitMQ giao lại. Crash loop -> xem dòng log "AMQP channel consumer đóng bất thường" (code).
 METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub-worker :WORKER_METRICS_PORT/metrics đòi
                          # "Authorization: Bearer <token>" (review #6). Prometheus/scraper phải gửi token: trong
                          # prometheus.yml bỏ comment khối `authorization: {type: Bearer, credentials: ...}` ở cả 2 job

@@ -9,8 +9,11 @@ import { backpressureFactor } from '../metrics';
  *   một đích chết của `cafe` không được làm chậm `bookstore`).
  * - Cửa sổ trượt 30s (bucket 1s); mỗi 1s: tỷ lệ lỗi > set point (5%, ≥ 10 mẫu) -> factor +0.25 (lùi nhanh), ngược lại −0.1
  *   (hồi chậm) — AIMD đảo chiều.
- * - permits = max(1, ceil(MAX × (1 − factor))); factor = 1 -> CHẾ ĐỘ DÒ: 1 permit, các lần bắt đầu xử lý cách nhau
- *   ≥ `probeIntervalMs` (giống HALF_OPEN của circuit — câu trả lời cho phần Canva để dành Part 2).
+ * - MỘT factor (một tín hiệu) cho phụ thuộc, nhưng MỖI consumer (lane: normalize, delivery) một semaphore riêng, MAX = prefetch
+ *   của consumer đó (20) — review BP5 TB-1: một semaphore chung thì delivery treo HTTP ở một đích chậm chiếm hết permit và
+ *   normalize của MỌI tenant xếp hàng sau (lỗi của đích làm chậm tenant khác, trái §0). Lúc khoẻ thông lượng như trước BP5.
+ * - permits (mỗi lane) = max(1, ceil(MAX × (1 − factor))); factor = 1 -> CHẾ ĐỘ DÒ: 1 permit, các lần bắt đầu xử lý của lane
+ *   cách nhau ≥ `probeIntervalMs` (giống HALF_OPEN của circuit — câu trả lời cho phần Canva để dành Part 2).
  * - Không đổi `prefetch` lúc chạy (hành vi `basic.qos` với consumer đang mở không chắc chắn): message vượt permit chờ trong
  *   tiến trình (unacked) tối đa `holdMaxMs`, quá thì người gọi republish không đốt lượt (`timeout`).
  * - Tắt máy (C5): `shutdown()` trả ngay `shutdown` cho mọi message đang chờ — người gọi KHÔNG xử lý, KHÔNG republish,
@@ -23,7 +26,7 @@ export type AcquireResult = { kind: 'permit'; release: Release } | { kind: 'time
 export interface BackpressureController {
   record(outcome: BackpressureOutcome): void;
   factor(): number;
-  acquire(): Promise<AcquireResult>;
+  acquire(lane?: string): Promise<AcquireResult>;
 }
 
 export interface FailureRateOptions {
@@ -64,6 +67,14 @@ interface Waiter {
   timer: NodeJS.Timeout;
 }
 
+/** Semaphore của một consumer (lane). */
+interface Lane {
+  inUse: number;
+  lastStartAt: number;
+  waiters: Waiter[];
+  probeTimer: NodeJS.Timeout | null;
+}
+
 export class FailureRateController implements BackpressureController {
   readonly dependency: string;
   private readonly maxPermits: number;
@@ -77,12 +88,9 @@ export class FailureRateController implements BackpressureController {
   /** bucket theo giây: [giây epoch, ok, fail] */
   private buckets: { sec: number; ok: number; fail: number }[] = [];
   private f = 0;
-  private inUse = 0;
-  private lastStartAt = -Infinity;
-  private readonly waiters: Waiter[] = [];
+  private readonly lanes = new Map<string, Lane>();
   private shuttingDown = false;
   private tickTimer: NodeJS.Timeout | null = null;
-  private probeTimer: NodeJS.Timeout | null = null;
 
   constructor(o: FailureRateOptions) {
     this.dependency = o.dependency;
@@ -106,8 +114,10 @@ export class FailureRateController implements BackpressureController {
   stop(): void {
     if (this.tickTimer) clearInterval(this.tickTimer);
     this.tickTimer = null;
-    if (this.probeTimer) clearTimeout(this.probeTimer);
-    this.probeTimer = null;
+    for (const l of this.lanes.values()) {
+      if (l.probeTimer) clearTimeout(l.probeTimer);
+      l.probeTimer = null;
+    }
   }
 
   record(outcome: BackpressureOutcome): void {
@@ -151,7 +161,7 @@ export class FailureRateController implements BackpressureController {
       /* giữ nguyên */
     } else this.f = Math.max(0, round2(this.f - 0.1));
     backpressureFactor.set({ dependency: this.dependency }, this.f);
-    this.pump();
+    for (const l of this.lanes.values()) this.pump(l);
   }
 
   private failuresInWindow(): number {
@@ -165,29 +175,37 @@ export class FailureRateController implements BackpressureController {
     return Math.max(1, Math.ceil(this.maxPermits * (1 - this.f)));
   }
 
-  get waiting(): number {
-    return this.waiters.length;
+  /** Số message đang chờ permit (mọi lane, hoặc một lane). */
+  waiting(lane?: string): number {
+    if (lane !== undefined) return this.lanes.get(lane)?.waiters.length ?? 0;
+    let n = 0;
+    for (const l of this.lanes.values()) n += l.waiters.length;
+    return n;
   }
 
-  get active(): number {
-    return this.inUse;
+  active(lane?: string): number {
+    if (lane !== undefined) return this.lanes.get(lane)?.inUse ?? 0;
+    let n = 0;
+    for (const l of this.lanes.values()) n += l.inUse;
+    return n;
   }
 
-  acquire(): Promise<AcquireResult> {
+  acquire(lane = 'default'): Promise<AcquireResult> {
     if (this.shuttingDown) return Promise.resolve({ kind: 'shutdown' });
-    if (this.waiters.length === 0 && this.canStart()) return Promise.resolve(this.grant());
+    const l = this.lane(lane);
+    if (l.waiters.length === 0 && this.canStart(l)) return Promise.resolve(this.grant(l));
     return new Promise<AcquireResult>((resolve) => {
       const w: Waiter = {
         resolve,
         timer: setTimeout(() => {
-          const i = this.waiters.indexOf(w);
-          if (i >= 0) this.waiters.splice(i, 1);
+          const i = l.waiters.indexOf(w);
+          if (i >= 0) l.waiters.splice(i, 1);
           resolve({ kind: 'timeout' });
         }, this.holdMaxMs),
       };
       w.timer.unref?.();
-      this.waiters.push(w);
-      this.pump();
+      l.waiters.push(w);
+      this.pump(l);
     });
   }
 
@@ -195,47 +213,58 @@ export class FailureRateController implements BackpressureController {
   shutdown(): void {
     this.shuttingDown = true;
     this.stop();
-    for (const w of this.waiters.splice(0)) {
-      clearTimeout(w.timer);
-      w.resolve({ kind: 'shutdown' });
+    for (const l of this.lanes.values()) {
+      for (const w of l.waiters.splice(0)) {
+        clearTimeout(w.timer);
+        w.resolve({ kind: 'shutdown' });
+      }
     }
   }
 
-  private canStart(): boolean {
-    if (this.inUse >= this.permits()) return false;
-    if (this.f >= 1 && this.now() - this.lastStartAt < this.probeIntervalMs) return false;
+  private lane(name: string): Lane {
+    let l = this.lanes.get(name);
+    if (!l) {
+      l = { inUse: 0, lastStartAt: -Infinity, waiters: [], probeTimer: null };
+      this.lanes.set(name, l);
+    }
+    return l;
+  }
+
+  private canStart(l: Lane): boolean {
+    if (l.inUse >= this.permits()) return false;
+    if (this.f >= 1 && this.now() - l.lastStartAt < this.probeIntervalMs) return false;
     return true;
   }
 
-  private grant(): AcquireResult {
-    this.inUse++;
-    this.lastStartAt = this.now();
+  private grant(l: Lane): AcquireResult {
+    l.inUse++;
+    l.lastStartAt = this.now();
     let released = false;
     return {
       kind: 'permit',
       release: () => {
         if (released) return;
         released = true;
-        this.inUse--;
-        this.pump();
+        l.inUse--;
+        this.pump(l);
       },
     };
   }
 
-  private pump(): void {
-    while (this.waiters.length > 0 && this.canStart()) {
-      const w = this.waiters.shift()!;
+  private pump(l: Lane): void {
+    while (l.waiters.length > 0 && this.canStart(l)) {
+      const w = l.waiters.shift()!;
       clearTimeout(w.timer);
-      w.resolve(this.grant());
+      w.resolve(this.grant(l));
     }
     // Chế độ dò: còn người chờ nhưng chưa tới nhịp -> hẹn đúng lúc được bắt đầu tiếp.
-    if (this.waiters.length > 0 && this.f >= 1 && this.inUse < 1 && !this.probeTimer) {
-      const wait = Math.max(0, this.probeIntervalMs - (this.now() - this.lastStartAt));
-      this.probeTimer = setTimeout(() => {
-        this.probeTimer = null;
-        this.pump();
+    if (l.waiters.length > 0 && this.f >= 1 && l.inUse < 1 && !l.probeTimer) {
+      const wait = Math.max(0, this.probeIntervalMs - (this.now() - l.lastStartAt));
+      l.probeTimer = setTimeout(() => {
+        l.probeTimer = null;
+        this.pump(l);
       }, wait);
-      this.probeTimer.unref?.();
+      l.probeTimer.unref?.();
     }
   }
 

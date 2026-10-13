@@ -116,13 +116,14 @@ export function circuitMaxDeferMs(env: string | undefined = process.env.CIRCUIT_
  * Tổng thời gian một message có thể còn "sống" trong hệ thống retry: 5 tầng delivery (10s+1m+5m+30m+2h) + 5 lần normalize
  * 30s + (BP2, C2) tối đa `CIRCUIT_MAX_DEFER_MS` hoãn vì circuit cho MỖI lần thử (6 lần: 1 lần đầu + 5 tầng).
  * + một vòng hoãn DÀI NHẤT mỗi lần thử (trần kiểm theo vòng; BP3: 5 phút) + (BP4) hoãn vì ramp ≤ 60s + 10s mỗi lần thử.
- * + (BP5) normalize hoãn ≤ 60 phút. processed_messages/outbox phải sống LÂU HƠN thế; dữ liệu mới hơn mốc này không được
- * dọn/xoá (QT §5.2). ≈ 7h15m40s.
+ * + (BP5) normalize hoãn/spill ≤ 60 phút + một vòng 30s. processed_messages/outbox phải sống LÂU HƠN thế; dữ liệu mới hơn mốc này không được
+ * dọn/xoá (QT §5.2). ≈ 7h16m10s.
  */
 export const TOTAL_RETRY_WINDOW_MS =
   RETRY_TIERS.reduce((sum, t) => sum + t.ttlMs, 0) +
   NORMALIZE_RETRY_TTL_MS * NORMALIZE_MAX_RETRIES +
-  NORMALIZE_MAX_DEFER_MS + // BP5: normalize hoãn không đốt lượt khi DB ốm (một lần cho mỗi event)
+  NORMALIZE_MAX_DEFER_MS + // BP5: normalize hoãn / spill không đốt lượt khi DB ốm (một lần cho mỗi event)
+  NORMALIZE_RETRY_TTL_MS + // + một vòng 30s: trần chỉ kiểm mỗi vòng (review BP5 TH-1)
   (RETRY_TIERS.length + 1) * (CIRCUIT_MAX_DEFER_MS + CIRCUIT_DEFER_ROUND_MS + DELIVERY_RAMP_DEFER_MS);
 
 /** Mốc thời gian MỚI NHẤT được phép dọn/xoá: dữ liệu nhận SAU mốc này có thể còn đang retry. */

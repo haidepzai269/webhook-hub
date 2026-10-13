@@ -11,6 +11,7 @@ import { logger } from '@hub/common';
 import { NORMALIZE_MAX_DEFER_MS, normalizeMaxDeferMs } from '@hub/messaging';
 import { FailureRateController, backpressureOptionsFromEnv } from '../src/backpressure/failure-rate.controller';
 import { runGated } from '../src/backpressure/gate';
+import { gracefulStop } from '../src/shutdown';
 import { InFlightTracker } from '../src/consumers/in-flight';
 import { DeliveryConsumer } from '../src/consumers/delivery.consumer';
 import { NORMALIZE_DEFERRED_SINCE_HEADER, NormalizeConsumer } from '../src/consumers/normalize.consumer';
@@ -156,8 +157,10 @@ describe('BP5 — runGated (giữ / spill / tắt máy)', () => {
     jest.useFakeTimers();
     try {
       const c = new FailureRateController({ dependency: 'db', maxPermits: 1, holdMaxMs: 60_000 });
-      // một message đang giữ permit (xử lý treo)
-      const busy = await c.acquire();
+      // mỗi lane một message đang giữ permit (xử lý treo)
+      const busyN = await c.acquire('normalize');
+      const busy = await c.acquire('delivery');
+      expect(busyN.kind).toBe('permit');
       expect(busy.kind).toBe('permit');
       const inFlight = new InFlightTracker();
       const normalize = new NormalizeConsumer({} as any, c);
@@ -180,18 +183,20 @@ describe('BP5 — runGated (giữ / spill / tắt máy)', () => {
       expect(handleD).not.toHaveBeenCalled();
       expect(chN.sendToQueue.mock.calls[0][0]).toBe('q.normalize.retry.30s');
       expect(chN.sendToQueue.mock.calls[0][2].headers[NORMALIZE_RETRY_HEADER]).toBe(2);
+      expect(chN.sendToQueue.mock.calls[0][2].headers[NORMALIZE_DEFERRED_SINCE_HEADER]).toEqual(expect.any(Number)); // TH-1: trần chung
       expect(chN.ack).toHaveBeenCalledTimes(1);
       expect(chD.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
       expect(JSON.parse(chD.sendToQueue.mock.calls[0][1].toString())).toMatchObject({ attemptCount: 3, destinationId: 'dest-1' });
       expect(chD.sendToQueue.mock.calls[0][2].headers['x-attempt']).toBe(3);
       expect(chD.ack).toHaveBeenCalledTimes(1);
       if (busy.kind === 'permit') busy.release();
+      if (busyN.kind === 'permit') busyN.release();
     } finally {
       jest.useRealTimers();
     }
   });
 
-  it('[BP:T24] (C5) factor = 1 giữ 5 message rồi SIGTERM: tắt máy xong ngay (< 25s); 5 message đó KHÔNG ack, KHÔNG nack, KHÔNG republish; message đã có permit chạy xong rồi ack', async () => {
+  it('[BP:T24] (phần a) (C5) factor = 1 giữ 5 message rồi SIGTERM: tắt máy xong ngay (< 25s); 5 message đó KHÔNG ack, KHÔNG nack, KHÔNG republish; message đã có permit chạy xong rồi ack', async () => {
     jest.useFakeTimers();
     try {
       const c = new FailureRateController({ dependency: 'db', minSamples: 1 });
@@ -238,6 +243,98 @@ describe('BP5 — runGated (giữ / spill / tắt máy)', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('BP5 — review lượt 1', () => {
+  it('(TB-1) một factor, HAI semaphore: 20 delivery treo HTTP (đích chậm) chiếm hết permit delivery mà normalize vẫn bắt đầu NGAY; lúc khoẻ 40 đồng thời / tiến trình như trước BP5', async () => {
+    const c = new FailureRateController({ dependency: 'db' });
+    const inFlight = new InFlightTracker();
+    let unblock!: () => void;
+    const slowHttp = new Promise<void>((r) => (unblock = r));
+    const delivery = { handleMessage: jest.fn(() => slowHttp), spill: jest.fn() };
+    const started: string[] = [];
+    const normalize = { handleMessage: jest.fn(async (m: any) => void started.push(m.id)), spill: jest.fn() };
+    const ch = buildChannel();
+    const d = Array.from({ length: 20 }, (_, i) => runGated(c, 'delivery', delivery as any, { ...amqp({ i }), id: `d${i}` } as any, ch, inFlight));
+    await Promise.resolve();
+    expect(c.active('delivery')).toBe(20);
+    const n = Array.from({ length: 20 }, (_, i) => runGated(c, 'normalize', normalize as any, { ...amqp({ i }), id: `n${i}` } as any, ch, inFlight));
+    expect(await Promise.all(n)).toEqual(Array(20).fill('done'));
+    expect(started).toHaveLength(20); // không chờ delivery
+    expect(c.waiting('normalize')).toBe(0);
+    // delivery thứ 21 thì chờ (prefetch 20 của delivery)
+    const extra = runGated(c, 'delivery', delivery as any, { ...amqp({}), id: 'd20' } as any, ch, inFlight);
+    await Promise.resolve();
+    expect(c.waiting('delivery')).toBe(1);
+    unblock();
+    expect(await Promise.all([...d, extra])).toEqual(Array(21).fill('done'));
+  });
+
+  it('(TH-1) spill normalize dùng chung trần NORMALIZE_MAX_DEFER_MS: trong trần giữ since + không đốt lượt; quá trần đốt lượt; hết lượt -> DLQ', () => {
+    const consumer = new NormalizeConsumer({} as any, null);
+    const msg = (h: Record<string, unknown>) => amqp({ rawEventId: 'r' }, h);
+    const ch1 = buildChannel();
+    const since = Date.now() - 10_000;
+    consumer.spill(msg({ [NORMALIZE_DEFERRED_SINCE_HEADER]: since, [NORMALIZE_RETRY_HEADER]: 1 }), ch1);
+    expect(ch1.sendToQueue.mock.calls[0][2].headers).toMatchObject({ [NORMALIZE_DEFERRED_SINCE_HEADER]: since, [NORMALIZE_RETRY_HEADER]: 1 });
+    const ch2 = buildChannel();
+    consumer.spill(msg({ [NORMALIZE_DEFERRED_SINCE_HEADER]: Date.now() - NORMALIZE_MAX_DEFER_MS - 1, [NORMALIZE_RETRY_HEADER]: 1 }), ch2);
+    expect(ch2.sendToQueue.mock.calls[0][2].headers[NORMALIZE_RETRY_HEADER]).toBe(2);
+    expect(ch2.ack).toHaveBeenCalledTimes(1);
+    const ch3 = buildChannel();
+    consumer.spill(msg({ [NORMALIZE_DEFERRED_SINCE_HEADER]: Date.now() - NORMALIZE_MAX_DEFER_MS - 1, [NORMALIZE_RETRY_HEADER]: 5 }), ch3);
+    expect(ch3.sendToQueue).not.toHaveBeenCalled();
+    expect(ch3.nack).toHaveBeenCalledWith(expect.anything(), false, false);
+  });
+
+  it('[BP:T24] (phần b) gracefulStop: thứ tự cancel consumer -> backpressure.shutdown() -> waitIdle -> đóng; message đang giữ không ack/nack/republish', async () => {
+    const order: string[] = [];
+    const c = new FailureRateController({ dependency: 'db', maxPermits: 1 });
+    const inFlight = new InFlightTracker();
+    const ch = buildChannel();
+    let finish!: () => void;
+    const work = new Promise<void>((r) => (finish = r));
+    const handler = {
+      handleMessage: jest.fn(async (m: any, chx: any) => {
+        await work;
+        chx.ack(m);
+      }),
+      spill: jest.fn(),
+    };
+    const running = runGated(c, 'delivery', handler as any, { ...amqp({}), id: 'run' } as any, ch, inFlight);
+    const held = [1, 2, 3].map((i) => runGated(c, 'delivery', handler as any, { ...amqp({ i }), id: `h${i}` } as any, ch, inFlight));
+    await Promise.resolve();
+    expect(c.waiting('delivery')).toBe(3);
+    const shutdownSpy = jest.spyOn(c, 'shutdown').mockImplementation(function (this: FailureRateController) {
+      order.push('backpressure.shutdown');
+      return FailureRateController.prototype.shutdown.call(c);
+    });
+    const waitIdle = jest.spyOn(inFlight, 'waitIdle').mockImplementation(async (ms: number) => {
+      order.push('waitIdle');
+      finish();
+      await running;
+      expect(ms).toBe(20_000);
+      return true;
+    });
+    const res = await gracefulStop({
+      cancelConsumers: async () => void order.push('cancel'),
+      backpressure: c,
+      inFlight,
+      background: [Promise.resolve().then(() => order.push('background'))],
+      waitBudgetMs: 20_000,
+      closeAll: async () => void order.push('closeAll'),
+    });
+    expect(order.filter((x) => x !== 'background')).toEqual(['cancel', 'backpressure.shutdown', 'waitIdle', 'closeAll']);
+    expect(res.idle).toBe(true);
+    expect(await Promise.all(held)).toEqual(['shutdown', 'shutdown', 'shutdown']);
+    expect(ch.ack).toHaveBeenCalledTimes(1);
+    expect(ch.ack.mock.calls[0][0].id).toBe('run');
+    expect(ch.nack).not.toHaveBeenCalled();
+    expect(ch.sendToQueue).not.toHaveBeenCalled();
+    expect(handler.spill).not.toHaveBeenCalled();
+    shutdownSpy.mockRestore();
+    waitIdle.mockRestore();
   });
 });
 
@@ -336,7 +433,7 @@ describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
       const firstWindow = warnLines.filter((t) => t - t0 < 60_000);
       expect(firstWindow.length).toBeLessThanOrEqual(2 + 1); // log gộp 30s (BP1)
       // DB về: probe thành công, lỗi cũ trôi khỏi cửa sổ 30s -> factor hồi -> hàng đang giữ được xử lý hết
-      expect(c.waiting).toBe(0);
+      expect(c.waiting()).toBe(0);
       expect(calls.filter((t) => t - t0 >= 60_000).length).toBeGreaterThanOrEqual(150);
       c.stop();
     } finally {

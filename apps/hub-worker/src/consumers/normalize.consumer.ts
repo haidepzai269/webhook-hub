@@ -94,12 +94,30 @@ export class NormalizeConsumer {
   }
 
   /**
-   * BP5 §7.3: giữ quá `BACKPRESSURE_HOLD_MAX_MS` chờ permit -> `retry.30s` KHÔNG tăng `x-normalize-retry` (header giữ nguyên),
-   * rồi ack. Không xử lý, không đọc DB.
+   * BP5 §7.3: giữ quá `BACKPRESSURE_HOLD_MAX_MS` chờ permit -> `retry.30s` KHÔNG tăng `x-normalize-retry`, rồi ack. Không xử lý,
+   * không đọc DB. Review BP5 TH-1: spill DÙNG CHUNG trần `NORMALIZE_MAX_DEFER_MS` với nhánh hoãn §7.4 (gắn/giữ
+   * `x-normalize-deferred-since`) — quá trần thì về đường cũ: đốt một lượt (`x-normalize-retry` + 1), hết lượt thì DLQ (raw thành
+   * ứng viên renormalize) — không spill vô hạn vượt sàn dọn của QT.
    */
   spill(msg: amqp.ConsumeMessage, channel: amqp.Channel): void {
-    channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, { persistent: true, headers: { ...(msg.properties.headers || {}) } });
-    channel.ack(msg);
+    const headers = { ...(msg.properties.headers || {}) };
+    const now = Date.now();
+    const sinceRaw = Number(headers[NORMALIZE_DEFERRED_SINCE_HEADER]);
+    const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : now;
+    if (now - since <= normalizeMaxDeferMs()) {
+      channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, { persistent: true, headers: { ...headers, [NORMALIZE_DEFERRED_SINCE_HEADER]: since } });
+      channel.ack(msg);
+      return;
+    }
+    const retries = readNormalizeRetryCount(headers);
+    if (retries < NORMALIZE_MAX_RETRIES) {
+      normalizeRetries.inc();
+      channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, { persistent: true, headers: { ...headers, [NORMALIZE_RETRY_HEADER]: retries + 1 } });
+      channel.ack(msg);
+      return;
+    }
+    logger.error({ deferredSince: since, retries }, 'Normalize giữ/hoãn quá NORMALIZE_MAX_DEFER_MS và hết lượt -> DLQ (renormalize từ Postgres)');
+    channel.nack(msg, false, false);
   }
 
   private async handle(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<'transient' | 'permanent' | void> {

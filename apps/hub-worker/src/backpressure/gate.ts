@@ -36,7 +36,7 @@ export async function runGated(
   backpressureHeld.inc({ consumer });
   let r;
   try {
-    r = await controller.acquire();
+    r = await controller.acquire(consumer); // semaphore RIÊNG mỗi consumer, chung một factor (review BP5 TB-1)
   } finally {
     backpressureHeld.dec({ consumer });
   }
