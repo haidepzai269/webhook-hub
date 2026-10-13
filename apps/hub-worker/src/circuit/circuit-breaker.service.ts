@@ -230,6 +230,7 @@ export class CircuitBreakerService {
       const openSeconds = probeFailed ? circuitOpenMaxSeconds() : CIRCUIT_OPEN_SECONDS;
       // C4: "thử lại lúc" = now + PTTL(:open) lấy ĐÚNG LÚC trip = giá trị vừa SET EX (không suy ra từ openedAt + 60s).
       const halfOpenAt = new Date(Date.now() + openSeconds * 1000);
+      let trips: number | null = null;
       try {
         const m = this.redis
           .multi()
@@ -237,13 +238,14 @@ export class CircuitBreakerService {
           .expire(k.failures, failuresAfterOpenSeconds(openSeconds))
           .del(k.probe);
         if (probeFailed) m.incr(k.trips).expire(k.trips, failuresAfterOpenSeconds(openSeconds));
-        await m.exec();
+        const res = await m.exec();
+        // Review BP3 TH-2: `:trips` lấy từ kết quả INCR trong CHÍNH MULTI này (lệnh thứ 4) — không thêm lệnh Redis.
+        trips = probeFailed ? Number(res?.[3]?.[1]) || null : 0;
       } catch {
         return { state: 'CLOSED', failures, degraded: true };
       }
-      if (target.persistedState !== 'OPEN') {
-        logger.warn({ destinationId: target.destinationId, failures, openSeconds, probeFailed }, `Circuit breaker -> OPEN (hoãn gửi ${openSeconds}s)`);
-      }
+      // Một dòng cho MỖI lần trip (kể cả trip lại sau probe thất bại), kèm số lần probe thất bại liên tiếp (`:trips`).
+      logger.warn({ destinationId: target.destinationId, failures, openSeconds, probeFailed, trips }, `Circuit breaker -> OPEN (hoãn gửi ${openSeconds}s)`);
       await this.transition(target, 'OPEN', failures, false, halfOpenAt);
       return { state: 'OPEN', failures, openPttlMs: openSeconds * 1000 };
     }

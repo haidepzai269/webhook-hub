@@ -355,7 +355,7 @@ NORMALIZE_MAX_DEFER_MS=3600000
 
 - [x] **BP1** — Vòng lặp nóng (§2). Nhỏ, độc lập. **Làm trước.**
 - [x] **BP2** — `destinationId` + gate trước khi nạp + hoãn thưa + trần theo thời gian (§3, §6 phần gate)
-- [ ] **BP3** — OPEN kéo dài dần (§4). Cần BP2.
+- [x] **BP3** — OPEN kéo dài dần (§4). Cần BP2.
 - [ ] **BP4** — Slow-start (§5). Cần gate của BP2.
 - [ ] **BP5** — Bộ điều khiển áp lực ngược (§7). Cần `classifyInfraError` của BP1.
 - [ ] **BP6** — Đồng bộ giấy (§8). Phần phụ lục chờ Q1.
@@ -429,3 +429,4 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 - **Đề xuất cho BP5 (review BP1 T3):** lỗi hạ tầng ngoài bảng bị xếp `unknown` — `PrismaClientUnknownRequestError` 57P01 (Neon cắt kết nối), amqplib "Channel closed". Hệ quả: ~5 phút vào DLX, metric `kind=unknown` lẫn lỗi hạ tầng. BP1 KHÔNG đổi bảng mã (spec giữ nguyên); BP5 xem xét mở rộng `classifyInfraError`.
 - **Nợ (review BP1 T4):** nhánh unknown không để dấu vết trong Postgres (`last_error` không đổi) — console không thấy, chỉ có log và bản sao DLQ broker (drop-head 5000). `x-dead-error` đã bỏ stack, chỉ tên lỗi + message cắt 200 ký tự.
 - **Cho BP3 (review BP2 lượt 2):** gộp `CIRCUIT_DEFER_ROUND_MS` (`libs/messaging/src/retry-window.ts`, cộng vào cửa sổ retry) và `CIRCUIT_DEFER` (`delivery.consumer.ts`, tầng hoãn thật) về **một nguồn** — BP3 hoãn theo PTTL tới `retry.5m` nên một vòng hoãn thành 5 phút; hai hằng số lệch nhau là cửa sổ dọn của QT sai.
+- **BP3 review (2026-10-13), chỉ ghi nhận:** (TH-3) request gửi với view CLOSED thất bại sau lần trip lại 300s có thể đặt lại `:open` EX 60 (rút OPEN xuống 60s) — hầu như không xảy ra, chấp nhận. (TH-4) rolling deploy với worker BP2: không NULL `circuit_half_open_at`, không DEL `:trips` — vô hại, tự lành ở lần trip kế / sau ≤ 420s. Chi tiết ở đánh đổi ADR-197.

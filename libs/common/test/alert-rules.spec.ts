@@ -248,3 +248,14 @@ describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
     expect(evalSourceSilent({ source: archived, nonProbeAccepted7d: 50, medianGapMs: MIN, lastNonProbeEventAt: ago(48 * HOUR) }, openWith()).facts.reason).toBe('archived');
   });
 });
+
+describe('review BP3 TH-1: câu "Thử lại lúc …" của circuit_open', () => {
+  it('halfOpenAt ở tương lai -> in giờ; đã qua (so với now) -> bỏ câu, không in giờ đã qua', () => {
+    const { buildAlertText, createAlertTextT } = require('../src') as typeof import('../src');
+    const now = Date.parse('2026-10-13T10:04:00Z');
+    const t = createAlertTextT('vi');
+    const mk = (halfOpenAt: string) => ({ rule: 'destination.circuit_open', facts: { circuitState: 'OPEN', halfOpenAt }, subjectType: 'destination' as const, subjectId: 'd' });
+    expect(buildAlertText(mk('2026-10-13T10:06:00Z'), t, { locale: 'vi', now, timeZone: 'UTC' }).message).toMatch(/thử lại lúc/i);
+    expect(buildAlertText(mk('2026-10-13T10:01:00Z'), t, { locale: 'vi', now, timeZone: 'UTC' }).message).not.toMatch(/thử lại lúc/i);
+  });
+});

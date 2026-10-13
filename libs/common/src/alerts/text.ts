@@ -451,7 +451,10 @@ export function buildAlertText(a: AlertLike, t: AlertTextT, ctx: AlertTextContex
     }
     case 'destination.circuit_open': {
       title = t('alerts.rule.destination.circuit-open.title');
-      const at = clock(f.halfOpenAt);
+      // Review BP3 TH-1: mốc đã qua (so với `now` của người dựng câu — evaluator/asOf) thì KHÔNG in "Thử lại lúc …":
+      // `circuit_half_open_at` có thể cũ một nhịp khi UPDATE có điều kiện không ghi được (ADR-197).
+      const ts = time(f.halfOpenAt);
+      const at = ts !== null && ts >= ctx.now ? clock(f.halfOpenAt) : null;
       message = join(t('alerts.rule.destination.circuit-open.message'), at ? t('alerts.rule.destination.circuit-open.retry-at', { at }) : null);
       fix = t('alerts.rule.destination.circuit-open.fix');
       break;

@@ -11,6 +11,7 @@ import {
 } from '../src/circuit/circuit-breaker.service';
 import { describeDb } from '../../../libs/database/test/support/test-db';
 import { circuitOpenMaxSeconds } from '@hub/messaging';
+import { logger } from '@hub/common';
 
 /**
  * Redis giả trong bộ nhớ, đủ cho circuit breaker: MGET, SET (EX/NX), DEL nhiều khoá, INCR, EXPIRE,
@@ -99,20 +100,29 @@ function fakeRedis() {
     ttls,
     multi: jest.fn(() => {
       calls.push('multi');
-      const ops: Array<() => void> = [];
+      const ops: Array<() => unknown> = [];
       const chain: any = {
         set: (k: string, v: string, ...args: any[]) => (
           ops.push(() => {
             store.set(k, v);
             const i = args.indexOf('EX');
             if (i >= 0) ttls.set(k, Number(args[i + 1]));
+            return 'OK';
           }),
           chain
         ),
-        del: (...ks: string[]) => (ops.push(() => ks.forEach((k) => store.delete(k))), chain),
-        incr: (k: string) => (ops.push(() => store.set(k, String(parseInt(store.get(k) ?? '0', 10) + 1))), chain),
-        expire: (k: string, sec: number) => (ops.push(() => ttls.set(k, Number(sec))), chain),
-        exec: async () => (ops.forEach((op) => op()), []),
+        del: (...ks: string[]) => (ops.push(() => ks.filter((k) => store.delete(k)).length), chain),
+        incr: (k: string) => (
+          ops.push(() => {
+            const n = parseInt(store.get(k) ?? '0', 10) + 1;
+            store.set(k, String(n));
+            return n;
+          }),
+          chain
+        ),
+        expire: (k: string, sec: number) => (ops.push(() => (ttls.set(k, Number(sec)), 1)), chain),
+        // như ioredis: [[err, kết quả], …] theo thứ tự lệnh
+        exec: async () => ops.map((op) => [null, op()]),
       };
       return chain;
     }),
@@ -256,8 +266,12 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     redis.store.set(K('failures'), '5');
     await cb.tryAcquireProbe(DEST);
     const before = Date.now();
+    const warn = jest.spyOn(logger, 'warn');
     const after = await cb.recordFailure(target('HALF_OPEN'), await cb.getState(DEST));
     expect(after).toMatchObject({ state: 'OPEN', openPttlMs: 300_000 });
+    // review BP3 TH-2: một dòng log mỗi lần trip, kèm :trips lấy từ kết quả MULTI (không thêm lệnh)
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ destinationId: DEST, openSeconds: 300, probeFailed: true, trips: 1 }), expect.stringContaining('OPEN'));
+    warn.mockRestore();
     expect(redis.store.get(K('open'))).toBe('OPEN');
     expect(redis.ttls.get(K('open'))).toBe(300);
     expect(redis.ttls.get(K('failures'))).toBeGreaterThan(300);
@@ -520,8 +534,11 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     expect(half.state).toBe('HALF_OPEN');
     const token = await cb.tryAcquireProbe(dest);
     expect(token).toEqual(expect.any(String));
+    const warn = jest.spyOn(logger, 'warn');
     const after = await cb.recordFailure(t, half);
     expect(after).toMatchObject({ state: 'OPEN', openPttlMs: 300_000 });
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ trips: 1, openSeconds: 300 }), expect.any(String)); // TH-2, Redis thật
+    warn.mockRestore();
     const p2 = await redis.pttl(k('open'));
     expect(p2).toBeGreaterThan(295_000);
     expect(await redis.ttl(k('failures'))).toBeGreaterThan(300);
