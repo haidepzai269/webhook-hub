@@ -24,3 +24,4 @@ Commit PK đầu tiên trên master sẽ được ghi thêm vào đây khi merge
 | Thời điểm | master | Gồm | Ghi chú |
 |---|---|---|---|
 | 2026-10-14 đêm (chặng 1) | `314ace0..9d84dcd` | PK0, PK1, PK2 (code đầu tiên: `10afed4`) | Không có migration. Rollback code = quay về `57c81ad` (hoặc `314ace0`, chỉ thêm docs) |
+| 2026-10-14 đêm (chặng 2) | `e6d61d6..8bcb4fa` | PK3 (signed-template), PK9 (danh mục 21 mục + identify + GET /api/v1/catalog), sửa hub-api khởi động (ADR-210) | Không có migration. CI e2e của `a4094b3` xanh. Mốc an toàn trước chặng 2: `e6d61d6` (= PK0–PK2) |
