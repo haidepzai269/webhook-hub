@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
-import { PrismaService } from '@hub/database';
+import { PrismaService, StorageTickRow } from '@hub/database';
 import {
   CleanupAdvisor,
   CleanupSuggestion,
@@ -59,7 +59,7 @@ import {
  *    gộp theo source, qua `forTenant`), đặt lại mốc. Mốc cũ hơn `TRAFFIC_RETENTION_DAYS − 1` ngày -> bắt buộc ở lượt kế.
  *
  * Đường nóng ingest KHÔNG đổi: +0 truy vấn, +0 lệnh Redis (số byte đi qua bộ gộp EG4). Lệnh Redis của job: 1 `SET NX` mỗi
- * nhịp mỗi instance. Đổi nấc hôm nay chỉ log + metric; email/webhook/cảnh báo owner là QT6 (`onLevelChange`).
+ * nhịp mỗi instance. Đổi nấc -> `onLevelChange`: QT6 StorageAlerts (alert owner+operator, email, webhook `hub.project.storage`).
  */
 export const STORAGE_LEVEL_LOCK_KEY = 'storage:level:lock';
 export const STORAGE_CALIBRATE_LOCK_KEY = 'storage:calibrate:lock';
@@ -123,6 +123,13 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
   private nearFull = false;
   /** QT6 cắm luồng cảnh báo (email/webhook/alert owner) vào đây. Lỗi trong hook không làm hỏng lượt đo. */
   readonly onLevelChange: ((c: LevelChange) => Promise<void> | void)[] = [];
+  /**
+   * QT6 (ADR-190): cuối mỗi lượt nấc — mọi dòng đã đọc kèm nấc CUỐI (đã ghi hay giữ nguyên), TRỪ project vừa báo đổi nấc
+   * trong lượt (hook trên đã lo). StorageAlerts quét bù `signaled_level` lệch + nhắc email hằng ngày, +0 truy vấn khi không có gì.
+   */
+  readonly onTick: ((rows: (StorageTickRow & { finalLevel: StorageLevel })[]) => Promise<unknown> | void)[] = [];
+  /** QT6 (§6): kết quả chốt ổ toàn cục (tối đa 10 phút một lần) — StorageAlerts mở/đóng `hub.storage_near_full`. */
+  readonly onDiskCheck: ((d: { sizeBytes: number; nearFull: boolean; budgetMb: number; top: { tenantId: string; usedBytes: number }[] }) => Promise<void> | void)[] = [];
 
   /** Đồng hồ (test thay được). */
   clock: () => number = Date.now;
@@ -200,6 +207,8 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
   async levelTick(tenantIds?: string[]): Promise<LevelTickResult> {
     const rows = await this.prisma.storageLevelTickAcrossTenants(tenantIds);
     const changes: LevelChange[] = [];
+    const ticked: (StorageTickRow & { finalLevel: StorageLevel })[] = [];
+    const usage: { tenantId: string; usedBytes: number }[] = [];
     let updated = 0;
     let locked = 0;
     for (const r of rows) {
@@ -213,24 +222,39 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       } catch {
         /* metric không làm hỏng lượt */
       }
-      if (usedBytes === r.usedBytes && level === r.level) continue;
+      usage.push({ tenantId: r.tenantId, usedBytes });
+      if (usedBytes === r.usedBytes && level === r.level) {
+        ticked.push({ ...r, finalLevel: level });
+        continue;
+      }
       try {
         // L1: compare-and-set theo mốc đã đọc — hiệu chỉnh vừa ghi mốc mới thì số quét thật thắng, lượt sau tính lại.
         // QT4 (E2): + `freedToken` — lô dọn vừa trừ byte và hạ nấc NGAY xen giữa thì số đọc ở đây đã cũ: bỏ ghi, lượt sau tính lại.
         const n = await this.prisma.forTenant(r.tenantId).updateStorageUsage({ usedBytes, level, calibratedAtToken: r.calibratedAtToken ?? null, freedToken: r.freedSinceCalibration });
         if (n === 0) {
           logger.debug({ tenantId: r.tenantId }, 'Storage: mốc hiệu chỉnh vừa đổi giữa lúc đọc và ghi -> bỏ ghi nấc lượt này');
+          ticked.push({ ...r, finalLevel: prev });
           continue;
         }
         updated++;
       } catch (err: any) {
         logger.warn({ err: err?.message, tenantId: r.tenantId }, 'Storage: không ghi được nấc của project (bỏ qua, lượt sau thử lại)');
+        ticked.push({ ...r, finalLevel: prev });
         continue;
       }
       if (level !== prev) {
         const c: LevelChange = { tenantId: r.tenantId, from: prev, to: level, usedBytes, quotaBytes };
         changes.push(c);
         await this.reportLevelChange(c);
+      } else {
+        ticked.push({ ...r, finalLevel: level });
+      }
+    }
+    for (const h of this.onTick) {
+      try {
+        await h(ticked);
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'Storage: hook cuối lượt nấc lỗi (bỏ qua)');
       }
     }
     try {
@@ -238,7 +262,7 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
     } catch {
       /* bỏ qua */
     }
-    const disk = await this.checkGlobalDisk();
+    const disk = await this.checkGlobalDisk(usage);
     return { skipped: false, projects: rows.length, updated, changes, ...(disk ? { disk } : {}) };
   }
 
@@ -277,7 +301,7 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
    * thật. Tối đa 10 phút một lần. Hôm nay: metric `hub_storage_near_full` + log error khi vượt; mở cảnh báo operator
    * `hub.storage_near_full` qua luồng CB là việc của QT6.
    */
-  private async checkGlobalDisk(): Promise<{ sizeBytes: number; nearFull: boolean } | undefined> {
+  private async checkGlobalDisk(usage: { tenantId: string; usedBytes: number }[] = []): Promise<{ sizeBytes: number; nearFull: boolean } | undefined> {
     const now = this.clock();
     if (!shouldCheckGlobalDisk(this.lastDiskCheckAt, now)) return undefined;
     this.lastDiskCheckAt = now;
@@ -289,6 +313,15 @@ export class StorageJob implements OnModuleInit, OnModuleDestroy {
       if (nearFull && !this.nearFull) logger.error({ sizeBytes, budgetMb: this.diskBudgetMb }, 'hub.storage_near_full: database vượt 80% DB_DISK_BUDGET_MB');
       if (!nearFull && this.nearFull) logger.info({ sizeBytes, budgetMb: this.diskBudgetMb }, 'hub.storage_near_full: database đã xuống dưới 80%');
       this.nearFull = nearFull;
+      // QT6: mở/đóng cảnh báo operator `hub.storage_near_full` (kèm 3 project dùng nhiều nhất — số đã có trong bộ nhớ).
+      const top = [...usage].sort((a, b) => b.usedBytes - a.usedBytes).slice(0, 3);
+      for (const h of this.onDiskCheck) {
+        try {
+          await h({ sizeBytes, nearFull, budgetMb: this.diskBudgetMb, top });
+        } catch (err: any) {
+          logger.warn({ err: err?.message }, 'Storage: hook chốt ổ lỗi (bỏ qua)');
+        }
+      }
       return { sizeBytes, nearFull };
     } catch (err: any) {
       logger.warn({ err: err?.message }, 'Storage: không đọc được pg_database_size (bỏ qua lượt chốt toàn cục)');

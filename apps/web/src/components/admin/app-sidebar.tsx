@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
 import { logout as serverLogout } from "@/lib/hub/client";
-import { useIsOperator } from "@/lib/hub/me-store";
+import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -32,6 +32,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const path = usePathname();
   const t = useT();
   const operator = useIsOperator();
+  const canSeeAlerts = useCanSeeAlerts();
   const { sidebarVariant, sidebarCollapsible, isSynced } = usePreferencesStore(
     useShallow((s) => ({
       sidebarVariant: s.values.sidebar_variant,
@@ -80,7 +81,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items
-                  .filter((item) => operator || !item.operatorOnly)
+                  .filter((item) => operator || !item.operatorOnly || (item.ownerToo === true && canSeeAlerts))
                   .map((item) => (
                   <SidebarMenuItem key={item.id}>
                     <SidebarMenuButton asChild tooltip={t(item.titleKey)} isActive={isActive(item.url)}>

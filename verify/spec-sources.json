@@ -266,10 +266,11 @@
           "QT4": "T9,T10,T15,T16,T20,T33",
           "QT4b": "T21,T22,T23,T24,T25",
           "QT5": "T18",
+          "QT6": "T11,T19,T34",
           "QT9": "T27"
         }
       },
-      "note": "SPEC-han-muc-dung-luong §12 + mục ĐÍNH CHÍNH (T28–T34; ADR-182..187, 189). Chặng 1 = QT1, QT2, QT3, QT9; chặng 2 = QT4, QT4b, QT5 (feat/qt). L0 + L1 (describeDb trên hubv)."
+      "note": "SPEC-han-muc-dung-luong §12 + mục ĐÍNH CHÍNH (T28–T34; ADR-182..187, 189). Chặng 1 = QT1, QT2, QT3, QT9; chặng 2 = QT4, QT4b, QT5; chặng 3 = QT6 (ADR-190), QT7, QT8 (feat/qt). L0 + L1 (describeDb trên hubv)."
     }
   ],
   "inline": [

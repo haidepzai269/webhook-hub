@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
-import { ALERT_EMAIL_HOURLY_CAP, AlertTextLocale, MailSender, createMailSender, logger, renderAlertEmail } from '@hub/common';
+import { ALERT_EMAIL_HOURLY_CAP, AlertTextLocale, MailSender, createMailSender, logger, renderAlertEmail, ruleAudience } from '@hub/common';
 import { AlertEmailClaim, PrismaService } from '@hub/database';
 import { alertEmailsTotal } from '../metrics';
 
@@ -37,12 +37,30 @@ export const ALERT_EMAIL_RETRY_DELAYS_MS = [60_000, 300_000] as const;
 export const ALERT_EMAIL_RESOLVED_DEFER_MS = 30_000;
 const HOUR_MS = 3_600_000;
 
-export type EligibilityProblem = 'not_operator' | 'email_unverified' | 'email_disabled' | 'rule_not_selected' | 'project_muted' | 'resolve_not_wanted';
+export type EligibilityProblem =
+  | 'not_operator'
+  | 'email_unverified'
+  | 'email_disabled'
+  | 'rule_not_selected'
+  | 'project_muted'
+  | 'resolve_not_wanted'
+  | 'storage_warn_off';
 
-/** Hàm thuần: điều kiện §6 kiểm LẠI lúc gửi (tuỳ chọn có thể đã đổi từ lúc evaluator ghi PENDING). null = được gửi. */
+/**
+ * Hàm thuần: điều kiện §6 kiểm LẠI lúc gửi (tuỳ chọn có thể đã đổi từ lúc evaluator ghi PENDING). null = được gửi.
+ * QT6 (E3, §8): luật audience `owners+operator` + người nhận đang là OWNER của project -> bỏ qua `alert_preferences` của
+ * operator; chỉ cần email đã xác minh, và với `project.storage_warn` (70/85) thì công tắc `storage_warn_email` còn bật.
+ * Owner không tắt được 95%/LOCKED. Mất vai trò owner trước lúc gửi -> rơi về điều kiện operator (thường là `not_operator`).
+ */
 export function alertEmailEligibility(
-  r: Pick<AlertEmailClaim, 'isOperator' | 'emailVerified' | 'emailEnabled' | 'emailRules' | 'mutedProjects' | 'emailOnResolve' | 'rule' | 'tenantId' | 'kind'>,
+  r: Pick<AlertEmailClaim, 'isOperator' | 'emailVerified' | 'emailEnabled' | 'emailRules' | 'mutedProjects' | 'emailOnResolve' | 'rule' | 'tenantId' | 'kind'> &
+    Partial<Pick<AlertEmailClaim, 'isOwner' | 'storageWarnEmail'>>,
 ): EligibilityProblem | null {
+  if (r.isOwner && ruleAudience(r.rule) === 'owners+operator' && r.kind === 'OPEN') {
+    if (!r.emailVerified) return 'email_unverified';
+    if (r.rule === 'project.storage_warn' && r.storageWarnEmail === false) return 'storage_warn_off';
+    return null;
+  }
   if (!r.isOperator) return 'not_operator';
   if (!r.emailVerified) return 'email_unverified';
   if (!r.emailEnabled) return 'email_disabled';
@@ -244,6 +262,9 @@ export class AlertEmailSender implements OnModuleInit, OnModuleDestroy {
         },
         project: { id: r.tenantId, slug: r.projectSlug, name: r.projectName },
         subjectName: r.subjectName,
+        // QT6: thư dung lượng tới owner nói đúng lý do nhận thư + link trang Dung lượng; `remind:` = thư nhắc hằng ngày.
+        audience: r.isOwner && ruleAudience(r.rule) === 'owners+operator' ? 'owner' : 'operator',
+        reminder: typeof r.tag === 'string' && r.tag.startsWith('remind:'),
         webUrl: this.webUrl,
         rollup: rollup.length,
         now,

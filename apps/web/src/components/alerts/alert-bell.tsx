@@ -16,19 +16,20 @@ import { ackAllIds, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
 import type { AlertView } from "@/lib/alerts/types";
 import { useAckAllAlerts, useAlertSummary, useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
 import { formatRelative } from "@/lib/hub/format";
-import { useIsOperator } from "@/lib/hub/me-store";
+import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { ProjectChip, SeverityDot, useAlertText, useAlertUiStore, useMinuteClock, useOpenAlertTarget } from "./alert-ui";
 
 /**
- * CB4 §8.1: chuông ở header, cạnh nút Ngôn ngữ / sáng-tối — CHỈ operator (người khác không thấy, không gọi `/alerts*`).
+ * CB4 §8.1: chuông ở header, cạnh nút Ngôn ngữ / sáng-tối — operator; QT6 (E3): cả owner (chỉ cảnh báo dung lượng của
+ * project mình). Developer/viewer không thấy, không gọi `/alerts*`. "Đánh dấu đã xem" vẫn chỉ operator.
  * Badge = số OPEN chưa xem, đỏ nếu có critical CHƯA XEM, hổ phách nếu chỉ warning, không badge khi 0. Popover ~380px nhóm
  * theo project (critical trước rồi mới nhất). Tổng gọi lại khi có `alert.changed` + poll 30s (alert-queries).
  */
 export function AlertBell() {
-  const operator = useIsOperator();
-  if (!operator) return null;
+  const canSee = useCanSeeAlerts();
+  if (!canSee) return null;
   return <OperatorBell />;
 }
 
@@ -89,6 +90,7 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
   const now = useMinuteClock();
   const summary = useAlertSummary();
   const feed = useOpenAlertFeed();
+  const isOperator = useIsOperator(); // QT6: ack chỉ operator (owner chỉ xem)
   const ackAll = useAckAllAlerts();
   const text = useAlertText();
   const go = useOpenAlertTarget();
@@ -173,7 +175,8 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
         <Button
           size="sm"
           variant="ghost"
-          disabled={toAck.length === 0 || ackAll.isPending}
+          disabled={!isOperator || toAck.length === 0 || ackAll.isPending}
+          hidden={!isOperator}
           onClick={() =>
             ackAll.mutate(
               toAck,

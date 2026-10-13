@@ -11,9 +11,9 @@ import {
   AlertListQuery,
   ackAlert,
   ackAllAlerts,
-  alertSummary,
+  alertSummaryFor,
   getAlertPreferences,
-  listAlerts,
+  listAlertsFor,
   putAlertPreferences,
   putUserLocale,
   sendTestAlertEmail,
@@ -21,14 +21,16 @@ import {
 import { AUTH_CONFIG, AuthConfig } from '../auth/auth-config';
 
 const OPERATOR_SCOPE = 'chuông của operator nhìn MỌI project (SPEC-canh-bao §5.2) — OperatorGuard, đọc qua escape hatch có tên';
+const VIEWER_SCOPE =
+  'chuông theo quyền (QT6, E3): operator nhìn MỌI project; owner chỉ cảnh báo dung lượng của project mình là owner — lọc trong escape hatch có tên';
 
 /**
- * CB3 (SPEC-canh-bao-nhan-dinh §5.2, ADR-169): API cảnh báo + tuỳ chọn cảnh báo — CHỈ operator (`OperatorGuard` sau
- * `SessionGuard`; người khác 403 `operator_required`). Không qua `ProjectScopeGuard`: chuông là xuyên project.
- * Test gửi thử email (CB5) và insights (CB6) KHÔNG ở đây.
+ * CB3 (SPEC-canh-bao-nhan-dinh §5.2, ADR-169): API cảnh báo + tuỳ chọn cảnh báo. Không qua `ProjectScopeGuard`: chuông
+ * là xuyên project. QT6 (E3, ADR-190): `GET /alerts`, `/alerts/summary` mở cho OWNER (chỉ cảnh báo dung lượng của project
+ * mình, developer/viewer vẫn 403); ack, ack-all, tuỳ chọn, gửi thử giữ `OperatorGuard`.
  */
 @Controller('api/v1')
-@UseGuards(SessionGuard, OperatorGuard)
+@UseGuards(SessionGuard)
 export class AlertsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -37,18 +39,19 @@ export class AlertsController {
   ) {}
 
   @Get('alerts')
-  @NoProjectScope(OPERATOR_SCOPE)
-  list(@Query() q: AlertListQuery) {
-    return listAlerts(this.prisma, q);
+  @NoProjectScope(VIEWER_SCOPE)
+  list(@Req() req: RequestWithPrincipal, @CurrentUser() userId: string, @Query() q: AlertListQuery) {
+    return listAlertsFor(this.prisma, { userId, isOperator: viewerIsOperator(req) }, q);
   }
 
   @Get('alerts/summary')
-  @NoProjectScope(OPERATOR_SCOPE)
-  summary() {
-    return alertSummary(this.prisma);
+  @NoProjectScope(VIEWER_SCOPE)
+  summary(@Req() req: RequestWithPrincipal, @CurrentUser() userId: string) {
+    return alertSummaryFor(this.prisma, { userId, isOperator: viewerIsOperator(req) });
   }
 
   @Post('alerts/ack-all')
+  @UseGuards(OperatorGuard)
   @HttpCode(HttpStatus.OK)
   @NoProjectScope(OPERATOR_SCOPE)
   ackAll(@Body() body: unknown, @Query() q: Record<string, unknown>, @CurrentUser() actor: string) {
@@ -56,6 +59,7 @@ export class AlertsController {
   }
 
   @Post('alerts/:id/ack')
+  @UseGuards(OperatorGuard)
   @HttpCode(HttpStatus.OK)
   @NoProjectScope(OPERATOR_SCOPE)
   ack(@Param('id') id: string, @CurrentUser() actor: string) {
@@ -63,12 +67,14 @@ export class AlertsController {
   }
 
   @Get('me/alert-preferences')
+  @UseGuards(OperatorGuard)
   @NoProjectScope('tuỳ chọn cảnh báo gắn NGƯỜI (IdentityRepository), chỉ operator')
   getPreferences(@CurrentUser() userId: string) {
     return getAlertPreferences(this.prisma, userId);
   }
 
   @Put('me/alert-preferences')
+  @UseGuards(OperatorGuard)
   @NoProjectScope('tuỳ chọn cảnh báo gắn NGƯỜI (IdentityRepository), chỉ operator')
   putPreferences(@Req() req: RequestWithPrincipal, @CurrentUser() userId: string, @Body() body: unknown) {
     return putAlertPreferences(this.prisma, userId, body, clientIp(req));
@@ -76,11 +82,18 @@ export class AlertsController {
 
   /** CB5 (§5.2, §8.5): thư mẫu tới email đã xác minh của CHÍNH người gọi — 3 lần/giờ (đếm ở Postgres, `auth_audit`). */
   @Post('me/alert-preferences/test-email')
+  @UseGuards(OperatorGuard)
   @HttpCode(HttpStatus.OK)
   @NoProjectScope('email thử tới CHÍNH người gọi (IdentityRepository), chỉ operator')
   testEmail(@Req() req: RequestWithPrincipal, @CurrentUser() userId: string) {
     return sendTestAlertEmail(this.prisma, this.mail, userId, clientIp(req), this.cfg.webPublicUrl);
   }
+}
+
+/** Cờ operator từ CHÍNH principal mà SessionGuard dựng (không tin client). */
+function viewerIsOperator(req: RequestWithPrincipal): boolean {
+  const p = req.principal;
+  return !!p && p.kind === 'user' && p.isOperator === true;
 }
 
 /** DINH-CHINH D3: ngôn ngữ của CHÍNH người dùng (mọi người dùng — nút Ngôn ngữ của console gọi; worker đọc cho email). */

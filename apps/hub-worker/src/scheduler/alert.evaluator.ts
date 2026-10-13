@@ -4,7 +4,6 @@ import {
   ALERT_EVAL_INTERVAL_MS,
   ALERT_REALTIME_CHANNEL,
   ALERT_RULES,
-  ALERT_RULE_CODES,
   AUTH_REJECTED_WINDOW_MS,
   AlertFacts,
   AlertRuleCode,
@@ -15,6 +14,7 @@ import {
   DEAD_SPIKE_MIN,
   DEAD_SPIKE_WINDOW_MS,
   DESTINATION_ARCHIVED_ERROR_PREFIX,
+  EVALUATED_RULE_CODES,
   FAILING_WINDOW_MS,
   FLAP_SUPPRESS_MS,
   RuleContext,
@@ -308,7 +308,9 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     const lap = new ProjectLap(tenantId, now, repo, open, openTruncated);
     const finalOpen = new Map<string, AlertSeverity>([...open].map(([k, a]) => [k, a.severity]));
 
-    for (const rule of ALERT_RULE_CODES) {
+    // QT6: chỉ luật `driver: 'evaluator'` — luật dung lượng / chốt ổ do StorageAlerts mở/đóng theo sự kiện, evaluator không
+    // đánh giá và KHÔNG đóng chúng (vòng "OPEN mà không còn đối tượng" dưới đây chỉ chạy cho luật được lặp).
+    for (const rule of EVALUATED_RULE_CODES) {
       if (this.stopping) {
         out.aborted = true;
         break;
@@ -427,6 +429,11 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
         const { total } = await repo.findOrphanRawEvents({ limit: 1, olderThanSeconds: Math.floor(BACKLOG_MIN_AGE_MS / 1000) });
         return [{ subjectId: tenantId, decide: (ctx) => evalNormalizeBacklog({ stuck: total }, ctx) }];
       }
+      case 'project.storage_warn':
+      case 'project.storage_critical':
+      case 'project.storage_locked':
+      case 'hub.storage_near_full':
+        return []; // luật sự kiện (QT6) — không có đầu vào ở evaluator
       default: {
         const never: never = rule;
         throw new Error(`Luật chưa có đầu vào: ${String(never)}`);
@@ -495,6 +502,14 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
     if (want.length === 0) return;
     const hadOpen = new Set(await repo.findAlertEmailUserIds(alert.id, 'OPEN'));
     await repo.enqueueAlertEmails(alert.id, 'RESOLVED', want.filter((u) => hadOpen.has(u)));
+  }
+
+  /**
+   * Báo một lần đổi trạng thái: metric + log + PUBLISH realtime (sau COMMIT). Công khai cho QT6 (StorageAlerts mở/đóng
+   * luật dung lượng theo sự kiện) — DÙNG CHUNG kết nối Redis lười của evaluator (giới hạn kết nối Upstash, ADR-062).
+   */
+  announce(alert: AlertRow, rule: AlertRuleCode, to: 'OPEN' | 'RESOLVED') {
+    this.transitioned(alert, rule, to);
   }
 
   private transitioned(alert: AlertRow, rule: AlertRuleCode, to: 'OPEN' | 'RESOLVED') {

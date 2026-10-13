@@ -150,7 +150,7 @@ describe('CB2 AlertEvaluator (đi dây, repo giả)', () => {
     const [channel, body] = redis.publish.mock.calls[0];
     expect(channel).toBe(ALERT_REALTIME_CHANNEL);
     // không facts thô
-    expect(JSON.parse(body)).toEqual({ id: auth(w)[0].id, tenantId: T, rule: 'destination.auth_rejected', severity: 'critical', state: 'OPEN', titleKey: 'alerts.rules.destination.auth_rejected.title' });
+    expect(JSON.parse(body)).toEqual({ id: auth(w)[0].id, tenantId: T, rule: 'destination.auth_rejected', severity: 'critical', state: 'OPEN', titleKey: 'alerts.rules.destination.auth_rejected.title', audience: 'operator' });
     // op-2 mute project -> không email; op-1 có
     expect(w.emails).toEqual([{ alertId: auth(w)[0].id, userId: 'op-1', kind: 'OPEN' }]);
     expect(await metricValue(alertTransitions as any, { rule: 'destination.auth_rejected', to: 'OPEN' })).toBe(before + 1);

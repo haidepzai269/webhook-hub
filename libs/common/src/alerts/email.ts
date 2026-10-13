@@ -40,6 +40,12 @@ const EMAIL_TEXT: Record<AlertTextLocale, Record<string, string>> = {
     'email.footer':
       'Bạn nhận thư này vì là người vận hành Webhook Hub và đã bật "Gửi cảnh báo về email của tôi". Tối đa 6 email mỗi giờ, phần vượt được gộp vào thư kế tiếp.',
     'email.timezone': 'giờ Việt Nam',
+    'email.tag.reminder': 'NHẮC',
+    'email.cta.storage': 'Mở trang Dung lượng',
+    'email.storage.auto-clean': 'Bật dọn tự động',
+    'email.settings.owner': 'Tắt email 70% và 85% ở trang Dung lượng (email 95% và khi khoá không tắt được)',
+    'email.footer.owner':
+      'Bạn nhận thư này vì là chủ (owner) của dự án. Số liệu dung lượng là ước tính. Tối đa 6 email mỗi giờ, phần vượt được gộp vào thư kế tiếp.',
   },
   en: {
     'email.tag.resolved': 'RESOLVED',
@@ -62,6 +68,12 @@ const EMAIL_TEXT: Record<AlertTextLocale, Record<string, string>> = {
     'email.footer':
       'You get this email because you operate this Webhook Hub and turned on "Email alerts to me". At most 6 emails per hour; the rest are rolled into the next email.',
     'email.timezone': 'Vietnam time',
+    'email.tag.reminder': 'REMINDER',
+    'email.cta.storage': 'Open the Storage page',
+    'email.storage.auto-clean': 'Turn on auto-clean',
+    'email.settings.owner': 'Turn off the 70% and 85% emails on the Storage page (95% and locked emails cannot be turned off)',
+    'email.footer.owner':
+      'You get this email because you own this project. Storage numbers are estimates. At most 6 emails per hour; the rest are rolled into the next email.',
   },
 };
 
@@ -79,6 +91,10 @@ export interface AlertEmailInput {
   now?: Date;
   /** Email thử từ Cài đặt: tiêu đề có [TEST] + dòng nói rõ không có sự cố thật. */
   test?: boolean;
+  /** QT6 (E3): người nhận là owner (thư dung lượng) — chân thư + link tắt khác operator. Mặc định operator. */
+  audience?: 'owner' | 'operator';
+  /** QT6 (§3): thư NHẮC hằng ngày ở 95% / đã khoá — tiêu đề có [NHẮC]. */
+  reminder?: boolean;
 }
 
 export interface AlertEmail {
@@ -106,6 +122,14 @@ export function alertConsoleLink(webUrl: string, a: { rule: string }, projectId:
 export function alertSettingsLink(webUrl: string): string {
   return `${consoleBase(webUrl)}/dashboard/settings`;
 }
+
+/** QT6: trang Dung lượng của ĐÚNG project (luật `project.storage_*`) — nơi dọn, bật dọn tự động, tắt email 70/85. */
+export function storageConsoleLink(webUrl: string, projectId: string, anchor?: string): string {
+  const p = new URLSearchParams({ project: projectId });
+  return `${consoleBase(webUrl)}/dashboard/storage?${p.toString()}${anchor ? `#${anchor}` : ''}`;
+}
+
+const isStorageRule = (rule: string) => rule.startsWith('project.storage_');
 
 const dateFmt = new Map<string, Intl.DateTimeFormat>();
 function formatDateTime(at: Date, locale: AlertTextLocale): string {
@@ -138,7 +162,7 @@ export function renderAlertEmail(input: AlertEmailInput): AlertEmail {
   const now = (input.now ?? new Date()).getTime();
   const txt = buildAlertText(alert, t, { locale, now, subjectName: input.subjectName ?? null, timeZone: ALERT_EMAIL_TIME_ZONE });
   const sev = alert.severity.toUpperCase();
-  const tag = input.test ? `[${t('email.tag.test')}]` : '';
+  const tag = input.test ? `[${t('email.tag.test')}]` : input.reminder ? `[${t('email.tag.reminder')}]` : '';
   const state = kind === 'RESOLVED' ? `[${t('email.tag.resolved')}]` : `[${sev}]`;
   const subject = `[Webhook Hub]${tag}${state}[${project.slug}] ${txt.title}`.replace(/[\r\n]+/g, ' ');
 
@@ -158,8 +182,15 @@ export function renderAlertEmail(input: AlertEmailInput): AlertEmail {
   const lead = kind === 'RESOLVED' ? t('email.resolved.lead') : null;
   const rollup = input.rollup && input.rollup > 0 ? t('email.rollup', { count: input.rollup }) : null;
   const banner = input.test ? t('email.test.banner') : null;
-  const link = alertConsoleLink(input.webUrl, alert, project.id);
-  const settings = alertSettingsLink(input.webUrl);
+  const storage = isStorageRule(alert.rule);
+  const owner = input.audience === 'owner';
+  const link = storage ? storageConsoleLink(input.webUrl, project.id) : alertConsoleLink(input.webUrl, alert, project.id);
+  const settings = owner ? storageConsoleLink(input.webUrl, project.id, 'email') : alertSettingsLink(input.webUrl);
+  const settingsText = owner ? t('email.settings.owner') : t('email.settings');
+  const footer = owner ? t('email.footer.owner') : t('email.footer');
+  const cta = storage ? t('email.cta.storage') : t('email.cta');
+  // §3: thư ở nấc 70% có thêm link "Bật dọn tự động".
+  const autoClean = storage && kind === 'OPEN' && alert.facts?.level === 'WARN_70' ? storageConsoleLink(input.webUrl, project.id, 'auto-clean') : null;
   const color = kind === 'RESOLVED' ? '#15803d' : alert.severity === 'critical' ? '#b91c1c' : '#b45309';
 
   const html = [
@@ -174,9 +205,10 @@ export function renderAlertEmail(input: AlertEmailInput): AlertEmail {
     ...rows.map(([k, v]) => `<tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:6px 0">${esc(v)}</td></tr>`),
     `</table>`,
     rollup ? `<p style="margin-top:16px;font-weight:600">${esc(rollup)}</p>` : '',
-    `<p style="margin:20px 0"><a href="${esc(link)}" style="background:${color};color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;display:inline-block">${esc(t('email.cta'))}</a></p>`,
-    `<p style="font-size:12px;color:#666"><a href="${esc(settings)}">${esc(t('email.settings'))}</a></p>`,
-    `<p style="font-size:12px;color:#666">${esc(t('email.footer'))}</p>`,
+    `<p style="margin:20px 0"><a href="${esc(link)}" style="background:${color};color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;display:inline-block">${esc(cta)}</a></p>`,
+    autoClean ? `<p><a href="${esc(autoClean)}">${esc(t('email.storage.auto-clean'))}</a></p>` : '',
+    `<p style="font-size:12px;color:#666"><a href="${esc(settings)}">${esc(settingsText)}</a></p>`,
+    `<p style="font-size:12px;color:#666">${esc(footer)}</p>`,
     `</div>`,
   ]
     .filter(Boolean)
@@ -191,10 +223,11 @@ export function renderAlertEmail(input: AlertEmailInput): AlertEmail {
     ...rows.map(([k, v]) => `${k}: ${v}`),
     ...(rollup ? ['', rollup] : []),
     '',
-    `${t('email.cta')}: ${link}`,
-    `${t('email.settings')}: ${settings}`,
+    `${cta}: ${link}`,
+    ...(autoClean ? [`${t('email.storage.auto-clean')}: ${autoClean}`] : []),
+    `${settingsText}: ${settings}`,
     '',
-    t('email.footer'),
+    footer,
     '— Webhook Hub',
   ].join('\n');
 

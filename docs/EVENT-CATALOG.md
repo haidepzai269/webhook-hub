@@ -119,6 +119,7 @@ Standard Webhooks, polling): `source = "hub"`, `sourceId = null` (subscription l
 
 | Kiểu | Khi nào | `data` |
 |---|---|---|
+| `hub.project.storage` | Project **đổi nấc** dung lượng (`OK` / `WARN_70` / `WARN_85` / `CRITICAL_95` / `LOCKED` / `HARD_LOCKED`), lên hay xuống — đúng **một** event mỗi lần đổi, vẫn phát khi `LOCKED` (ADR-182/190) | `level`, `previousLevel` (≠ `level`), `usedBytes`, `quotaBytes`, `forecastHours` (số \| null), `suggestion` (một phần tử khuôn `suggestions[]` dưới đây — gợi ý giải phóng nhiều nhất — hoặc null), `lockEnabled` (false = hệ thống chưa bật khoá, `LOCKED` vẫn nhận event) |
 | `hub.project.cleanup_suggested` | Nấc dung lượng đi lên (kể cả `LOCKED`); hoặc tổng byte gợi ý đổi ≥ 10% hạn mức so với lần phát trước và lần trước cũ hơn 24h. Không phát khi `OK` và không có gợi ý | `level`, `usedBytes`, `quotaBytes`, `forecastHours` (số \| null), `suggestions[]` |
 
 Phần tử `suggestions[]` (mọi khoá luôn có mặt): `id` (`sug_` + 24 hex, xác định từ advisor/mức/hành động/tuổi/source — cùng

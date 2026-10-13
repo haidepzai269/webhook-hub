@@ -81,6 +81,23 @@ export const FLAP_SUPPRESS_MS = 30 * MIN;
 
 export type AlertSeverity = 'critical' | 'warning' | 'info';
 export type AlertSubjectType = 'destination' | 'source' | 'project';
+/**
+ * QT6 (SPEC-han-muc-dung-luong E3, ADR-189 c / ADR-190): AI thấy cảnh báo. Mặc định `operator` (mọi luật CB giữ như cũ).
+ * `owners+operator`: owner của CHÍNH project đó cũng thấy (API lọc, room `project:<id>:owners`, email) — chỉ `project.storage_*`.
+ */
+export type AlertAudience = 'operator' | 'owners+operator';
+/**
+ * Ai mở/đóng luật: `evaluator` = AlertEvaluator đánh giá mỗi 60s (luật CB). `event` = luật do SỰ KIỆN mở/đóng — nấc dung
+ * lượng đổi (StorageAlerts, cùng transaction với dấu "đã báo") và chốt ổ toàn cục — evaluator KHÔNG đụng tới.
+ */
+export type AlertDriver = 'evaluator' | 'event';
+
+interface AlertRuleMeta {
+  severity: AlertSeverity;
+  subjectType: AlertSubjectType;
+  audience?: AlertAudience;
+  driver?: AlertDriver;
+}
 
 export const ALERT_RULES = {
   'destination.auth_rejected': { severity: 'critical', subjectType: 'destination' },
@@ -92,10 +109,34 @@ export const ALERT_RULES = {
   'source.connection_broken': { severity: 'critical', subjectType: 'source' },
   'source.silent': { severity: 'warning', subjectType: 'source' },
   'normalize.backlog': { severity: 'warning', subjectType: 'project' },
-} as const satisfies Record<string, { severity: AlertSeverity; subjectType: AlertSubjectType }>;
+  // QT6 (SPEC-han-muc-dung-luong §3 + E3): một luật cho MỖI họ nấc — WARN_70/WARN_85 chung `storage_warn` (facts.level nói
+  // nấc nào), LOCKED/HARD_LOCKED chung `storage_locked`. Mở/đóng theo nấc trong StorageAlerts, không qua evaluator.
+  'project.storage_warn': { severity: 'warning', subjectType: 'project', audience: 'owners+operator', driver: 'event' },
+  'project.storage_critical': { severity: 'critical', subjectType: 'project', audience: 'owners+operator', driver: 'event' },
+  'project.storage_locked': { severity: 'critical', subjectType: 'project', audience: 'owners+operator', driver: 'event' },
+  // §6 (ADR-185/190): ổ Postgres chung vượt 80% DB_DISK_BUDGET_MB — cảnh báo VẬN HÀNH, không thuộc project nào. Bảng alerts
+  // bắt buộc tenant_id -> neo vào project lâu đời nhất (ổn định giữa các lượt); facts nêu các project dùng nhiều nhất.
+  'hub.storage_near_full': { severity: 'critical', subjectType: 'project', audience: 'operator', driver: 'event' },
+} as const satisfies Record<string, AlertRuleMeta>;
 
 export type AlertRuleCode = keyof typeof ALERT_RULES;
 export const ALERT_RULE_CODES = Object.keys(ALERT_RULES) as AlertRuleCode[];
+
+/** Người thấy của một luật (mặc định `operator`). Mã lạ -> `operator` (an toàn: owner không thấy thứ chưa khai). */
+export function ruleAudience(rule: string): AlertAudience {
+  const m = (ALERT_RULES as Record<string, AlertRuleMeta>)[rule];
+  return m?.audience ?? 'operator';
+}
+
+/** Luật mà owner (không phải operator) được thấy — API lọc `rule IN ownerVisibleRules()`, không thêm cột vào `alerts`. */
+export function ownerVisibleRules(): AlertRuleCode[] {
+  return ALERT_RULE_CODES.filter((c) => ruleAudience(c) === 'owners+operator');
+}
+
+/** Luật AlertEvaluator đánh giá mỗi lượt (luật `event` do nơi khác mở/đóng — evaluator không được đóng nhầm chúng). */
+export const EVALUATED_RULE_CODES: AlertRuleCode[] = ALERT_RULE_CODES.filter(
+  (c) => ((ALERT_RULES as Record<string, AlertRuleMeta>)[c].driver ?? 'evaluator') === 'evaluator',
+);
 
 /** Mặc định khi bật email (§3.2): mọi luật `critical`. */
 export const DEFAULT_EMAIL_RULES: AlertRuleCode[] = ALERT_RULE_CODES.filter((c) => ALERT_RULES[c].severity === 'critical');

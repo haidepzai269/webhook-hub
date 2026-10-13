@@ -19,7 +19,7 @@ import {
   toastsToDismiss,
 } from "@/lib/alerts/notify-logic";
 import { loadSubjectNames, useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
-import { useIsOperator } from "@/lib/hub/me-store";
+import { useCanSeeAlerts } from "@/lib/hub/me-store";
 import { subscribeHubSocket } from "@/lib/hub/socket";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -35,7 +35,7 @@ import { useAlertText, useAlertUiStore, useOpenAlertTarget } from "./alert-ui";
  * Toàn bộ quyết định là hàm thuần ở lib/alerts/notify-logic.ts (test CB:T15).
  */
 export function AlertNotifier() {
-  const operator = useIsOperator();
+  const operator = useCanSeeAlerts(); // QT6 (E3): owner cũng nhận banner/toast cảnh báo dung lượng
   const feed = useOpenAlertFeed();
   const setBanner = useAlertUiStore((s) => s.setBanner);
   const nextExpiry = useAlertUiStore((s) => bannerNextExpiry(s.banner));

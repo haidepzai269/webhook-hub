@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { alertActions } from "@/lib/alerts/links";
 import { type BannerEntry, bannerAck, bannerAdd, bannerAnnounceKey, bannerMotion, selectBanner } from "@/lib/alerts/notify-logic";
 import { useAckAlert, useSubjectNames } from "@/lib/hub/alert-queries";
-import { useIsOperator } from "@/lib/hub/me-store";
+import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useT } from "@/lib/i18n/use-t";
 
 import { ProjectChip, SeverityIcon, useAlertText, useAlertUiStore, useOpenAlertTarget, usePrefersReducedMotion } from "./alert-ui";
@@ -22,7 +22,7 @@ import { ProjectChip, SeverityIcon, useAlertText, useAlertUiStore, useOpenAlertT
  * Chỉ critical nhận qua `alert.changed` TRONG PHIÊN mới vào đây (AlertNotifier) — tải trang không bật banner cũ.
  */
 export function AlertBanner() {
-  const operator = useIsOperator();
+  const operator = useCanSeeAlerts(); // QT6: operator hoặc owner
   const banner = useAlertUiStore((s) => s.banner);
   const { primary, more } = selectBanner(banner);
   const reduced = usePrefersReducedMotion();
@@ -92,6 +92,7 @@ function BannerBody({ entry, more }: { entry: BannerEntry; more: number }) {
   const t = useT();
   const text = useAlertText();
   const open = useOpenAlertTarget();
+  const isOperator = useIsOperator(); // QT6: "Đã xem" (ack) chỉ operator
   const ack = useAckAlert();
   const setBanner = useAlertUiStore((s) => s.setBanner);
   const setBellOpen = useAlertUiStore((s) => s.setBellOpen);
@@ -136,6 +137,7 @@ function BannerBody({ entry, more }: { entry: BannerEntry; more: number }) {
                 className="hover:bg-black/5 dark:hover:bg-white/10"
                 style={{ color: "inherit" }}
                 disabled={ack.isPending}
+                hidden={!isOperator}
                 onClick={() => {
                   setBanner((b) => bannerAck(b, a.id));
                   // Review L5: ack lỗi -> báo lỗi và trả banner về (không được im lặng mất cảnh báo critical).

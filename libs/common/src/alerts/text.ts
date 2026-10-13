@@ -80,6 +80,37 @@ const VI = {
   "alerts.rule.normalize.backlog.message": "Đã nhận và lưu an toàn nhưng quá 10 phút chưa chuẩn hoá, nên chưa được giao.",
   "alerts.rule.normalize.backlog.fix": "Kiểm tra tiến trình worker, rồi bấm Chuẩn hoá lại ở trang Hành trình sự kiện.",
   "alerts.rule.unknown.title": "Cảnh báo {rule}",
+  "alerts.rule.project.storage-warn.name": "Dung lượng sắp đầy",
+  "alerts.rule.project.storage-warn.title": "Dự án đã dùng {pct}% dung lượng (ước tính)",
+  "alerts.rule.project.storage-critical.name": "Dung lượng sắp khoá (95%)",
+  "alerts.rule.project.storage-critical.title": "Dung lượng {pct}% — sắp ngừng nhận sự kiện",
+  "alerts.rule.project.storage-locked.name": "Dự án đã đầy dung lượng",
+  "alerts.rule.project.storage-locked.title": "Dự án đã đầy dung lượng ({pct}%)",
+  "alerts.rule.project.storage-locked.title.hard": "Dự án đã vượt trần cứng 110% ({pct}%)",
+  "alerts.storage.usage": "Đang dùng ~{used} / {quota} (ước tính).",
+  "alerts.storage.forecast": "Còn ~{hours} giờ trước khi khoá theo tốc độ 24 giờ qua.",
+  "alerts.storage.suggestion": "Hub gợi ý: {action} mức {importance} cũ hơn {olderThan} — giải phóng ~{size}.",
+  "alerts.storage.locked": "Dự án đã ngừng nhận sự kiện mới, trừ các nguồn Giữ lâu (còn nhận tới 110%). Nhà cung cấp sẽ gửi lại trong một thời gian rồi bỏ.",
+  "alerts.storage.hard-locked": "Dự án đã ngừng nhận mọi sự kiện mới. Nhà cung cấp sẽ gửi lại trong một thời gian rồi bỏ.",
+  "alerts.storage.lock-off": "Đã vượt hạn mức. Khoá chưa bật trên hệ thống này, sự kiện vẫn được nhận.",
+  "alerts.storage.auto-clean-on": "Đang bật dọn tự động.",
+  "alerts.storage.auto-clean-off": "Dọn tự động đã cài nhưng chưa chạy (người vận hành chưa bật).",
+  "alerts.storage.action.trim": "Dọn",
+  "alerts.storage.action.delete": "Xoá hẳn",
+  "alerts.storage.importance.junk": "Rác",
+  "alerts.storage.importance.low": "Thấp",
+  "alerts.storage.importance.medium": "Trung bình",
+  "alerts.rule.project.storage-warn.fix":
+    "Mở trang Dung lượng: dọn theo gợi ý, bật dọn tự động, hoặc gắn \"Giữ lâu\" cho nguồn quan trọng.",
+  "alerts.rule.project.storage-critical.fix":
+    "Dọn theo gợi ý ở trang Dung lượng (Dọn giữ chống trùng; Xoá hẳn mất chống trùng), hoặc liên hệ người vận hành để tăng hạn mức.",
+  "alerts.rule.project.storage-locked.fix":
+    "Dọn theo gợi ý ở trang Dung lượng để mở lại (mở khi dưới 90%), hoặc liên hệ người vận hành. Chưa có gói trả phí.",
+  "alerts.rule.hub.storage-near-full.name": "Ổ dữ liệu chung sắp đầy",
+  "alerts.rule.hub.storage-near-full.title": "Ổ Postgres chung đã dùng {pct}% ngân sách",
+  "alerts.rule.hub.storage-near-full.message": "{size} / {budget} (DB_DISK_BUDGET_MB). Mọi dự án dùng chung ổ này; tổng hạn mức được cấp vượt.",
+  "alerts.rule.hub.storage-near-full.fix":
+    "Xem cột mức sử dụng ở danh sách dự án, nhắc dự án dùng nhiều nhất dọn, hoặc hạ hạn mức của họ.",
   "alerts.unit.seconds": "{n} giây",
   "alerts.unit.minutes": "{n} phút",
   "alerts.unit.hours": "{n} giờ",
@@ -160,6 +191,35 @@ const EN: { [K in keyof typeof VI]: string } = {
     "Received and stored safely, but not normalized for over 10 minutes, so not delivered yet.",
   "alerts.rule.normalize.backlog.fix": "Check the worker process, then click Re-normalize on the Event journeys page.",
   "alerts.rule.unknown.title": "Alert {rule}",
+  "alerts.rule.project.storage-warn.name": "Storage filling up",
+  "alerts.rule.project.storage-warn.title": "Project uses {pct}% of its storage (estimate)",
+  "alerts.rule.project.storage-critical.name": "Storage about to lock (95%)",
+  "alerts.rule.project.storage-critical.title": "Storage at {pct}% — about to stop accepting events",
+  "alerts.rule.project.storage-locked.name": "Project storage full",
+  "alerts.rule.project.storage-locked.title": "Project storage is full ({pct}%)",
+  "alerts.rule.project.storage-locked.title.hard": "Project passed the 110% hard limit ({pct}%)",
+  "alerts.storage.usage": "Using ~{used} / {quota} (estimate).",
+  "alerts.storage.forecast": "About {hours} h left before locking at the last 24 h rate.",
+  "alerts.storage.suggestion": "Hub suggests: {action} {importance} older than {olderThan} — frees ~{size}.",
+  "alerts.storage.locked": "The project stopped accepting new events, except Keep-longer sources (accepted up to 110%). Providers retry for a while, then give up.",
+  "alerts.storage.hard-locked": "The project stopped accepting all new events. Providers retry for a while, then give up.",
+  "alerts.storage.lock-off": "Over quota. Locking is not enabled on this system, events are still accepted.",
+  "alerts.storage.auto-clean-on": "Auto-clean is on.",
+  "alerts.storage.auto-clean-off": "Auto-clean is set up but not running (the operator has not enabled it).",
+  "alerts.storage.action.trim": "Trim",
+  "alerts.storage.action.delete": "Delete",
+  "alerts.storage.importance.junk": "junk",
+  "alerts.storage.importance.low": "low",
+  "alerts.storage.importance.medium": "medium",
+  "alerts.rule.project.storage-warn.fix": "Open the Storage page: clean up as suggested, turn on auto-clean, or mark important sources Keep longer.",
+  "alerts.rule.project.storage-critical.fix":
+    "Clean up as suggested on the Storage page (Trim keeps de-duplication; Delete loses it), or ask the operator to raise the quota.",
+  "alerts.rule.project.storage-locked.fix":
+    "Clean up as suggested on the Storage page to unlock (unlocks below 90%), or contact the operator. There are no paid plans.",
+  "alerts.rule.hub.storage-near-full.name": "Shared database disk filling up",
+  "alerts.rule.hub.storage-near-full.title": "Shared Postgres disk at {pct}% of budget",
+  "alerts.rule.hub.storage-near-full.message": "{size} / {budget} (DB_DISK_BUDGET_MB). All projects share this disk; quotas are overcommitted.",
+  "alerts.rule.hub.storage-near-full.fix": "Check the usage column in the project list, ask the heaviest projects to clean up, or lower their quota.",
   "alerts.unit.seconds": "{n} s",
   "alerts.unit.minutes": "{n} min",
   "alerts.unit.hours": "{n} h",
@@ -312,6 +372,38 @@ export function failingFixKey(byClass: unknown): string {
 
 const join = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(' ');
 
+/** Byte -> "12.3 MB" (số liệu dung lượng luôn là ƯỚC TÍNH — câu tự ghi). */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '?';
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/**
+ * QT6 (§3): nội dung cảnh báo dung lượng — mức dùng (ƯỚC TÍNH), dự báo, gợi ý dọn của hub (kèm MB), trạng thái dọn tự
+ * động ở nấc cảnh báo; ở nấc khoá nói THẬT khi `STORAGE_LOCK_ENABLED=0` (E5: "Khoá chưa bật…, event vẫn được nhận").
+ */
+function storageMessage(rule: string, f: Record<string, unknown>, t: AlertTextT): string {
+  const used = num(f.usedBytes);
+  const quota = num(f.quotaBytes);
+  const hours = num(f.forecastHours);
+  const sug = f.suggestion && typeof f.suggestion === 'object' ? (f.suggestion as Record<string, unknown>) : null;
+  const sugBytes = sug ? num(sug.estimatedBytes) : null;
+  const imp = sug && Array.isArray(sug.importance) ? (sug.importance as unknown[]).map((i) => t(`alerts.storage.importance.${String(i)}`)).join(', ') : '';
+  const locked = rule === 'project.storage_locked';
+  const lockLine = locked ? (f.lockEnabled === false ? t('alerts.storage.lock-off') : t(f.level === 'HARD_LOCKED' ? 'alerts.storage.hard-locked' : 'alerts.storage.locked')) : null;
+  return join(
+    lockLine,
+    used !== null && quota !== null ? t('alerts.storage.usage', { used: formatBytes(used), quota: formatBytes(quota) }) : null,
+    !locked && hours !== null ? t('alerts.storage.forecast', { hours: Math.max(0, Math.round(hours)) }) : null,
+    sug && sugBytes !== null && sugBytes > 0
+      ? t('alerts.storage.suggestion', { action: t(`alerts.storage.action.${String(sug.action)}`), importance: imp, olderThan: String(sug.olderThan ?? ''), size: formatBytes(sugBytes) })
+      : null,
+    rule === 'project.storage_warn' ? t(f.autoCleanEnabled === true ? 'alerts.storage.auto-clean-on' : 'alerts.storage.auto-clean-off') : null,
+  );
+}
+
 /**
  * Dựng câu cho một cảnh báo. Thiếu số liệu thì câu gọn hơn chứ không in "undefined"; luật lạ (server mới hơn web)
  * -> tiêu đề chung có mã luật, không vỡ trang.
@@ -403,6 +495,24 @@ export function buildAlertText(a: AlertLike, t: AlertTextT, ctx: AlertTextContex
       title = t('alerts.rule.normalize.backlog.title', { count: num(f.count) ?? '?' });
       message = t('alerts.rule.normalize.backlog.message');
       fix = t('alerts.rule.normalize.backlog.fix');
+      break;
+    }
+    case 'project.storage_warn':
+    case 'project.storage_critical':
+    case 'project.storage_locked': {
+      const pct = num(f.pct);
+      const hard = a.rule === 'project.storage_locked' && f.level === 'HARD_LOCKED';
+      title = t(ruleKey(a.rule, hard ? 'title.hard' : 'title'), { pct: pct ?? '?' });
+      message = storageMessage(a.rule, f, t);
+      fix = t(ruleKey(a.rule, 'fix'));
+      break;
+    }
+    case 'hub.storage_near_full': {
+      const size = num(f.sizeBytes);
+      const budget = num(f.budgetBytes);
+      title = t('alerts.rule.hub.storage-near-full.title', { pct: num(f.pct) ?? '?' });
+      message = size !== null && budget !== null ? t('alerts.rule.hub.storage-near-full.message', { size: formatBytes(size), budget: formatBytes(budget) }) : '';
+      fix = t('alerts.rule.hub.storage-near-full.fix');
       break;
     }
     default:

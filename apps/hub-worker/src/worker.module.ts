@@ -7,6 +7,7 @@ import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
 import { StorageJob } from './scheduler/storage.job';
 import { StorageCleanRunner } from './scheduler/storage-clean.runner';
+import { StorageAlerts } from './scheduler/storage-alerts';
 import { AlertEvaluator } from './scheduler/alert.evaluator';
 import { AlertEmailSender } from './scheduler/alert-email.sender';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
@@ -19,6 +20,7 @@ const PROVIDERS = [
   DeliverySweeper,
   CleanupJob,
   StorageJob, // QT2 (ADR-183): đo dung lượng project — cập nhật nấc 60s + hiệu chỉnh 24h, khoá Redis như cleanup
+  StorageAlerts, // QT6 (ADR-190): cảnh báo dung lượng owner+operator — cắm vào StorageJob, không job mới
   StorageCleanRunner, // QT4 (ADR-184): chạy lệnh dọn theo lô (SKIP LOCKED + lease, 0 lệnh Redis)
   AlertEvaluator,
   AlertEmailSender, // CB5: vòng gửi email cảnh báo (outbox theo người) — tách khỏi evaluator

@@ -47,11 +47,19 @@ const LATER = new Date(NOW.getTime() + CALM_MIN_SPACING_MS);
 const attempts = (statuses: (number | null)[]): AttemptSample[] => statuses.map((status, i) => ({ status, at: ago((i + 1) * MIN) }));
 
 describe('CB1 luật cảnh báo (libs/common/src/alerts/rules.ts)', () => {
-  it('danh mục: 9 luật §4, mức + loại đối tượng; email mặc định = mọi critical', () => {
-    expect(ALERT_RULE_CODES).toHaveLength(9);
+  it('danh mục: 9 luật §4 + 4 luật dung lượng QT6 (ADR-190), mức + loại đối tượng; email mặc định = mọi critical', () => {
+    expect(ALERT_RULE_CODES).toHaveLength(13);
     expect(ALERT_RULES['destination.auth_rejected']).toEqual({ severity: 'critical', subjectType: 'destination' });
     expect(ALERT_RULES['delivery.dead_spike'].subjectType).toBe('project');
-    expect(DEFAULT_EMAIL_RULES.sort()).toEqual(['delivery.dead_spike', 'destination.auth_rejected', 'source.connection_broken', 'source.signature_failing']);
+    expect(DEFAULT_EMAIL_RULES.sort()).toEqual([
+      'delivery.dead_spike',
+      'destination.auth_rejected',
+      'hub.storage_near_full',
+      'project.storage_critical',
+      'project.storage_locked',
+      'source.connection_broken',
+      'source.signature_failing',
+    ]);
   });
 
   it('[CB:T1] (phần a) destination.auth_rejected: 2×401 không mở, 3× (401/403 trộn) mở kèm facts; ngoài 30 phút / bị chuỗi cắt không tính; đóng khi 2xx hoặc 30 phút im', () => {

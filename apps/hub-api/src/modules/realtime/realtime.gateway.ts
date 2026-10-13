@@ -29,6 +29,12 @@ const tenantRoom = (tenantId: string) => `${ROOM_PREFIX}${tenantId}`;
  */
 const OPS_SUFFIX = ':ops';
 export const opsRoom = (tenantId: string) => `${tenantRoom(tenantId)}${OPS_SUFFIX}`;
+/**
+ * QT6 (E3, ADR-190): room CHỈ owner của MỘT project — `alert.changed` của luật audience `owners+operator` (cảnh báo dung
+ * lượng) emit THÊM vào đây. Vai trò kiểm lúc join (DB) và R-3 quét lại: mất vai trò owner -> rời room, không ngắt socket.
+ */
+const OWNERS_SUFFIX = ':owners';
+export const ownersRoom = (tenantId: string) => `${tenantRoom(tenantId)}${OWNERS_SUFFIX}`;
 
 /** Kênh Redis (từ hub-worker) -> tên sự kiện Socket.IO. Chặng ở hub-api KHÔNG đi qua đây (in-process). */
 export const REALTIME_CHANNELS: Record<string, string> = {
@@ -130,7 +136,7 @@ export class RealtimeGateway
       if (!this.server) return;
       const rooms = this.server.sockets.adapter.rooms;
       for (const [room] of rooms) {
-        if (!room.startsWith(ROOM_PREFIX) || room.endsWith(OPS_SUFFIX)) continue;
+        if (!room.startsWith(ROOM_PREFIX) || room.endsWith(OPS_SUFFIX) || room.endsWith(OWNERS_SUFFIX)) continue;
         const tenantId = room.slice(ROOM_PREFIX.length);
         this.server.to(room).emit('metrics.tick', computeTick(this.counters.get(tenantId)));
       }
@@ -175,7 +181,9 @@ export class RealtimeGateway
     }
     if (eventName === 'alert.changed') {
       // M1: chỉ socket của OPERATOR đang mở project này — thành viên thường cùng room project không nhận.
-      this.server.to(opsRoom(tenantId)).emit(eventName, data);
+      // QT6: luật audience `owners+operator` -> cả room owner (một socket ở cả hai room chỉ nhận MỘT lần: Socket.IO gộp room).
+      const rooms = data.audience === 'owners+operator' ? [opsRoom(tenantId), ownersRoom(tenantId)] : [opsRoom(tenantId)];
+      this.server.to(rooms).emit(eventName, data);
       return; // không đụng bộ đếm metrics.tick
     }
     this.server.to(tenantRoom(tenantId)).emit(eventName, data);
@@ -211,7 +219,16 @@ export class RealtimeGateway
         socket.data.userId = claims.sub;
         socket.data.sid = claims.sid;
         socket.data.isOperator = session.user?.isOperator === true; // CB3: từ CHÍNH user của session, không từ vé/client
-        next();
+        // QT6: vai trò owner của project trong vé — từ DB lúc join (room owners). Lỗi đọc -> không vào room (an toàn).
+        return Promise.resolve()
+          .then(() => this.prisma!.identity().findMembershipRole(claims.sub, claims.tid))
+          .then((role) => {
+            socket.data.isOwner = role === 'owner';
+          })
+          .catch(() => {
+            socket.data.isOwner = false;
+          })
+          .then(() => next());
       })
       .catch(() => next(new Error('UNAUTHORIZED')));
   }
@@ -230,7 +247,7 @@ export class RealtimeGateway
     const sids = [...new Set(sockets.map((s) => s.data.sid as string))];
     const pairKeys = new Map<string, { userId: string; projectId: string }>();
     for (const s of sockets) pairKeys.set(`${s.data.userId}:${s.data.tenantId}`, { userId: s.data.userId, projectId: s.data.tenantId });
-    let access: { live: Map<string, { userId: string; isOperator: boolean }>; members: Set<string> };
+    let access: { live: Map<string, { userId: string; isOperator: boolean }>; members: Set<string>; owners?: Set<string> };
     try {
       access = await this.prisma.identity().socketAccess(sids, [...pairKeys.values()], new Date());
     } catch (err) {
@@ -248,6 +265,11 @@ export class RealtimeGateway
         // CB3: mất quyền operator nhưng vẫn là thành viên -> giữ kết nối, chỉ rời room cảnh báo (R-3 không đổi).
         s.data.isOperator = false;
         s.leave(opsRoom(s.data.tenantId));
+      }
+      if (ok && s.data.isOwner && access.owners && !access.owners.has(`${s.data.userId}:${s.data.tenantId}`)) {
+        // QT6 (E3): mất vai trò owner nhưng vẫn là thành viên -> chỉ rời room owners (không ngắt socket).
+        s.data.isOwner = false;
+        s.leave(ownersRoom(s.data.tenantId));
       }
     }
     if (n > 0) logger.info({ disconnected: n, userId: userId ?? null }, 'Realtime: ngắt socket mất phiên / mất quyền (R-3)');
@@ -275,6 +297,7 @@ export class RealtimeGateway
     // Middleware ở afterInit đã kiểm vé + session; tới đây chắc chắn có tenantId (= project của vé)
     client.join(tenantRoom(client.data.tenantId));
     if (client.data.isOperator === true) client.join(opsRoom(client.data.tenantId));
+    if (client.data.isOwner === true) client.join(ownersRoom(client.data.tenantId));
     logger.debug({ clientId: client.id }, 'Client kết nối tới Realtime Gateway');
   }
 

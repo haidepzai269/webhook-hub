@@ -235,6 +235,8 @@ model ProjectMember {
   userId    String     @map("user_id") @db.Uuid
   role      MemberRole
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// QT6 (§8): owner tắt được email dung lượng 70%/85% (không tắt được 95%/LOCKED).
+  storageWarnEmail Boolean @default(true) @map("storage_warn_email")
 
   project Project @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -464,6 +466,8 @@ model ProjectUsage {
   level                 String    @default("OK") @db.VarChar(16)
   notifiedLevel         String?   @map("notified_level") @db.VarChar(16)
   notifiedAt            DateTime? @map("notified_at") @db.Timestamptz(6)
+  /// QT6 (ADR-190): nấc đã báo lần cuối (alert + webhook hub.project.storage + email) — khác `level` = còn nợ một lần báo.
+  signaledLevel         String?   @map("signaled_level") @db.VarChar(16)
   measuredAt            DateTime? @map("measured_at") @db.Timestamptz(6)
 
   project Project @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -716,11 +720,13 @@ model AlertEmail {
   lastError        String?         @map("last_error") @db.VarChar(200)
   suppressedReason String?         @map("suppressed_reason") @db.VarChar(64)
   rolledInto       String?         @map("rolled_into") @db.Uuid
+  /// QT6 (ADR-190): email theo nấc/ngày của cùng cảnh báo (`up:WARN_85:<ngày>`, `remind:LOCKED:<ngày>`); email CB = ''.
+  tag              String          @default("") @db.VarChar(48)
 
   alert Alert @relation(fields: [alertId, tenantId], references: [id, tenantId], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([alertId, userId, kind])
+  @@unique([alertId, userId, kind, tag])
   @@index([userId, createdAt(sort: Desc)])
   @@index([state, createdAt])
   @@map("alert_emails")

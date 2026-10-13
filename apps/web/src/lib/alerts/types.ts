@@ -77,4 +77,6 @@ export interface AlertChangedNotice {
   severity: AlertSeverity;
   state: AlertState;
   titleKey: string;
+  /** QT6 (E3): `owners+operator` = cảnh báo dung lượng (owner cũng nhận, room `project:<id>:owners`). */
+  audience?: "operator" | "owners+operator";
 }

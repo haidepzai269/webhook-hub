@@ -66,6 +66,17 @@ export function alertActions(a: { rule: string; subjectId: string; facts?: Recor
       ];
     case "normalize.backlog":
       return [{ labelKey: "alerts.action.renormalize", href: "/dashboard/events" }];
+    // QT6 (§9): cảnh báo dung lượng -> trang Dung lượng của project (LOCKED: "Dọn theo gợi ý" lên đầu).
+    case "project.storage_warn":
+    case "project.storage_critical":
+      return [{ labelKey: "alerts.action.open-storage", href: "/dashboard/storage" }];
+    case "project.storage_locked":
+      return [
+        { labelKey: "alerts.action.clean-suggested", href: "/dashboard/storage#suggestions" },
+        { labelKey: "alerts.action.open-storage", href: "/dashboard/storage" },
+      ];
+    case "hub.storage_near_full":
+      return [{ labelKey: "alerts.action.open-projects", href: "/dashboard/projects" }];
     default:
       return [];
   }

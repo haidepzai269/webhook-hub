@@ -192,12 +192,14 @@ export class IdentityRepository {
     const members = pairs.length
       ? await this.db.projectMember.findMany({
           where: { OR: pairs.map((p) => ({ userId: p.userId, tenantId: p.projectId })) },
-          select: { userId: true, tenantId: true },
+          select: { userId: true, tenantId: true, role: true },
         })
       : [];
     return {
       live: new Map(sessions.map((s) => [s.id, { userId: s.userId, isOperator: s.user.isOperator }])),
       members: new Set(members.map((m) => `${m.userId}:${m.tenantId}`)),
+      // QT6 (E3): cặp còn là OWNER — R-3 cho socket rời room `project:<id>:owners` khi mất vai trò owner.
+      owners: new Set(members.filter((m) => m.role === 'owner').map((m) => `${m.userId}:${m.tenantId}`)),
     };
   }
 
@@ -208,6 +210,29 @@ export class IdentityRepository {
   async lockAndCountOwnedProjects(userId: string): Promise<number> {
     await this.db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'project-create:' + userId}, 0))`;
     return this.db.projectMember.count({ where: { userId, role: 'owner' } });
+  }
+
+  /**
+   * QT6 (§8, E3): owner của project cho email dung lượng — kèm email đã xác minh + công tắc tắt email 70/85
+   * (`storage_warn_email`). Developer/viewer không bao giờ có ở đây.
+   */
+  async listProjectOwnersForStorageEmail(projectId: string): Promise<{ userId: string; emailVerified: boolean; storageWarnEmail: boolean }[]> {
+    const rows = await this.db.projectMember.findMany({
+      where: { tenantId: projectId, role: 'owner' },
+      select: { userId: true, storageWarnEmail: true, user: { select: { emailVerifiedAt: true } } },
+    });
+    return rows.map((r) => ({ userId: r.userId, emailVerified: !!r.user.emailVerifiedAt, storageWarnEmail: r.storageWarnEmail }));
+  }
+
+  /** QT6/QT7: công tắc email dung lượng 70/85 của CHÍNH một thành viên (owner). Trả số dòng ghi (0 = không phải thành viên). */
+  async setStorageWarnEmail(projectId: string, userId: string, on: boolean): Promise<number> {
+    const r = await this.db.projectMember.updateMany({ where: { tenantId: projectId, userId }, data: { storageWarnEmail: on } });
+    return r.count;
+  }
+
+  async findStorageWarnEmail(projectId: string, userId: string): Promise<boolean | null> {
+    const m = await this.db.projectMember.findUnique({ where: { tenantId_userId: { tenantId: projectId, userId } }, select: { storageWarnEmail: true } });
+    return m ? m.storageWarnEmail : null;
   }
 
   async findMembershipRole(userId: string, projectId: string): Promise<MemberRole | null> {

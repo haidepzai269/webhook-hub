@@ -29,6 +29,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** CB4: chỉ người vận hành hub thấy (vd. Cảnh báo — API `/alerts*` trả 403 operator_required cho người khác). */
   operatorOnly?: boolean;
+  /** QT6 (E3): mục operatorOnly mà owner của ít nhất một project cũng thấy (trang Cảnh báo — chỉ cảnh báo dung lượng). */
+  ownerToo?: boolean;
 }
 
 export interface NavGroup {
@@ -55,7 +57,7 @@ export const sidebarItems: NavGroup[] = [
     items: [
       { id: "dashboard", titleKey: "nav.item.dashboard", url: "/dashboard", icon: LayoutDashboard },
       // CB4 (SPEC-canh-bao-nhan-dinh §8.4): cảnh báo xuyên project — chỉ operator.
-      { id: "alerts", titleKey: "nav.item.alerts", url: "/dashboard/alerts", icon: BellRing, operatorOnly: true },
+      { id: "alerts", titleKey: "nav.item.alerts", url: "/dashboard/alerts", icon: BellRing, operatorOnly: true, ownerToo: true },
     ],
   },
   {

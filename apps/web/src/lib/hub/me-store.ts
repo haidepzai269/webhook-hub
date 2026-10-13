@@ -19,6 +19,14 @@ export function useIsOperator(): boolean {
   return useMeStore((s) => s.me?.user.isOperator === true);
 }
 
+/**
+ * QT6 (SPEC-han-muc-dung-luong E3, ADR-190): ai thấy chuông / banner / toast / trang Cảnh báo — operator (mọi cảnh báo) HOẶC
+ * owner của ít nhất một project (server chỉ trả cảnh báo dung lượng của project họ là owner). Developer/viewer: không.
+ */
+export function useCanSeeAlerts(): boolean {
+  return useMeStore((s) => s.me?.user.isOperator === true || (s.me?.memberships ?? []).some((m) => m.role === "owner"));
+}
+
 export function useMeId(): string | null {
   return useMeStore((s) => s.me?.user.id ?? null);
 }

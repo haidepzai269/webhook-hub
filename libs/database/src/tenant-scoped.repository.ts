@@ -1179,10 +1179,11 @@ export class TenantScopedRepository {
    * dựng trên `tx` để nằm CÙNG transaction đổi trạng thái cảnh báo. Khoá ngoại ghép (alert_id, tenant_id) chặn alert của
    * project khác. Trả số dòng tạo mới.
    */
-  async enqueueAlertEmails(alertId: string, kind: 'OPEN' | 'RESOLVED', userIds: string[]): Promise<number> {
+  async enqueueAlertEmails(alertId: string, kind: 'OPEN' | 'RESOLVED', userIds: string[], tag = ''): Promise<number> {
     if (userIds.length === 0) return 0;
+    // QT6 (ADR-190): `tag` tách email theo nấc/ngày của CÙNG một cảnh báo dung lượng (unique alert, user, kind, tag).
     const r = await this.prisma.alertEmail.createMany({
-      data: [...new Set(userIds)].map((userId) => ({ tenantId: this.tenantId, alertId, userId, kind })),
+      data: [...new Set(userIds)].map((userId) => ({ tenantId: this.tenantId, alertId, userId, kind, tag })),
       skipDuplicates: true,
     });
     return r.count;
@@ -1204,10 +1205,16 @@ export class TenantScopedRepository {
   /** Người đã có dòng outbox `kind` cho cảnh báo này (CB2: email RESOLVED chỉ gửi cho người đã nhận email OPEN). */
   async findAlertEmailUserIds(alertId: string, kind: 'OPEN' | 'RESOLVED'): Promise<string[]> {
     const rows = await this.prisma.alertEmail.findMany({
-      where: { tenantId: this.tenantId, alertId, kind },
+      where: { tenantId: this.tenantId, alertId, kind, tag: '' },
       select: { userId: true },
     });
     return rows.map((r) => r.userId);
+  }
+
+  /** QT6: cảnh báo OPEN của một nhóm luật cho MỘT đối tượng (luật dung lượng — đối tượng = project). */
+  async findOpenAlertsByRules(rules: string[], subjectId: string) {
+    if (rules.length === 0) return [];
+    return this.prisma.alert.findMany({ where: { tenantId: this.tenantId, state: 'OPEN', rule: { in: rules }, subjectId } });
   }
 
   // --- Đầu vào của AlertEvaluator (CB2, SPEC §4/§5.1): mỗi câu một truy vấn tổng hợp, có cửa sổ thời gian + LIMIT ---
@@ -1378,6 +1385,38 @@ export class TenantScopedRepository {
 
   async findProjectUsage() {
     return this.prisma.projectUsage.findUnique({ where: { tenantId: this.tenantId } });
+  }
+
+  /**
+   * QT6 (ADR-190): khoá dòng `project_usage` của project (`FOR UPDATE`) cho luồng "báo" — hai đường báo cùng lúc (lượt nấc
+   * 60s, lô dọn) xếp hàng ở đây, đường sau thấy `signaled_level` đã khớp nên không báo lần hai. Gọi trong `tenantTx`.
+   */
+  async lockProjectUsageForSignal() {
+    const [row] = await this.prisma.$queryRaw<
+      {
+        level: string;
+        signaledLevel: string | null;
+        notifiedLevel: string | null;
+        notifiedAt: Date | null;
+        usedBytes: bigint;
+        bloatFactor: number;
+        suggestions: unknown;
+        calibratedAt: Date | null;
+        measuredAt: Date | null;
+      }[]
+    >(Prisma.sql`
+      SELECT level, signaled_level AS "signaledLevel", notified_level AS "notifiedLevel", notified_at AS "notifiedAt",
+             used_bytes AS "usedBytes", bloat_factor::float8 AS "bloatFactor", suggestions, calibrated_at AS "calibratedAt",
+             measured_at AS "measuredAt"
+      FROM hub.project_usage WHERE tenant_id = ${this.tenantId}::uuid FOR UPDATE`);
+    return row ? { ...row, usedBytes: Number(row.usedBytes), bloatFactor: Number(row.bloatFactor) } : null;
+  }
+
+  /** QT6: ghi dấu "đã báo" + dấu email theo nấc (cùng transaction với alert/webhook/email của lần báo). */
+  async markStorageSignaled(m: { signaledLevel: string; notifiedLevel: string | null; notifiedAt: Date | null }): Promise<void> {
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE hub.project_usage SET signaled_level = ${m.signaledLevel}, notified_level = ${m.notifiedLevel}, notified_at = ${m.notifiedAt}
+      WHERE tenant_id = ${this.tenantId}::uuid`);
   }
 
   /**

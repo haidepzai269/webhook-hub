@@ -54,14 +54,18 @@ describe('[CB:T10] (phần a) chỉ operator: /alerts* và /me/alert-preferences
     expect((await bodyOf(() => g.canActivate(ctxOf({ kind: 'key', id: 'k', tenantId: A, scopes: [] })))).status).toBe(401);
   });
 
-  it('mọi route của AlertsController (alerts, summary, ack, ack-all, me/alert-preferences GET/PUT) chạy SessionGuard rồi OperatorGuard; /me/locale chỉ SessionGuard', () => {
-    expect(Reflect.getMetadata(GUARDS_METADATA, AlertsController)).toEqual([SessionGuard, OperatorGuard]);
+  it('AlertsController: SessionGuard ở lớp; ack, ack-all, me/alert-preferences* thêm OperatorGuard; QT6: GET alerts/summary lọc theo quyền trong handler (owner thấy cảnh báo dung lượng); /me/locale chỉ SessionGuard', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, AlertsController)).toEqual([SessionGuard]);
     const routes = Object.getOwnPropertyNames(AlertsController.prototype)
       .filter((n) => n !== 'constructor' && Reflect.getMetadata(METHOD_METADATA, (AlertsController.prototype as any)[n]) !== undefined)
       .map((n) => Reflect.getMetadata(PATH_METADATA, (AlertsController.prototype as any)[n]));
     expect(routes.sort()).toEqual(['alerts', 'alerts/:id/ack', 'alerts/ack-all', 'alerts/summary', 'me/alert-preferences', 'me/alert-preferences', 'me/alert-preferences/test-email'].sort());
     for (const n of Object.getOwnPropertyNames(AlertsController.prototype).filter((x) => x !== 'constructor')) {
-      expect(Reflect.getMetadata(GUARDS_METADATA, (AlertsController.prototype as any)[n]) ?? []).toEqual([]); // không route nào tự thay guard
+      const fn = (AlertsController.prototype as any)[n];
+      if (Reflect.getMetadata(METHOD_METADATA, fn) === undefined) continue;
+      const path = Reflect.getMetadata(PATH_METADATA, fn);
+      const want = path === 'alerts' || path === 'alerts/summary' ? [] : [OperatorGuard];
+      expect([path, Reflect.getMetadata(GUARDS_METADATA, fn) ?? []]).toEqual([path, want]);
     }
     expect(Reflect.getMetadata(GUARDS_METADATA, MeLocaleController)).toEqual([SessionGuard]);
   });
@@ -284,7 +288,14 @@ describe('[CB:T10] (phần c) realtime alert.changed: chỉ socket OPERATOR củ
     const rooms = new Map<string, Set<any>>();
     const sockets = new Map<string, any>();
     gw.server = {
-      to: (room: string) => ({ emit: (event: string, data: any) => rooms.get(room)?.forEach((s) => s.got.push({ event, data })) }),
+      // Như Socket.IO: `to([a, b])` gộp room — một socket ở cả hai room chỉ nhận MỘT lần (QT6 emit ops + owners).
+      to: (room: string | string[]) => ({
+        emit: (event: string, data: any) => {
+          const hit = new Set<any>();
+          for (const r of ([] as string[]).concat(room)) rooms.get(r)?.forEach((s) => hit.add(s));
+          hit.forEach((s) => s.got.push({ event, data }));
+        },
+      }),
       sockets: { sockets, adapter: { rooms } },
     } as any;
     const connect = async (sid: string, userId: string, projectId: string) => {
@@ -302,7 +313,7 @@ describe('[CB:T10] (phần c) realtime alert.changed: chỉ socket OPERATOR củ
     };
     return { gw, connect, rooms };
   }
-  const notice = { id: ALERT, tenantId: A, rule: 'destination.auth_rejected', severity: 'critical', state: 'OPEN', titleKey: 'alerts.rules.destination.auth_rejected.title' };
+  const notice = { id: ALERT, tenantId: A, rule: 'destination.auth_rejected', severity: 'critical', state: 'OPEN', titleKey: 'alerts.rules.destination.auth_rejected.title', audience: 'operator' };
 
   it('M1: thành viên THƯỜNG cùng room project không nhận; operator của project A nhận (facts/trường lạ bị bỏ); operator đang mở project B không nhận; sự kiện cũ vẫn tới mọi socket', async () => {
     const { gw, connect } = world();

@@ -1,5 +1,5 @@
 import { GithubAdapter, PayosAdapter, SepayAdapter, StripeAdapter } from '../src';
-import { canonicalKeys, isReservedType, NormalizedEvent, validateCanonical, HUB_CLEANUP_SUGGESTED, HUB_SUGGESTION_KEYS, RuleAdvisor } from '@hub/common';
+import { canonicalKeys, isReservedType, NormalizedEvent, validateCanonical, HUB_CLEANUP_SUGGESTED, HUB_PROJECT_STORAGE, HUB_SUGGESTION_KEYS, RuleAdvisor } from '@hub/common';
 import * as f from './fixtures';
 
 /**
@@ -78,3 +78,28 @@ describe('[QT:T24] (phần e) U50 hợp đồng catalog — hub.project.cleanup_
   });
 });
 
+
+/** QT6 (§3, ADR-190): `hub.project.storage` — đúng khoá catalog; `suggestion` null hoặc đúng khuôn một phần tử suggestions[]. */
+describe('[QT:T19] (phần c) U50 hợp đồng catalog — hub.project.storage', () => {
+  it('data khớp tuyệt đối khoá catalog, previousLevel ≠ level, suggestion null hợp lệ; khoá lạ / thiếu -> lỗi đúng trường', async () => {
+    const [suggestion] = await new RuleAdvisor(() => 0).suggest({
+      usedBytes: 0,
+      quotaBytes: 1,
+      level: 'OK',
+      growthPerDay: 0,
+      buckets: [{ sourceId: null, importance: 'low', ageDays: 9, events: 1, bytes: 10 }],
+      policies: [],
+      keepLongerSourceIds: [],
+    });
+    const data = { level: 'LOCKED', previousLevel: 'CRITICAL_95', usedBytes: 51, quotaBytes: 50, forecastHours: null, suggestion, lockEnabled: false };
+    expect(isReservedType(HUB_PROJECT_STORAGE)).toBe(true);
+    expect(Object.keys(data).sort()).toEqual([...(canonicalKeys(HUB_PROJECT_STORAGE) ?? [])].sort());
+    expect(validateCanonical(HUB_PROJECT_STORAGE, data)).toEqual({ ok: true });
+    expect(validateCanonical(HUB_PROJECT_STORAGE, { ...data, suggestion: null })).toEqual({ ok: true });
+    expect(validateCanonical(HUB_PROJECT_STORAGE, { ...data, previousLevel: 'LOCKED' })).toEqual({ ok: false, field: 'previousLevel' });
+    expect(validateCanonical(HUB_PROJECT_STORAGE, { ...data, extra: 1 })).toEqual({ ok: false, field: 'extra' });
+    const { lockEnabled: _drop, ...missing } = data;
+    expect(validateCanonical(HUB_PROJECT_STORAGE, missing)).toEqual({ ok: false, field: 'lockEnabled' });
+    expect(validateCanonical(HUB_PROJECT_STORAGE, { ...data, suggestion: { ...suggestion, importance: ['high'] } })).toEqual({ ok: false, field: 'suggestion.importance' });
+  });
+});

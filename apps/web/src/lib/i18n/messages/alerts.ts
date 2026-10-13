@@ -21,6 +21,10 @@ export const alerts = defineMessages("alerts", {
     "alerts.action.open-sources": "Mở trang Nguồn",
     "alerts.action.view-source-events": "Xem sự kiện của nguồn",
     "alerts.action.renormalize": "Chuẩn hoá lại",
+    "alerts.action.open-storage": "Mở trang Dung lượng",
+    "alerts.action.clean-suggested": "Dọn theo gợi ý",
+    "alerts.action.open-projects": "Xem mức sử dụng các dự án",
+    "alerts.owner-scope": "Bạn thấy cảnh báo dung lượng của các dự án bạn làm chủ.",
 
     // ---- chuông (§8.1)
     "alerts.bell.label": "Cảnh báo",
@@ -89,6 +93,10 @@ export const alerts = defineMessages("alerts", {
     "alerts.action.open-sources": "Open Sources",
     "alerts.action.view-source-events": "View source events",
     "alerts.action.renormalize": "Re-normalize",
+    "alerts.action.open-storage": "Open the Storage page",
+    "alerts.action.clean-suggested": "Clean up as suggested",
+    "alerts.action.open-projects": "See project usage",
+    "alerts.owner-scope": "You see storage alerts of the projects you own.",
 
     "alerts.bell.label": "Alerts",
     "alerts.bell.aria": "Alerts: {count} unread",

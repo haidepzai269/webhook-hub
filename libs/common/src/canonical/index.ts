@@ -6,7 +6,7 @@
 import { CanonicalResult, FAIL } from './result';
 import { paymentKeys, validatePayment } from './payment';
 import { repoKeys, validateRepo } from './repo';
-import { HUB_CLEANUP_SUGGESTED, hubKeys, validateHub } from './hub';
+import { HUB_CLEANUP_SUGGESTED, HUB_PROJECT_STORAGE, hubKeys, validateHub } from './hub';
 import { SAMPLE_TYPES } from './samples';
 
 export type { CanonicalResult } from './result';
@@ -57,7 +57,7 @@ export function validateCanonical(type: string, data: unknown): CanonicalResult 
 }
 
 /** Kiểu cụ thể đại diện của catalog — dùng để hỏi "mẫu wildcard này có phủ kiểu chuẩn nào không". */
-const CATALOG_REPRESENTATIVES = [...SAMPLE_TYPES, 'repo.pull_request.closed', 'repo.issue.closed', HUB_CLEANUP_SUGGESTED];
+const CATALOG_REPRESENTATIVES = [...SAMPLE_TYPES, 'repo.pull_request.closed', 'repo.issue.closed', HUB_CLEANUP_SUGGESTED, HUB_PROJECT_STORAGE];
 
 /**
  * KN1 (SPEC-ket-noi §3.1): mẫu `eventTypes` của endpoint console có khớp catalog không. Mẫu NGOÀI không gian dành

@@ -18,7 +18,7 @@ import { ALERT_RULE_CODES, ALERT_SEVERITIES, type AlertView } from "@/lib/alerts
 import { useAlertsPage, useSubjectNames } from "@/lib/hub/alert-queries";
 import { formatRelative, formatStamp } from "@/lib/hub/format";
 import { ALERT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
-import { useIsOperator } from "@/lib/hub/me-store";
+import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useProjects } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
@@ -99,7 +99,8 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<Row>[] => [
 function AlertsView() {
   const t = useT();
   const locale = useLocale();
-  const operator = useIsOperator();
+  const operator = useCanSeeAlerts(); // QT6: owner thấy cảnh báo dung lượng của project mình
+  const isOperator = useIsOperator();
   const url = useUrlParams(ALERT_PARAMS);
   const v = url.values;
   const projects = useProjects();
@@ -124,6 +125,7 @@ function AlertsView() {
   return (
     <>
       <PageHeader title={t("page.alerts.title")} description={t("page.alerts.description")} />
+      {!isOperator && <p className="mb-3 text-muted-foreground text-sm">{t("alerts.owner-scope")}</p>}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select value={v.project ?? ALL} onValueChange={(p) => url.setFilter({ project: p === ALL ? null : p })}>
           <SelectTrigger size="sm" className="w-48" aria-label={t("page.alerts.filter.project")}>

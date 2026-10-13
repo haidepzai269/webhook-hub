@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { ALERT_RULE_CODES, ALERT_RULES, AlertRuleCode, alertTitleKey, ALERT_EMAIL_HOURLY_CAP, DEFAULT_EMAIL_RULES, logger, MailSender, maskEmail, sampleAlertEmail } from '@hub/common';
+import { ALERT_RULE_CODES, ALERT_RULES, AlertRuleCode, alertTitleKey, ownerVisibleRules, ruleAudience, ALERT_EMAIL_HOURLY_CAP, DEFAULT_EMAIL_RULES, logger, MailSender, maskEmail, sampleAlertEmail } from '@hub/common';
 import { AlertPreferencesInput, OperatorAlertRow, PrismaService } from '@hub/database';
 import { hubError } from '../errors/hub-error';
 import { assertFlatQuery, badParam, isUuid, parseEnumParam, parsePageCursor, parseUuidParam } from '../api/list-params';
@@ -20,6 +20,8 @@ export type AlertStore = Pick<
   | 'operatorFindAlertTenant'
   | 'operatorFindAlertTenants'
   | 'dbNow'
+  | 'ownerAlertsAcrossTenants'
+  | 'ownerAlertSummaryAcrossTenants'
   | 'tenantTx'
   | 'forTenant'
   | 'findExistingProjectIds'
@@ -88,6 +90,65 @@ export async function listAlerts(store: AlertStore, q: AlertListQuery) {
     (r) => ({ at: r.cursorAt, id: r.id }),
   );
   return { items: out.items.map(alertView), next: out.next, prev: out.prev, asOf: asOf.toISOString() };
+}
+
+/** Người xem chuông / trang Cảnh báo — từ CHÍNH session (SessionGuard), không từ client. */
+export interface AlertViewer {
+  userId: string;
+  isOperator: boolean;
+}
+
+/**
+ * QT6 (E3): project người xem là OWNER (không phải operator). Không owner project nào -> 403 `operator_required` như cũ
+ * (developer/viewer không thấy cảnh báo nào).
+ */
+async function ownedProjectIds(store: Pick<AlertStore, 'identity'>, userId: string): Promise<string[]> {
+  const ms = await store.identity().listMemberships(userId);
+  const owned = ms.filter((m) => m.role === 'owner').map((m) => m.projectId);
+  if (owned.length === 0) throw hubError('operator_required', {}, 'Chỉ người vận hành hub (hoặc owner — với cảnh báo dung lượng của project mình) xem được cảnh báo');
+  return owned;
+}
+
+/**
+ * QT6 (E3, ADR-190): danh sách cảnh báo theo QUYỀN. Operator: như cũ (mọi luật, mọi project). Owner: CHỈ luật audience
+ * `owners+operator` (`project.storage_*`) của project mình là owner — lọc cứng trong SQL của escape hatch có tên
+ * `ownerAlertsAcrossTenants`. Lọc `rule` ngoài tập đó -> trang rỗng (không lộ có hay không).
+ */
+export async function listAlertsFor(store: AlertStore, viewer: AlertViewer, q: AlertListQuery) {
+  if (viewer.isOperator) return listAlerts(store, q);
+  await ownedProjectIds(store, viewer.userId);
+  assertFlatQuery(q);
+  if (q.cursor && (q.before || q.after)) throw badParam('cursor', 'cursor là tên khác của before — không truyền cùng before/after');
+  const filter = {
+    state: parseEnumParam(q.state, 'state', ALERT_STATES),
+    severity: parseEnumParam(q.severity, 'severity', ALERT_SEVERITIES),
+    rule: parseEnumParam(q.rule, 'rule', ALERT_RULE_CODES),
+    projectId: parseUuidParam(q.project, 'project'),
+  };
+  const limit = parseLimit(q.limit, ALERT_LIST_MAX);
+  const page = parsePageCursor(q.cursor || q.before, q.after);
+  const rules = filter.rule ? (ruleAudience(filter.rule) === 'owners+operator' ? [filter.rule] : []) : ownerVisibleRules();
+  const out = await runPage(
+    (dir, cursor) => store.ownerAlertsAcrossTenants(viewer.userId, rules, { ...filter, rule: undefined, dir, cursor, limit }),
+    page,
+    limit,
+    (r) => ({ at: r.cursorAt, id: r.id }),
+  );
+  return { items: out.items.map(alertView), next: out.next, prev: out.prev, scope: 'owner' as const };
+}
+
+/** QT6: tóm tắt chuông theo quyền (owner: chỉ cảnh báo dung lượng của project mình). */
+export async function alertSummaryFor(store: AlertStore, viewer: AlertViewer) {
+  if (viewer.isOperator) return alertSummary(store);
+  await ownedProjectIds(store, viewer.userId);
+  const { totals, perProject } = await store.ownerAlertSummaryAcrossTenants(viewer.userId, ownerVisibleRules());
+  return {
+    openBySeverity: { critical: totals.critical, warning: totals.warning, info: totals.info },
+    unacked: totals.unacked,
+    unackedBySeverity: totals.unackedBySeverity,
+    perProject,
+    scope: 'owner' as const,
+  };
 }
 
 export async function alertSummary(store: AlertStore) {
@@ -177,7 +238,7 @@ export async function ackAllAlerts(store: AlertStore, body: unknown, q: Record<s
 const PREF_KEYS = ['emailEnabled', 'emailRules', 'emailOnResolve', 'mutedProjects'] as const;
 
 /** Danh mục luật cho trang Cài đặt (CB5): mã + mức — web dịch tên luật theo `alerts.rules.<mã>.title`. */
-export const ALERT_RULE_CATALOG = ALERT_RULE_CODES.map((code) => ({ code, severity: ALERT_RULES[code].severity, titleKey: alertTitleKey(code) }));
+export const ALERT_RULE_CATALOG = ALERT_RULE_CODES.map((code) => ({ code, severity: ALERT_RULES[code].severity, titleKey: alertTitleKey(code), audience: ruleAudience(code) }));
 
 type PrefsRow = { emailEnabled: boolean; emailRules: string[]; emailOnResolve: boolean; mutedProjects: string[]; updatedAt: Date } | null;
 type Account = { email: string; emailVerifiedAt: Date | null } | null;

@@ -6,7 +6,7 @@ import type { AlertPage, AlertSummary, AlertView } from "@/lib/alerts/types";
 
 import { hubFetch } from "./client";
 import { withProject } from "./flow-project";
-import { useIsOperator } from "./me-store";
+import { useCanSeeAlerts, useIsOperator } from "./me-store";
 import type { Destination, Source } from "./types";
 
 /**
@@ -26,7 +26,7 @@ export const alertKeys = {
 
 /** Tổng cho badge chuông: gọi lại khi có `alert.changed` (socket.ts) VÀ poll 30s (cảnh báo của project khác — ADR-169). */
 export function useAlertSummary() {
-  const operator = useIsOperator();
+  const operator = useCanSeeAlerts(); // QT6: operator hoặc owner (server lọc theo quyền)
   return useQuery({
     queryKey: alertKeys.summary,
     queryFn: () => hubFetch<AlertSummary>("/api/v1/alerts/summary"),
@@ -38,7 +38,7 @@ export function useAlertSummary() {
 
 /** Cảnh báo OPEN xuyên project — popover chuông + bộ nhớ "vừa đến" của banner/toast. */
 export function useOpenAlertFeed() {
-  const operator = useIsOperator();
+  const operator = useCanSeeAlerts(); // QT6: operator hoặc owner (server lọc theo quyền)
   return useQuery({
     queryKey: alertKeys.openFeed,
     queryFn: () => hubFetch<AlertPage>(`/api/v1/alerts?state=OPEN&limit=${OPEN_FEED_LIMIT}`),
@@ -50,7 +50,7 @@ export function useOpenAlertFeed() {
 
 /** Một trang của /dashboard/alerts — `query` = bộ lọc + cursor (list-url.toApiQuery). */
 export function useAlertsPage(query: string) {
-  const operator = useIsOperator();
+  const operator = useCanSeeAlerts(); // QT6: operator hoặc owner (server lọc theo quyền)
   return useQuery({
     queryKey: alertKeys.page(query),
     queryFn: () => hubFetch<AlertPage>(`/api/v1/alerts${query ? `?${query}` : ""}`),

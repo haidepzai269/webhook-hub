@@ -348,6 +348,87 @@ export class PrismaService {
     return rows[0]?.tenantId ?? null;
   }
 
+  // ================== Cảnh báo: escape hatch của OWNER (QT6, SPEC-han-muc-dung-luong E3, ADR-190) ==================
+  // Owner (không phải operator) thấy cảnh báo có audience `owners+operator` (`project.storage_*`) của CÁC project mình là
+  // owner. Đọc xuyên project qua HAI hàm có tên dưới đây (systemTx), lọc CỨNG trong SQL: `project_members.role = 'owner'`
+  // của CHÍNH user + `rule = ANY(rules)` (danh sách lấy từ rules.ts). Chỉ module alerts gọi — gate `owner-alerts` giữ.
+
+  /** Danh sách cảnh báo của owner — cùng keyset `(opened_at, id)` với hàm operator. */
+  public ownerAlertsAcrossTenants(userId: string, rules: string[], f: OperatorAlertFilter): Promise<OperatorAlertRow[]> {
+    if (rules.length === 0) return Promise.resolve([]);
+    const conds: Prisma.Sql[] = [];
+    if (f.state) conds.push(Prisma.sql`AND a.state = ${f.state}::"hub"."AlertState"`);
+    if (f.severity) conds.push(Prisma.sql`AND a.severity = ${f.severity}::"hub"."AlertSeverity"`);
+    if (f.rule) conds.push(Prisma.sql`AND a.rule = ${f.rule}`);
+    if (f.projectId) conds.push(Prisma.sql`AND a.tenant_id = ${f.projectId}::uuid`);
+    if (f.cursor) {
+      const at = Prisma.sql`${f.cursor.at}::timestamp AT TIME ZONE 'UTC'`;
+      conds.push(
+        f.dir === 'newer'
+          ? Prisma.sql`AND (a.opened_at, a.id) > (${at}, ${f.cursor.id}::uuid)`
+          : Prisma.sql`AND (a.opened_at, a.id) < (${at}, ${f.cursor.id}::uuid)`,
+      );
+    }
+    const order = f.dir === 'newer' ? Prisma.sql`a.opened_at ASC, a.id ASC` : Prisma.sql`a.opened_at DESC, a.id DESC`;
+    return this.systemTx('owner: alerts dung lượng của project mình', async (tx) => {
+      const rows = await tx.$queryRaw<(AlertRow & { cursorAt: string; projectSlug: string; projectName: string })[]>(Prisma.sql`
+        SELECT a.id, a.tenant_id AS "tenantId", a.rule, a.severity::text AS severity, a.subject_type::text AS "subjectType",
+               a.subject_id AS "subjectId", a.state::text AS state, a.opened_at AS "openedAt", a.last_seen_at AS "lastSeenAt",
+               a.resolved_at AS "resolvedAt", a.facts, a.acknowledged_at AS "acknowledgedAt", a.acknowledged_by AS "acknowledgedBy",
+               to_char(a.opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS "cursorAt",
+               p.slug AS "projectSlug", p.name AS "projectName"
+        FROM hub.alerts a
+        JOIN hub.project_members m ON m.tenant_id = a.tenant_id AND m.user_id = ${userId}::uuid AND m.role = 'owner'::"hub"."MemberRole"
+        JOIN hub.projects p ON p.id = a.tenant_id
+        WHERE a.rule = ANY(${rules}::text[]) ${conds.length ? Prisma.join(conds, ' ') : Prisma.empty}
+        ORDER BY ${order}
+        LIMIT ${f.limit + 1}`);
+      return rows.map(({ projectSlug, projectName, ...a }) => ({ ...a, project: { id: a.tenantId, slug: projectSlug, name: projectName } }));
+    });
+  }
+
+  /** Tóm tắt chuông của owner — cùng hình với `operatorAlertSummaryAcrossTenants`, chỉ luật owner thấy + project mình là owner. */
+  public ownerAlertSummaryAcrossTenants(userId: string, rules: string[], limit = 500): Promise<OperatorAlertSummary> {
+    return this.systemTx('owner: tóm tắt alerts dung lượng', async (tx) => {
+      const rows =
+        rules.length === 0
+          ? []
+          : await tx.$queryRaw<{ id: string; slug: string; name: string; critical: bigint; warning: bigint; info: bigint; unacked: bigint; uc: bigint; uw: bigint; ui: bigint }[]>(Prisma.sql`
+        SELECT p.id, p.slug, p.name,
+               count(*) FILTER (WHERE a.severity = 'critical') AS critical,
+               count(*) FILTER (WHERE a.severity = 'warning')  AS warning,
+               count(*) FILTER (WHERE a.severity = 'info')     AS info,
+               count(*) FILTER (WHERE a.acknowledged_at IS NULL) AS unacked,
+               count(*) FILTER (WHERE a.acknowledged_at IS NULL AND a.severity = 'critical') AS uc,
+               count(*) FILTER (WHERE a.acknowledged_at IS NULL AND a.severity = 'warning')  AS uw,
+               count(*) FILTER (WHERE a.acknowledged_at IS NULL AND a.severity = 'info')     AS ui
+        FROM hub.alerts a
+        JOIN hub.project_members m ON m.tenant_id = a.tenant_id AND m.user_id = ${userId}::uuid AND m.role = 'owner'::"hub"."MemberRole"
+        JOIN hub.projects p ON p.id = a.tenant_id
+        WHERE a.state = 'OPEN' AND a.rule = ANY(${rules}::text[])
+        GROUP BY p.id, p.slug, p.name
+        ORDER BY critical DESC, warning DESC, p.slug ASC
+        LIMIT ${limit}`);
+      const sum = (k: 'critical' | 'warning' | 'info' | 'unacked' | 'uc' | 'uw' | 'ui') => rows.reduce((n, r) => n + Number(r[k]), 0);
+      return {
+        totals: {
+          critical: sum('critical'),
+          warning: sum('warning'),
+          info: sum('info'),
+          unacked: sum('unacked'),
+          unackedBySeverity: { critical: sum('uc'), warning: sum('uw'), info: sum('ui') },
+        },
+        perProject: rows.map((r) => ({
+          project: { id: r.id, slug: r.slug, name: r.name },
+          critical: Number(r.critical),
+          warning: Number(r.warning),
+          info: Number(r.info),
+          unacked: Number(r.unacked),
+        })),
+      };
+    });
+  }
+
   // ================== Email cảnh báo: escape hatch của VÒNG GỬI (CB5, SPEC §6, DINH-CHINH D1/D2, ADR-173) ==================
   // `alert_emails` mang tenant_id + RLS. Vòng gửi trong hub-worker làm việc THEO NGƯỜI, xuyên project (trần 6/giờ/người,
   // dòng "…và k khác" gộp email của mọi project) -> đi qua ĐÚNG các hàm có tên dưới đây (systemTx), như `cleanup.job`.
@@ -382,7 +463,7 @@ export class PrismaService {
         RETURNING e.id`);
       if (picked.length === 0) return [];
       return tx.$queryRaw<AlertEmailClaim[]>(Prisma.sql`
-        SELECT e.id, e.tenant_id AS "tenantId", e.alert_id AS "alertId", e.user_id AS "userId", e.kind::text AS kind,
+        SELECT e.id, e.tenant_id AS "tenantId", e.alert_id AS "alertId", e.user_id AS "userId", e.kind::text AS kind, e.tag,
                e.attempts, e.created_at AS "createdAt", e.next_attempt_at::text AS lease,
                a.rule, a.severity::text AS severity, a.subject_type::text AS "subjectType", a.subject_id AS "subjectId",
                a.state::text AS "alertState", a.facts, a.opened_at AS "openedAt", a.resolved_at AS "resolvedAt",
@@ -390,12 +471,14 @@ export class PrismaService {
                u.email, u.locale::text AS locale, u.is_operator AS "isOperator", (u.email_verified_at IS NOT NULL) AS "emailVerified",
                COALESCE(pr.email_enabled, false) AS "emailEnabled", COALESCE(pr.email_rules, ARRAY[]::text[]) AS "emailRules",
                COALESCE(pr.email_on_resolve, false) AS "emailOnResolve", COALESCE(pr.muted_projects, ARRAY[]::uuid[])::text[] AS "mutedProjects",
-               COALESCE(d.name, s.name) AS "subjectName"
+               COALESCE(d.name, s.name) AS "subjectName",
+               (pm.role = 'owner') IS TRUE AS "isOwner", COALESCE(pm.storage_warn_email, true) AS "storageWarnEmail"
         FROM hub.alert_emails e
         JOIN hub.alerts a ON a.id = e.alert_id AND a.tenant_id = e.tenant_id
         JOIN hub.projects p ON p.id = e.tenant_id
         JOIN hub.users u ON u.id = e.user_id
         LEFT JOIN hub.alert_preferences pr ON pr.user_id = e.user_id
+        LEFT JOIN hub.project_members pm ON pm.tenant_id = e.tenant_id AND pm.user_id = e.user_id
         LEFT JOIN hub.destinations d ON a.subject_type = 'destination' AND d.id = a.subject_id AND d.tenant_id = a.tenant_id
         LEFT JOIN hub.sources s ON a.subject_type = 'source' AND s.id = a.subject_id AND s.tenant_id = a.tenant_id
         WHERE e.id = ANY(${picked.map((r) => r.id)}::uuid[])
@@ -414,7 +497,7 @@ export class PrismaService {
         UPDATE hub.alert_emails e SET next_attempt_at = now() + make_interval(secs => ${leaseMs / 1000}::double precision)
         WHERE e.id = ${id}::uuid AND e.state = 'PENDING' AND e.next_attempt_at = ${lease}::timestamptz
         RETURNING e.next_attempt_at::text AS lease,
-          (SELECT o.state::text FROM hub.alert_emails o WHERE o.alert_id = e.alert_id AND o.user_id = e.user_id AND o.kind = 'OPEN') AS "openState"`);
+          (SELECT o.state::text FROM hub.alert_emails o WHERE o.alert_id = e.alert_id AND o.user_id = e.user_id AND o.kind = 'OPEN' AND o.tag = '') AS "openState"`);
       return rows[0] ?? null;
     });
   }
@@ -503,11 +586,12 @@ export class PrismaService {
     const scope = tenantIds ? Prisma.sql`WHERE pu.tenant_id = ANY(${tenantIds}::uuid[])` : Prisma.empty;
     return this.systemTx('storage: level tick', async (tx) => {
       const rows = await tx.$queryRaw<
-        { tenantId: string; usedBytes: bigint; level: string; calibratedBytes: bigint; calibratedAt: Date | null; calibratedAtToken: string | null; freed: bigint; bloatFactor: number; quotaMb: number | null; trafficBytes: bigint }[]
+        { tenantId: string; usedBytes: bigint; level: string; calibratedBytes: bigint; calibratedAt: Date | null; calibratedAtToken: string | null; freed: bigint; bloatFactor: number; quotaMb: number | null; trafficBytes: bigint; signaledLevel: string | null; notifiedLevel: string | null; notifiedAt: Date | null }[]
       >(Prisma.sql`
         SELECT pu.tenant_id AS "tenantId", pu.used_bytes AS "usedBytes", pu.level, pu.calibrated_bytes AS "calibratedBytes",
                pu.calibrated_at AS "calibratedAt", pu.calibrated_at::text AS "calibratedAtToken", pu.freed_since_calibration AS freed, pu.bloat_factor::float8 AS "bloatFactor",
                p.storage_quota_mb AS "quotaMb",
+               pu.signaled_level AS "signaledLevel", pu.notified_level AS "notifiedLevel", pu.notified_at AS "notifiedAt",
                COALESCE((SELECT sum(t.bytes) FROM hub.source_traffic_minutely t
                          WHERE t.tenant_id = pu.tenant_id
                            AND t.minute > date_trunc('minute', COALESCE(pu.calibrated_at, '-infinity'::timestamptz))), 0)::bigint AS "trafficBytes"
@@ -525,6 +609,9 @@ export class PrismaService {
         bloatFactor: Number(r.bloatFactor),
         quotaMb: r.quotaMb,
         trafficBytesSinceCalibration: Number(r.trafficBytes),
+        signaledLevel: r.signaledLevel,
+        notifiedLevel: r.notifiedLevel,
+        notifiedAt: r.notifiedAt,
       }));
     });
   }
@@ -651,6 +738,8 @@ export interface AlertEmailClaim {
   alertId: string;
   userId: string;
   kind: 'OPEN' | 'RESOLVED';
+  /** QT6 (ADR-190): '' = email CB; `up:<nấc>:<ngày>` / `remind:<nấc>:<ngày>` = email dung lượng theo nấc. */
+  tag: string;
   attempts: number;
   createdAt: Date;
   /** Lease (= `next_attempt_at` dạng text, đủ µs) — token fencing cho mọi lần ghi kết quả. */
@@ -668,6 +757,10 @@ export interface AlertEmailClaim {
   email: string;
   locale: 'vi' | 'en';
   isOperator: boolean;
+  /** QT6 (E3): người nhận là owner của project này lúc gửi — điều kiện cho luật audience `owners+operator`. */
+  isOwner: boolean;
+  /** `project_members.storage_warn_email` (owner tắt email 70/85). */
+  storageWarnEmail: boolean;
   emailVerified: boolean;
   emailEnabled: boolean;
   emailRules: string[];
@@ -768,6 +861,10 @@ export interface StorageTickRow {
   bloatFactor: number;
   quotaMb: number | null;
   trafficBytesSinceCalibration: number;
+  /** QT6 (ADR-190): nấc đã báo lần cuối + dấu email — lượt nấc quét bù/nhắc hằng ngày mà không thêm truy vấn. */
+  signaledLevel?: string | null;
+  notifiedLevel?: string | null;
+  notifiedAt?: Date | null;
 }
 
 interface IngestSourceRow {

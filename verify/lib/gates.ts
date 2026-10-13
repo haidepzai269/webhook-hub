@@ -166,6 +166,13 @@ export const GATES: Gate[] = [
     check: grepLines(/\boperator(Alerts|AlertSummary|FindAlert)\w*\s*\(/),
   },
   {
+    id: 'owner-alerts',
+    rule: 'Escape hatch cảnh báo của OWNER `owner(Alerts|AlertSummary)AcrossTenants(` (xuyên project, lọc owner + luật audience trong SQL) chỉ được gọi ở apps/hub-api/src/modules/alerts/ và khai ở prisma.service.ts',
+    source: 'SPEC-han-muc-dung-luong ĐÍNH CHÍNH E3, ADR-190',
+    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && !f.startsWith('apps/hub-api/src/modules/alerts/'),
+    check: grepLines(/\bowner(Alerts|AlertSummary)AcrossTenants\s*\(/),
+  },
+  {
     id: 'alert-email-outbox',
     rule: 'Escape hatch vòng gửi email cảnh báo `alertEmailOutbox…(` (xuyên project, systemTx) chỉ được gọi ở apps/hub-worker/src/scheduler/alert-email.sender.ts và khai ở prisma.service.ts',
     source: 'SPEC-canh-bao-nhan-dinh §6, DINH-CHINH D2, ADR-173',

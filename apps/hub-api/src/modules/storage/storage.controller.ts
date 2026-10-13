@@ -5,7 +5,7 @@ import { SessionGuard } from '../auth/session.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
-import { StorageFlags, applySuggestion, createCleanJob, getCleanJob, getStorageOverview, getStoragePolicies, putStoragePolicies } from './storage-api';
+import { StorageFlags, applySuggestion, createCleanJob, getCleanJob, getStorageEmail, getStorageOverview, getStoragePolicies, putStorageEmail, putStoragePolicies } from './storage-api';
 
 /**
  * QT4 (SPEC-han-muc-dung-luong §5.5, ADR-184): trang "Dung lượng" của một project. Quyền = scope (`storage:read` cho
@@ -52,6 +52,19 @@ export class StorageController {
   @RequireScope('storage:write')
   putPolicies(@Param('projectId') projectId: string, @CurrentUser() actor: string, @Body() body: unknown) {
     return putStoragePolicies(this.prisma, projectId, body, actor, this.flags);
+  }
+
+  /** QT6 (§8): công tắc email 70%/85% của CHÍNH người gọi (owner); 95%/LOCKED không tắt được. */
+  @Get('storage/email')
+  @RequireScope('storage:read')
+  email(@Param('projectId') projectId: string, @CurrentUser() userId: string) {
+    return getStorageEmail(this.prisma, projectId, userId);
+  }
+
+  @Put('storage/email')
+  @RequireScope('storage:write')
+  putEmail(@Param('projectId') projectId: string, @CurrentUser() userId: string, @Body() body: unknown) {
+    return putStorageEmail(this.prisma, projectId, userId, body);
   }
 
   @Get('storage/clean/:jobId')

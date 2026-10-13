@@ -425,3 +425,37 @@ export async function getCleanJob(store: StorageStore, projectId: string, jobId:
   if (!job) throw hubError('not_found');
   return cleanJobView(job);
 }
+
+// ------------------------------------------------------------------ QT6 (§8): email dung lượng của CHÍNH người gọi
+
+export type StorageEmailStore = Pick<PrismaService, 'tenantTx' | 'forTenant' | 'identity'>;
+
+/**
+ * §8 + E3: owner tắt được email 70%/85% (`project.storage_warn`) cho project này; email 95% và LOCKED KHÔNG tắt được (câu trả
+ * về nói rõ). Cờ gắn THÀNH VIÊN (`project_members.storage_warn_email`, IdentityRepository); người không phải thành viên
+ * (operator đi qua đường operator) -> `member: false`, email của họ theo trang Cài đặt cảnh báo.
+ */
+export async function getStorageEmail(store: StorageEmailStore, projectId: string, userId: string) {
+  const on = await store.identity().findStorageWarnEmail(projectId, userId);
+  return { member: on !== null, warnEmail: on ?? true, criticalEmail: true, lockedEmail: true };
+}
+
+export async function putStorageEmail(store: StorageEmailStore, projectId: string, userId: string, body: unknown) {
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  if (!b || Object.keys(b).some((k) => k !== 'warnEmail') || typeof b.warnEmail !== 'boolean') {
+    throw hubError('bad_request', { field: 'warnEmail' }, 'Body là {"warnEmail": true|false} — chỉ email 70%/85% tắt được');
+  }
+  const on = b.warnEmail;
+  return store.tenantTx(projectId, async (tx) => {
+    const n = await store.identity(tx).setStorageWarnEmail(projectId, userId, on);
+    if (n === 0) throw hubError('bad_request', { field: 'warnEmail' }, 'Chỉ thành viên của project đổi được email dung lượng của mình — operator dùng trang Cài đặt cảnh báo');
+    await store.forTenant(projectId, tx).createAuditLog({
+      action: 'storage.email_changed',
+      entityType: 'project',
+      entityId: projectId,
+      actor: userId,
+      metadata: { warnEmail: on },
+    });
+    return { member: true, warnEmail: on, criticalEmail: true, lockedEmail: true };
+  });
+}

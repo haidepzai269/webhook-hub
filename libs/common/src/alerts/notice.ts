@@ -3,7 +3,7 @@
  * Chỉ publish khi trạng thái ĐỔI (OPEN mới / RESOLVED), không mỗi lượt. KHÔNG có `facts` thô — câu chữ dựng ở web (i18n)
  * từ `titleKey`; ai cần số liệu thì đọc API.
  */
-import { ALERT_RULES, AlertRuleCode, AlertSeverity } from './rules';
+import { ALERT_RULES, AlertAudience, AlertRuleCode, AlertSeverity, ruleAudience } from './rules';
 
 export const ALERT_REALTIME_CHANNEL = 'hub:realtime:alerts';
 
@@ -15,6 +15,8 @@ export interface AlertChangedNotice {
   state: 'OPEN' | 'RESOLVED';
   /** Khoá i18n của tiêu đề (`alerts.rules.<rule>.title`) — web dịch vi/en. */
   titleKey: string;
+  /** QT6 (E3): `owners+operator` -> gateway emit thêm vào room `project:<id>:owners`. Lấy từ `rules.ts`, không tin tin nhắn. */
+  audience: AlertAudience;
 }
 
 export function alertTitleKey(rule: AlertRuleCode): string {
@@ -22,11 +24,11 @@ export function alertTitleKey(rule: AlertRuleCode): string {
 }
 
 export function toAlertChangedNotice(a: { id: string; tenantId: string; rule: AlertRuleCode; state: 'OPEN' | 'RESOLVED' }): AlertChangedNotice {
-  return { id: a.id, tenantId: a.tenantId, rule: a.rule, severity: ALERT_RULES[a.rule].severity, state: a.state, titleKey: alertTitleKey(a.rule) };
+  return { id: a.id, tenantId: a.tenantId, rule: a.rule, severity: ALERT_RULES[a.rule].severity, state: a.state, titleKey: alertTitleKey(a.rule), audience: ruleAudience(a.rule) };
 }
 
 /**
- * CB3 (§5.3): hub-api đọc tin từ Redis rồi chuyển NGUYÊN hợp đồng ra socket — chỉ 6 trường, không gì khác (tin lạ có kèm
+ * CB3 (§5.3): hub-api đọc tin từ Redis rồi chuyển NGUYÊN hợp đồng ra socket — chỉ 7 trường (QT6 thêm `audience`), không gì khác (tin lạ có kèm
  * `facts` hay trường thêm thì bị bỏ). Sai hình (thiếu tenantId, luật lạ, …) -> null: thà mất một cập nhật realtime
  * (web còn poll `/alerts/summary` mỗi 30s) còn hơn đẩy dữ liệu không rõ nguồn gốc.
  */
@@ -45,5 +47,7 @@ export function parseAlertChangedNotice(raw: unknown): AlertChangedNotice | null
     severity: r.severity,
     state: r.state,
     titleKey: r.titleKey as string,
+    // QT6: audience tính lại từ luật (rules.ts) — tin nhắn tự xưng `owners+operator` cho luật CB không mở được room owner.
+    audience: ruleAudience(r.rule),
   };
 }
