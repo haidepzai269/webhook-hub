@@ -76,21 +76,30 @@ function emptyReq(headerNames: string[] = []): ParsedRequest {
 }
 
 /**
- * Review PK9 TB-1: chỉ xét 64 KB đầu của mẫu dán / body thu được — đủ cho tiêu đề + khoá cấp một của mọi mẫu thật,
- * và chặn trần thời gian của mọi bước parse (server PK6 ④ gọi cùng hàm trên body ≤ 1 MB do người ngoài gửi).
+ * Review PK9 TB-1 + R2 TB-R2-1: hai trần.
+ * - `IDENTIFY_MAX_INPUT_CHARS` (1 MB = trần ingest `MAX_INGEST_PAYLOAD_BYTES`): cả mẫu dán / body thu được. `JSON.parse`
+ *   chạy trên body ĐẦY ĐỦ tới trần này (V8 tuyến tính) — body JSON hợp lệ lớn (GitHub push nhiều commit, Shopify đơn nhiều dòng,
+ *   Stripe invoice) vẫn đọc được khoá cấp một. Cắt TRƯỚC khi parse (bản TB-1) làm hỏng nhận diện + báo sai "JSON hỏng".
+ * - `IDENTIFY_MAX_CHARS` (64 KB): chỉ cho các nhánh còn lại — XML, form, JSON lines, JWT.
  */
 export const IDENTIFY_MAX_CHARS = 64 * 1024;
+export const IDENTIFY_MAX_INPUT_CHARS = 1024 * 1024;
 const TRUNCATED_PROBLEM = 'mẫu dài hơn 64 KB — chỉ xét 64 KB đầu';
+const INPUT_TRUNCATED_PROBLEM = 'mẫu dài hơn 1 MB (trần ingest) — chỉ xét 1 MB đầu';
+/** Dòng tiêu đề hỏng: báo tối đa chừng này dòng (mẫu dán lớn không sinh hàng nghìn `problems`). */
+const MAX_HEADER_PROBLEMS = 5;
 
-function clip(s: string, problems: string[]): string {
-  if (s.length <= IDENTIFY_MAX_CHARS) return s;
-  problems.push(TRUNCATED_PROBLEM);
-  return s.slice(0, IDENTIFY_MAX_CHARS);
+function clip(s: string, problems: string[], max = IDENTIFY_MAX_CHARS, problem = TRUNCATED_PROBLEM): string {
+  if (s.length <= max) return s;
+  if (!problems.includes(problem)) problems.push(problem);
+  return s.slice(0, max);
 }
 
 function readRequest(input: IdentifyInput, problems: string[]): ParsedRequest | null {
   if (input.captured) return fromCaptured(input.captured, problems);
-  if (typeof input.sample === 'string' && input.sample.trim().length > 0) return fromSample(clip(input.sample, problems), problems);
+  if (typeof input.sample === 'string' && input.sample.trim().length > 0) {
+    return fromSample(clip(input.sample, problems, IDENTIFY_MAX_INPUT_CHARS, INPUT_TRUNCATED_PROBLEM), problems);
+  }
   return null;
 }
 
@@ -104,7 +113,7 @@ function fromCaptured(c: CapturedSample, problems: string[]): ParsedRequest {
   }
   r.hasHeaders = Object.keys(r.headers).length > 0;
   r.queryKeys = queryKeys(c.query ?? '');
-  applyBody(r, clip(typeof c.body === 'string' ? c.body : '', problems), problems);
+  applyBody(r, clip(typeof c.body === 'string' ? c.body : '', problems, IDENTIFY_MAX_INPUT_CHARS, INPUT_TRUNCATED_PROBLEM), problems);
   return r;
 }
 
@@ -114,6 +123,7 @@ const HEADER_LINE_RE = /^([A-Za-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)$/;
 /** Mẫu dán: [dòng đầu] + [tiêu đề] + dòng trống + body — hoặc chỉ body. Dòng `#` ở đầu (ghi chú fixture) bị bỏ. */
 function fromSample(raw: string, problems: string[]): ParsedRequest {
   const lines = raw.replace(/\r\n?/g, '\n').split('\n');
+  let headerProblems = 0;
   let i = 0;
   while (i < lines.length && (lines[i].trim() === '' || lines[i].startsWith('#'))) i++;
   const r = emptyReq();
@@ -128,7 +138,7 @@ function fromSample(raw: string, problems: string[]): ParsedRequest {
     for (; i < lines.length && lines[i].trim() !== ''; i++) {
       const m = HEADER_LINE_RE.exec(lines[i]);
       if (!m) {
-        problems.push(`dòng tiêu đề không đọc được: "${lines[i].slice(0, 40)}"`);
+        if (headerProblems++ < MAX_HEADER_PROBLEMS) problems.push(`dòng tiêu đề không đọc được: "${lines[i].slice(0, 40)}"`);
         continue;
       }
       const name = m[1].toLowerCase();
@@ -163,8 +173,8 @@ const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof
 
 /** Đoán khuôn body theo NỘI DUNG (không theo content-type). */
 function applyBody(r: ParsedRequest, body: string, problems: string[]): void {
-  const t = body.trim();
-  if (t.length === 0) {
+  const full = body.trim();
+  if (full.length === 0) {
     // Có dòng đầu / tiêu đề mà body rỗng = body rỗng thật (Google Drive); không có gì cả = không có body.
     r.format = r.hasHeaders || r.method !== null ? 'empty' : null;
     return;
@@ -173,8 +183,9 @@ function applyBody(r: ParsedRequest, body: string, problems: string[]): void {
     for (const k of Object.keys(o)) r.bodyKeys.add(k);
     for (const v of Object.values(o)) if (typeof v === 'string' && /^https?:\/\//i.test(v)) r.urls.push(v);
   };
-  if (t[0] === '{' || t[0] === '[') {
-    const v = tryJson(t);
+  if (full[0] === '{' || full[0] === '[') {
+    // TB-R2-1: JSON (object / mảng) parse trên body ĐẦY ĐỦ (≤ 1 MB, đã kẹp ở readRequest).
+    const v = tryJson(full);
     if (v.ok && isObj(v.value)) {
       r.format = 'json-object';
       keysOf(v.value);
@@ -185,15 +196,25 @@ function applyBody(r: ParsedRequest, body: string, problems: string[]): void {
       for (const el of v.value.slice(0, 50)) if (isObj(el)) keysOf(el);
       return;
     }
-    const rows = t.split('\n').filter((l) => l.trim().length > 0).map((l) => tryJson(l.trim()));
+    // JSON lines: chỉ 64 KB đầu; bị cắt thì bỏ dòng cuối dở dang (không coi là "JSON hỏng").
+    const cut = full.length > IDENTIFY_MAX_CHARS;
+    const lines = clip(full, problems).split('\n');
+    if (cut && lines.length > 1) lines.pop();
+    const rows = lines.filter((l) => l.trim().length > 0).map((l) => tryJson(l.trim()));
     if (rows.length > 1 && rows.every((x) => x.ok && isObj(x.value))) {
       r.format = 'jsonl';
       for (const x of rows.slice(0, 50)) if (x.ok) keysOf(x.value as Record<string, unknown>);
       return;
     }
-    problems.push('body bắt đầu như JSON nhưng không parse được (JSON, mảng JSON hay JSON lines)');
+    problems.push(
+      full.length >= IDENTIFY_MAX_INPUT_CHARS
+        ? 'body JSON dài hơn 1 MB — không đọc được khoá body (khoá body coi là "không biết")'
+        : 'body bắt đầu như JSON nhưng không parse được (JSON, mảng JSON hay JSON lines)',
+    );
     return;
   }
+  // Các nhánh còn lại (XML, JWT, form): chỉ 64 KB đầu (TB-1).
+  const t = clip(full, problems);
   if (t[0] === '<') {
     const root = xmlRootTag(t);
     if (root) {

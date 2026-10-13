@@ -738,6 +738,11 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
   - **T-g:** `GET /api/v1/catalog` trả `Cache-Control: private, max-age=300`. Không làm ETag (dữ liệu nhỏ, max-age đủ).
   - **Typeform nạp** (`entries/typeform.json`: hmac sha256 base64, `prefix: "sha256="`, khoá `event_id`), fixture constructed theo payload mẫu chính thức → **21 mục / 70 pending**.
   - **Để lại (Thấp, chưa làm):** T-a (`{id}` + ký tự ngăn cách dời byte khi id chứa chính ký tự đó — tác động thấp, body sau cắt luôn có rác); T-c (WooCommerce ping `webhook_id=` không ký → 401, chờ PK4 bắt tay); T-d (Linear chỉ chống phát lại bằng `webhookTimestamp` trong body, `hmac` chưa kiểm được); T-e (S1 chống trùng bằng header không được ký — đánh đổi chung như GitHub native, cần ADR khi làm `idempotency: {bodyHash: true}`); T-i (fixture github ghi official nhưng chữ ký/ body là placeholder); `shape` coi mọi `*timestamp*` là signed-template (Linear gợi ý sai scheme).
+- **Sửa review PK9-R2 (2026-10-14, Amelia):**
+  - **TB-R2-1:** `identify` parse JSON (object / mảng) trên body **đầy đủ**, trần chung 1 MB (`IDENTIFY_MAX_INPUT_CHARS` = trần ingest); chỉ XML / JWT / form / JSON lines bị cắt 64 KB. JSON lines bị cắt thì bỏ dòng cuối dở dang. JSON > 1 MB hỏng báo "dài hơn 1 MB — khoá body coi là không biết", không báo "JSON hỏng". Dòng tiêu đề hỏng chỉ báo 5 dòng đầu. Test: fixture github + typeform đệm lên 100 KB ra đúng mục, cùng điểm, `problems` rỗng.
+  - **T-R2-1:** gate `server-lib-subpath` quét cả file (`import(` / `require(` xuống dòng), thêm `require.resolve(` và template literal. Vẫn chỉ chuỗi tĩnh.
+  - **T-R2-2:** gate mới `web-no-provider-barrel` (src `apps/web`, không phải spec, cấm barrel `@hub/providers`).
+  - **T-R2-3:** `typeform.docsVersion` ghi rõ `event_id` chưa có tài liệu cam kết giữ nguyên khi gửi lại.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

@@ -989,7 +989,7 @@ export const CATALOG_DATA: CatalogEntry[] = [
     ],
     "secretSource": "provider",
     "docs": "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
-    "docsVersion": null,
+    "docsVersion": "Khoá chống trùng event_id: tài liệu chỉ nói \"Unique ID for the webhook\"; CHƯA có tài liệu xác nhận event_id giữ nguyên khi Typeform gửi lại (review PK9-R2 T-R2-3). Nếu đổi theo lần gửi: hub đã COMMIT mà phản hồi bị mất -> một event trùng.",
     "confidence": "cao",
     "sources": [
       "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",

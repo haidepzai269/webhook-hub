@@ -12,6 +12,15 @@ import { BODY_FORMATS, CatalogEntry } from '../src/catalog/types';
  */
 const sources = readCatalogSources();
 const entry = (id: string): CatalogEntry => JSON.parse(JSON.stringify(CATALOG.find((e) => e.id === id)!));
+/** Phần đầu fixture (dòng đầu + tiêu đề) -> map tiêu đề (cho ca `captured`). */
+const headersOf = (head: string): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const l of head.split('\n')) {
+    const m = /^([A-Za-z0-9-]+):\s*(.*)$/.exec(l);
+    if (m) out[m[1].toLowerCase()] = m[2];
+  }
+  return out;
+};
 
 describe('[PK:T19] nghiệm thu nhận tên trên TOÀN danh mục (bài A, §13)', () => {
   it('entries/ + entries-pending/ + fixtures/ hợp lệ; catalog.data.ts khớp entries/ (quên `npm run catalog:build` -> đỏ)', () => {
@@ -239,6 +248,30 @@ describe('[PK:T23] mỗi khuôn body F15 có fixture parse được (không dự
     const unclosed = identify({ sample: '<?xml version="1.0"\n<root/>' }, CATALOG);
     expect(unclosed.bodyFormat).toBeNull();
     expect(unclosed.problems.length).toBe(1);
+  });
+
+  it('review PK9-R2 TB-R2-1: fixture thật (github, typeform) đệm body JSON lên 100 KB -> vẫn đúng mục, cùng điểm, không báo "JSON hỏng"', () => {
+    for (const id of ['github', 'typeform']) {
+      const f = sources.fixtures.find((x) => x.entryId === id && x.text.includes('{'))!;
+      const text = f.text.replace(/\r\n/g, '\n');
+      const cut = text.indexOf('\n\n');
+      const head = text.slice(0, cut);
+      const body = JSON.parse(text.slice(cut + 2));
+      const padded = JSON.stringify({ ...body, zz_pad: 'x'.repeat(100 * 1024) });
+      expect(padded.length).toBeGreaterThan(100 * 1024);
+      const small = identify({ sample: f.text }, CATALOG);
+      for (const r of [identify({ sample: `${head}\n\n${padded}` }, CATALOG), identify({ captured: { method: 'POST', headers: headersOf(head), body: padded } }, CATALOG)]) {
+        expect([id, r.matches[0]?.id]).toEqual([id, id]);
+        expect(r.matches[0].score).toBe(small.matches[0].score);
+        expect(r.bodyFormat).toBe('json-object');
+        expect(r.problems).toEqual([]);
+      }
+    }
+    // JSON hỏng thật vẫn bị báo; JSON lines > 64 KB: dòng cuối dở dang không làm hỏng khuôn.
+    expect(identify({ sample: '{"a":' + '1'.repeat(100 * 1024) }, CATALOG).problems.some((p) => p.includes('không parse được'))).toBe(true);
+    const jsonl = Array.from({ length: 3000 }, (_, i) => JSON.stringify({ id: i, type: 'x', pad: 'y'.repeat(30) })).join('\n');
+    expect(jsonl.length).toBeGreaterThan(64 * 1024);
+    expect(identify({ captured: { method: 'POST', headers: {}, body: jsonl } }, CATALOG).bodyFormat).toBe('jsonl');
   });
 
   it('captured (PK6): headers + query + body -> nhận như mẫu dán; GET + query -> VNPay (unsupported)', () => {

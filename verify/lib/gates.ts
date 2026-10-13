@@ -56,6 +56,32 @@ function grepLines(re: RegExp, opts: { skipComments?: boolean; transform?: (ln: 
   };
 }
 
+/**
+ * Review PK9-R2 T-R2-1: regex (cờ `g`) trên CẢ file — khớp được `import(` xuống dòng rồi mới tới chuỗi. Báo ở dòng chứa
+ * đầu khớp; dòng chú thích (`//`, `*`, `/*`) bị bỏ như `grepLines` với `skipComments`.
+ */
+function grepAcrossLines(re: RegExp) {
+  return (text: string) => {
+    const lines = text.split('\n');
+    const starts: number[] = [];
+    let pos = 0;
+    for (const ln of lines) {
+      starts.push(pos);
+      pos += ln.length + 1;
+    }
+    const out: { line: number; text: string }[] = [];
+    const seen = new Set<number>();
+    for (const m of text.matchAll(re)) {
+      let i = 0;
+      while (i + 1 < starts.length && starts[i + 1] <= m.index!) i++;
+      if (seen.has(i) || isComment(lines[i])) continue;
+      seen.add(i);
+      out.push({ line: i + 1, text: lines[i].replace(/\r$/, '').trim().slice(0, 200) });
+    }
+    return out;
+  };
+}
+
 const ACCOUNT_RE = /(?<![\d.])\d{9,14}(?![\d.])/;
 
 /**
@@ -323,9 +349,20 @@ export const GATES: Gate[] = [
     // tsconfig paths + jest moduleNameMapper resolve subpath, Node lúc chạy thì không: node_modules/@hub/<lib> trỏ gốc
     // package (không phải dist/), package không khai `exports` → MODULE_NOT_FOUND, hub-api không lên (CI e2e đỏ fa1874c).
     // apps/web dùng alias Next riêng (`@hub/providers/catalog`, E28) nên ngoài phạm vi.
+    // Review PK9-R2 T-R2-1: bắt cả `require.resolve(…)`, chuỗi template literal, và `import(` / `require(` xuống dòng
+    // trước chuỗi (quét cả file, `\s*` trải nhiều dòng). Vẫn chỉ chuỗi TĨNH — ghép chuỗi lúc chạy thì không thấy (ADR-210).
     source: 'ADR-210',
     include: (f) => isSrc(f) && !f.startsWith('apps/web/'),
-    check: grepLines(new RegExp(`(\\bfrom\\s+|\\brequire\\(\\s*|\\bimport\\s*\\(?\\s*)['"]${'@h' + 'ub'}/[\\w-]+/`), { skipComments: true }),
+    check: grepAcrossLines(new RegExp(`(\\bfrom\\s+|\\brequire(?:\\.resolve)?\\(\\s*|\\bimport\\s*\\(?\\s*)['"\`]${'@h' + 'ub'}/[\\w-]+/`, 'g')),
+  },
+  {
+    id: 'web-no-provider-barrel',
+    rule: 'Src apps/web (không phải spec) không import barrel `@hub/providers` — chỉ `@hub/providers/catalog`',
+    // Review PK9-R2 T-R2-2 (E28): barrel kéo `crypto` của Node + dữ liệu danh mục vào bundle trình duyệt. Đối xứng với
+    // `server-lib-subpath`: server chỉ barrel, web chỉ subpath catalog. Spec (jest) được dùng barrel để đối chiếu luật server.
+    source: 'SPEC-provider-khac E28, ADR-210',
+    include: (f) => /^apps\/web\/src\//.test(f) && /\.(ts|tsx|js)$/.test(f) && !isSpec(f),
+    check: grepAcrossLines(new RegExp(`(\\bfrom\\s+|\\brequire(?:\\.resolve)?\\(\\s*|\\bimport\\s*\\(?\\s*)['"\`]${'@h' + 'ub'}/providers['"\`]`, 'g')),
   },
   {
     id: 'shop-size',

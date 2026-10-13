@@ -209,4 +209,33 @@ const d = await import('${H}crypto/y');`,
       'libs/database/src/c.ts:1',
     ]);
   });
+  it('review PK9-R2 T-R2-1: server-lib-subpath bắt require.resolve, template literal, import( / require( xuống dòng; chú thích thì không', () => {
+    const H = '@h' + 'ub/';
+    const B = '`';
+    const f = files({
+      'apps/hub-api/src/a.ts': `const p = require.resolve('${H}providers/catalog');
+const q = require(${B}${H}common/x${B});
+const r = await import(
+  '${H}crypto/y'
+);
+// import('${H}crypto/z') trong chú thích
+const ok = require('${H}providers');`,
+    });
+    const r = runGates([byId('server-lib-subpath')], f.list, f.read);
+    expect(r[0].violations.map((v) => v.file + ':' + v.line)).toEqual(['apps/hub-api/src/a.ts:1', 'apps/hub-api/src/a.ts:2', 'apps/hub-api/src/a.ts:3']);
+  });
+  it('review PK9-R2 T-R2-2 (E28): apps/web src không import barrel @hub/providers (chỉ /catalog); spec của web thì được', () => {
+    const H = '@h' + 'ub/';
+    const f = files({
+      'apps/web/src/a.tsx': `import { identify } from '${H}providers/catalog';
+import { validateGenericConfig } from '${H}providers';`,
+      'apps/web/src/b.ts': `const m = await import(
+  "${H}providers"
+);`,
+      'apps/web/src/lib/hub/x.spec.ts': `import { validateGenericConfig } from '${H}providers';`,
+      'apps/hub-api/src/c.ts': `import { X } from '${H}providers';`,
+    });
+    const r = runGates([byId('web-no-provider-barrel')], f.list, f.read);
+    expect(r[0].violations.map((v) => v.file + ':' + v.line)).toEqual(['apps/web/src/a.tsx:2', 'apps/web/src/b.ts:1']);
+  });
 });
