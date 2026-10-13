@@ -1,0 +1,14 @@
+{
+  "id": "mailgun",
+  "name": "Mailgun",
+  "aliases": [
+    "mailgun",
+    "mail gun"
+  ],
+  "confidence": "cao",
+  "docs": "https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/securing-webhooks",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S5: chữ ký trong body chỉ phủ timestamp+token, không phủ event-data -> cần unverified"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "slack",
+  "name": "Slack (Events API / interactivity / slash commands)",
+  "aliases": [
+    "slack"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "Events API cần bắt tay url_verification (body-echo challenge) -> chờ PK4"
+}

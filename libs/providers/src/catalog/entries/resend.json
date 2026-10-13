@@ -1,0 +1,49 @@
+{
+  "id": "resend",
+  "name": "Resend",
+  "aliases": [
+    "resend"
+  ],
+  "group": "svix",
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "svix-id",
+        "svix-timestamp",
+        "svix-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "standard-webhooks",
+      "eventType": "resend.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Signing secret của endpoint (whsec_…)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://resend.com/docs/dashboard/webhooks/verify-webhooks-requests",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://resend.com/docs/dashboard/webhooks/verify-webhooks-requests"
+  ]
+}

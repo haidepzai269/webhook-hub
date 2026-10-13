@@ -1,0 +1,20 @@
+{
+  "id": "adobe-commerce",
+  "name": "Adobe Commerce / Magento (Webhooks module)",
+  "aliases": [
+    "magento",
+    "adobe commerce"
+  ],
+  "confidence": "thấp",
+  "docs": "https://developer.adobe.com/commerce/extensibility/webhooks/signature-verification",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "độ tin cậy \"thấp\" trong nghiên cứu (không đọc được tài liệu chính thức) — không được nạp (§8.1); khi xác minh xong sẽ là unsupported (S10)",
+  "handler": {
+    "unsupported": {
+      "reason": "Adobe Commerce webhook đòi bên nhận trả lời nghiệp vụ đồng bộ (quyết định tiếp tục thao tác); hub không trả lời thay ứng dụng.",
+      "workaround": "Để ứng dụng của bạn nhận webhook trực tiếp, rồi đẩy sự kiện vào hub qua POST /v1/p/:project/events."
+    }
+  }
+}

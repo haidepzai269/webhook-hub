@@ -1,0 +1,8 @@
+# origin: constructed; source: https://render.com/docs/webhooks
+POST /webhook HTTP/1.1
+Content-Type: application/json
+webhook-id: evt-cq000000000000000000
+webhook-timestamp: 1700000000
+webhook-signature: v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+{"type":"deploy_ended","timestamp":"2024-01-01T00:00:00.000Z","data":{"id":"evt-cq000000000000000000","serviceId":"srv-cq000000000000000000"}}

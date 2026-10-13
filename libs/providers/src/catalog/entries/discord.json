@@ -1,0 +1,54 @@
+{
+  "id": "discord",
+  "name": "Discord (Interactions endpoint)",
+  "aliases": [
+    "discord",
+    "discord interactions"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-signature-ed25519",
+        "x-signature-timestamp"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "type",
+        "application_id",
+        "token",
+        "id"
+      ],
+      "optional": [
+        "data",
+        "guild_id",
+        "channel_id",
+        "member",
+        "user"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "unsupported": {
+      "reason": "Discord Interactions đòi trả lời đồng bộ (PING phải trả {type:1}, lệnh phải trả interaction response) và ký Ed25519 bằng khoá công khai — hub chỉ ACK sau COMMIT, không sinh câu trả lời thay ứng dụng.",
+      "workaround": "Để ứng dụng Discord của bạn nhận Interactions trực tiếp (trả lời đồng bộ), rồi đẩy sự kiện cần chia sẻ vào hub qua POST /v1/p/:project/events."
+    }
+  },
+  "fields": [],
+  "secretSource": null,
+  "docs": "https://docs.discord.com/developers/interactions/overview",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://docs.discord.com/developers/interactions/overview"
+  ]
+}

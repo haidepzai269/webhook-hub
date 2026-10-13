@@ -1,0 +1,13 @@
+{
+  "id": "zoom",
+  "name": "Zoom",
+  "aliases": [
+    "zoom"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.zoom.us/docs/api/webhooks/",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: endpoint.url_validation cần hmac-echo (E3) -> chờ PK4"
+}

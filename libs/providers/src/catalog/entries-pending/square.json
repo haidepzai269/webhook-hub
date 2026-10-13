@@ -1,0 +1,14 @@
+{
+  "id": "square",
+  "name": "Square",
+  "aliases": [
+    "square",
+    "squareup"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developer.squareup.com/docs/webhooks/step3validate",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S6: ký URL nhận + body -> cần unverified (forwardUrl)"
+}

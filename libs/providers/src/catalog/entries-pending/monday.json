@@ -1,0 +1,14 @@
+{
+  "id": "monday",
+  "name": "monday.com",
+  "aliases": [
+    "monday",
+    "monday.com"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.monday.com/api-reference/reference/webhooks",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: bắt tay body-echo challenge; phần lớn webhook không ký -> chờ PK4/PK5"
+}

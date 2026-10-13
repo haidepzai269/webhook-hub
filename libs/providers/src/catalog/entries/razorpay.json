@@ -1,0 +1,55 @@
+{
+  "id": "razorpay",
+  "name": "Razorpay",
+  "aliases": [
+    "razorpay"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-razorpay-signature"
+      ],
+      "optional": [
+        "x-razorpay-event-id"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "x-razorpay-signature",
+      "algo": "sha256",
+      "encoding": "hex",
+      "idempotency": {
+        "header": "x-razorpay-event-id"
+      },
+      "eventType": "razorpay.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Webhook secret đặt khi tạo webhook ở Razorpay Dashboard",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://razorpay.com/docs/webhooks/validate-test/",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://razorpay.com/docs/webhooks/validate-test/"
+  ]
+}

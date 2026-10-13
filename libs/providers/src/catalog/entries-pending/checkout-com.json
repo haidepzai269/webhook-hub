@@ -1,0 +1,15 @@
+{
+  "id": "checkout-com",
+  "name": "Checkout.com",
+  "aliases": [
+    "checkout.com",
+    "checkout com",
+    "cko"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://www.checkout.com/docs/workflows/set-up-your-webhook-receiver",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"id (chưa xác minh trong phiên)\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

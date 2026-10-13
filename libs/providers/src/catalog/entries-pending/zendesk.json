@@ -1,0 +1,13 @@
+{
+  "id": "zendesk",
+  "name": "Zendesk",
+  "aliases": [
+    "zendesk"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.zendesk.com/documentation/webhooks/verifying/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "tài liệu chỉ có công thức, không có định dạng timestamp và cửa sổ (§16 PK3)"
+}

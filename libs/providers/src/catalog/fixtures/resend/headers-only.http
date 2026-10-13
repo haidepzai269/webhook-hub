@@ -1,0 +1,7 @@
+# origin: constructed; source: https://resend.com/docs/dashboard/webhooks/verify-webhooks-requests
+POST /webhook HTTP/1.1
+Content-Type: application/json
+svix-id: msg_p5jXN8AQM9LWM0D4loKWxJek
+svix-timestamp: 1700000000
+svix-signature: v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+

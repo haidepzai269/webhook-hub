@@ -1,0 +1,15 @@
+{
+  "id": "tiktok-shop",
+  "name": "TikTok Shop",
+  "aliases": [
+    "tiktok shop",
+    "tiktokshop",
+    "tts"
+  ],
+  "confidence": "thấp",
+  "docs": "https://partner.tiktokshop.com/docv2/page/tts-webhooks-overview",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "độ tin cậy \"thấp\" trong nghiên cứu (không đọc được tài liệu chính thức) — không được nạp (§8.1)"
+}

@@ -1,0 +1,56 @@
+{
+  "id": "vnpay",
+  "name": "VNPay",
+  "aliases": [
+    "vnpay",
+    "vn pay",
+    "vnpayment"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "GET",
+    "headers": {
+      "required": [],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "empty",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [
+        "vnp_TmnCode",
+        "vnp_Amount",
+        "vnp_TxnRef",
+        "vnp_TransactionNo",
+        "vnp_ResponseCode",
+        "vnp_TransactionStatus",
+        "vnp_SecureHash"
+      ],
+      "optional": [
+        "vnp_BankCode",
+        "vnp_BankTranNo",
+        "vnp_CardType",
+        "vnp_PayDate",
+        "vnp_OrderInfo",
+        "vnp_SecureHashType"
+      ]
+    }
+  },
+  "handler": {
+    "unsupported": {
+      "reason": "VNPay đòi bên nhận trả lời nghiệp vụ đồng bộ (RspCode: đơn có tồn tại, đúng số tiền). Hub không biết đơn hàng (BB-1); trả \"00 Confirm Success\" thay shop là nói dối VNPay.",
+      "workaround": "Để shop nhận IPN trực tiếp, xác nhận đơn, rồi đẩy payment.received vào hub qua POST /v1/p/:project/events."
+    }
+  },
+  "fields": [],
+  "secretSource": null,
+  "docs": "https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html",
+  "docsVersion": "2.1.0",
+  "confidence": "cao",
+  "sources": [
+    "https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html"
+  ]
+}

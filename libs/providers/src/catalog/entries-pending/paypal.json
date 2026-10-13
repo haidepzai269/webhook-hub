@@ -1,0 +1,14 @@
+{
+  "id": "paypal",
+  "name": "PayPal (REST webhooks)",
+  "aliases": [
+    "paypal",
+    "pay pal"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.paypal.com/api/rest/webhooks/rest/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8: SHA256withRSA với chứng chỉ tải qua mạng -> cần unverified (đích tự kiểm)"
+}

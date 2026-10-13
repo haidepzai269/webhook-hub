@@ -1,0 +1,44 @@
+{
+  "id": "payos",
+  "name": "PayOS",
+  "aliases": [
+    "payos",
+    "pay os",
+    "payos.vn"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "code",
+        "desc",
+        "success",
+        "data",
+        "signature"
+      ],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "native": "payos"
+  },
+  "fields": [],
+  "secretSource": "provider",
+  "docs": "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/"
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "id": "linear",
+  "name": "Linear",
+  "aliases": [
+    "linear",
+    "linear.app"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "linear-signature",
+        "linear-delivery",
+        "linear-event"
+      ],
+      "optional": [
+        "linear-timestamp"
+      ]
+    },
+    "userAgent": "^Linear-Webhook",
+    "body": {
+      "format": "json-object",
+      "required": [
+        "action",
+        "type",
+        "createdAt",
+        "webhookTimestamp"
+      ],
+      "optional": [
+        "data",
+        "url",
+        "actor",
+        "updatedFrom",
+        "webhookId",
+        "organizationId"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "linear-signature",
+      "algo": "sha256",
+      "encoding": "hex",
+      "idempotency": {
+        "header": "linear-delivery"
+      },
+      "eventType": "linear.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Signing secret của webhook Linear",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://linear.app/developers/webhooks",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://linear.app/developers/webhooks"
+  ]
+}

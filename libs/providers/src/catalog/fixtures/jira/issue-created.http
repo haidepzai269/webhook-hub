@@ -1,0 +1,7 @@
+# origin: constructed; source: https://developer.atlassian.com/cloud/jira/platform/webhooks/
+POST /webhook HTTP/1.1
+Content-Type: application/json
+X-Atlassian-Webhook-Identifier: 1234567890
+X-Hub-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000
+
+{"timestamp":1700000000000,"webhookEvent":"jira:issue_created","issue_event_type_name":"issue_created","issue":{"id":"10001","key":"PRJ-1"}}

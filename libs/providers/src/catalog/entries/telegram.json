@@ -1,0 +1,64 @@
+{
+  "id": "telegram",
+  "name": "Telegram Bot API",
+  "aliases": [
+    "telegram",
+    "telegram bot",
+    "telegram bot api"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-telegram-bot-api-secret-token"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "update_id"
+      ],
+      "optional": [
+        "message",
+        "edited_message",
+        "callback_query",
+        "channel_post",
+        "my_chat_member",
+        "chat_member",
+        "poll",
+        "inline_query"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "static-token",
+      "header": "x-telegram-bot-api-secret-token",
+      "idempotency": {
+        "field": "update_id"
+      },
+      "eventType": "telegram.update"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "secret_token đã truyền khi gọi setWebhook (1–256 ký tự A-Z a-z 0-9 _ -)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://core.telegram.org/bots/api#setwebhook",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://core.telegram.org/bots/api#setwebhook"
+  ]
+}

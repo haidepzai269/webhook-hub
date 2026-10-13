@@ -1,0 +1,15 @@
+{
+  "id": "ghtk",
+  "name": "Giao Hàng Tiết Kiệm (GHTK)",
+  "aliases": [
+    "ghtk",
+    "giao hang tiet kiem",
+    "giao hàng tiết kiệm"
+  ],
+  "confidence": "cao",
+  "docs": "http://api.ghtk.vn/en/docs/submit-order/webhook/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S9: ?hash là URL bí mật không giải thích, không có id sự kiện -> cần unverified"
+}

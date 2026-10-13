@@ -1,0 +1,14 @@
+{
+  "id": "mailchimp",
+  "name": "Mailchimp (audience webhooks)",
+  "aliases": [
+    "mailchimp",
+    "mail chimp"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://mailchimp.com/developer/marketing/guides/sync-audience-data-webhooks/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S9: secret nhúng URL, chữ ký tuỳ chọn chưa rõ thuật toán -> cần unverified"
+}

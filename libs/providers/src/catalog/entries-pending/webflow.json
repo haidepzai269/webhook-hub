@@ -1,0 +1,13 @@
+{
+  "id": "webflow",
+  "name": "Webflow",
+  "aliases": [
+    "webflow"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.webflow.com/data/docs/working-with-webhooks",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng payload.id (lồng, \"chưa xác minh\") — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

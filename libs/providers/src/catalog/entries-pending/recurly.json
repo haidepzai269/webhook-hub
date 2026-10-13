@@ -1,0 +1,13 @@
+{
+  "id": "recurly",
+  "name": "Recurly",
+  "aliases": [
+    "recurly"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://docs.recurly.com/recurly-subscriptions/v2.29/docs/signature-verification",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "header \"<ts>,<sig>\" không có tên khoá, ngoài khuôn kv (§16 PK3) — cần mở rộng khuôn có ADR hoặc unverified"
+}

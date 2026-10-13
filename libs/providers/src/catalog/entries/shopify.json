@@ -1,0 +1,56 @@
+{
+  "id": "shopify",
+  "name": "Shopify",
+  "aliases": [
+    "shopify"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-shopify-hmac-sha256"
+      ],
+      "optional": [
+        "x-shopify-webhook-id",
+        "x-shopify-event-id"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "x-shopify-hmac-sha256",
+      "algo": "sha256",
+      "encoding": "base64",
+      "idempotency": {
+        "header": "x-shopify-event-id"
+      },
+      "eventType": "shopify.webhook"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Client secret của app Shopify (khoá ký webhook)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://shopify.dev/docs/apps/build/webhooks/subscribe/https",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://shopify.dev/docs/apps/build/webhooks/subscribe/https"
+  ]
+}

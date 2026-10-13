@@ -1,0 +1,13 @@
+{
+  "id": "xendit",
+  "name": "Xendit",
+  "aliases": [
+    "xendit"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.xendit.co/docs/handling-webhooks",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng là id nghiệp vụ khác nhau theo sản phẩm (payment_id, capture_id…), không có trường chung — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

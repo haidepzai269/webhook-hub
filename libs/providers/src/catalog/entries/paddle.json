@@ -1,0 +1,70 @@
+{
+  "id": "paddle",
+  "name": "Paddle Billing",
+  "aliases": [
+    "paddle",
+    "paddle billing"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "paddle-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "data"
+      ],
+      "optional": [
+        "notification_id"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "signed-template",
+      "template": "{timestamp}:{body}",
+      "signature": {
+        "header": "paddle-signature",
+        "kv": {
+          "sep": ";",
+          "sig": "h1",
+          "timestamp": "ts"
+        }
+      },
+      "timestampFormat": "unix",
+      "toleranceSec": 5,
+      "idempotency": {
+        "field": "event_id"
+      },
+      "eventType": "paddle.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Khoá bí mật của notification destination (bắt đầu pdl_ntfset_)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://developer.paddle.com/webhooks/signature-verification",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://developer.paddle.com/webhooks/signature-verification",
+    "https://developer.paddle.com/webhooks/overview"
+  ]
+}

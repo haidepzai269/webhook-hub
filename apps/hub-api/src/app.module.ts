@@ -20,6 +20,7 @@ import { EndpointVerifier } from './modules/service-api/endpoint-verifier';
 import { FlowModule } from './modules/flow/flow.module';
 import { ConsoleEndpointsController } from './modules/console/endpoints.controller';
 import { SourceConnectionsController } from './modules/console/source-connections.controller';
+import { CatalogController } from './modules/console/catalog.controller';
 import { AlertsController, MeLocaleController } from './modules/alerts/alerts.controller';
 import { OperatorGuard } from './modules/console/operator.guard';
 import { InsightsController } from './modules/insights/insights.controller';
@@ -35,6 +36,7 @@ export function hubApiControllers(nodeEnv: string | undefined = process.env.NODE
   const base = [IngestController, HealthController, ApiController, ProjectsController, MembersController, ServiceApiController, ServiceResourcesController, MetricsController,
     ConsoleEndpointsController, // KN1 (ADR-138): console tạo endpoint — controller riêng, không sửa ApiController
     SourceConnectionsController, // KN2 (ADR-138): hub tự đăng ký URL ingest tại provider
+    CatalogController, // PK9 (ADR-208): danh mục provider đã build — identify() chạy ở trình duyệt
     AlertsController, // CB3 (ADR-169): cảnh báo xuyên project — chỉ operator
     MeLocaleController, // CB3 / DINH-CHINH D3: PUT /api/v1/me/locale
     InsightsController, // CB6: nhận định theo project (thành viên đọc được project)

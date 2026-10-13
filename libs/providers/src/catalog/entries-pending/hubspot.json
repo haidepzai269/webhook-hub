@@ -1,0 +1,14 @@
+{
+  "id": "hubspot",
+  "name": "HubSpot",
+  "aliases": [
+    "hubspot",
+    "hub spot"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.hubspot.com/docs/api/webhooks/validating-requests",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S6: v3 ký method + URI + body -> cần unverified"
+}

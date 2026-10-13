@@ -1,0 +1,15 @@
+{
+  "id": "docker-hub",
+  "name": "Docker Hub",
+  "aliases": [
+    "docker hub",
+    "dockerhub",
+    "docker"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.docker.com/docker-hub/repos/manage/webhooks/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S9: không ký, không có id sự kiện -> cần unverified"
+}

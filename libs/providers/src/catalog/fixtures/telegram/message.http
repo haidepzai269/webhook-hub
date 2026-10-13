@@ -1,0 +1,6 @@
+# origin: constructed; source: https://core.telegram.org/bots/api#setwebhook
+POST /webhook HTTP/1.1
+Content-Type: application/json
+X-Telegram-Bot-Api-Secret-Token: PLACEHOLDER
+
+{"update_id":10000,"message":{"message_id":1,"date":1704067200,"chat":{"id":1,"type":"private"},"text":"/start"}}

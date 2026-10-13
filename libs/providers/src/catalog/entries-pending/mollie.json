@@ -1,0 +1,13 @@
+{
+  "id": "mollie",
+  "name": "Mollie",
+  "aliases": [
+    "mollie"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.mollie.com/reference/webhooks",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8/S9: dataless, không ký -> cần unverified"
+}

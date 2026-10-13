@@ -1,0 +1,13 @@
+{
+  "id": "netlify",
+  "name": "Netlify (deploy notifications)",
+  "aliases": [
+    "netlify"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.netlify.com/site-deploys/deploy-notifications/#payload-signature",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "JWS HS256 bọc băm body — không phải HMAC trên body -> cần unverified"
+}

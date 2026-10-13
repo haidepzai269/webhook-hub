@@ -1,0 +1,13 @@
+{
+  "id": "asana",
+  "name": "Asana",
+  "aliases": [
+    "asana"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.asana.com/docs/webhooks-guide",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: bắt tay header-echo X-Hook-Secret, secret đến trong request đầu -> chờ PK4/PK6"
+}

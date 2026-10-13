@@ -1,0 +1,19 @@
+{
+  "id": "microsoft-graph",
+  "name": "Microsoft Graph change notifications (Outlook/Teams/OneDrive/SharePoint)",
+  "aliases": [
+    "microsoft graph",
+    "ms graph",
+    "outlook",
+    "teams",
+    "onedrive",
+    "sharepoint",
+    "office 365"
+  ],
+  "confidence": "cao",
+  "docs": "https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: bắt tay validationToken (query-echo, text/plain) -> chờ PK4"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "kiotviet",
+  "name": "KiotViet",
+  "aliases": [
+    "kiotviet",
+    "kiot viet"
+  ],
+  "confidence": "cao",
+  "docs": "https://www.kiotviet.vn/huong-dan-su-dung-public-api-retail/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "encoding và tiền tố của x-hub-signature \"chưa xác minh\" trong nghiên cứu"
+}

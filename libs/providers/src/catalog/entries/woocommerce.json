@@ -1,0 +1,63 @@
+{
+  "id": "woocommerce",
+  "name": "WooCommerce",
+  "aliases": [
+    "woocommerce",
+    "woo commerce",
+    "woo"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-wc-webhook-signature"
+      ],
+      "optional": [
+        "x-wc-webhook-source",
+        "x-wc-webhook-topic",
+        "x-wc-webhook-resource",
+        "x-wc-webhook-event",
+        "x-wc-webhook-id",
+        "x-wc-webhook-delivery-id"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "x-wc-webhook-signature",
+      "algo": "sha256",
+      "encoding": "base64",
+      "idempotency": {
+        "header": "x-wc-webhook-delivery-id"
+      },
+      "eventType": "woocommerce.webhook"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret đặt khi tạo webhook (WooCommerce → Settings → Advanced → Webhooks)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks/",
+  "docsVersion": "REST API v3",
+  "confidence": "trung bình",
+  "sources": [
+    "https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks/",
+    "https://hookdeck.com/webhooks/platforms/guide-to-woocommerce-webhooks-features-and-best-practices"
+  ]
+}

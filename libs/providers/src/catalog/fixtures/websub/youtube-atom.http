@@ -1,0 +1,13 @@
+# origin: constructed; source: https://developers.google.com/youtube/v3/guides/push_notifications
+POST /websub HTTP/1.1
+Content-Type: application/atom+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <yt:videoId>VIDEO_ID</yt:videoId>
+    <yt:channelId>CHANNEL_ID</yt:channelId>
+    <title>Video title</title>
+    <updated>2015-03-06T21:40:57.703Z</updated>
+  </entry>
+</feed>

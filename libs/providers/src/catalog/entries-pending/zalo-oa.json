@@ -1,0 +1,15 @@
+{
+  "id": "zalo-oa",
+  "name": "Zalo Official Account",
+  "aliases": [
+    "zalo",
+    "zalo oa",
+    "zalo official account"
+  ],
+  "confidence": "thấp",
+  "docs": "https://developers.zalo.me/docs/official-account/webhook/tong-quan",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "độ tin cậy \"thấp\" trong nghiên cứu (không đọc được tài liệu chính thức) — không được nạp (§8.1)"
+}

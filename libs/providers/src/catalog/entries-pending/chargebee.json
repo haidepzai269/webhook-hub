@@ -1,0 +1,13 @@
+{
+  "id": "chargebee",
+  "name": "Chargebee",
+  "aliases": [
+    "chargebee"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://www.chargebee.com/docs/billing/2.0/site-configuration/webhook_settings",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "trường body và khoá chống trùng theo \"kiến thức API\", trang đã đọc không liệt kê"
+}

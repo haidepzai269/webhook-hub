@@ -1,0 +1,13 @@
+{
+  "id": "notion",
+  "name": "Notion",
+  "aliases": [
+    "notion"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.notion.com/reference/webhooks",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: verification_token đến trong request đầu (chế độ thu) -> chờ PK4/PK6"
+}

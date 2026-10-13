@@ -1,0 +1,13 @@
+{
+  "id": "braintree",
+  "name": "Braintree",
+  "aliases": [
+    "braintree"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developer.paypal.com/braintree/docs/guides/webhooks/parse",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S5: chữ ký trong form, payload XML base64 -> cần unverified"
+}

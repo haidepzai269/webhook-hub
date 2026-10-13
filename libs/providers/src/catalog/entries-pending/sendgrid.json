@@ -1,0 +1,15 @@
+{
+  "id": "sendgrid",
+  "name": "SendGrid Event Webhook",
+  "aliases": [
+    "sendgrid",
+    "send grid",
+    "twilio sendgrid"
+  ],
+  "confidence": "cao",
+  "docs": "https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/getting-started-event-webhook-security-features",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8: ECDSA khoá công khai -> cần unverified"
+}

@@ -1,0 +1,5 @@
+# origin: constructed; source: https://docs.zalopay.vn/docs/developer-tools/knowledge-base/callback/
+POST /callback HTTP/1.1
+Content-Type: application/json
+
+{"data":"{\"app_id\":2553,\"app_trans_id\":\"240101_000001\",\"app_time\":1704067200000,\"amount\":50000,\"zp_trans_id\":240101000000001}","mac":"0000000000000000000000000000000000000000000000000000000000000000","type":1}

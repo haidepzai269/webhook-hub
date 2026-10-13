@@ -1,0 +1,13 @@
+{
+  "id": "plaid",
+  "name": "Plaid",
+  "aliases": [
+    "plaid"
+  ],
+  "confidence": "cao",
+  "docs": "https://plaid.com/docs/api/webhooks/webhook-verification/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8: JWT ES256, khoá công khai lấy qua API -> cần unverified"
+}

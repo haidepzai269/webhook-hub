@@ -1,0 +1,21 @@
+{
+  "id": "onepay",
+  "name": "OnePay",
+  "aliases": [
+    "onepay",
+    "one pay",
+    "cổng onepay"
+  ],
+  "confidence": "thấp",
+  "docs": "https://mtf.onepay.vn/developer/resource/documents/docx/quy_trinh_tich_hop-noidia.pdf",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "độ tin cậy \"thấp\" trong nghiên cứu (không đọc được tài liệu chính thức) — không được nạp (§8.1); khi xác minh xong sẽ là unsupported (S10, phản hồi nghiệp vụ đồng bộ)",
+  "handler": {
+    "unsupported": {
+      "reason": "OnePay đòi bên nhận trả lời nghiệp vụ đồng bộ (responsecode); hub không biết đơn hàng (BB-1).",
+      "workaround": "Để shop nhận IPN trực tiếp, xác nhận đơn, rồi đẩy payment.received vào hub qua POST /v1/p/:project/events."
+    }
+  }
+}

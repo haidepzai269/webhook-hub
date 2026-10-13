@@ -1,0 +1,16 @@
+{
+  "id": "azure-devops",
+  "name": "Azure DevOps Service Hooks",
+  "aliases": [
+    "azure devops",
+    "ado",
+    "vsts",
+    "tfs"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://learn.microsoft.com/en-us/azure/devops/service-hooks/services/webhooks",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"id (chưa xác minh trong phiên)\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

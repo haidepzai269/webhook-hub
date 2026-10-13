@@ -1,0 +1,15 @@
+{
+  "id": "ghn",
+  "name": "Giao Hàng Nhanh (GHN)",
+  "aliases": [
+    "ghn",
+    "giao hang nhanh",
+    "giao hàng nhanh"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.ghn.vn/en/docs/webhook/callback-order-status",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S9: không ký, không có id sự kiện -> cần unverified (khoá theo nội dung, E7)"
+}

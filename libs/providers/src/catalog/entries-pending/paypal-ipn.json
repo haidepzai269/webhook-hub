@@ -1,0 +1,14 @@
+{
+  "id": "paypal-ipn",
+  "name": "PayPal IPN (legacy)",
+  "aliases": [
+    "paypal ipn",
+    "ipn"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.paypal.com/api/nvp-soap/ipn/IPNIntro/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8: verify bằng POST ngược về PayPal -> cần unverified"
+}

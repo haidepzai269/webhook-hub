@@ -1,0 +1,13 @@
+{
+  "id": "haravan",
+  "name": "Haravan",
+  "aliases": [
+    "haravan"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.haravan.com/docs/tutorials/webhooks/private-webhook/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng tài liệu không nêu — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

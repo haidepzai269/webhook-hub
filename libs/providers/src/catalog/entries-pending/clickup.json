@@ -1,0 +1,14 @@
+{
+  "id": "clickup",
+  "name": "ClickUp",
+  "aliases": [
+    "clickup",
+    "click up"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.clickup.com/docs/webhooksignature",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

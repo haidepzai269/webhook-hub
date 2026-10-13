@@ -1,0 +1,7 @@
+# origin: constructed; source: https://docs.svix.com/receiving/verifying-payloads/how-manual
+POST /webhook HTTP/1.1
+Content-Type: application/json
+svix-id: msg_p5jXN8AQM9LWM0D4loKWxJek
+svix-timestamp: 1700000000
+svix-signature: v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+

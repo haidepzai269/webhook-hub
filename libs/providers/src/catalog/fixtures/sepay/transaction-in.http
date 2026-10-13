@@ -1,0 +1,5 @@
+# origin: constructed; source: https://developer.sepay.vn/en/sepay-webhooks/xac-thuc
+POST /webhook HTTP/1.1
+Content-Type: application/json
+
+{"id":92704,"gateway":"Vietcombank","transactionDate":"2023-03-25 14:02:37","accountNumber":"0123499999","code":null,"content":"chuyen tien mua iphone","transferType":"in","transferAmount":2277000,"accumulated":19077000,"subAccount":null,"referenceCode":"MBVCB.3278907687","description":""}

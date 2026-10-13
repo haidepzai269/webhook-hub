@@ -1,0 +1,14 @@
+{
+  "id": "brevo",
+  "name": "Brevo (Sendinblue)",
+  "aliases": [
+    "brevo",
+    "sendinblue"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developers.brevo.com/docs/secured-webhooks",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

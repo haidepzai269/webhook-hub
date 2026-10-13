@@ -1,0 +1,62 @@
+{
+  "id": "vercel",
+  "name": "Vercel",
+  "aliases": [
+    "vercel",
+    "zeit"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-vercel-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "type",
+        "createdAt",
+        "payload"
+      ],
+      "optional": [
+        "region"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "x-vercel-signature",
+      "algo": "sha1",
+      "encoding": "hex",
+      "idempotency": {
+        "field": "id"
+      },
+      "eventType": "vercel.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret của webhook (tài khoản) hoặc Client Secret của Integration",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "sha1Reason": "Vercel chỉ ký bằng HMAC-SHA1 (tài liệu Webhooks API); hub vẫn so constant-time.",
+  "docs": "https://vercel.com/docs/webhooks/webhooks-api",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://vercel.com/docs/webhooks/webhooks-api"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "airtable",
+  "name": "Airtable",
+  "aliases": [
+    "airtable"
+  ],
+  "confidence": "cao",
+  "docs": "https://airtable.com/developers/web/api/webhooks-overview",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8 dataless: không có id sự kiện, phải gọi API lấy payload"
+}

@@ -1,0 +1,54 @@
+{
+  "id": "render",
+  "name": "Render",
+  "aliases": [
+    "render",
+    "render.com"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "webhook-id",
+        "webhook-timestamp",
+        "webhook-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "type",
+        "timestamp",
+        "data"
+      ],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "standard-webhooks",
+      "eventType": "render.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Signing secret của webhook Render (whsec_…)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://render.com/docs/webhooks",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://render.com/docs/webhooks"
+  ]
+}

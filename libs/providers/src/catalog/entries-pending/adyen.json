@@ -1,0 +1,14 @@
+{
+  "id": "adyen",
+  "name": "Adyen",
+  "aliases": [
+    "adyen"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.adyen.com/development-resources/webhooks/secure-webhooks/verify-hmac-signatures",
+  "blockedBy": [
+    "PK5",
+    "docs"
+  ],
+  "pendingReason": "S5: HMAC trên các trường của từng notificationItem; khoá chống trùng lồng + \"chưa xác minh\""
+}

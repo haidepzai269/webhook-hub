@@ -1,0 +1,14 @@
+{
+  "id": "casso",
+  "name": "Casso",
+  "aliases": [
+    "casso",
+    "casso.vn"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developer.casso.vn/webhook/thiet-lap-webhook-thu-cong",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "ký trên JSON đã sắp xếp khoá, không trên bytes gốc -> cần scheme unverified (đính chính §8.4)"
+}

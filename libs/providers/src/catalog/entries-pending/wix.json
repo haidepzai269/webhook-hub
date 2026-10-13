@@ -1,0 +1,13 @@
+{
+  "id": "wix",
+  "name": "Wix (app webhooks)",
+  "aliases": [
+    "wix"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://dev.wix.com/docs/build-apps/develop-your-app/api-integrations/events-and-webhooks/about-webhooks",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S8: body là JWT RS256 -> cần unverified"
+}

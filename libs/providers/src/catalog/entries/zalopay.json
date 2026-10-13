@@ -1,0 +1,44 @@
+{
+  "id": "zalopay",
+  "name": "ZaloPay",
+  "aliases": [
+    "zalopay",
+    "zalo pay"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "data",
+        "mac",
+        "type"
+      ],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "unsupported": {
+      "reason": "ZaloPay đòi bên nhận trả lời nghiệp vụ đồng bộ (return_code quyết định ZaloPay có gọi lại không). Hub không biết đơn hàng (BB-1); trả thành công thay shop là nói dối ZaloPay.",
+      "workaround": "Để shop nhận IPN trực tiếp, xác nhận đơn, rồi đẩy payment.received vào hub qua POST /v1/p/:project/events."
+    }
+  },
+  "fields": [],
+  "secretSource": null,
+  "docs": "https://docs.zalopay.vn/docs/developer-tools/knowledge-base/callback/",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://docs.zalopay.vn/docs/developer-tools/knowledge-base/callback/"
+  ]
+}

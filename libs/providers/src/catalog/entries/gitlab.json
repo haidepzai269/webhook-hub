@@ -1,0 +1,71 @@
+{
+  "id": "gitlab",
+  "name": "GitLab",
+  "aliases": [
+    "gitlab",
+    "git lab"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-gitlab-event"
+      ],
+      "optional": [
+        "x-gitlab-token",
+        "x-gitlab-event-uuid",
+        "x-gitlab-webhook-uuid",
+        "x-gitlab-instance",
+        "idempotency-key",
+        "webhook-id",
+        "webhook-timestamp",
+        "webhook-signature"
+      ]
+    },
+    "userAgent": "^GitLab/",
+    "body": {
+      "format": "json-object",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "standard-webhooks",
+      "eventType": "gitlab.event"
+    },
+    "alternatives": [
+      {
+        "note": "Webhook không bật signing token: dùng token tĩnh X-Gitlab-Token (khoá chống trùng Idempotency-Key, không đổi khi gửi lại).",
+        "config": {
+          "scheme": "static-token",
+          "header": "x-gitlab-token",
+          "idempotency": {
+            "header": "idempotency-key"
+          },
+          "eventType": "gitlab.event"
+        }
+      }
+    ]
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Signing token của webhook GitLab (hoặc Secret token nếu dùng cách token tĩnh)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://docs.gitlab.com/user/project/integrations/webhooks/",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://docs.gitlab.com/user/project/integrations/webhooks/",
+    "https://docs.gitlab.com/user/project/integrations/webhook_events/"
+  ]
+}

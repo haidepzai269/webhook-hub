@@ -1,0 +1,5 @@
+# origin: constructed; source: http://api.ghtk.vn/en/docs/submit-order/webhook/
+POST /updateShipment?hash=XXX HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+label_id=S1.A1.2001297581&partner_id=1234567&status_id=5&action_time=2016-11-02T12:18:39+07:00&reason_code=&reason=&weight=2.4&fee=15000&return_part_package=0

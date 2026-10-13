@@ -1,0 +1,6 @@
+# origin: constructed; source: https://vercel.com/docs/webhooks/webhooks-api
+POST /webhook HTTP/1.1
+Content-Type: application/json
+X-Vercel-Signature: 0000000000000000000000000000000000000000
+
+{"id":"evt_0000000000000000","type":"deployment.created","createdAt":1704067200000,"payload":{"deployment":{"id":"dpl_0000"}},"region":"sfo1"}

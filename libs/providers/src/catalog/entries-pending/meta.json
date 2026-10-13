@@ -1,0 +1,18 @@
+{
+  "id": "meta",
+  "name": "Meta Webhooks (Facebook/Messenger/Instagram/WhatsApp Cloud API)",
+  "aliases": [
+    "meta",
+    "facebook",
+    "messenger",
+    "instagram",
+    "whatsapp",
+    "fb"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.facebook.com/docs/graph-api/webhooks/getting-started",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: bắt tay GET hub.challenge (query-echo + verify_token) -> chờ PK4"
+}

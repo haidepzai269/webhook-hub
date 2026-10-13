@@ -1,0 +1,57 @@
+{
+  "id": "sepay",
+  "name": "SePay",
+  "aliases": [
+    "sepay",
+    "se pay",
+    "sepay.vn"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [],
+      "optional": [
+        "x-sepay-signature",
+        "x-sepay-timestamp",
+        "authorization"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "gateway",
+        "transactionDate",
+        "accountNumber",
+        "transferType",
+        "transferAmount",
+        "referenceCode"
+      ],
+      "optional": [
+        "code",
+        "content",
+        "accumulated",
+        "subAccount",
+        "description"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "native": "sepay"
+  },
+  "fields": [],
+  "secretSource": "provider",
+  "docs": "https://developer.sepay.vn/en/sepay-webhooks/xac-thuc",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://docs.sepay.vn/tich-hop-webhooks.html",
+    "https://developer.sepay.vn/en/sepay-webhooks/xac-thuc"
+  ]
+}

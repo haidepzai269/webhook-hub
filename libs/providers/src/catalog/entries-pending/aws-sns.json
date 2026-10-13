@@ -1,0 +1,17 @@
+{
+  "id": "aws-sns",
+  "name": "Amazon SNS (HTTP/S subscription)",
+  "aliases": [
+    "aws sns",
+    "sns",
+    "amazon sns",
+    "aws"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html",
+  "blockedBy": [
+    "PK5",
+    "PK4"
+  ],
+  "pendingReason": "S8+S7: RSA chứng chỉ tải qua mạng; xác nhận đăng ký đòi gọi SubscribeURL ra ngoài (§15 không làm)"
+}

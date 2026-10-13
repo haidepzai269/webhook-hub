@@ -1,0 +1,13 @@
+{
+  "id": "supabase",
+  "name": "Supabase Database Webhooks",
+  "aliases": [
+    "supabase"
+  ],
+  "confidence": "cao",
+  "docs": "https://supabase.com/docs/guides/database/webhooks",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S2/S9: header do dev tự đặt, không có id sự kiện -> cần unverified"
+}

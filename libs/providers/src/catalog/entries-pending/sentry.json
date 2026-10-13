@@ -1,0 +1,13 @@
+{
+  "id": "sentry",
+  "name": "Sentry (Integration Platform)",
+  "aliases": [
+    "sentry"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.sentry.io/organization/integrations/integration-platform/webhooks/",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "mã mẫu ký JSON.stringify(body), không phải bytes gốc -> cần unverified + fixture thật (nghiên cứu phát hiện 3)"
+}

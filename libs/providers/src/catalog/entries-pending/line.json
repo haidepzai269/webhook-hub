@@ -1,0 +1,14 @@
+{
+  "id": "line",
+  "name": "LINE Messaging API",
+  "aliases": [
+    "line",
+    "line messaging"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developers.line.biz/en/docs/messaging-api/receiving-messages/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "header/thuật toán theo \"kiến thức chung\" (trang chữ ký timeout khi đọc)"
+}

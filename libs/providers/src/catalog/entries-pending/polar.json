@@ -1,0 +1,14 @@
+{
+  "id": "polar",
+  "name": "Polar",
+  "aliases": [
+    "polar",
+    "polar.sh"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://polar.sh/docs/integrate/webhooks/delivery",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "trang Polar chỉ xác nhận webhook-signature (webhook-id/timestamp chưa xác minh); secret whsec_ cũ phải base64 cả chuỗi"
+}

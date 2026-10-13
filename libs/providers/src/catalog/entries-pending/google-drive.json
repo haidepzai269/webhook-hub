@@ -1,0 +1,16 @@
+{
+  "id": "google-drive",
+  "name": "Google Drive push notifications (Workspace)",
+  "aliases": [
+    "google drive",
+    "drive",
+    "google workspace",
+    "gdrive"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.google.com/workspace/drive/api/guides/push",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng là CẶP tiêu đề x-goog-channel-id + x-goog-message-number — config chỉ nhận một tiêu đề — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

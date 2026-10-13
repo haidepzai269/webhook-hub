@@ -1,0 +1,13 @@
+{
+  "id": "heroku",
+  "name": "Heroku App Webhooks",
+  "aliases": [
+    "heroku"
+  ],
+  "confidence": "cao",
+  "docs": "https://devcenter.heroku.com/articles/app-webhooks",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng là trường lồng webhook_metadata.event.id — config chỉ đọc trường cấp một — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

@@ -1,0 +1,5 @@
+# origin: constructed; source: https://dev.wix.com/docs/build-apps/develop-your-app/api-integrations/events-and-webhooks/about-webhooks
+POST /wix HTTP/1.1
+Content-Type: text/plain
+
+eyJhbGciOiJ4In0.eyJkYXRhIjoie1wiZXZlbnRUeXBlXCI6XCJ4XCJ9IiwiaWF0IjoxfQ.

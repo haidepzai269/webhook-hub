@@ -1,0 +1,14 @@
+{
+  "id": "clerk",
+  "name": "Clerk",
+  "aliases": [
+    "clerk",
+    "clerk.dev"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://clerk.com/docs/webhooks/sync-data",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "header svix-* theo \"kiến thức chung\" — trang Clerk đã đọc chỉ nêu verifyWebhook()"
+}

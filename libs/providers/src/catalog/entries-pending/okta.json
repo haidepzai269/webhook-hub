@@ -1,0 +1,13 @@
+{
+  "id": "okta",
+  "name": "Okta Event Hooks",
+  "aliases": [
+    "okta"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.okta.com/docs/concepts/event-hooks/",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: GET x-okta-verification-challenge (header-echo trả JSON) -> chờ PK4"
+}

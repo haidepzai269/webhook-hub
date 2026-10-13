@@ -1,0 +1,16 @@
+{
+  "id": "momo",
+  "name": "MoMo",
+  "aliases": [
+    "momo",
+    "ví momo",
+    "vi momo",
+    "momo ipn"
+  ],
+  "confidence": "cao",
+  "docs": "https://developers.momo.vn/v3/docs/payment/api/result-handling/notification",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S5: ký các trường đã parse (chữ ký trong body) -> cần unverified; ack 204"
+}

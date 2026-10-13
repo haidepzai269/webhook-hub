@@ -1,0 +1,14 @@
+{
+  "id": "bitbucket",
+  "name": "Bitbucket Cloud",
+  "aliases": [
+    "bitbucket",
+    "bit bucket"
+  ],
+  "confidence": "cao",
+  "docs": "https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng x-request-uuid \"chưa xác minh trong phiên\" (đối chiếu lại 2026-10-14: trang chỉ nêu X-Hub-Signature) — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

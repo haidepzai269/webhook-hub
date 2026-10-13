@@ -1,0 +1,62 @@
+{
+  "id": "postmark",
+  "name": "Postmark",
+  "aliases": [
+    "postmark"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [],
+      "optional": [
+        "authorization",
+        "x-pm-retries-remaining",
+        "x-pm-webhook-trace-id"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "RecordType"
+      ],
+      "optional": [
+        "MessageID",
+        "ServerID",
+        "MessageStream",
+        "Recipient",
+        "Tag",
+        "Metadata"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "static-token",
+      "location": "basic",
+      "idempotency": {
+        "header": "x-pm-webhook-trace-id"
+      },
+      "eventType": "postmark.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "user:pass đặt trong URL webhook Postmark (Basic auth)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://postmarkapp.com/developer/webhooks/webhooks-overview",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://postmarkapp.com/developer/webhooks/webhooks-overview"
+  ]
+}

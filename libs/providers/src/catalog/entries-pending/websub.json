@@ -1,0 +1,16 @@
+{
+  "id": "websub",
+  "name": "WebSub / PubSubHubbub (YouTube push…)",
+  "aliases": [
+    "websub",
+    "pubsubhubbub",
+    "youtube",
+    "youtube push"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developers.google.com/youtube/v3/guides/push_notifications",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: GET hub.challenge (query-echo), lease phải gia hạn -> chờ PK4"
+}

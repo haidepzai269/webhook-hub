@@ -1,0 +1,14 @@
+{
+  "id": "sanity",
+  "name": "Sanity",
+  "aliases": [
+    "sanity",
+    "sanity.io"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://www.sanity.io/docs/webhooks",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "encoding + chuỗi ký \"chưa xác minh\" (mô phỏng Stripe)"
+}

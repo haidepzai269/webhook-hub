@@ -1,0 +1,14 @@
+{
+  "id": "bigcommerce",
+  "name": "BigCommerce",
+  "aliases": [
+    "bigcommerce",
+    "big commerce"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://docs.bigcommerce.com/developer/docs/integrations/webhooks",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S2+S8: không ký, header do dev tự đặt khi tạo webhook (không có tên cố định)"
+}

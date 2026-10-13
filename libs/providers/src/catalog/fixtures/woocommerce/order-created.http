@@ -1,0 +1,11 @@
+# origin: constructed; source: https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks/
+POST /webhook HTTP/1.1
+Content-Type: application/json
+X-WC-Webhook-Source: https://shop.example.com/
+X-WC-Webhook-Topic: order.created
+X-WC-Webhook-Resource: order
+X-WC-Webhook-Event: created
+X-WC-Webhook-Signature: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+X-WC-Webhook-ID: 12
+X-WC-Webhook-Delivery-ID: 3456
+

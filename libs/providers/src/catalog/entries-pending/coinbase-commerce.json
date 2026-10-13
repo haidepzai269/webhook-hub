@@ -1,0 +1,14 @@
+{
+  "id": "coinbase-commerce",
+  "name": "Coinbase Commerce",
+  "aliases": [
+    "coinbase commerce",
+    "coinbase"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://docs.cdp.coinbase.com/commerce/api-arcitecture/webhooks-security",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng event.id (lồng, \"chưa xác minh\") — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

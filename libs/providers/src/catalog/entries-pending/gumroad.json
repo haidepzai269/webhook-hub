@@ -1,0 +1,13 @@
+{
+  "id": "gumroad",
+  "name": "Gumroad Ping",
+  "aliases": [
+    "gumroad"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://gumroad.com/ping",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S9: không ký -> cần unverified"
+}

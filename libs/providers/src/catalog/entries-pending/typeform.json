@@ -1,0 +1,14 @@
+{
+  "id": "typeform",
+  "name": "Typeform",
+  "aliases": [
+    "typeform",
+    "type form"
+  ],
+  "confidence": "cao",
+  "docs": "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng event_id \"chưa xác minh trong phiên\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

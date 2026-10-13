@@ -1,0 +1,5 @@
+# origin: constructed; source: https://developers.hubspot.com/docs/api/webhooks/validating-requests
+POST /hubspot HTTP/1.1
+Content-Type: application/json
+
+[{"eventId":1,"subscriptionType":"contact.creation","objectId":123,"portalId":456,"occurredAt":1704067200000},{"eventId":2,"subscriptionType":"contact.deletion","objectId":124,"portalId":456,"occurredAt":1704067201000}]

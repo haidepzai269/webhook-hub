@@ -1,0 +1,14 @@
+{
+  "id": "docusign",
+  "name": "DocuSign Connect",
+  "aliases": [
+    "docusign",
+    "docu sign"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developers.docusign.com/platform/webhooks/connect/hmac/",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

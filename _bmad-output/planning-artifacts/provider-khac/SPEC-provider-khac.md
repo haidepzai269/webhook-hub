@@ -700,6 +700,33 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
   - **T-5:** giữ 5 giây cho điền nhanh Paddle, câu nhắc ở form về khởi động lạnh.
   - **T-6:** reason mới `missing_kv_key` + `expectedKvKey` (thay "lệch giờ" khi kv thiếu hẳn khoá timestamp). Có khoá mà lệch vẫn là `timestamp_out_of_range`.
   - **T-7:** thân §5 sửa: ví dụ dùng `signature.headers` (E16), `toleranceSec` không có mặc định (bắt buộc khi có `{timestamp}`). Zendesk vào `entries-pending/` ở PK9.
+- **PK9 (2026-10-14, Amelia):**
+  - **Đếm lại theo `provider-fingerprints.json` (E23):** 91 bên = 61 cao, 24 trung bình, 6 thấp. Theo mã đầu: S1 29, S2 13, S3 5, S4 13 (S1–S4 = **60**); S5 8, S6 4, S7 3, S8 9, S9 5 (= 29); chưa xếp mã 2 (sapo, zalo-oa). S10 có trong `shapes` của 5 bên: vnpay, zalopay, onepay, discord, adobe-commerce.
+  - **Nạp được 20 mục** (`entries/`):
+    - 13 config: paddle, razorpay, shopify, woocommerce, gitlab, jira, linear, vercel, render, telegram, postmark, svix, resend;
+    - 4 native: payos, sepay, stripe, github;
+    - 3 unsupported: vnpay, zalopay, discord.
+  - **71 pending** (`entries-pending/`, mỗi mục có `blockedBy` + lý do; `npm run verify:catalog` in đủ danh sách):
+    - 23 chỉ chờ PK5 (`unverified`), 12 chỉ chờ PK4 (bắt tay), 3 chờ kép (aws-sns và trello chờ PK4 + PK5; adyen chờ PK5 + đối chiếu tài liệu);
+    - 33 chỉ chờ `docs`: 6 mục `thấp`; 19 mục có khoá chống trùng "chưa xác minh", lồng, hoặc là cặp tiêu đề (config bắt buộc khoá chống trùng là tiêu đề hoặc trường cấp một); 8 mục có header/encoding/chuỗi ký "chưa xác minh" hoặc ngoài khuôn (kiotviet, line, clerk, polar, sanity, zendesk, recurly, chargebee).
+    - Xa mục tiêu ~80 vì luật "chi tiết chưa xác minh không vào entry" (§8.4) gặp luật "config bắt buộc khoá chống trùng". Chuyển sang `entries/` chỉ cần dữ liệu: đối chiếu tài liệu + fixture.
+  - **Lệch chỉ thị:**
+    - onepay và adobe-commerce là S10 nhưng độ tin cậy `thấp` → để pending (vẫn mang `handler.unsupported`), vì luật §8.1 cấm nạp `thấp`.
+    - `[PK:T20]` "ví momo": momo ở pending (PK5), nên test dùng "ví zalopay", "Zalo Pay", "cổng VNPay" (cùng luật bỏ dấu / tiền tố / theo từ).
+    - `[PK:T22]`: repo **không có jsdom** → biên dịch `identify.ts` bằng `typescript.transpileModule` rồi chạy trong `vm` chỉ có `atob` + `TextDecoder` (không `require`/`process`/`Buffer`); kết quả so với chạy trong Node trên mọi fixture.
+  - **Khuôn mục:** thêm so với §8.1:
+    - `handler.alternatives` (gitlab: token tĩnh phụ);
+    - `sha1Reason` (bắt buộc khi config dùng sha1 — chuyển từ ghi chú PK2/ADR-203);
+    - `sources`;
+    - `group` = `svix` cho resend + svix.
+    - User-Agent tính là mục **optional** (dev hay dán mẫu không kèm UA).
+    - Format body chỉ chặn khi mẫu có body.
+  - **Fixture:** 1 official (github, header đối chiếu docs.github.com ngày 2026-10-14), còn lại constructed. Chữ ký và token luôn là placeholder entropy thấp (README trong `catalog/`). Mục không có body mẫu (razorpay, shopify, woocommerce, svix, resend) thì fixture chỉ có tiêu đề. Fixture của mục pending (ghtk form, websub xml, wix jwt, hubspot mảng, auth0 jsonl, google-drive rỗng) phủ `[PK:T23]`.
+  - **Đối chiếu thêm 2026-10-14:**
+    - GitLab: tiêu đề + `Idempotency-Key` = `webhook-id`, đúng như nghiên cứu.
+    - CircleCI: trang tham chiếu payload 404 → pending.
+    - Bitbucket: trang chỉ nêu `X-Hub-Signature` → pending.
+  - `GET /api/v1/catalog` trả `{entries}`, scope `read:project`. `POST /sources/:id/identify` để PK6.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

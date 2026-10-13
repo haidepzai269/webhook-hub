@@ -1,0 +1,50 @@
+{
+  "id": "stripe",
+  "name": "Stripe",
+  "aliases": [
+    "stripe"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "stripe-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "object",
+        "type",
+        "created",
+        "data"
+      ],
+      "optional": [
+        "api_version",
+        "livemode",
+        "pending_webhooks",
+        "request",
+        "context"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "native": "stripe"
+  },
+  "fields": [],
+  "secretSource": "provider",
+  "docs": "https://docs.stripe.com/webhooks",
+  "docsVersion": "API 2026-09-30.preview (trang có Thin/Snapshot events)",
+  "confidence": "cao",
+  "sources": [
+    "https://docs.stripe.com/webhooks"
+  ]
+}

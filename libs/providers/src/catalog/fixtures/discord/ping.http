@@ -1,0 +1,7 @@
+# origin: constructed; source: https://docs.discord.com/developers/interactions/overview
+POST /interactions HTTP/1.1
+Content-Type: application/json
+X-Signature-Ed25519: 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+X-Signature-Timestamp: 1700000000
+
+{"type":1,"id":"1000000000000000001","application_id":"1000000000000000002","token":"x","version":1}

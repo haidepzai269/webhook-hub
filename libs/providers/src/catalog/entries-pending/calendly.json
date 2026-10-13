@@ -1,0 +1,13 @@
+{
+  "id": "calendly",
+  "name": "Calendly",
+  "aliases": [
+    "calendly"
+  ],
+  "confidence": "trung bình",
+  "docs": "https://developer.calendly.com/api-docs/overview/webhooks/webhook-signatures",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"chưa xác minh\" (body không có id sự kiện rõ) — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

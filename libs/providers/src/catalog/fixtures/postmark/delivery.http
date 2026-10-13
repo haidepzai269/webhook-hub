@@ -1,0 +1,6 @@
+# origin: constructed; source: https://postmarkapp.com/developer/webhooks/webhooks-overview
+POST /webhook HTTP/1.1
+Content-Type: application/json
+X-PM-Webhook-Trace-Id: 6b1f0e2a-0000-0000-0000-000000000000
+
+{"RecordType":"Delivery","ServerID":23,"MessageStream":"outbound","MessageID":"00000000-0000-0000-0000-000000000000","Recipient":"john@example.com","Tag":"welcome-email","DeliveredAt":"2024-01-01T00:00:00Z","Details":"Test delivery webhook details","Metadata":{}}

@@ -1,0 +1,14 @@
+{
+  "id": "auth0",
+  "name": "Auth0 (Log Streams - custom webhook)",
+  "aliases": [
+    "auth0",
+    "auth 0"
+  ],
+  "confidence": "thấp",
+  "docs": "https://auth0.com/docs/customize/log-streams/custom-log-streams",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "độ tin cậy \"thấp\" trong nghiên cứu (không đọc được tài liệu chính thức) — không được nạp (§8.1)"
+}

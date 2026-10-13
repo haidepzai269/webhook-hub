@@ -1,0 +1,56 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "aliases": [
+    "github",
+    "git hub",
+    "github.com"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-github-event",
+        "x-github-delivery"
+      ],
+      "optional": [
+        "x-hub-signature-256",
+        "x-hub-signature",
+        "x-github-hook-id",
+        "x-github-hook-installation-target-type",
+        "x-github-hook-installation-target-id"
+      ]
+    },
+    "userAgent": "^GitHub-Hookshot/",
+    "body": {
+      "format": [
+        "json-object",
+        "form"
+      ],
+      "required": [],
+      "optional": [
+        "action",
+        "repository",
+        "sender",
+        "installation",
+        "organization"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "native": "github"
+  },
+  "fields": [],
+  "secretSource": "provider",
+  "docs": "https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
+  ]
+}

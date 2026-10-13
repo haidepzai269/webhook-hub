@@ -1,0 +1,14 @@
+{
+  "id": "trello",
+  "name": "Trello",
+  "aliases": [
+    "trello"
+  ],
+  "confidence": "cao",
+  "docs": "https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/",
+  "blockedBy": [
+    "PK4",
+    "PK5"
+  ],
+  "pendingReason": "S6+S7: ký body + URL callback; HEAD khi tạo -> chờ PK4/PK5"
+}

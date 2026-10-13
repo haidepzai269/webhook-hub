@@ -1,0 +1,68 @@
+{
+  "id": "jira",
+  "name": "Jira Cloud (Atlassian)",
+  "aliases": [
+    "jira",
+    "jira cloud",
+    "atlassian jira"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "x-atlassian-webhook-identifier"
+      ],
+      "optional": [
+        "x-hub-signature",
+        "x-atlassian-webhook-retry",
+        "x-atlassian-webhook-flow"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "timestamp",
+        "webhookEvent"
+      ],
+      "optional": [
+        "issue_event_type_name",
+        "user",
+        "issue",
+        "changelog",
+        "comment"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "x-hub-signature",
+      "prefix": "<algo>=",
+      "encoding": "hex",
+      "idempotency": {
+        "header": "x-atlassian-webhook-identifier"
+      },
+      "eventType": "jira.webhook"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret đặt khi tạo webhook Jira",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://developer.atlassian.com/cloud/jira/platform/webhooks/",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://developer.atlassian.com/cloud/jira/platform/webhooks/"
+  ]
+}

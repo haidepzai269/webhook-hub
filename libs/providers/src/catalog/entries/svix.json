@@ -1,0 +1,51 @@
+{
+  "id": "svix",
+  "name": "Svix (nền tảng gửi webhook, dùng bởi nhiều SaaS)",
+  "aliases": [
+    "svix",
+    "standard webhooks"
+  ],
+  "group": "svix",
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "svix-id",
+        "svix-timestamp",
+        "svix-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "standard-webhooks",
+      "eventType": "svix.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Signing secret của endpoint (whsec_…)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://docs.svix.com/receiving/verifying-payloads/how-manual",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://docs.svix.com/receiving/verifying-payloads/how-manual",
+    "https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md"
+  ]
+}

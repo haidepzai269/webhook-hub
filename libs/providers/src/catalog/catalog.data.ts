@@ -1,0 +1,1162 @@
+// SINH TỰ ĐỘNG bởi `npm run catalog:build` từ libs/providers/src/catalog/entries/*.json — KHÔNG sửa tay.
+// Test [PK:T19] đỏ khi file này lệch với entries/ (quên build lại).
+import type { CatalogEntry } from './types';
+
+export const CATALOG_DATA: CatalogEntry[] = [
+  {
+    "id": "discord",
+    "name": "Discord (Interactions endpoint)",
+    "aliases": [
+      "discord",
+      "discord interactions"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-signature-ed25519",
+          "x-signature-timestamp"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "type",
+          "application_id",
+          "token",
+          "id"
+        ],
+        "optional": [
+          "data",
+          "guild_id",
+          "channel_id",
+          "member",
+          "user"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "unsupported": {
+        "reason": "Discord Interactions đòi trả lời đồng bộ (PING phải trả {type:1}, lệnh phải trả interaction response) và ký Ed25519 bằng khoá công khai — hub chỉ ACK sau COMMIT, không sinh câu trả lời thay ứng dụng.",
+        "workaround": "Để ứng dụng Discord của bạn nhận Interactions trực tiếp (trả lời đồng bộ), rồi đẩy sự kiện cần chia sẻ vào hub qua POST /v1/p/:project/events."
+      }
+    },
+    "fields": [],
+    "secretSource": null,
+    "docs": "https://docs.discord.com/developers/interactions/overview",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://docs.discord.com/developers/interactions/overview"
+    ]
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "aliases": [
+      "github",
+      "git hub",
+      "github.com"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-github-event",
+          "x-github-delivery"
+        ],
+        "optional": [
+          "x-hub-signature-256",
+          "x-hub-signature",
+          "x-github-hook-id",
+          "x-github-hook-installation-target-type",
+          "x-github-hook-installation-target-id"
+        ]
+      },
+      "userAgent": "^GitHub-Hookshot/",
+      "body": {
+        "format": [
+          "json-object",
+          "form"
+        ],
+        "required": [],
+        "optional": [
+          "action",
+          "repository",
+          "sender",
+          "installation",
+          "organization"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "native": "github"
+    },
+    "fields": [],
+    "secretSource": "provider",
+    "docs": "https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
+    ]
+  },
+  {
+    "id": "gitlab",
+    "name": "GitLab",
+    "aliases": [
+      "gitlab",
+      "git lab"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-gitlab-event"
+        ],
+        "optional": [
+          "x-gitlab-token",
+          "x-gitlab-event-uuid",
+          "x-gitlab-webhook-uuid",
+          "x-gitlab-instance",
+          "idempotency-key",
+          "webhook-id",
+          "webhook-timestamp",
+          "webhook-signature"
+        ]
+      },
+      "userAgent": "^GitLab/",
+      "body": {
+        "format": "json-object",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "standard-webhooks",
+        "eventType": "gitlab.event"
+      },
+      "alternatives": [
+        {
+          "note": "Webhook không bật signing token: dùng token tĩnh X-Gitlab-Token (khoá chống trùng Idempotency-Key, không đổi khi gửi lại).",
+          "config": {
+            "scheme": "static-token",
+            "header": "x-gitlab-token",
+            "idempotency": {
+              "header": "idempotency-key"
+            },
+            "eventType": "gitlab.event"
+          }
+        }
+      ]
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Signing token của webhook GitLab (hoặc Secret token nếu dùng cách token tĩnh)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://docs.gitlab.com/user/project/integrations/webhooks/",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://docs.gitlab.com/user/project/integrations/webhooks/",
+      "https://docs.gitlab.com/user/project/integrations/webhook_events/"
+    ]
+  },
+  {
+    "id": "jira",
+    "name": "Jira Cloud (Atlassian)",
+    "aliases": [
+      "jira",
+      "jira cloud",
+      "atlassian jira"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-atlassian-webhook-identifier"
+        ],
+        "optional": [
+          "x-hub-signature",
+          "x-atlassian-webhook-retry",
+          "x-atlassian-webhook-flow"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "timestamp",
+          "webhookEvent"
+        ],
+        "optional": [
+          "issue_event_type_name",
+          "user",
+          "issue",
+          "changelog",
+          "comment"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "x-hub-signature",
+        "prefix": "<algo>=",
+        "encoding": "hex",
+        "idempotency": {
+          "header": "x-atlassian-webhook-identifier"
+        },
+        "eventType": "jira.webhook"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret đặt khi tạo webhook Jira",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://developer.atlassian.com/cloud/jira/platform/webhooks/",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://developer.atlassian.com/cloud/jira/platform/webhooks/"
+    ]
+  },
+  {
+    "id": "linear",
+    "name": "Linear",
+    "aliases": [
+      "linear",
+      "linear.app"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "linear-signature",
+          "linear-delivery",
+          "linear-event"
+        ],
+        "optional": [
+          "linear-timestamp"
+        ]
+      },
+      "userAgent": "^Linear-Webhook",
+      "body": {
+        "format": "json-object",
+        "required": [
+          "action",
+          "type",
+          "createdAt",
+          "webhookTimestamp"
+        ],
+        "optional": [
+          "data",
+          "url",
+          "actor",
+          "updatedFrom",
+          "webhookId",
+          "organizationId"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "linear-signature",
+        "algo": "sha256",
+        "encoding": "hex",
+        "idempotency": {
+          "header": "linear-delivery"
+        },
+        "eventType": "linear.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Signing secret của webhook Linear",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://linear.app/developers/webhooks",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://linear.app/developers/webhooks"
+    ]
+  },
+  {
+    "id": "paddle",
+    "name": "Paddle Billing",
+    "aliases": [
+      "paddle",
+      "paddle billing"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "paddle-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "event_id",
+          "event_type",
+          "occurred_at",
+          "data"
+        ],
+        "optional": [
+          "notification_id"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "signed-template",
+        "template": "{timestamp}:{body}",
+        "signature": {
+          "header": "paddle-signature",
+          "kv": {
+            "sep": ";",
+            "sig": "h1",
+            "timestamp": "ts"
+          }
+        },
+        "timestampFormat": "unix",
+        "toleranceSec": 5,
+        "idempotency": {
+          "field": "event_id"
+        },
+        "eventType": "paddle.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Khoá bí mật của notification destination (bắt đầu pdl_ntfset_)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://developer.paddle.com/webhooks/signature-verification",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://developer.paddle.com/webhooks/signature-verification",
+      "https://developer.paddle.com/webhooks/overview"
+    ]
+  },
+  {
+    "id": "payos",
+    "name": "PayOS",
+    "aliases": [
+      "payos",
+      "pay os",
+      "payos.vn"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "code",
+          "desc",
+          "success",
+          "data",
+          "signature"
+        ],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "native": "payos"
+    },
+    "fields": [],
+    "secretSource": "provider",
+    "docs": "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/"
+    ]
+  },
+  {
+    "id": "postmark",
+    "name": "Postmark",
+    "aliases": [
+      "postmark"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [],
+        "optional": [
+          "authorization",
+          "x-pm-retries-remaining",
+          "x-pm-webhook-trace-id"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "RecordType"
+        ],
+        "optional": [
+          "MessageID",
+          "ServerID",
+          "MessageStream",
+          "Recipient",
+          "Tag",
+          "Metadata"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "static-token",
+        "location": "basic",
+        "idempotency": {
+          "header": "x-pm-webhook-trace-id"
+        },
+        "eventType": "postmark.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "user:pass đặt trong URL webhook Postmark (Basic auth)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://postmarkapp.com/developer/webhooks/webhooks-overview",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://postmarkapp.com/developer/webhooks/webhooks-overview"
+    ]
+  },
+  {
+    "id": "razorpay",
+    "name": "Razorpay",
+    "aliases": [
+      "razorpay"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-razorpay-signature"
+        ],
+        "optional": [
+          "x-razorpay-event-id"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "x-razorpay-signature",
+        "algo": "sha256",
+        "encoding": "hex",
+        "idempotency": {
+          "header": "x-razorpay-event-id"
+        },
+        "eventType": "razorpay.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Webhook secret đặt khi tạo webhook ở Razorpay Dashboard",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://razorpay.com/docs/webhooks/validate-test/",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://razorpay.com/docs/webhooks/validate-test/"
+    ]
+  },
+  {
+    "id": "render",
+    "name": "Render",
+    "aliases": [
+      "render",
+      "render.com"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "webhook-id",
+          "webhook-timestamp",
+          "webhook-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "type",
+          "timestamp",
+          "data"
+        ],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "standard-webhooks",
+        "eventType": "render.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Signing secret của webhook Render (whsec_…)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://render.com/docs/webhooks",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://render.com/docs/webhooks"
+    ]
+  },
+  {
+    "id": "resend",
+    "name": "Resend",
+    "aliases": [
+      "resend"
+    ],
+    "group": "svix",
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "svix-id",
+          "svix-timestamp",
+          "svix-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "standard-webhooks",
+        "eventType": "resend.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Signing secret của endpoint (whsec_…)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://resend.com/docs/dashboard/webhooks/verify-webhooks-requests",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://resend.com/docs/dashboard/webhooks/verify-webhooks-requests"
+    ]
+  },
+  {
+    "id": "sepay",
+    "name": "SePay",
+    "aliases": [
+      "sepay",
+      "se pay",
+      "sepay.vn"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [],
+        "optional": [
+          "x-sepay-signature",
+          "x-sepay-timestamp",
+          "authorization"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "gateway",
+          "transactionDate",
+          "accountNumber",
+          "transferType",
+          "transferAmount",
+          "referenceCode"
+        ],
+        "optional": [
+          "code",
+          "content",
+          "accumulated",
+          "subAccount",
+          "description"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "native": "sepay"
+    },
+    "fields": [],
+    "secretSource": "provider",
+    "docs": "https://developer.sepay.vn/en/sepay-webhooks/xac-thuc",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://docs.sepay.vn/tich-hop-webhooks.html",
+      "https://developer.sepay.vn/en/sepay-webhooks/xac-thuc"
+    ]
+  },
+  {
+    "id": "shopify",
+    "name": "Shopify",
+    "aliases": [
+      "shopify"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-shopify-hmac-sha256"
+        ],
+        "optional": [
+          "x-shopify-webhook-id",
+          "x-shopify-event-id"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "x-shopify-hmac-sha256",
+        "algo": "sha256",
+        "encoding": "base64",
+        "idempotency": {
+          "header": "x-shopify-event-id"
+        },
+        "eventType": "shopify.webhook"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Client secret của app Shopify (khoá ký webhook)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://shopify.dev/docs/apps/build/webhooks/subscribe/https",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://shopify.dev/docs/apps/build/webhooks/subscribe/https"
+    ]
+  },
+  {
+    "id": "stripe",
+    "name": "Stripe",
+    "aliases": [
+      "stripe"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "stripe-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "object",
+          "type",
+          "created",
+          "data"
+        ],
+        "optional": [
+          "api_version",
+          "livemode",
+          "pending_webhooks",
+          "request",
+          "context"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "native": "stripe"
+    },
+    "fields": [],
+    "secretSource": "provider",
+    "docs": "https://docs.stripe.com/webhooks",
+    "docsVersion": "API 2026-09-30.preview (trang có Thin/Snapshot events)",
+    "confidence": "cao",
+    "sources": [
+      "https://docs.stripe.com/webhooks"
+    ]
+  },
+  {
+    "id": "svix",
+    "name": "Svix (nền tảng gửi webhook, dùng bởi nhiều SaaS)",
+    "aliases": [
+      "svix",
+      "standard webhooks"
+    ],
+    "group": "svix",
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "svix-id",
+          "svix-timestamp",
+          "svix-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "standard-webhooks",
+        "eventType": "svix.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Signing secret của endpoint (whsec_…)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://docs.svix.com/receiving/verifying-payloads/how-manual",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://docs.svix.com/receiving/verifying-payloads/how-manual",
+      "https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md"
+    ]
+  },
+  {
+    "id": "telegram",
+    "name": "Telegram Bot API",
+    "aliases": [
+      "telegram",
+      "telegram bot",
+      "telegram bot api"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-telegram-bot-api-secret-token"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "update_id"
+        ],
+        "optional": [
+          "message",
+          "edited_message",
+          "callback_query",
+          "channel_post",
+          "my_chat_member",
+          "chat_member",
+          "poll",
+          "inline_query"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "static-token",
+        "header": "x-telegram-bot-api-secret-token",
+        "idempotency": {
+          "field": "update_id"
+        },
+        "eventType": "telegram.update"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "secret_token đã truyền khi gọi setWebhook (1–256 ký tự A-Z a-z 0-9 _ -)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://core.telegram.org/bots/api#setwebhook",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://core.telegram.org/bots/api#setwebhook"
+    ]
+  },
+  {
+    "id": "vercel",
+    "name": "Vercel",
+    "aliases": [
+      "vercel",
+      "zeit"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-vercel-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "type",
+          "createdAt",
+          "payload"
+        ],
+        "optional": [
+          "region"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "x-vercel-signature",
+        "algo": "sha1",
+        "encoding": "hex",
+        "idempotency": {
+          "field": "id"
+        },
+        "eventType": "vercel.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret của webhook (tài khoản) hoặc Client Secret của Integration",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "sha1Reason": "Vercel chỉ ký bằng HMAC-SHA1 (tài liệu Webhooks API); hub vẫn so constant-time.",
+    "docs": "https://vercel.com/docs/webhooks/webhooks-api",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://vercel.com/docs/webhooks/webhooks-api"
+    ]
+  },
+  {
+    "id": "vnpay",
+    "name": "VNPay",
+    "aliases": [
+      "vnpay",
+      "vn pay",
+      "vnpayment"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "GET",
+      "headers": {
+        "required": [],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "empty",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [
+          "vnp_TmnCode",
+          "vnp_Amount",
+          "vnp_TxnRef",
+          "vnp_TransactionNo",
+          "vnp_ResponseCode",
+          "vnp_TransactionStatus",
+          "vnp_SecureHash"
+        ],
+        "optional": [
+          "vnp_BankCode",
+          "vnp_BankTranNo",
+          "vnp_CardType",
+          "vnp_PayDate",
+          "vnp_OrderInfo",
+          "vnp_SecureHashType"
+        ]
+      }
+    },
+    "handler": {
+      "unsupported": {
+        "reason": "VNPay đòi bên nhận trả lời nghiệp vụ đồng bộ (RspCode: đơn có tồn tại, đúng số tiền). Hub không biết đơn hàng (BB-1); trả \"00 Confirm Success\" thay shop là nói dối VNPay.",
+        "workaround": "Để shop nhận IPN trực tiếp, xác nhận đơn, rồi đẩy payment.received vào hub qua POST /v1/p/:project/events."
+      }
+    },
+    "fields": [],
+    "secretSource": null,
+    "docs": "https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html",
+    "docsVersion": "2.1.0",
+    "confidence": "cao",
+    "sources": [
+      "https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html"
+    ]
+  },
+  {
+    "id": "woocommerce",
+    "name": "WooCommerce",
+    "aliases": [
+      "woocommerce",
+      "woo commerce",
+      "woo"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-wc-webhook-signature"
+        ],
+        "optional": [
+          "x-wc-webhook-source",
+          "x-wc-webhook-topic",
+          "x-wc-webhook-resource",
+          "x-wc-webhook-event",
+          "x-wc-webhook-id",
+          "x-wc-webhook-delivery-id"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "x-wc-webhook-signature",
+        "algo": "sha256",
+        "encoding": "base64",
+        "idempotency": {
+          "header": "x-wc-webhook-delivery-id"
+        },
+        "eventType": "woocommerce.webhook"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret đặt khi tạo webhook (WooCommerce → Settings → Advanced → Webhooks)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks/",
+    "docsVersion": "REST API v3",
+    "confidence": "trung bình",
+    "sources": [
+      "https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks/",
+      "https://hookdeck.com/webhooks/platforms/guide-to-woocommerce-webhooks-features-and-best-practices"
+    ]
+  },
+  {
+    "id": "zalopay",
+    "name": "ZaloPay",
+    "aliases": [
+      "zalopay",
+      "zalo pay"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "data",
+          "mac",
+          "type"
+        ],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "unsupported": {
+        "reason": "ZaloPay đòi bên nhận trả lời nghiệp vụ đồng bộ (return_code quyết định ZaloPay có gọi lại không). Hub không biết đơn hàng (BB-1); trả thành công thay shop là nói dối ZaloPay.",
+        "workaround": "Để shop nhận IPN trực tiếp, xác nhận đơn, rồi đẩy payment.received vào hub qua POST /v1/p/:project/events."
+      }
+    },
+    "fields": [],
+    "secretSource": null,
+    "docs": "https://docs.zalopay.vn/docs/developer-tools/knowledge-base/callback/",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://docs.zalopay.vn/docs/developer-tools/knowledge-base/callback/"
+    ]
+  }
+];

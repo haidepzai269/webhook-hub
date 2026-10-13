@@ -1,0 +1,12 @@
+# origin: constructed; source: https://developers.google.com/workspace/drive/api/guides/push
+POST /notifications HTTP/1.1
+Content-Length: 0
+X-Goog-Channel-ID: 8bd90be9-3a58-3122-ab43-9823188a5b43
+X-Goog-Channel-Token: PLACEHOLDER
+X-Goog-Channel-Expiration: Tue, 19 Nov 2013 01:13:52 GMT
+X-Goog-Resource-ID: ret08u3rv24htgh289g
+X-Goog-Resource-URI: https://www.googleapis.com/drive/v3/files/ret08u3rv24htgh289g
+X-Goog-Resource-State: update
+X-Goog-Changed: content,properties
+X-Goog-Message-Number: 480896
+

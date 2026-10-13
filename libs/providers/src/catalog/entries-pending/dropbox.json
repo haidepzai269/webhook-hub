@@ -1,0 +1,13 @@
+{
+  "id": "dropbox",
+  "name": "Dropbox",
+  "aliases": [
+    "dropbox"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.dropboxapi.com/dropbox-api/docs/webhooks",
+  "blockedBy": [
+    "PK4"
+  ],
+  "pendingReason": "S7: GET ?challenge (query-echo) -> chờ PK4; dataless"
+}

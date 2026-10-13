@@ -1,0 +1,6 @@
+# origin: constructed; source: https://developer.paddle.com/webhooks/overview
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Paddle-Signature: ts=1700000000;h1=0000000000000000000000000000000000000000000000000000000000000000
+
+{"event_id":"evt_01hv8x2acma2gz5szx6ekqtkp7","event_type":"transaction.completed","occurred_at":"2024-04-12T10:18:49.621022Z","notification_id":"ntf_01hv8x2af6bpwbwsdbbx2fcv1q","data":{"id":"txn_01hv8wptq8987qeep44cyrewp9","status":"completed"}}

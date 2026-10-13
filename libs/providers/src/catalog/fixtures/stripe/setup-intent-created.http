@@ -1,0 +1,6 @@
+# origin: constructed; source: https://docs.stripe.com/api/events/object
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Stripe-Signature: t=1700000000,v1=0000000000000000000000000000000000000000000000000000000000000000
+
+{"id":"evt_1NG8Du2eZvKYlo2CUI79vXWy","object":"event","api_version":"2019-02-19","created":1686089970,"data":{"object":{"id":"seti_1NG8Du2eZvKYlo2C9XMqbR0x","object":"setup_intent","status":"requires_confirmation"}},"livemode":false,"pending_webhooks":0,"request":{"id":null,"idempotency_key":null},"type":"setup_intent.created"}

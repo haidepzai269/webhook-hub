@@ -1,0 +1,15 @@
+{
+  "id": "lemon-squeezy",
+  "name": "Lemon Squeezy",
+  "aliases": [
+    "lemon squeezy",
+    "lemonsqueezy",
+    "ls"
+  ],
+  "confidence": "cao",
+  "docs": "https://docs.lemonsqueezy.com/help/webhooks/signing-requests",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+}

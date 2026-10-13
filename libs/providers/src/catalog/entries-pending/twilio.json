@@ -1,0 +1,13 @@
+{
+  "id": "twilio",
+  "name": "Twilio",
+  "aliases": [
+    "twilio"
+  ],
+  "confidence": "cao",
+  "docs": "https://www.twilio.com/docs/usage/webhooks/webhooks-security",
+  "blockedBy": [
+    "PK5"
+  ],
+  "pendingReason": "S6: ký URL đầy đủ + tham số -> cần unverified (forwardUrl)"
+}

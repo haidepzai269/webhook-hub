@@ -1,0 +1,15 @@
+{
+  "id": "sapo",
+  "name": "Sapo",
+  "aliases": [
+    "sapo",
+    "sapo.vn",
+    "sapo omni"
+  ],
+  "confidence": "thấp",
+  "docs": "https://support.sapo.vn/sapo-webhook",
+  "blockedBy": [
+    "docs"
+  ],
+  "pendingReason": "độ tin cậy \"thấp\" trong nghiên cứu (không đọc được tài liệu chính thức) — không được nạp (§8.1)"
+}
