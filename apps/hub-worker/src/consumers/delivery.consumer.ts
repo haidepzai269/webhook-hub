@@ -23,6 +23,7 @@ import {
 } from '@hub/common';
 import { aesGcmDecrypt } from '@hub/crypto';
 import * as amqp from 'amqplib';
+import { performance } from 'perf_hooks';
 import Redis from 'ioredis';
 
 // S2-1: circuit OPEN chỉ mở 60s -> hoãn vào tầng NGẮN NHẤT có TTL >= 60s (q.delivery.retry.1m),
@@ -61,7 +62,8 @@ export class LogThrottle {
   private suppressed = 0;
   constructor(
     private readonly intervalMs = INFRA_LOG_INTERVAL_MS,
-    private readonly now: () => number = Date.now,
+    // Đồng hồ đơn điệu (review L2-1): chỉnh giờ hệ thống/NTP không làm log im lâu hay bật lại sớm. Test tiêm đồng hồ giả.
+    private readonly now: () => number = () => performance.now(),
   ) {}
   /** Trả số lần đã gộp từ dòng log trước (>= 0) nếu được log lúc này; null nếu phải im. */
   take(): number | null {

@@ -343,7 +343,7 @@ NORMALIZE_MAX_DEFER_MS=3600000
 
 ## 11. Story và thứ tự
 
-- [ ] **BP1** — Vòng lặp nóng (§2). Nhỏ, độc lập. **Làm trước.**
+- [x] **BP1** — Vòng lặp nóng (§2). Nhỏ, độc lập. **Làm trước.**
 - [ ] **BP2** — `destinationId` + gate trước khi nạp + hoãn thưa + trần theo thời gian (§3, §6 phần gate)
 - [ ] **BP3** — OPEN kéo dài dần (§4). Cần BP2.
 - [ ] **BP4** — Slow-start (§5). Cần gate của BP2.

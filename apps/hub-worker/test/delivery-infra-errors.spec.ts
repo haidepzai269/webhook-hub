@@ -63,6 +63,24 @@ function expectKept(headers: Record<string, unknown>) {
   expect(headers).toMatchObject({ ...KEEP, 'x-correlation-id': 'corr-1' });
 }
 
+/**
+ * `[BP:T3]` (review L2-2): tìm lời gọi amqplib có thể requeue — đối số requeue phải ghi rõ `false`.
+ * amqplib: nack(msg, allUpTo = false, requeue = true) · nackAll(requeue = true) · reject(msg, requeue = true).
+ * Bỏ comment trước khi so; bỏ receiver `Promise` (Promise.reject không phải amqplib). Bắt cả lời gọi xuống dòng
+ * (đối số lồng tối đa một cấp ngoặc). Giới hạn đã biết: `nack` đã destructure khỏi channel thì không thấy.
+ */
+function requeueCalls(source: string): string[] {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+  const out: string[] = [];
+  for (const m of code.matchAll(/([\w$]+)\s*\.\s*(nackAll|nack|reject)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
+    if (m[1] === 'Promise') continue;
+    const args = m[3].split(',').map((a) => a.trim()).filter(Boolean);
+    const requeueArg = m[2] === 'nack' ? args[2] : m[2] === 'reject' ? args[1] : args[0];
+    if (requeueArg !== 'false') out.push(m[0].replace(/\s+/g, ' '));
+  }
+  return out;
+}
+
 const p1001 = () =>
   new Prisma.PrismaClientKnownRequestError("Can't reach database server", { code: 'P1001', clientVersion: '5.22.0' });
 
@@ -194,25 +212,21 @@ describe('BP1 — DeliveryConsumer không còn vòng lặp nóng requeue (ADR-19
     };
     roots.forEach(walk);
     expect(files.some((f) => f.endsWith('delivery.consumer.ts'))).toBe(true);
-    const offenders: string[] = [];
-    for (const f of files) {
-      const text = fs.readFileSync(f, 'utf8');
-      // Bắt cả lời gọi xuống dòng: lấy trọn danh sách đối số tới dấu ')' khớp (đối số không lồng ngoặc sâu).
-      for (const m of text.matchAll(/\.(nack|reject)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
-        const args = m[2].split(',').map((a) => a.trim()).filter(Boolean);
-        // amqplib: nack(msg, allUpTo = false, requeue = true) · reject(msg, requeue = true) -> requeue mặc định là TRUE.
-        const requeueArg = m[1] === 'nack' ? args[2] : args[1];
-        if (requeueArg !== 'false') offenders.push(`${path.relative(repoRoot, f)}: ${m[0].replace(/\s+/g, ' ')}`);
-      }
-    }
+    const offenders = files.flatMap((f) => requeueCalls(fs.readFileSync(f, 'utf8')).map((c) => `${path.relative(repoRoot, f)}: ${c}`));
     expect(offenders).toEqual([]);
-    // Tự kiểm regex: các dạng phải bị bắt.
-    const probe = 'ch.nack(msg); ch.nack(msg, false); ch.reject(msg); ch.reject(m, true); ch.nack(\n  msg,\n  false,\n  true,\n);';
-    const caught = [...probe.matchAll(/\.(nack|reject)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)].filter((m) => {
-      const args = m[2].split(',').map((a) => a.trim()).filter(Boolean);
-      return (m[1] === 'nack' ? args[2] : args[1]) !== 'false';
-    });
-    expect(caught).toHaveLength(5);
+    // Tự kiểm bộ quét: dạng phải bắt / không được bắt nhầm (review L2-2).
+    expect(
+      requeueCalls(
+        'ch.nack(msg); ch.nack(msg, false); ch.reject(msg); ch.reject(m, true); ch.nackAll(); ch.nackAll(true);\n' +
+          'ch.nack(\n  msg,\n  false,\n  true,\n);',
+      ),
+    ).toHaveLength(7);
+    expect(
+      requeueCalls(
+        'Promise.reject(err); ch.nack(msg, false, false /* ghi chú */); ch.nackAll(false); ch.reject(msg, false);\n' +
+          '// ch.nack(msg, false, true) trong comment\n/* ch.reject(msg) */',
+      ),
+    ).toEqual([]);
   });
 
   it('(review M1) lỗi unknown rải rác qua nhiều lần thử KHÔNG vào DLX: sang lần thử mới thì x-unknown-errors/x-infra-deferrals về 0', async () => {
@@ -258,7 +272,10 @@ describe('BP1 — DeliveryConsumer không còn vòng lặp nóng requeue (ADR-19
     expect(ch2.sendToQueue.mock.calls[0][2].headers[UNKNOWN_ERRORS_HEADER]).toBe(1);
   });
 
-  it('[BP:T1] (phần c) P1001 SAU KHI đích đã nhận 2xx (ghi kết quả lỗi) -> retry.10s, attemptCount giữ nguyên; lần quay lại thua lease -> hoãn 1m, không gửi lại', async () => {
+  it('[BP:T1] (phần c) P1001 SAU KHI đích đã nhận 2xx (ghi kết quả lỗi) -> retry.10s, attemptCount giữ nguyên; lần quay lại trong 60s thua lease -> hoãn 1m', async () => {
+    // At-least-once (review L2-3): lần quay lại SAU 1m thắng lease đã hết hạn và GỬI LẠI cùng lần thử — đích dedupe
+    // bằng `webhook-id = event.id` (giữ nguyên qua retry, webhook.sender.ts). Nếu DB vẫn chết thì vòng 10s lặp tiếp.
+    // Test chỉ khẳng định khoảng trong 60s lease: không gọi đích lần hai.
     const row = buildDeliveryRow();
     const repo = {
       findDeliveryForSend: jest.fn().mockResolvedValue(row),
