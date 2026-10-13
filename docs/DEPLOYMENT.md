@@ -574,6 +574,9 @@ METRICS_TICK_MS=5000
 NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE); hub-api KHÔNG đăng ký /mock/* (ADR-054)
 CIRCUIT_MAX_DEFER_MS=1800000 # hub-worker: trần THỜI GIAN hoãn vì circuit cho một lần thử rồi tính là một lần thử thất bại (BP2, ADR-196; thay CIRCUIT_MAX_DEFERRALS). Chỉ đặt THẤP hơn mặc định
 CIRCUIT_OPEN_MAX_SECONDS=300 # hub-worker: OPEN sau probe thất bại (60..300s; BP3, ADR-197). Chỉ đặt THẤP hơn 300
+DELIVERY_RAMP_START_RPS=2    # hub-worker: slow-start sau hồi phục (BP4, ADR-198) — trần đầu (rps)
+DELIVERY_RAMP_STEP_SECONDS=10 # mỗi bước nhân đôi trần
+DELIVERY_RAMP_SECONDS=60     # thời lượng ramp; 0 = tắt; chỉ đặt THẤP hơn 60
 METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub-worker :WORKER_METRICS_PORT/metrics đòi
                          # "Authorization: Bearer <token>" (review #6). Prometheus/scraper phải gửi token: trong
                          # prometheus.yml bỏ comment khối `authorization: {type: Bearer, credentials: ...}` ở cả 2 job

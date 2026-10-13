@@ -18,7 +18,7 @@ import { describeDb } from '../../../libs/database/test/support/test-db';
  * Row giả: đích thật `dest-1`, rps 0 (buildDeliveryRow).
  */
 type State = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
-function setup(states: Record<string, State>, opts: { probe?: boolean; throttleAllowed?: boolean; row?: any; openPttlMs?: number } = {}) {
+function setup(states: Record<string, State>, opts: { probe?: boolean; throttleAllowed?: boolean; row?: any; openPttlMs?: number; rampCap?: number } = {}) {
   const row = opts.row === undefined ? buildDeliveryRow() : opts.row;
   const tx = {
     deliveryAttempt: { create: jest.fn().mockResolvedValue({}) },
@@ -41,7 +41,8 @@ function setup(states: Record<string, State>, opts: { probe?: boolean; throttleA
     const state = states[id] ?? 'CLOSED';
     const v: any = { state, failures: state === 'CLOSED' ? 0 : 5 };
     if (state === 'OPEN' && opts.openPttlMs !== undefined) v.openPttlMs = opts.openPttlMs;
-    if (state === 'CLOSED' && rps > 0) v.throttleAllowed = opts.throttleAllowed ?? true;
+    if (state === 'CLOSED' && (rps > 0 || opts.rampCap)) v.throttleAllowed = opts.throttleAllowed ?? true;
+    if (state === 'CLOSED' && opts.rampCap) v.rampCap = opts.rampCap;
     return v;
   });
   cb.recheckThrottle = jest.fn(async (_id: string, v: any) => v);
@@ -180,6 +181,26 @@ describe('BP2 §3.2 — gate trước khi nạp DB', () => {
     ch = buildChannel();
     await s1.consumer.handleMessage(amqp(hinted('dest-1', 0)), ch);
     expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+  });
+
+  it('[BP:T15] (phần b) vượt trần ramp (đích không có rps): retry.10s, attemptCount giữ nguyên, KHÔNG nạp row, KHÔNG ghi DB; đường cũ cũng vậy (sau khi nạp)', async () => {
+    const { consumer, repo, send, tx } = setup({}, { throttleAllowed: false, rampCap: 2 });
+    const ch = buildChannel();
+    await consumer.handleMessage(amqp(hinted('dest-1', 0, { attemptCount: 2 })), ch);
+    expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(repo.deferDelivery).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
+    expect(JSON.parse(ch.sendToQueue.mock.calls[0][1].toString()).attemptCount).toBe(2);
+    expect(ch.ack).toHaveBeenCalledTimes(1);
+
+    const legacy = setup({}, { throttleAllowed: false, rampCap: 2 });
+    const ch2 = buildChannel();
+    await legacy.consumer.handleMessage(amqp(buildSlimMsg()), ch2);
+    expect(ch2.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
+    expect(legacy.send).not.toHaveBeenCalled();
+    expect(legacy.tx.deliveryAttempt.create).not.toHaveBeenCalled();
+    expect(tx.deliveryAttempt.create).not.toHaveBeenCalled();
   });
 
   it('[BP:T10] (phần b) message thiếu gợi ý (hoặc chỉ có destinationId, không rps) -> đường cũ: nạp row rồi mới gate', async () => {

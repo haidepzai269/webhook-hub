@@ -291,7 +291,12 @@ export class DeliveryConsumer {
           }
           // Quá trần thời gian -> phải nạp row để ghi một lần thử thất bại (nhánh chung bên dưới quyết định lại).
         } else if (view.throttleAllowed === false) {
-          log.warn({ destinationId: hint.destinationId, rateLimitRps: hint.rateLimitRps }, 'Outbound Throttle (gợi ý) -> tầng retry ngắn nhất, không nạp DB');
+          // BP4: vượt trần slow-start (ramp) là chuyện bình thường ngay sau hồi phục (hàng trăm message/giây) -> debug, không xả log.
+          (view.rampCap !== undefined ? log.debug : log.warn).call(
+            log,
+            { destinationId: hint.destinationId, rateLimitRps: hint.rateLimitRps, rampCap: view.rampCap },
+            'Outbound Throttle / slow-start (gợi ý) -> tầng retry ngắn nhất, không nạp DB',
+          );
           channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
           channel.ack(msg);
           return;
@@ -389,14 +394,16 @@ export class DeliveryConsumer {
       const heldToken = probeToken;
       const releaseProbe = () => (isProbe ? this.circuitBreaker.releaseProbe(destinationId, heldToken) : Promise.resolve());
 
-      // 1b. Outbound Throttle per destination (§5.4b & ADR-016): phòng ngừa, giữ tầng NGẮN nhất.
+      // 1b. Outbound Throttle per destination (§5.4b & ADR-016) + slow-start sau hồi phục (BP4, ADR-198): trần = min(rps, ramp),
+      // vượt -> tầng NGẮN nhất (retry.10s), không tăng lượt, không ghi DB.
       // Bộ đếm đã tăng trong getState (cùng lệnh). Chỉ áp khi CLOSED: probe HALF_OPEN và lần "thử" do
       // circuit quá trần không đi qua throttle (probe chỉ một request; lần quá trần không gọi đích).
       if (!circuitTimeout && view.throttleAllowed !== undefined) {
         if (!view.throttleAllowed) {
-          log.warn(
-            { destinationId, rateLimitRps: destination.rateLimitRps },
-            'Outbound Throttle kích hoạt (vượt RPS đích) -> đẩy sang tầng retry ngắn nhất',
+          (view.rampCap !== undefined ? log.debug : log.warn).call(
+            log,
+            { destinationId, rateLimitRps: destination.rateLimitRps, rampCap: view.rampCap },
+            'Outbound Throttle / slow-start kích hoạt (vượt trần) -> đẩy sang tầng retry ngắn nhất',
           );
           await releaseProbe();
           channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });

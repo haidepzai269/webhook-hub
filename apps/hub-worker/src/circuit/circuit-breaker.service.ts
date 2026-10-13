@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { CircuitState, fastFailRedisOptions, logger } from '@hub/common';
 import { PrismaService } from '@hub/database';
-import { CIRCUIT_OPEN_MS as OPEN_FIRST_MS, circuitOpenMaxSeconds } from '@hub/messaging';
+import { CIRCUIT_OPEN_MS as OPEN_FIRST_MS, circuitOpenMaxSeconds, deliveryRampConfig } from '@hub/messaging';
 
 /** Token DI tuỳ chọn để test tiêm Redis giả; production tự tạo client riêng. */
 export const CIRCUIT_REDIS = Symbol('CIRCUIT_REDIS');
@@ -38,24 +38,46 @@ export const LUA_INCR_EXPIRE = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 return n`;
 /**
- * BP2 §6 (ADR-196): GATE — MỘT script, LUÔN đúng 1 lệnh, có hay không có throttle (thay `MGET` + `LUA_STATE_AND_THROTTLE`,
- * ADR-064). KEYS: open, failures, throttle:{giây}; ARGV: ngưỡng lỗi, rate_limit_rps, TTL cửa sổ throttle (giây).
- * Chỉ INCR bộ đếm throttle khi CLOSED VÀ có trần (rps > 0) — không trần thì 0 lệnh throttle như cũ. Trả PTTL của `:open`
- * (BP3 dùng để hoãn tới hết OPEN, C4). Trả {open 1|0, failures|'', openPttl|-2, count|-1}.
- * BP4 thêm khoá `:ramp` + ARGV ramp vào CHÍNH script này (vẫn 1 lệnh).
+ * BP2 §6 (ADR-196) + BP4 (ADR-198): GATE — MỘT script, LUÔN đúng 1 lệnh, có hay không có throttle/ramp.
+ * KEYS: open, failures, throttle:{giây}, ramp. ARGV: ngưỡng lỗi, rate_limit_rps, nowMs, ramp start rps, ramp step (giây),
+ * TTL cửa sổ throttle (giây).
+ * - Trả PTTL của `:open` (BP3 hoãn tới hết OPEN, C4).
+ * - CLOSED + còn `:ramp` (BP4, đặt lúc probe thành công): rampCap = start × 2^floor((now − rampStart)/step).
+ * - INCR bộ đếm throttle chỉ khi CLOSED VÀ có trần (rps > 0 hoặc còn `:ramp`) — không trần thì 0 lệnh throttle như cũ.
+ * Cap thật = min(rps nếu > 0, rampCap) tính ở JS từ hai giá trị trả về (để kiểm lại với rps thật mà không INCR lần hai, C9).
+ * Trả {open 1|0, failures|'', openPttl|-2, count|-1, rampCap|-1}.
  */
 export const LUA_GATE = `local open = redis.call('GET', KEYS[1])
 local pttl = -2
 if open then pttl = redis.call('PTTL', KEYS[1]) end
 local failures = redis.call('GET', KEYS[2])
 local t = -1
-if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) and (tonumber(ARGV[2]) > 0) then
-  t = redis.call('INCR', KEYS[3])
-  if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[3]) end
+local cap = -1
+if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
+  local rs = redis.call('GET', KEYS[4])
+  if rs then
+    local el = tonumber(ARGV[3]) - (tonumber(rs) or 0)
+    if el < 0 then el = 0 end
+    local steps = math.floor(el / (tonumber(ARGV[5]) * 1000))
+    if steps > 20 then steps = 20 end
+    cap = tonumber(ARGV[4]) * (2 ^ steps)
+  end
+  if (tonumber(ARGV[2]) > 0) or (cap > 0) then
+    t = redis.call('INCR', KEYS[3])
+    if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[6]) end
+  end
 end
 local o = 0
 if open then o = 1 end
-return {o, failures or '', pttl, t}`;
+return {o, failures or '', pttl, t, cap}`;
+
+/**
+ * BP4 (ADR-198): probe thành công -> CLOSED trong MỘT lệnh: DEL failures, open, probe, trips + SET `:ramp` = nowMs EX ramp giây.
+ * KEYS: failures, open, probe, trips, ramp. ARGV: nowMs, ramp giây.
+ */
+export const LUA_CLOSE_AND_RAMP = `redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+redis.call('SET', KEYS[5], ARGV[1], 'EX', tonumber(ARGV[2]))
+return 1`;
 
 /**
  * Giành probe HALF_OPEN: chỉ SET NX khi `:open` KHÔNG tồn tại và `:failures` ≥ ngưỡng (đúng là HALF_OPEN
@@ -87,6 +109,8 @@ export interface CircuitView {
   openPttlMs?: number;
   /** BP2: giá trị bộ đếm throttle sau INCR của gate (chỉ có khi đã INCR) — để kiểm lại với rps thật mà KHÔNG đếm lần hai. */
   throttleCount?: number;
+  /** BP4: trần slow-start hiện tại (rps) khi đích đang ramp sau khi hồi phục. */
+  rampCap?: number;
 }
 
 /** Đích đang xử lý + trạng thái đang ghi trong DB (đọc kèm delivery, không tốn truy vấn riêng). */
@@ -126,7 +150,7 @@ export class CircuitBreakerService {
 
   private keys(destinationId: string) {
     const base = `circuit:${destinationId}`;
-    return { failures: `${base}:failures`, open: `${base}:open`, probe: `${base}:probe`, trips: `${base}:trips` };
+    return { failures: `${base}:failures`, open: `${base}:open`, probe: `${base}:probe`, trips: `${base}:trips`, ramp: `${base}:ramp` };
   }
 
   /**
@@ -137,11 +161,14 @@ export class CircuitBreakerService {
   async getState(destinationId: string, rateLimitRps = 0): Promise<CircuitView> {
     const k = this.keys(destinationId);
     const rps = rateLimitRps > 0 ? rateLimitRps : 0;
+    const ramp = deliveryRampConfig();
     try {
-      const throttleKey = `throttle:destination:${destinationId}:${Math.floor(Date.now() / 1000)}`;
-      const [openFlag, failuresRaw, pttl, count] = (await this.redis.eval(
-        LUA_GATE, 3, k.open, k.failures, throttleKey, CIRCUIT_FAILURE_THRESHOLD, rps, 2,
-      )) as [number, string, number, number];
+      const now = Date.now();
+      const throttleKey = `throttle:destination:${destinationId}:${Math.floor(now / 1000)}`;
+      const [openFlag, failuresRaw, pttl, count, capRaw] = (await this.redis.eval(
+        LUA_GATE, 4, k.open, k.failures, throttleKey, k.ramp,
+        CIRCUIT_FAILURE_THRESHOLD, rps, now, ramp.startRps, ramp.stepSeconds, 2,
+      )) as [number, string, number, number, number];
       const failures = parseInt(failuresRaw || '0', 10) || 0;
       if (Number(openFlag) === 1) {
         const view: CircuitView = { state: 'OPEN', failures };
@@ -149,7 +176,13 @@ export class CircuitBreakerService {
         return view;
       }
       if (failures >= CIRCUIT_FAILURE_THRESHOLD) return { state: 'HALF_OPEN', failures };
-      if (rps > 0 && Number(count) >= 0) return { state: 'CLOSED', failures, throttleAllowed: Number(count) <= rps, throttleCount: Number(count) };
+      const rampCap = Number(capRaw) > 0 ? Number(capRaw) : undefined;
+      const cap = Math.min(rps > 0 ? rps : Infinity, rampCap ?? Infinity);
+      if (Number.isFinite(cap) && Number(count) >= 0) {
+        const view: CircuitView = { state: 'CLOSED', failures, throttleAllowed: Number(count) <= cap, throttleCount: Number(count) };
+        if (rampCap !== undefined) view.rampCap = rampCap;
+        return view;
+      }
       return { state: 'CLOSED', failures };
     } catch {
       return { state: 'CLOSED', failures: 0, degraded: true };
@@ -164,8 +197,11 @@ export class CircuitBreakerService {
   async recheckThrottle(destinationId: string, view: CircuitView, realRps: number): Promise<CircuitView> {
     if (view.state !== 'CLOSED' || view.degraded) return view;
     const { throttleAllowed: _a, throttleCount, ...rest } = view;
-    if (!(realRps > 0)) return rest;
-    if (throttleCount !== undefined) return { ...rest, throttleCount, throttleAllowed: throttleCount <= realRps };
+    // BP4: cap thật = min(rps thật nếu > 0, rampCap) — ramp vẫn áp dù rps đổi.
+    const cap = Math.min(realRps > 0 ? realRps : Infinity, view.rampCap ?? Infinity);
+    if (!Number.isFinite(cap)) return rest;
+    if (throttleCount !== undefined) return { ...rest, throttleCount, throttleAllowed: throttleCount <= cap };
+    // Gate chưa INCR (gợi ý rps 0, không ramp) mà rps thật > 0 -> một INCR.
     return { ...rest, throttleAllowed: await this.checkThrottle(destinationId, realRps) };
   }
 
@@ -202,8 +238,15 @@ export class CircuitBreakerService {
       return 'CLOSED';
     }
     const k = this.keys(target.destinationId);
+    const ramp = deliveryRampConfig();
     try {
-      await this.redis.del(k.failures, k.open, k.probe, k.trips); // BP3: CLOSED -> xoá cả `:trips` (vẫn MỘT lệnh)
+      if (view.state === 'HALF_OPEN' && ramp.seconds > 0) {
+        // BP4 (ADR-198): PROBE thành công -> đích vừa hồi phục, hàng hoãn sắp dội về: xoá 4 khoá + bắt đầu ramp, MỘT lệnh.
+        // Chỉ ramp sau probe: mạch tự về CLOSED (khoá hết hạn) hay thành công khi CLOSED còn failures nghĩa là chưa từng OPEN.
+        await this.redis.eval(LUA_CLOSE_AND_RAMP, 5, k.failures, k.open, k.probe, k.trips, k.ramp, Date.now(), ramp.seconds);
+      } else {
+        await this.redis.del(k.failures, k.open, k.probe, k.trips); // BP3: CLOSED -> xoá cả `:trips` (vẫn MỘT lệnh)
+      }
     } catch {}
     // `persistedState` đọc kèm delivery có thể đã cũ (worker khác vừa ghi OPEN): KHÔNG dựa vào nó để bỏ
     // qua — UPDATE có điều kiện `circuit_state <> 'CLOSED'` quyết định (review SPEC-2 #6c).
@@ -236,11 +279,12 @@ export class CircuitBreakerService {
           .multi()
           .set(k.open, 'OPEN', 'EX', openSeconds)
           .expire(k.failures, failuresAfterOpenSeconds(openSeconds))
-          .del(k.probe);
+          .del(k.probe)
+          .del(k.ramp); // BP4: lỗi đủ ngưỡng trong lúc ramp -> OPEN và dừng ramp
         if (probeFailed) m.incr(k.trips).expire(k.trips, failuresAfterOpenSeconds(openSeconds));
         const res = await m.exec();
-        // Review BP3 TH-2: `:trips` lấy từ kết quả INCR trong CHÍNH MULTI này (lệnh thứ 4) — không thêm lệnh Redis.
-        trips = probeFailed ? Number(res?.[3]?.[1]) || null : 0;
+        // Review BP3 TH-2: `:trips` lấy từ kết quả INCR trong CHÍNH MULTI này (lệnh thứ 5, sau DEL :ramp của BP4) — không thêm lệnh Redis.
+        trips = probeFailed ? Number(res?.[4]?.[1]) || null : 0;
       } catch {
         return { state: 'CLOSED', failures, degraded: true };
       }

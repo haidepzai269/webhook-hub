@@ -31,14 +31,27 @@ function fakeRedis() {
     eval: async (script: string, n: number, ...rest: any[]) => {
       const key = rest[0];
       if (/PTTL/.test(script)) {
-        // LUA_GATE (BP2 §6): KEYS open, failures, throttle; ARGV ngưỡng, rps, TTL. INCR chỉ khi CLOSED và rps > 0.
-        const [open, failures, throttle] = rest.slice(0, n);
+        // LUA_GATE (BP2 §6 + BP4): KEYS open, failures, throttle, ramp; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL.
+        const [open, failures, throttle, ramp] = rest.slice(0, n);
         let t = -1;
-        if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n]) && Number(rest[n + 1]) > 0) {
-          t = Number(store.get(throttle) ?? 0) + 1;
-          store.set(throttle, String(t));
+        let cap = -1;
+        if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
+          if (store.get(ramp)) {
+            const el = Math.max(0, Number(rest[n + 2]) - Number(store.get(ramp)));
+            cap = Number(rest[n + 3]) * 2 ** Math.min(20, Math.floor(el / (Number(rest[n + 4]) * 1000)));
+          }
+          if (Number(rest[n + 1]) > 0 || cap > 0) {
+            t = Number(store.get(throttle) ?? 0) + 1;
+            store.set(throttle, String(t));
+          }
         }
-        return [store.get(open) ? 1 : 0, store.get(failures) ?? '', store.get(open) ? 60_000 : -2, t];
+        return [store.get(open) ? 1 : 0, store.get(failures) ?? '', store.get(open) ? 60_000 : -2, t, cap];
+      }
+      if (/redis\.call\('DEL'/.test(script) && /'SET'/.test(script)) {
+        // LUA_CLOSE_AND_RAMP (BP4): DEL 4 khoá + SET :ramp
+        rest.slice(0, 4).forEach((k: string) => store.delete(k));
+        store.set(rest[4], String(rest[n]));
+        return 1;
       }
       if (/EXISTS/.test(script)) {
         // LUA_ACQUIRE_PROBE: KEYS open, failures, probe; ARGV token, TTL, ngưỡng
@@ -323,10 +336,26 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     store.set('circuit:dest-1:failures', '5'); // :open đã hết hạn -> HALF_OPEN; DB còn ghi OPEN
     const { repo } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 }, persistedCircuit: 'OPEN', circuitDbWrites: true });
     expect(repo.findDeliveryForSend).toHaveBeenCalledTimes(1);
-    // gate · giành probe · PUBLISH circuit (syncObserved OPEN->HALF_OPEN) · DEL (probe thành công) · PUBLISH circuit (->CLOSED) · PUBLISH delivery
-    // = 4 lệnh (gate + acquire + DEL + PUBLISH delivery) + 2 PUBLISH circuit — bằng trước BP2 (MGET thay EVAL); ca hiếm
-    // (một probe / đích / 30s). Gộp acquire vào gate: để BP4 (SPEC-BP C10).
-    expect(take()).toEqual(['eval', 'eval', 'publish', 'del', 'publish', 'publish']);
+    // gate · giành probe · PUBLISH circuit (syncObserved OPEN->HALF_OPEN) · EVAL đóng mạch + đặt :ramp (BP4, thay DEL — vẫn 1 lệnh)
+    // · PUBLISH circuit (->CLOSED) · PUBLISH delivery = 4 lệnh + 2 PUBLISH circuit — bằng trước BP2; ca hiếm (một probe / đích / 30s).
+    // Không gộp acquire vào gate (C10/C11: dù gộp vẫn > 3 vì PUBLISH circuit; đổi ngữ nghĩa getState, rủi ro hơn lợi).
+    expect(take()).toEqual(['eval', 'eval', 'publish', 'eval', 'publish', 'publish']);
+    expect(store.get('circuit:dest-1:ramp')).toEqual(expect.any(String)); // ramp bắt đầu
+  });
+
+  it('[BP:T22] (phần c) ramp (BP4): trong ramp gửi được = 2 lệnh (gate + PUBLISH); vượt trần ramp = 1 lệnh, 0 DB', async () => {
+    const t0 = Date.parse('2026-10-13T12:00:00.200Z');
+    jest.spyOn(Date, 'now').mockReturnValue(t0 + 300); // cố định trong một giây -> cùng bộ đếm throttle
+    store.set('circuit:dest-1:ramp', String(t0)); // vừa hồi phục: trần 2/s
+    for (let i = 0; i < 2; i++) {
+      await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+      expect(take()).toEqual(['eval', 'publish']);
+    }
+    const { repo, channel } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']);
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
+    expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(repo.deferDelivery).not.toHaveBeenCalled();
   });
 
   it('R1 (C9): đích CÓ throttle, gợi ý ĐÚNG -> gate trước khi nạp, vẫn 2 lệnh/delivery (EVAL + PUBLISH)', async () => {

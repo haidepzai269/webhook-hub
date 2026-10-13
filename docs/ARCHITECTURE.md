@@ -190,7 +190,7 @@ Rollback vì lý do khác (không phải unique) → trả **5xx** để provide
 
 0. Message chỉ mang tham chiếu (ADR-042) + **gợi ý** `destinationId`/`rateLimitRps` (BP2, ADR-196). Có gợi ý → **gate trước khi nạp** (bước 1 chạy trước): OPEN / HALF_OPEN không giành probe → hoãn, vượt throttle → `retry.10s`, cả hai **0 truy vấn đọc**; sau khi nạp, gợi ý lệch row thì gate lại với giá trị thật. Nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
 1. Kiểm **circuit breaker** — **gate**: LUÔN một `EVAL` (`LUA_GATE`: circuit + throttle khi có `rate_limit_rps` + PTTL của `:open`; BP2 §6, ADR-196, thay `MGET`/ADR-064). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần **thời gian** `CIRCUIT_MAX_DEFER_MS` (mặc định 30 phút, header `x-circuit-deferred-since`; ADR-048/054, BP2 ADR-196); `next_attempt_at` ghi thưa ≤ 1 lần/2 phút (sweeper vẫn dựa vào nó).
-2. Áp **outbound throttle** (cửa sổ cố định 1 giây, chỉ khi `rate_limit_rps > 0` và circuit CLOSED; bộ đếm đã tăng trong lệnh ở bước 1). Vượt → `q.delivery.retry.10s`, `ack`. *(§5.4b)*
+2. Áp **outbound throttle** (cửa sổ cố định 1 giây, khi circuit CLOSED và có trần: `rate_limit_rps > 0` hoặc đích đang **slow-start** sau hồi phục — trần = min(rps, ramp), BP4 ADR-198; bộ đếm đã tăng trong lệnh ở bước 1). Vượt → `q.delivery.retry.10s`, `ack`, không ghi DB. *(§5.4b)*
 3. Render template → gọi HTTP, timeout tổng mặc định 5s (`AbortSignal.timeout`), cấu hình `DELIVERY_TIMEOUT_MS` kẹp 1–10s (ADR-078), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
 4. INSERT `delivery_attempts` (status code, duration_ms, response body cắt 2KB, error).
 5. `2xx` → `SUCCEEDED`, reset circuit (0 lệnh Redis nếu chưa từng lỗi), `ack`. Chỉ `5xx`/`408`/`429`/lỗi mạng tính vào circuit.
@@ -319,7 +319,7 @@ Mọi replay ghi `audit_logs` (ai, lúc nào, lý do).
 |---|---|---|
 | `CLOSED` | bình thường | gửi |
 | `OPEN` | ≥ 5 lỗi phía đích (5xx/408/429/mạng) trong cửa sổ `:failures` | lần đầu ngừng 60s (`:open` EX 60); **probe thất bại → 300s** (`CIRCUIT_OPEN_MAX_SECONDS`, `:trips`+1; BP3, ADR-197). Message hoãn **tới hết OPEN** theo PTTL thật gate trả về: `q.delivery.retry.1m` hoặc `q.delivery.retry.5m`, không tăng `attemptCount`, trần **thời gian** `CIRCUIT_MAX_DEFER_MS`. `destinations.circuit_half_open_at` = lúc trip + TTL vừa đặt (câu "Thử lại lúc …" của cảnh báo, không gọi Redis) |
-| `HALF_OPEN` | `:open` hết hạn mà `failures ≥ 5` (trạng thái **suy ra**, không lưu; `:failures` sống tới `openSeconds + 120`) | đúng **1** probe (Lua `SET NX` có token); thành công → `CLOSED` (DEL 4 khoá: failures, open, probe, trips), thất bại → `OPEN` 300s; probe nhận 4xx → nhả probe, giữ `HALF_OPEN` |
+| `HALF_OPEN` | `:open` hết hạn mà `failures ≥ 5` (trạng thái **suy ra**, không lưu; `:failures` sống tới `openSeconds + 120`) | đúng **1** probe (Lua `SET NX` có token); thành công → `CLOSED` (DEL 4 khoá: failures, open, probe, trips), thất bại → `OPEN` 300s; probe nhận 4xx → nhả probe, giữ `HALF_OPEN`; thành công còn bật **slow-start** (`:ramp`, §5.4b) |
 
 Redis chết → circuit breaker **fail-open** + log cảnh báo. 4xx khác không tính vào circuit (lỗi cấu hình của ta, đích vẫn sống).
 
@@ -332,7 +332,9 @@ Redis chết → circuit breaker **fail-open** + log cảnh báo. 4xx khác khô
 > **Circuit breaker** là *phản ứng* — khi đích **đã** hỏng thì ngừng đập vào nó.
 > Thiếu throttle: worker scale lên 5 sẽ bắn gấp 5 lần vào một đích yếu và **tự tay tạo ra sự cố mà circuit breaker phải đi dọn**.
 
-Cùng script Lua với rate limit inbound (cửa sổ 60s), chỉ đổi key và độ dài cửa sổ.
+Bộ đếm throttle nằm trong `LUA_GATE` (một `EVAL` cùng circuit, BP2 ADR-196).
+
+**Slow-start sau hồi phục (BP4, ADR-198).** Probe HALF_OPEN thành công → MỘT lệnh xoá `failures/open/probe/trips` + `SET circuit:{id}:ramp = nowMs EX DELIVERY_RAMP_SECONDS` (60). Trong ramp, gate tính `rampCap = DELIVERY_RAMP_START_RPS × 2^floor((now − rampStart)/DELIVERY_RAMP_STEP_SECONDS)` (2 → 4 → … → 64 rps) và dùng chung cửa sổ 1 giây với `rate_limit_rps`: trần = min(rps nếu > 0, rampCap). Vượt → `retry.10s` như throttle. Lỗi đủ ngưỡng trong ramp → OPEN và xoá `:ramp`. Mạch tự về CLOSED (khoá hết hạn) thì không ramp. Mất `:ramp` (Redis) → gửi bình thường; Redis lỗi → fail-open. Đây là câu trả lời thay cho jitter: hàng hoãn chảy về đích theo nhịp tăng dần, không dồn thành một cục.
 
 ### 5.4c. Cố tình không làm (và vì sao)
 

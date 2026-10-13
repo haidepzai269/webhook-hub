@@ -8,9 +8,10 @@ import {
   LUA_INCR_EXPIRE,
   LUA_RELEASE_PROBE,
   LUA_GATE,
+  LUA_CLOSE_AND_RAMP,
 } from '../src/circuit/circuit-breaker.service';
 import { describeDb } from '../../../libs/database/test/support/test-db';
-import { circuitOpenMaxSeconds } from '@hub/messaging';
+import { circuitOpenMaxSeconds, deliveryRampConfig } from '@hub/messaging';
 import { logger } from '@hub/common';
 
 /**
@@ -81,14 +82,28 @@ function fakeRedis() {
         return 1;
       }
       if (script === LUA_GATE) {
-        // BP2 §6: KEYS open, failures, throttle; ARGV ngưỡng, rps, TTL. INCR chỉ khi CLOSED và rps > 0.
-        const [open, failures, throttle] = keys;
+        // BP2 §6 + BP4: KEYS open, failures, throttle, ramp; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL.
+        // INCR chỉ khi CLOSED và có trần (rps > 0 hoặc còn :ramp). Bản thật kiểm trên Redis thật ở cuối file.
+        const [open, failures, throttle, ramp] = keys;
         let t = -1;
-        if (!store.has(open) && parseInt(store.get(failures) ?? '0', 10) < Number(argv[0]) && Number(argv[1]) > 0) {
-          t = parseInt(store.get(throttle) ?? '0', 10) + 1;
-          store.set(throttle, String(t));
+        let cap = -1;
+        if (!store.has(open) && parseInt(store.get(failures) ?? '0', 10) < Number(argv[0])) {
+          if (store.has(ramp)) {
+            const el = Math.max(0, Number(argv[2]) - Number(store.get(ramp)));
+            cap = Number(argv[3]) * 2 ** Math.min(20, Math.floor(el / (Number(argv[4]) * 1000)));
+          }
+          if (Number(argv[1]) > 0 || cap > 0) {
+            t = parseInt(store.get(throttle) ?? '0', 10) + 1;
+            store.set(throttle, String(t));
+          }
         }
-        return [store.has(open) ? 1 : 0, store.get(failures) ?? '', store.has(open) ? 60_000 : -2, t];
+        return [store.has(open) ? 1 : 0, store.get(failures) ?? '', store.has(open) ? 60_000 : -2, t, cap];
+      }
+      if (script === LUA_CLOSE_AND_RAMP) {
+        keys.slice(0, 4).forEach((k2: string) => store.delete(k2));
+        store.set(keys[4], argv[0]);
+        ttls.set(keys[4], Number(argv[1]));
+        return 1;
       }
       if (script === LUA_RELEASE_PROBE) {
         if (store.get(keys[0]) === argv[0]) return store.delete(keys[0]) ? 1 : 0;
@@ -242,19 +257,24 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(JSON.parse(redis.publish.mock.calls[0][1])).toMatchObject({ from: 'OPEN', to: 'HALF_OPEN' });
   });
 
-  it('probe thành công -> CLOSED, xoá :failures :open :probe bằng MỘT lệnh DEL', async () => {
+  it('[BP:T14] (phần a) probe thành công -> CLOSED: MỘT lệnh xoá 4 khoá (failures, open, probe, trips) + đặt :ramp = now EX 60', async () => {
     const redis = fakeRedis();
     const { prisma, db } = fakePrisma({ [DEST]: 'HALF_OPEN' });
     const cb = new CircuitBreakerService(prisma, redis);
     redis.store.set(K('failures'), '5');
+    redis.store.set(K('trips'), '2');
     expect(await cb.tryAcquireProbe(DEST)).toEqual(expect.any(String));
     const view = await cb.getState(DEST);
     redis.calls.length = 0;
+    const before = Date.now();
 
     expect(await cb.recordSuccess(target('HALF_OPEN'), view)).toBe('CLOSED');
-    expect(redis.del).toHaveBeenCalledTimes(1);
-    expect(redis.del).toHaveBeenCalledWith(K('failures'), K('open'), K('probe'), K('trips')); // BP3: + :trips, vẫn MỘT lệnh
-    expect(redis.store.size).toBe(0);
+    expect(redis.calls.filter((c: string) => c !== 'publish')).toEqual(['eval']); // MỘT lệnh
+    expect(redis.eval.mock.calls.at(-1)![0]).toBe(LUA_CLOSE_AND_RAMP);
+    expect(redis.del).not.toHaveBeenCalled();
+    expect([...redis.store.keys()]).toEqual([K('ramp')]);
+    expect(Number(redis.store.get(K('ramp')))).toBeGreaterThanOrEqual(before);
+    expect(redis.ttls.get(K('ramp'))).toBe(60);
     expect(db.get(DEST)).toBe('CLOSED');
     expect(JSON.parse(redis.publish.mock.calls[0][1])).toMatchObject({ from: 'HALF_OPEN', to: 'CLOSED' });
   });
@@ -307,6 +327,67 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     // trạng thái khác OPEN -> halfOpenAt NULL
     await cb.recordSuccess(target('OPEN'), { state: 'HALF_OPEN', failures: 5 });
     expect(repo.updateDestinationCircuitState.mock.calls.at(-1)).toEqual([DEST, 'CLOSED', null]);
+  });
+
+  it('[BP:T14] (phần b) KHÔNG ramp khi: tắt (DELIVERY_RAMP_SECONDS=0), hay thành công lúc CLOSED còn failures (chưa từng OPEN) -> DEL 4 khoá như cũ; trip OPEN xoá :ramp; cấu hình kẹp', async () => {
+    const redis = fakeRedis();
+    const cb = new CircuitBreakerService(fakePrisma({ [DEST]: 'HALF_OPEN' }).prisma, redis);
+    process.env.DELIVERY_RAMP_SECONDS = '0';
+    try {
+      redis.store.set(K('failures'), '5');
+      await cb.recordSuccess(target('HALF_OPEN'), { state: 'HALF_OPEN', failures: 5 });
+      expect(redis.del).toHaveBeenCalledWith(K('failures'), K('open'), K('probe'), K('trips'));
+      expect(redis.store.has(K('ramp'))).toBe(false);
+    } finally {
+      delete process.env.DELIVERY_RAMP_SECONDS;
+    }
+    redis.store.set(K('failures'), '2');
+    await cb.recordSuccess(target('CLOSED'), { state: 'CLOSED', failures: 2 });
+    expect(redis.store.has(K('ramp'))).toBe(false);
+    // đang ramp mà lỗi đủ ngưỡng -> OPEN và dừng ramp
+    redis.store.set(K('ramp'), String(Date.now()));
+    redis.store.set(K('failures'), '4');
+    await cb.recordFailure(target('CLOSED'), { state: 'CLOSED', failures: 4 });
+    expect(redis.store.has(K('ramp'))).toBe(false);
+    expect(redis.store.get(K('open'))).toBe('OPEN');
+    expect(deliveryRampConfig({})).toEqual({ startRps: 2, stepSeconds: 10, seconds: 60 });
+    expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '600', DELIVERY_RAMP_START_RPS: '0', DELIVERY_RAMP_STEP_SECONDS: 'x' })).toEqual({ startRps: 2, stepSeconds: 10, seconds: 60 });
+    expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '30', DELIVERY_RAMP_START_RPS: '5', DELIVERY_RAMP_STEP_SECONDS: '4' })).toEqual({ startRps: 5, stepSeconds: 4, seconds: 30 });
+  });
+
+  it('[BP:T15] (phần a) trong ramp: giây 0–9 tối đa 2/s, giây 10–19 tối đa 4/s; cap = min(rps của khách, ramp); recheck với rps thật vẫn giữ ramp', async () => {
+    const redis = fakeRedis();
+    const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
+    const t0 = 1_800_000_000_000;
+    let now = t0;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      redis.store.set(K('ramp'), String(t0));
+      const allowed = async (rps = 0, n = 6) => {
+        let ok = 0;
+        for (let i = 0; i < n; i++) if ((await cb.getState(DEST, rps)).throttleAllowed !== false) ok++;
+        return ok;
+      };
+      now = t0 + 5_000;
+      expect(await allowed()).toBe(2);
+      now = t0 + 15_000;
+      expect(await allowed()).toBe(4);
+      now = t0 + 16_000;
+      expect(await allowed(3)).toBe(3); // rps khách 3 < ramp 4
+      now = t0 + 17_000;
+      expect(await cb.getState(DEST, 0)).toMatchObject({ state: 'CLOSED', rampCap: 4, throttleCount: 1, throttleAllowed: true });
+      now = t0 + 55_000;
+      expect((await cb.getState(DEST, 0)).rampCap).toBe(64);
+      // gợi ý rps 100 nhưng rps thật 1: cap = min(1, ramp) — lần 2 trong giây bị chặn, không INCR thêm
+      now = t0 + 21_000;
+      await cb.getState(DEST, 100);
+      const v = await cb.getState(DEST, 100);
+      expect(v).toMatchObject({ throttleAllowed: true, throttleCount: 2, rampCap: 8 });
+      expect(await cb.recheckThrottle(DEST, v, 1)).toMatchObject({ throttleAllowed: false, throttleCount: 2 });
+      expect(await cb.recheckThrottle(DEST, v, 0)).toMatchObject({ throttleAllowed: true }); // bỏ rps -> chỉ còn ramp 8
+    } finally {
+      jest.restoreAllMocks();
+    }
   });
 
   it('gửi thành công khi failures == 0 -> 0 lệnh Redis, 0 lệnh DB', async () => {
@@ -420,7 +501,7 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
   const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
 
   afterAll(async () => {
-    await redis.del(k('failures'), k('open'), k('probe'), k('trips'), `throttle:destination:${dest}:${Math.floor(Date.now() / 1000)}`);
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'), k('ramp'), `throttle:destination:${dest}:${Math.floor(Date.now() / 1000)}`);
     await redis.quit();
   });
 
@@ -553,6 +634,61 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     await cb.tryAcquireProbe(dest);
     await cb.recordSuccess(t, await cb.getState(dest));
     expect(await redis.exists(k('failures'), k('open'), k('probe'), k('trips'))).toBe(0);
+  });
+
+  it('[BP:T15] (phần c) Redis THẬT: probe thành công đặt :ramp (EX 60) trong MỘT lệnh; gate theo ramp cho tối đa 2/s rồi 4/s; mất :ramp -> gửi bình thường (BB-2)', async () => {
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'), k('ramp'));
+    await redis.set(k('failures'), '5'); // HALF_OPEN
+    const t = { destinationId: dest, tenantId: 'tenant-1', persistedState: 'HALF_OPEN' as const };
+    const token = await cb.tryAcquireProbe(dest);
+    expect(token).toEqual(expect.any(String));
+    await cb.recordSuccess(t, await cb.getState(dest));
+    expect(await redis.exists(k('failures'), k('open'), k('probe'), k('trips'))).toBe(0);
+    const ttl = await redis.ttl(k('ramp'));
+    expect(ttl).toBeGreaterThan(55);
+    expect(ttl).toBeLessThanOrEqual(60);
+    const start = Number(await redis.get(k('ramp')));
+    const real = Date.now;
+    try {
+      for (const [offset, cap] of [[3_000, 2], [13_000, 4], [23_000, 8]] as const) {
+        jest.spyOn(Date, 'now').mockImplementation(() => start + offset);
+        let ok = 0;
+        for (let i = 0; i < 12; i++) if ((await cb.getState(dest, 0)).throttleAllowed !== false) ok++;
+        expect(ok).toBe(cap);
+        jest.restoreAllMocks();
+      }
+    } finally {
+      Date.now = real;
+    }
+    await redis.del(k('ramp'));
+    expect(await cb.getState(dest, 0)).toEqual({ state: 'CLOSED', failures: 0 }); // không trần -> không INCR, gửi bình thường
+  });
+
+  it('[BP:T16] (phần a) mô phỏng trên Redis THẬT: 500 message hoãn dội về ngay khi hồi phục, mỗi giây 60s — không giây nào vượt trần ramp (2,4,8,…,64)', async () => {
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'), k('ramp'));
+    const start = 1_900_000_000_000;
+    await redis.set(k('ramp'), String(start), 'EX', 60);
+    let backlog = 500;
+    const sent: number[] = [];
+    try {
+      for (let sec = 0; sec < 60 && backlog > 0; sec++) {
+        jest.spyOn(Date, 'now').mockImplementation(() => start + sec * 1000 + 500);
+        let ok = 0;
+        // mỗi giây cả hàng còn lại thử (như prefetch × worker dội về), phần vượt quay lại retry.10s
+        for (let i = 0; i < Math.min(backlog, 80); i++) if ((await cb.getState(dest, 0)).throttleAllowed !== false) ok++;
+        const cap = 2 * 2 ** Math.floor(sec / 10);
+        expect(ok).toBeLessThanOrEqual(cap);
+        sent.push(ok);
+        backlog -= ok;
+        jest.restoreAllMocks();
+      }
+    } finally {
+      jest.restoreAllMocks();
+      await redis.del(k('ramp'));
+    }
+    expect(sent[0]).toBe(2);
+    expect(sent[10]).toBe(4);
+    expect(sent.reduce((a, b) => a + b, 0)).toBe(500 - backlog);
   });
 
   it('BP2 §6 LUA_GATE: Redis LỖI (cổng chết) -> fail-open CLOSED degraded, không ném', async () => {

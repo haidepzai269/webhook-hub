@@ -88,6 +88,14 @@
 - Đếm như mọi ca khác của R1 (tổng lệnh của delivery, gồm PUBLISH): HALF_OPEN có probe = gate + giành probe + DEL (probe thành công) + PUBLISH delivery = **4 lệnh**, cộng **một PUBLISH `hub:realtime:circuit` mỗi lần đổi trạng thái** (`syncObserved` OPEN→HALF_OPEN, đóng mạch →CLOSED). Bằng đúng trước BP2 (MGET thay cho EVAL). Ca hiếm: một probe mỗi đích mỗi 30s.
 - Muốn ≤ 3 thật thì gộp `tryAcquireProbe` vào `LUA_GATE` — để BP4 (sửa chính script này). `[BP:T22]` (phần b) assert chuỗi lệnh đầy đủ, không lọc PUBLISH.
 
+**C11 — BP4 lúc code (2026-10-13).**
+- **Ramp chỉ bắt đầu khi PROBE thành công** (`recordSuccess` với view HALF_OPEN), không phải mọi `recordSuccess` có `failures > 0`: thành công lúc CLOSED còn 1–4 lỗi nghĩa là mạch chưa từng OPEN, không có hàng tồn — đúng lý do "Vì sao chỉ ramp khi có probe thành công" của §5. Câu "(`recordSuccess` với `failures > 0`)" trong §5 hiểu theo nghĩa này.
+- Đóng mạch + đặt `:ramp` = MỘT `EVAL` (`LUA_CLOSE_AND_RAMP`), thay `DEL` — số lệnh không đổi.
+- `LUA_GATE` trả thêm `rampCap` (không trả sẵn `throttleAllowed`): JS tính trần = min(rps, rampCap) để `recheckThrottle` (C9) kiểm lại với rps thật mà không INCR lần hai.
+- **Không gộp `tryAcquireProbe` vào gate** (C10 để ngỏ cho BP4): dù gộp, HALF_OPEN có probe vẫn > 3 lệnh vì PUBLISH circuit; gộp đổi ngữ nghĩa `getState` (mọi lần gate ở HALF_OPEN tự giành probe, mọi nhánh bỏ ngang phải nhả) — rủi ro hơn lợi cho ca hiếm. `[BP:T22]` phần b giữ chuỗi lệnh đầy đủ.
+- Cửa sổ retry cộng `6 × (DELIVERY_RAMP_SECONDS + 10s)` (message có thể bị ramp hoãn tới hết ramp mỗi lần thử) ≈ 6h15m40s; `DELIVERY_RAMP_SECONDS` chỉ được thấp hơn 60. Throttle `rate_limit_rps` do khách đặt vẫn không có trần thời gian (như trước BP).
+- `[BP:T16]` phần a: mô phỏng trên Redis thật (500 message, 60 giây giả lập). Kịch bản chaos LOCAL (đích chết 10 phút thật) chưa chạy (C8).
+
 ## 0. Bối cảnh
 
 Admin đọc dòng 9 của phụ lục `PhuLuc_MoTaYeuCauKyThuat_WebhookHub.docx` ("retry nhiều mức tăng dần + circuit breaker + outbound throttle") và cho rằng retry liên tục là tự tay phá hệ thống. Admin dẫn bài VNJUG tóm tắt Canva *Worker Backpressure Part 1* (Mikalai Barysau, 17/09/2026).
