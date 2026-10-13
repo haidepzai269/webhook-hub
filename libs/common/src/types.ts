@@ -68,6 +68,13 @@ export interface DeliveryMessage {
   attemptGeneration: number;
   attemptCount: number;
   correlationId: string;
+  /**
+   * BP2 (ADR-196): GỢI Ý để gate circuit/throttle TRƯỚC khi nạp DB. Tuỳ chọn — message cũ không có vẫn chạy đường cũ.
+   * `destinationId` là tham chiếu; `rateLimitRps` là bản chụp cấu hình (không bí mật). Worker luôn kiểm lại với row
+   * thật sau khi nạp — lệch thì gate lại với giá trị thật trước khi gửi.
+   */
+  destinationId?: string;
+  rateLimitRps?: number;
 }
 
 export interface OutboxPayload {

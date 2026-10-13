@@ -8,7 +8,7 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
   const TENANT = '00000000-0000-0000-0000-000000000001';
   const DELIVERY = '33333333-3333-3333-3333-333333333333';
 
-  it('payload outbox delivery.replayed chỉ có 5 khoá tham chiếu', async () => {
+  it('[BP:T5] (phần e) payload outbox delivery.replayed chỉ có 5 khoá tham chiếu + gợi ý gate BP2 (destinationId, rateLimitRps), không secret', async () => {
     const outboxRows: any[] = [];
     const repo = {
       findDeliveryById: jest.fn().mockResolvedValue({
@@ -19,7 +19,7 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
         subscriptionId: 'sub-1',
         attemptGeneration: 1,
         event: { id: 'evt-1', correlationId: 'corr-1' },
-        subscription: { destination: { id: 'd', configEncrypted: 'iv:ct:tag', signingSecretEncrypted: 'iv:ct:tag' } },
+        subscription: { destination: { id: 'd', rateLimitRps: 3, configEncrypted: 'iv:ct:tag', signingSecretEncrypted: 'iv:ct:tag' } },
       }),
       hasNewerGeneration: jest.fn().mockResolvedValue(false),
       createDelivery: jest.fn().mockResolvedValue({}),
@@ -43,8 +43,8 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
     expect(outboxRows).toHaveLength(1);
     expect(outboxRows[0].topic).toBe('delivery.replayed');
     const payload = outboxRows[0].payload;
-    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'tenantId']);
-    expect(payload).toMatchObject({ tenantId: TENANT, attemptGeneration: 2, attemptCount: 0, correlationId: 'corr-1' });
+    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
+    expect(payload).toMatchObject({ tenantId: TENANT, attemptGeneration: 2, attemptCount: 0, correlationId: 'corr-1', destinationId: 'd', rateLimitRps: 3 });
     expect(JSON.stringify(payload)).not.toMatch(/config|signingSecret|"event"/);
     // S2-3: audit trong CÙNG transaction (tx), có actor + reason
     expect(auditRows).toHaveLength(1);

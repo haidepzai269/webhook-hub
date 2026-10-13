@@ -67,12 +67,14 @@ function expectKept(headers: Record<string, unknown>) {
  * `[BP:T3]` (review L2-2): tìm lời gọi amqplib có thể requeue — đối số requeue phải ghi rõ `false`.
  * amqplib: nack(msg, allUpTo = false, requeue = true) · nackAll(requeue = true) · reject(msg, requeue = true).
  * Bỏ comment trước khi so; bỏ receiver `Promise` (Promise.reject không phải amqplib). Bắt cả lời gọi xuống dòng
- * (đối số lồng tối đa một cấp ngoặc). Giới hạn đã biết: `nack` đã destructure khỏi channel thì không thấy.
+ * (đối số lồng tối đa một cấp ngoặc). Receiver gồm cả `ch?.nack`, `getCh().nack`, `arr[i].nack` (review BP1 lượt 3).
+ * Giới hạn đã biết: `nack` đã destructure khỏi channel; `ch['nack'](…)`; đối số lồng ngoặc từ 2 cấp; chuỗi chứa `//` hoặc
+ * `/*` làm bước bỏ comment cắt mất code phía sau; bắt nhầm promise tự chế ngoài `Promise` (vd. `deferred.reject(err)`).
  */
 function requeueCalls(source: string): string[] {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
   const out: string[] = [];
-  for (const m of code.matchAll(/([\w$]+)\s*\.\s*(nackAll|nack|reject)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
+  for (const m of code.matchAll(/([\w$\])]+)\s*\??\.\s*(nackAll|nack|reject)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
     if (m[1] === 'Promise') continue;
     const args = m[3].split(',').map((a) => a.trim()).filter(Boolean);
     const requeueArg = m[2] === 'nack' ? args[2] : m[2] === 'reject' ? args[1] : args[0];
@@ -218,9 +220,10 @@ describe('BP1 — DeliveryConsumer không còn vòng lặp nóng requeue (ADR-19
     expect(
       requeueCalls(
         'ch.nack(msg); ch.nack(msg, false); ch.reject(msg); ch.reject(m, true); ch.nackAll(); ch.nackAll(true);\n' +
+          'ch?.nack(msg); getCh().nack(msg); chans[0].reject(msg);\n' +
           'ch.nack(\n  msg,\n  false,\n  true,\n);',
       ),
-    ).toHaveLength(7);
+    ).toHaveLength(10);
     expect(
       requeueCalls(
         'Promise.reject(err); ch.nack(msg, false, false /* ghi chú */); ch.nackAll(false); ch.reject(msg, false);\n' +

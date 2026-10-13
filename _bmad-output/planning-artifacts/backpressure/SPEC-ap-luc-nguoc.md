@@ -78,6 +78,12 @@
 
 **C8 — Chạy chaos.** Chỉ chạy `[BP:T4]`, `[BP:T16]`, `[BP:T21]` (LOCAL, docker-compose) khi trên máy **không có agent nặng nào khác** đang chạy jest, tsc hay docker. Máy có RAM 16GB, WSL bị giới hạn 6GB. Nếu đang có agent khác chạy thì báo coordinator và chờ, không chạy chen vào.
 
+**C9 — BP2: message mang thêm gợi ý `rateLimitRps` (phòng chọn phương án A, 2026-10-13, lúc code BP2).**
+- Phát hiện: §3.2/§6 đòi gate (1 lệnh) **trước** khi nạp row, kể cả nhánh "vượt throttle → retry.10s, 0 truy vấn DB", nhưng `rate_limit_rps` chỉ nằm trong DB (`destination.rateLimitRps`). Chỉ có `destinationId` thì đích có throttle phải INCR thêm sau khi nạp → 3 lệnh/delivery, phá R1 (`redis-budget.spec.ts` "đích CÓ throttle vẫn 2 lệnh").
+- Quyết định: `DeliveryMessage` thêm gợi ý tuỳ chọn `rateLimitRps` cạnh `destinationId`, điền ở **cùng mọi nơi** (route-event, sweeper SQL, replay đơn, replay hàng loạt, `slim()`). Gate trước khi nạp dùng gợi ý; sau khi nạp, `destinationId` hoặc `rateLimitRps` khác row thật thì gate lại với giá trị thật (+1 lệnh, ca hiếm), không đếm throttle hai lần làm hoãn oan. Message thiếu gợi ý đi đường cũ (nạp rồi gate).
+- R1: gợi ý đúng → đích có throttle vẫn 2 lệnh/delivery; gợi ý lệch → 3 lệnh, là ca ngoại lệ đã biết, có test.
+- Đánh đổi với ADR-042 (ghi ở ADR-196): message mang một mẩu **cấu hình** chứ không chỉ tham chiếu; giá trị thật vẫn đọc từ DB và kiểm lại trước khi gửi; không có bí mật. `syncObserved` không chạy ở lần hoãn trước khi nạp (không có `persistedState`) → DB thấy OPEN→HALF_OPEN trễ một nhịp, chấp nhận.
+
 ## 0. Bối cảnh
 
 Admin đọc dòng 9 của phụ lục `PhuLuc_MoTaYeuCauKyThuat_WebhookHub.docx` ("retry nhiều mức tăng dần + circuit breaker + outbound throttle") và cho rằng retry liên tục là tự tay phá hệ thống. Admin dẫn bài VNJUG tóm tắt Canva *Worker Backpressure Part 1* (Mikalai Barysau, 17/09/2026).

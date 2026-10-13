@@ -18,6 +18,7 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     correlationId: `corr-${i}`,
     eventType: 'repo.push',
     destinationId: 'dest-1',
+    rateLimitRps: 4,
   }));
 
   /** Prisma giả: ghi vào "staged", chỉ COMMIT vào "db" khi callback transaction resolve. */
@@ -80,7 +81,7 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     expect(db.deliveries.length + db.outbox.length + db.audit.length).toBe(0);
   });
 
-  it('[AF:#28] chạy thật -> N delivery (generation+1) + N outbox delivery.replayed gọn + 1 audit, trong 1 transaction', async () => {
+  it('[AF:#28][BP:T5] (phần f) chạy thật -> N delivery (generation+1) + N outbox delivery.replayed gọn + 1 audit, trong 1 transaction', async () => {
     const { controller, prisma, db } = build();
     const res: any = await controller.replayBulk(TENANT, 'admin', {
       reason: 'đích sống lại',
@@ -94,7 +95,8 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     expect(db.outbox).toHaveLength(3);
     for (const o of db.outbox) {
       expect(o.topic).toBe('delivery.replayed');
-      expect(Object.keys(o.payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'tenantId']);
+      expect(Object.keys(o.payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
+      expect(o.payload).toMatchObject({ destinationId: 'dest-1', rateLimitRps: 4 });
     }
     expect(db.audit).toHaveLength(1);
     expect(db.audit[0]).toMatchObject({ tenantId: TENANT, action: 'delivery.replay_bulk', actor: 'admin', reason: 'đích sống lại' });

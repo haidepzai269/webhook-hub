@@ -352,7 +352,8 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     await consumer.handleMessage(toAmqpMsg(buildLegacyMsg()), channel);
 
     const forwarded = JSON.parse(channel.sendToQueue.mock.calls[0][1].toString());
-    expect(Object.keys(forwarded).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'tenantId']);
+    // BP2: destinationId/rateLimitRps của message cũ chỉ còn là GỢI Ý (luôn kiểm lại với DB), không phải cấu hình gửi.
+    expect(Object.keys(forwarded).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
   });
 
   it('S1-1: DEAD -> bản sao vào DLQ là message GỌN', async () => {

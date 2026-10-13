@@ -105,6 +105,22 @@ describe('QT4b: gợi ý dọn trong StorageJob + webhook qua outbox', () => {
     expect(st.txs).toBe(1);
   });
 
+  it('[BP:T5] (phần a) event hub.* qua emitHubEvent -> outbox delivery.requested mang gợi ý destinationId + rateLimitRps (một chỗ điền: route-event.ts, SPEC-BP C1)', async () => {
+    const { job, st } = fake({
+      usage: {
+        suggestedAt: null,
+        suggestedBytes: 1,
+        bloatFactor: 2,
+        byBucket: BUCKETS,
+        suggestions: [{ action: 'trim', importance: ['low'], olderThan: '3d', sourceId: null, advisor: 'rules@1', reason: 'r', reasonCode: 'delivered_old' }],
+      },
+      subs: [{ id: 'sub-1', destinationId: 'd-1', destination: { id: 'd-1', name: 'ops', type: 'webhook', verification: 'VERIFIED', rateLimitRps: 7 } }],
+    });
+    await job.reportLevelChange({ tenantId: T, from: 'CRITICAL_95', to: 'LOCKED', usedBytes: 51 * MB, quotaBytes: 50 * MB });
+    expect(st.outbox).toHaveLength(1);
+    expect(st.outbox[0].payload).toMatchObject({ deliveryId: 'del-1', tenantId: T, destinationId: 'd-1', rateLimitRps: 7, attemptCount: 0 });
+  });
+
   it('[QT:T24] (phần d) nấc XUỐNG không phát; OK + không gợi ý không phát; đổi ít / đã phát trong ngày không phát', async () => {
     const down = fake();
     await down.job.reportLevelChange({ tenantId: T, from: 'LOCKED', to: 'WARN_85', usedBytes: 40 * MB, quotaBytes: 50 * MB });

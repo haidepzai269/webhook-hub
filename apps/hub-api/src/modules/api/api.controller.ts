@@ -669,6 +669,9 @@ export class ApiController {
       attemptGeneration: newGen,
       attemptCount: 0,
       correlationId: delivery.event.correlationId,
+      // BP2 (ADR-196): gợi ý gate trước khi nạp DB — tham chiếu + rps chụp lúc replay, worker kiểm lại.
+      destinationId: dst?.id,
+      rateLimitRps: (dst as { rateLimitRps?: number } | undefined)?.rateLimitRps,
     });
 
     // Delivery mới + outbox trong CÙNG một transaction (outbox pattern): hoặc cả hai cùng
@@ -810,6 +813,8 @@ export class ApiController {
                   attemptGeneration: items[i].generation,
                   attemptCount: 0,
                   correlationId: r.correlationId,
+                  destinationId: r.destinationId,
+                  rateLimitRps: r.rateLimitRps ?? undefined,
                 }) as unknown as Prisma.InputJsonValue,
               })),
             });

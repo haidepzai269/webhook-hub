@@ -123,7 +123,7 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     expect(await new TenantScopedRepository(appDb, tenant).claimForSend(id, 2, 0)).toBe(1);
   });
 
-  it('[AF:#17] sweeper: PENDING 11 phút không attempt -> có outbox; có outbox chưa publish -> không ghi thêm; PENDING mới -> không', async () => {
+  it('[AF:#17][BP:T5] (phần g) sweeper: PENDING 11 phút không attempt -> có outbox; có outbox chưa publish -> không ghi thêm; PENDING mới -> không', async () => {
     const stuck = await mkDelivery(3, 11);
     const hasPending = await mkDelivery(4, 11);
     await prisma.outbox.create({
@@ -138,8 +138,11 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     expect(await outboxFor(fresh)).toBe(0);
 
     const [row] = await prisma.$queryRaw<{ payload: any }[]>`SELECT payload FROM hub.outbox WHERE payload->>'deliveryId' = ${stuck}`;
-    expect(Object.keys(row.payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'tenantId']);
+    // BP2 SQL thật: payload mang gợi ý destinationId + rateLimitRps (BP2, ADR-196).
+    expect(Object.keys(row.payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
     expect(row.payload).toMatchObject({ tenantId: tenant, attemptGeneration: 3, attemptCount: 0 });
+    expect(typeof row.payload.destinationId).toBe('string');
+    expect(typeof row.payload.rateLimitRps).toBe('number');
 
     // Chạy lại ngay: dòng vừa ghi còn chưa publish -> không nhân bản
     await prisma.$executeRaw(buildSweepSql(10 * 60_000, 10_000));

@@ -1,17 +1,36 @@
 import { DeliveryMessage } from './types';
 
 /** Các khoá DUY NHẤT được phép nằm trong message delivery (S1-1, ADR-042). */
-export const DELIVERY_MESSAGE_KEYS = ['deliveryId', 'tenantId', 'attemptGeneration', 'attemptCount', 'correlationId'] as const;
+export const DELIVERY_MESSAGE_KEYS = [
+  'deliveryId',
+  'tenantId',
+  'attemptGeneration',
+  'attemptCount',
+  'correlationId',
+  // BP2 (ADR-196): gợi ý tuỳ chọn cho gate trước khi nạp DB — không bí mật, luôn kiểm lại với DB.
+  'destinationId',
+  'rateLimitRps',
+] as const;
+
+/** Gợi ý BP2 hợp lệ? (`rateLimitRps` là số nguyên ≥ 0). */
+function hintRps(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : NaN;
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
 
 /** Dựng message gọn — nơi duy nhất quyết định hình dạng message (normalize, replay, retry, DLQ). */
 export function buildDeliveryMessage(input: DeliveryMessage): DeliveryMessage {
-  return {
+  const out: DeliveryMessage = {
     deliveryId: input.deliveryId,
     tenantId: input.tenantId,
     attemptGeneration: input.attemptGeneration,
     attemptCount: input.attemptCount,
     correlationId: input.correlationId,
   };
+  if (typeof input.destinationId === 'string' && input.destinationId) out.destinationId = input.destinationId;
+  const rps = hintRps(input.rateLimitRps);
+  if (rps !== undefined) out.rateLimitRps = rps;
+  return out;
 }
 
 /**
@@ -31,5 +50,7 @@ export function parseDeliveryMessage(content: Buffer | string, fallbackCorrelati
     attemptGeneration: Number(raw.attemptGeneration ?? 1),
     attemptCount: Number(raw.attemptCount ?? 0),
     correlationId: typeof raw.correlationId === 'string' ? raw.correlationId : fallbackCorrelationId,
+    destinationId: typeof raw.destinationId === 'string' ? raw.destinationId : undefined,
+    rateLimitRps: hintRps(raw.rateLimitRps),
   });
 }

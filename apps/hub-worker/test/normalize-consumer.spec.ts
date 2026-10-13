@@ -57,7 +57,7 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     const outboxRows: any[] = [];
     const subs = Array.from({ length: opts.subs ?? 2 }, (_, i) => ({
       id: `sub-${i}`,
-      destination: { id: `dest-${i}`, name: `Đích ${i}`, type: 'webhook', verification: opts.verification?.[i] ?? 'VERIFIED' },
+      destination: { id: `dest-${i}`, name: `Đích ${i}`, type: 'webhook', verification: opts.verification?.[i] ?? 'VERIFIED', rateLimitRps: 0 },
     }));
     let deliverySeq = 0;
     const tx = {
@@ -125,13 +125,14 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 
-  it('[AF:#15] S1-1: payload outbox chỉ có tham chiếu — không config, signingSecret, event', async () => {
+  it('[AF:#15][BP:T5] (phần b) S1-1: payload outbox chỉ có tham chiếu — không config, signingSecret, event; BP2: + gợi ý destinationId/rateLimitRps', async () => {
     const { prisma, outboxRows } = buildFakePrisma({ subs: 1 });
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
 
     const payload = outboxRows[0].payload;
-    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'tenantId']);
-    expect(payload).toMatchObject({ deliveryId: 'del-1', tenantId: TENANT, attemptCount: 0, attemptGeneration: 1 });
+    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
+    expect(payload).toMatchObject({ deliveryId: 'del-1', tenantId: TENANT, attemptCount: 0, attemptGeneration: 1, destinationId: 'dest-0', rateLimitRps: 0 });
+    expect(JSON.stringify(payload)).not.toMatch(/config|signingSecret|"event"/);
   });
 
   it('[MS:U18] (phần c) S5: event lưu sourceId của raw_event; subscription lọc theo sourceIds (rỗng HOẶC chứa source)', async () => {

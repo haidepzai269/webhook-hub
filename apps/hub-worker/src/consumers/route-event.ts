@@ -28,11 +28,21 @@ export async function routeEventToSubscriptions(
       continue;
     }
     const delivery = await repoTx.createDelivery({ eventId: evt.id, subscriptionId: sub.id, attemptGeneration: 1, status: 'PENDING' });
-    // Outbox không mang tenant_id (hạ tầng xuyên tenant) — payload chỉ là tham chiếu (S1-1).
+    // Outbox không mang tenant_id (hạ tầng xuyên tenant) — payload chỉ là tham chiếu (S1-1) + gợi ý gate BP2 (ADR-196).
+    // MỘT chỗ điền cho cả event chuẩn hoá lẫn event `hub.*` (emitHubEvent) — SPEC-BP C1.
+    const rps = (sub.destination as { rateLimitRps?: number } | undefined)?.rateLimitRps;
     await tx.outbox.create({
       data: {
         topic: DELIVERY_REQUESTED_TOPIC,
-        payload: buildDeliveryMessage({ deliveryId: delivery.id, tenantId, attemptGeneration: 1, attemptCount: 0, correlationId: String(evt.correlationId) }) as unknown as Prisma.InputJsonValue,
+        payload: buildDeliveryMessage({
+          deliveryId: delivery.id,
+          tenantId,
+          attemptGeneration: 1,
+          attemptCount: 0,
+          correlationId: String(evt.correlationId),
+          destinationId: sub.destinationId ?? sub.destination?.id,
+          rateLimitRps: rps ?? undefined,
+        }) as unknown as Prisma.InputJsonValue,
       },
     });
     routed.push({

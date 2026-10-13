@@ -44,7 +44,7 @@ export function buildSweepSql(sweepAfterMs: number, batch = SWEEP_BATCH, retryGr
   const legacySecs = Math.floor(LEGACY_RETRY_SWEEP_AFTER_MS / 1000);
   return Prisma.sql`
     WITH stuck AS (
-      SELECT d.id, d.tenant_id, d.attempt_generation, d.attempt_count, e.correlation_id
+      SELECT d.id, d.tenant_id, d.attempt_generation, d.attempt_count, e.correlation_id, d.subscription_id
       FROM hub.deliveries d
       JOIN hub.events e ON e.id = d.event_id
       WHERE (
@@ -73,8 +73,13 @@ export function buildSweepSql(sweepAfterMs: number, batch = SWEEP_BATCH, retryGr
              'tenantId', s.tenant_id::text,
              'attemptGeneration', s.attempt_generation,
              'attemptCount', s.attempt_count,
-             'correlationId', s.correlation_id::text)
-    FROM stuck s`;
+             'correlationId', s.correlation_id::text,
+             -- BP2 (ADR-196): gợi ý gate trước khi nạp DB; worker kiểm lại với row thật.
+             'destinationId', sub.destination_id::text,
+             'rateLimitRps', dst.rate_limit_rps)
+    FROM stuck s
+    JOIN hub.subscriptions sub ON sub.id = s.subscription_id
+    JOIN hub.destinations dst ON dst.id = sub.destination_id`;
 }
 
 @Injectable()

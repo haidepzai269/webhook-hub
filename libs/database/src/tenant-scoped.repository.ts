@@ -380,7 +380,8 @@ export class TenantScopedRepository {
         destination: { tenantId: this.tenantId, isActive: true, archivedAt: null },
         OR: sourceId ? [anySource, { sourceIds: { has: sourceId } }] : [anySource],
       },
-      include: { destination: { select: { id: true, name: true, type: true, verification: true } } },
+      // BP2: + rateLimitRps làm gợi ý trong message giao hàng (gate trước khi nạp DB, ADR-196).
+      include: { destination: { select: { id: true, name: true, type: true, verification: true, rateLimitRps: true } } },
     });
   }
 
@@ -697,7 +698,9 @@ export class TenantScopedRepository {
       SELECT d.id, d.event_id AS "eventId", d.subscription_id AS "subscriptionId",
              d.attempt_generation AS "attemptGeneration", d.last_error AS "lastError",
              d.created_at AS "createdAt", e.correlation_id AS "correlationId", e.type AS "eventType",
-             s.destination_id AS "destinationId"
+             s.destination_id AS "destinationId",
+             (SELECT dst.rate_limit_rps FROM hub.destinations dst
+               WHERE dst.id = s.destination_id AND dst.tenant_id = s.tenant_id) AS "rateLimitRps"
       FROM hub.deliveries d
       JOIN hub.events e ON e.id = d.event_id AND e.tenant_id = d.tenant_id
       JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
@@ -2324,6 +2327,8 @@ export interface DeadDeliveryRef {
   correlationId: string;
   eventType: string;
   destinationId: string;
+  /** BP2: gợi ý cho message replay (ADR-196). null nếu đích không còn (không xảy ra với replayableOnly). */
+  rateLimitRps: number | null;
 }
 
 /** `%` `_` `\` trong chuỗi người dùng gõ là ký tự thường, không phải wildcard của ILIKE. */
