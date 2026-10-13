@@ -30,18 +30,24 @@ export const LUA_INCR_EXPIRE = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 return n`;
 /**
- * Review SPEC-3 #2 (ADR-064): đọc circuit + throttle trong MỘT lệnh. KEYS: open, failures, throttle;
- * ARGV: ngưỡng lỗi, TTL cửa sổ throttle (giây). Chỉ tăng bộ đếm throttle khi CLOSED (OPEN/HALF_OPEN thì
- * message không gửi theo đường thường nên không tiêu RPS). Trả {open|'', failures|'', count|-1}.
+ * BP2 §6 (ADR-196): GATE — MỘT script, LUÔN đúng 1 lệnh, có hay không có throttle (thay `MGET` + `LUA_STATE_AND_THROTTLE`,
+ * ADR-064). KEYS: open, failures, throttle:{giây}; ARGV: ngưỡng lỗi, rate_limit_rps, TTL cửa sổ throttle (giây).
+ * Chỉ INCR bộ đếm throttle khi CLOSED VÀ có trần (rps > 0) — không trần thì 0 lệnh throttle như cũ. Trả PTTL của `:open`
+ * (BP3 dùng để hoãn tới hết OPEN, C4). Trả {open 1|0, failures|'', openPttl|-2, count|-1}.
+ * BP4 thêm khoá `:ramp` + ARGV ramp vào CHÍNH script này (vẫn 1 lệnh).
  */
-export const LUA_STATE_AND_THROTTLE = `local open = redis.call('GET', KEYS[1])
+export const LUA_GATE = `local open = redis.call('GET', KEYS[1])
+local pttl = -2
+if open then pttl = redis.call('PTTL', KEYS[1]) end
 local failures = redis.call('GET', KEYS[2])
 local t = -1
-if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
+if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) and (tonumber(ARGV[2]) > 0) then
   t = redis.call('INCR', KEYS[3])
-  if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[2]) end
+  if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[3]) end
 end
-return {open or '', failures or '', t}`;
+local o = 0
+if open then o = 1 end
+return {o, failures or '', pttl, t}`;
 
 /**
  * Giành probe HALF_OPEN: chỉ SET NX khi `:open` KHÔNG tồn tại và `:failures` ≥ ngưỡng (đúng là HALF_OPEN
@@ -69,6 +75,10 @@ export interface CircuitView {
   throttleAllowed?: boolean;
   /** Redis lỗi: trạng thái là fail-open (CLOSED) chứ không phải quan sát thật -> không đồng bộ DB. */
   degraded?: boolean;
+  /** BP2 §6: PTTL (ms) của `:open` khi OPEN — BP3 dùng để hoãn tới hết OPEN (C4). */
+  openPttlMs?: number;
+  /** BP2: giá trị bộ đếm throttle sau INCR của gate (chỉ có khi đã INCR) — để kiểm lại với rps thật mà KHÔNG đếm lần hai. */
+  throttleCount?: number;
 }
 
 /** Đích đang xử lý + trạng thái đang ghi trong DB (đọc kèm delivery, không tốn truy vấn riêng). */
@@ -112,30 +122,43 @@ export class CircuitBreakerService {
   }
 
   /**
-   * MỘT lệnh: MGET khi đích không throttle; khi `rateLimitRps > 0` thì một EVAL gộp đọc circuit + tăng
-   * bộ đếm throttle (review SPEC-3 #2) — đường delivery luôn ≤ 2 lệnh (lệnh này + PUBLISH).
+   * GATE (BP2 §6, ADR-196): LUÔN đúng MỘT lệnh (EVAL `LUA_GATE`), có hay không có throttle — đường delivery ≤ 2 lệnh
+   * (lệnh này + PUBLISH). Gọi được TRƯỚC khi nạp row khi message mang gợi ý `destinationId` + `rateLimitRps`.
+   * Redis lỗi -> fail-open (CLOSED, degraded), như cũ.
    */
   async getState(destinationId: string, rateLimitRps = 0): Promise<CircuitView> {
     const k = this.keys(destinationId);
+    const rps = rateLimitRps > 0 ? rateLimitRps : 0;
     try {
-      if (rateLimitRps > 0) {
-        const throttleKey = `throttle:destination:${destinationId}:${Math.floor(Date.now() / 1000)}`;
-        const [openRaw, failuresRaw, count] = (await this.redis.eval(
-          LUA_STATE_AND_THROTTLE, 3, k.open, k.failures, throttleKey, CIRCUIT_FAILURE_THRESHOLD, 2,
-        )) as [string, string, number];
-        const failures = parseInt(failuresRaw || '0', 10) || 0;
-        if (openRaw) return { state: 'OPEN', failures };
-        if (failures >= CIRCUIT_FAILURE_THRESHOLD) return { state: 'HALF_OPEN', failures };
-        return { state: 'CLOSED', failures, throttleAllowed: Number(count) <= rateLimitRps };
+      const throttleKey = `throttle:destination:${destinationId}:${Math.floor(Date.now() / 1000)}`;
+      const [openFlag, failuresRaw, pttl, count] = (await this.redis.eval(
+        LUA_GATE, 3, k.open, k.failures, throttleKey, CIRCUIT_FAILURE_THRESHOLD, rps, 2,
+      )) as [number, string, number, number];
+      const failures = parseInt(failuresRaw || '0', 10) || 0;
+      if (Number(openFlag) === 1) {
+        const view: CircuitView = { state: 'OPEN', failures };
+        if (Number(pttl) > 0) view.openPttlMs = Number(pttl);
+        return view;
       }
-      const [open, failuresRaw] = await this.redis.mget(k.open, k.failures);
-      const failures = parseInt(failuresRaw ?? '0', 10) || 0;
-      if (open) return { state: 'OPEN', failures };
       if (failures >= CIRCUIT_FAILURE_THRESHOLD) return { state: 'HALF_OPEN', failures };
+      if (rps > 0 && Number(count) >= 0) return { state: 'CLOSED', failures, throttleAllowed: Number(count) <= rps, throttleCount: Number(count) };
       return { state: 'CLOSED', failures };
     } catch {
       return { state: 'CLOSED', failures: 0, degraded: true };
     }
+  }
+
+  /**
+   * BP2 (C9): gợi ý `rateLimitRps` trong message lệch với row thật (đổi cấu hình sau khi message được tạo). Kiểm throttle lại
+   * với rps THẬT mà KHÔNG đếm hai lần (không hoãn oan): gate đã INCR -> so lại chính giá trị đó (0 lệnh); gate chưa INCR
+   * (gợi ý rps = 0) mà rps thật > 0 -> một INCR (1 lệnh, ca hiếm). Chỉ áp khi CLOSED và không degraded.
+   */
+  async recheckThrottle(destinationId: string, view: CircuitView, realRps: number): Promise<CircuitView> {
+    if (view.state !== 'CLOSED' || view.degraded) return view;
+    const { throttleAllowed: _a, throttleCount, ...rest } = view;
+    if (!(realRps > 0)) return rest;
+    if (throttleCount !== undefined) return { ...rest, throttleCount, throttleAllowed: throttleCount <= realRps };
+    return { ...rest, throttleAllowed: await this.checkThrottle(destinationId, realRps) };
   }
 
   /**

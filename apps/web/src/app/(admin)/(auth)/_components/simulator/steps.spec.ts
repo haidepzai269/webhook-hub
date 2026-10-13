@@ -22,9 +22,10 @@ describe("mô phỏng webhook — steps khớp code", () => {
 
   it("delivery: findDeliveryForSend → getState → claimForSend, cả trong code lẫn trong kịch bản", () => {
     const src = read("apps/hub-worker/src/consumers/delivery.consumer.ts");
-    const at = ["repo.findDeliveryForSend(", "this.circuitBreaker.getState(", "repo.claimForSend("].map((x) =>
-      src.indexOf(x),
-    );
+    // BP2 (ADR-196): message có gợi ý thì gate (getState) chạy TRƯỚC khi nạp; đường đầy đủ vẫn có getState sau
+    // findDeliveryForSend và trước claimForSend (message cũ / gợi ý lệch) -> tìm tuần tự từ vị trí trước đó.
+    let pos = -1;
+    const at = ["repo.findDeliveryForSend(", "this.circuitBreaker.getState(", "repo.claimForSend("].map((x) => (pos = src.indexOf(x, pos + 1)));
     expect(at.every((v, i) => v >= 0 && (i === 0 || v > at[i - 1]))).toBe(true);
     expect(before("load-delivery", "circuit-check", "sign-send")).toBe(true);
   });

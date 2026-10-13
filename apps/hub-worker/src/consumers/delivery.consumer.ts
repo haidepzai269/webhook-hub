@@ -261,9 +261,47 @@ export class DeliveryConsumer {
     const slim = (count = attemptCount) => Buffer.from(JSON.stringify(buildDeliveryMessage({ ...deliveryMsg, attemptCount: count })));
 
     try {
+      // BP2 §3.2 (ADR-196): message có GỢI Ý đích + rps -> GATE TRƯỚC khi nạp DB (1 lệnh Redis). Mạch OPEN / HALF_OPEN không
+      // giành được probe -> hoãn với 0 truy vấn đọc; vượt throttle -> retry.10s, 0 truy vấn DB. Message cũ (thiếu gợi ý) đi đường
+      // cũ: nạp row rồi mới gate. Gợi ý luôn được KIỂM LẠI với row thật trước khi gửi (C9).
+      const hint =
+        typeof deliveryMsg.destinationId === 'string' && typeof deliveryMsg.rateLimitRps === 'number'
+          ? { destinationId: deliveryMsg.destinationId, rateLimitRps: deliveryMsg.rateLimitRps }
+          : null;
+      let view: CircuitView | null = null;
+      let probeToken: string | null = null;
+      /** Đích mà `probeToken` thuộc về (gợi ý có thể lệch đích thật). */
+      let probeFor: string | null = null;
+      if (hint) {
+        view = await this.circuitBreaker.getState(hint.destinationId, hint.rateLimitRps);
+        if (view.state === 'HALF_OPEN') {
+          probeToken = await this.circuitBreaker.tryAcquireProbe(hint.destinationId);
+          probeFor = probeToken ? hint.destinationId : null;
+        }
+        if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !probeToken)) {
+          const d = circuitDeferDecision(msg.properties.headers, Date.now());
+          if (!d.exceeded) {
+            await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log);
+            return;
+          }
+          // Quá trần thời gian -> phải nạp row để ghi một lần thử thất bại (nhánh chung bên dưới quyết định lại).
+        } else if (view.throttleAllowed === false) {
+          log.warn({ destinationId: hint.destinationId, rateLimitRps: hint.rateLimitRps }, 'Outbound Throttle (gợi ý) -> tầng retry ngắn nhất, không nạp DB');
+          channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          channel.ack(msg);
+          return;
+        }
+      }
+      const releaseHeldProbe = async () => {
+        if (probeToken && probeFor) await this.circuitBreaker.releaseProbe(probeFor, probeToken);
+        probeToken = null;
+        probeFor = null;
+      };
+
       // 0. Nạp delivery + event + subscription + destination bằng MỘT truy vấn đã scope tenant.
       const row = await repo.findDeliveryForSend(deliveryId);
       if (!row) {
+        await releaseHeldProbe();
         log.warn('Delivery không còn tồn tại (đã bị xoá hoặc khác tenant) -> ack, bỏ qua');
         channel.ack(msg);
         return;
@@ -272,6 +310,7 @@ export class DeliveryConsumer {
       // ADR-161 (T3): đích đã LƯU TRỮ ("Xoá" trên bản đồ luồng) -> không gửi; delivery thành DEAD kèm lý do rõ, ack.
       // Đích chỉ "Ngắt" (is_active=false) thì delivery đang bay vẫn chạy nốt (ADR-161) — chỉ normalize/replay chặn mới.
       if ((destination as { archivedAt?: Date | null }).archivedAt) {
+        await releaseHeldProbe();
         await repo.abandonDelivery(deliveryId, 'destination_archived: đích đã bị xoá khỏi luồng (lưu trữ, ADR-161) — không gửi');
         log.warn({ destinationId: destination.id }, 'Đích đã lưu trữ -> delivery DEAD, không gửi');
         channel.ack(msg);
@@ -307,17 +346,28 @@ export class DeliveryConsumer {
         tenantId,
         persistedState: ((destination as { circuitState?: CircuitState }).circuitState ?? 'CLOSED') as CircuitState,
       };
-      // Review SPEC-3 #2: circuit + throttle trong MỘT lệnh Redis khi đích có rate_limit_rps.
       const rateLimitRps = destination.rateLimitRps && destination.rateLimitRps > 0 ? destination.rateLimitRps : 0;
-      const view: CircuitView = await this.circuitBreaker.getState(destinationId, rateLimitRps);
+      if (!view || !hint || hint.destinationId !== destinationId) {
+        // Message cũ (không gợi ý), hoặc gợi ý LỆCH đích thật (subscription đổi đích sau khi tạo message): gate với id thật.
+        // Ca lệch tốn thêm 1 lệnh (hiếm); lần INCR throttle (nếu có) ở đích gợi ý là một lần đếm dư cho đích đó — chấp nhận.
+        if (hint) log.info({ hinted: hint.destinationId, actual: destinationId }, 'Gợi ý destinationId lệch row -> gate lại với id thật');
+        await releaseHeldProbe();
+        view = await this.circuitBreaker.getState(destinationId, rateLimitRps);
+        if (view.state === 'HALF_OPEN') {
+          probeToken = await this.circuitBreaker.tryAcquireProbe(destinationId);
+          probeFor = probeToken ? destinationId : null;
+        }
+      } else if ((hint.rateLimitRps > 0 ? hint.rateLimitRps : 0) !== rateLimitRps) {
+        // Gợi ý rps LỆCH (đổi cấu hình): kiểm throttle lại với rps thật, KHÔNG đếm hai lần (C9).
+        log.info({ hinted: hint.rateLimitRps, actual: rateLimitRps }, 'Gợi ý rateLimitRps lệch row -> kiểm throttle lại với giá trị thật');
+        view = await this.circuitBreaker.recheckThrottle(destinationId, view, rateLimitRps);
+      }
+      // Bản republish (hoãn/retry/DLQ) mang gợi ý ĐÚNG với row vừa đọc.
+      deliveryMsg = { ...deliveryMsg, destinationId, rateLimitRps };
       // `:open` hết hạn (-> HALF_OPEN) hay mọi khoá hết hạn (-> CLOSED) không có sự kiện nào báo:
-      // phát hiện ở message kế tiếp bằng cách so với bản DB.
+      // phát hiện ở message kế tiếp bằng cách so với bản DB. (Lần hoãn trước khi nạp không đồng bộ — trễ một nhịp, ADR-196.)
       await this.circuitBreaker.syncObserved(circuit, view);
 
-      let probeToken: string | null = null;
-      if (view.state === 'HALF_OPEN') {
-        probeToken = await this.circuitBreaker.tryAcquireProbe(destinationId);
-      }
       const isProbe = probeToken !== null;
       /** Khác null = hoãn vì circuit đã quá trần -> ghi một lần thử thất bại thay vì gửi (ADR-054). */
       let circuitTimeout: string | null = null;
@@ -331,7 +381,8 @@ export class DeliveryConsumer {
         circuitTimeout = `circuit ${view.state} quá lâu: đã hoãn ${waitedMin} phút (trần ${Math.round(circuitMaxDeferMs() / 60_000)} phút) -> tính là một lần thử thất bại`;
         log.warn({ circuit: view.state, deferredSince: d.since, deferrals: d.deferrals }, 'Circuit hoãn quá trần thời gian -> ghi một lần thử thất bại, đi tầng retry kế');
       }
-      const releaseProbe = () => (isProbe ? this.circuitBreaker.releaseProbe(destinationId, probeToken) : Promise.resolve());
+      const heldToken = probeToken;
+      const releaseProbe = () => (isProbe ? this.circuitBreaker.releaseProbe(destinationId, heldToken) : Promise.resolve());
 
       // 1b. Outbound Throttle per destination (§5.4b & ADR-016): phòng ngừa, giữ tầng NGẮN nhất.
       // Bộ đếm đã tăng trong getState (cùng lệnh). Chỉ áp khi CLOSED: probe HALF_OPEN và lần "thử" do

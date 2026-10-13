@@ -7,7 +7,8 @@
  *   ingest     3 = EVAL rate limit + GET idem + SET NX idem (sau COMMIT)
  *              (EG3, ADR-178: EVAL rate limit chạy SAU verify -> request sai chữ ký 0 lệnh)
  *   normalize  1 = PUBLISH hub:realtime:events (gộp mọi event/đích của raw event)
- *   delivery   2 = MGET circuit + PUBLISH hub:realtime:deliveries   (recordSuccess khi failures=0: 0 lệnh)
+ *   delivery   2 = EVAL gate circuit(+throttle) + PUBLISH hub:realtime:deliveries   (recordSuccess khi failures=0: 0 lệnh)
+ *              (BP2 §6, ADR-196: gate LUÔN một EVAL — thay MGET; message có gợi ý thì gate TRƯỚC khi nạp DB)
  *   => 1 đích = 6, 2 đích = 8.
  */
 const calls: string[] = [];
@@ -29,15 +30,15 @@ function fakeRedis() {
     },
     eval: async (script: string, n: number, ...rest: any[]) => {
       const key = rest[0];
-      if (/redis\.call\('GET'/.test(script)) {
-        // LUA_STATE_AND_THROTTLE: KEYS open, failures, throttle
+      if (/PTTL/.test(script)) {
+        // LUA_GATE (BP2 §6): KEYS open, failures, throttle; ARGV ngưỡng, rps, TTL. INCR chỉ khi CLOSED và rps > 0.
         const [open, failures, throttle] = rest.slice(0, n);
         let t = -1;
-        if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
+        if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n]) && Number(rest[n + 1]) > 0) {
           t = Number(store.get(throttle) ?? 0) + 1;
           store.set(throttle, String(t));
         }
-        return [store.get(open) ?? '', store.get(failures) ?? '', t];
+        return [store.get(open) ? 1 : 0, store.get(failures) ?? '', store.get(open) ? 60_000 : -2, t];
       }
       if (/INCR/.test(script)) {
         const n = Number(store.get(key) ?? 0) + 1;
@@ -178,6 +179,51 @@ async function runDelivery(i: number, rateLimitRps = 0) {
   expect(tx.deliveryAttempt.create).toHaveBeenCalled();
 }
 
+/**
+ * BP2 (ADR-196, C9): message mang GỢI Ý `destinationId` + `rateLimitRps` -> gate TRƯỚC khi nạp DB.
+ * `real` = cấu hình thật trong row; `hint` = gợi ý trong message (có thể lệch).
+ */
+async function runDeliveryHinted(i: number, o: { real: { destinationId?: string; rateLimitRps: number }; hint: { destinationId?: string; rateLimitRps: number }; headers?: Record<string, unknown> }) {
+  const now = new Date();
+  const destId = o.real.destinationId ?? `dest-${i}`;
+  const row = {
+    id: `del-${i}`, tenantId: TENANT, attemptGeneration: 1, attemptCount: 0, status: 'PENDING',
+    event: { id: 'evt-1', tenantId: TENANT, type: 'payment.received', source: 'sepay', subject: null, data: {}, normalized: true, occurredAt: now, receivedAt: now, correlationId: 'c', rawEventId: RAW, parentEventId: null, origin: 'webhook', rawEvent: null },
+    subscription: {
+      id: `sub-${i}`, template: '',
+      destination: { id: destId, type: 'webhook', configEncrypted: aesGcmEncrypt('{"url":"https://x.example.com"}', MASTER), signingSecretEncrypted: null, rateLimitRps: o.real.rateLimitRps, circuitState: 'CLOSED' },
+    },
+  };
+  const tx = {
+    deliveryAttempt: { create: jest.fn() },
+    delivery: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), findFirst: jest.fn().mockResolvedValue({ id: row.id }) },
+    processedMessage: { create: jest.fn() },
+  };
+  const repo = {
+    findDeliveryForSend: jest.fn().mockResolvedValue(row),
+    claimForSend: jest.fn().mockResolvedValue(1),
+    updateDeliveryStatus: jest.fn().mockResolvedValue({}),
+    updateDestinationCircuitState: jest.fn().mockResolvedValue(0),
+    deferDelivery: jest.fn().mockResolvedValue(1),
+  };
+  const prisma: any = {
+    forTenant: () => repo,
+    processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
+    tenantTx(_t: any, fn: any, o2?: any) { return this.$transaction(fn, o2); },
+    systemTx(_r: any, fn: any) { return this.$transaction(fn); },
+    $transaction: jest.fn(async (fn: any) => fn(tx)),
+  };
+  const consumer = new DeliveryConsumer(prisma, new CircuitBreakerService(prisma));
+  const channel: any = { ack: jest.fn(), nack: jest.fn(), sendToQueue: jest.fn(), publish: jest.fn() };
+  const msg = {
+    deliveryId: row.id, tenantId: TENANT, attemptGeneration: 1, attemptCount: 0, correlationId: 'c',
+    destinationId: o.hint.destinationId ?? destId, rateLimitRps: o.hint.rateLimitRps,
+  };
+  await consumer.handleMessage({ content: Buffer.from(JSON.stringify(msg)), properties: { headers: o.headers ?? {} } } as any, channel);
+  expect(channel.ack).toHaveBeenCalled();
+  return { repo, tx, channel };
+}
+
 describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/delivery)', () => {
   beforeAll(() => {
     process.env.MASTER_KEY = MASTER;
@@ -198,7 +244,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(take()).toEqual(['publish']);
     for (let i = 1; i <= n; i++) {
       await runDelivery(i);
-      expect(take()).toEqual(['mget', 'publish']);
+      expect(take()).toEqual(['eval', 'publish']);
     }
   });
 
@@ -230,6 +276,57 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
       expect(calls.length).toBe(expected);
       expect(calls.length).toBeLessThanOrEqual(4 + 2 * n);
     }
+  });
+
+  it('[BP:T6] (phần a) circuit OPEN + message có gợi ý destinationId: 0 truy vấn DB đọc (không nạp row), đúng 1 lệnh Redis (gate)', async () => {
+    store.set('circuit:dest-1:open', 'OPEN');
+    store.set('circuit:dest-1:failures', '5');
+    const { repo, tx, channel } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']);
+    expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(repo.claimForSend).not.toHaveBeenCalled();
+    expect(tx.deliveryAttempt.create).not.toHaveBeenCalled();
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+    // Ghi thưa (F7): lần hoãn ĐẦU vẫn ghi next_attempt_at (UPDATE theo id, không đọc); lần trong 2 phút sau thì không.
+    expect(repo.deferDelivery).toHaveBeenCalledTimes(1);
+    const again = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 }, headers: channel.sendToQueue.mock.calls[0][2].headers });
+    expect(take()).toEqual(['eval']);
+    expect(again.repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(again.repo.deferDelivery).not.toHaveBeenCalled(); // 0 truy vấn DB
+  });
+
+  it('[BP:T22] (phần a) ngân sách đường hoãn (F4): hoãn OPEN = 1 lệnh; throttle (gợi ý) = 1 lệnh, 0 truy vấn DB', async () => {
+    store.set('circuit:dest-1:open', 'OPEN');
+    await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']);
+    store.clear();
+    // cửa sổ throttle của giây này (và giây kế, phòng chạm ranh giới giây) đã đầy
+    const sec = Math.floor(Date.now() / 1000);
+    for (const t of [sec, sec + 1]) store.set(`throttle:destination:dest-2:${t}`, '1000');
+    const { repo, channel } = await runDeliveryHinted(2, { real: { rateLimitRps: 5 }, hint: { rateLimitRps: 5 } });
+    expect(take()).toEqual(['eval']);
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
+    expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(repo.deferDelivery).not.toHaveBeenCalled();
+  });
+
+  it('R1 (C9): đích CÓ throttle, gợi ý ĐÚNG -> gate trước khi nạp, vẫn 2 lệnh/delivery (EVAL + PUBLISH)', async () => {
+    await runDeliveryHinted(1, { real: { rateLimitRps: 10 }, hint: { rateLimitRps: 10 } });
+    expect(take()).toEqual(['eval', 'publish']);
+    await runDeliveryHinted(2, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval', 'publish']);
+  });
+
+  it('R1 (C9) — CA NGOẠI LỆ ĐÃ BIẾT: gợi ý LỆCH -> 3 lệnh (gate lại / một INCR); rps 5→10 dùng lại bộ đếm cũ -> vẫn 2', async () => {
+    // [BP:T11] gợi ý destinationId lệch row thật -> gate lại với id thật (+1 EVAL)
+    await runDeliveryHinted(1, { real: { destinationId: 'dest-real', rateLimitRps: 0 }, hint: { destinationId: 'dest-stale', rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval', 'eval', 'publish']);
+    // gợi ý rps 0 (gate không INCR) mà rps thật 5 -> MỘT INCR (không đếm hai lần)
+    await runDeliveryHinted(2, { real: { rateLimitRps: 5 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval', 'eval', 'publish']);
+    // gợi ý rps 5, thật 10 -> so lại chính bộ đếm của gate, 0 lệnh thêm
+    await runDeliveryHinted(3, { real: { rateLimitRps: 10 }, hint: { rateLimitRps: 5 } });
+    expect(take()).toEqual(['eval', 'publish']);
   });
 
   it('gửi lại y hệt: Redis GET trúng -> chỉ 2 lệnh (EVAL + GET), không transaction', async () => {

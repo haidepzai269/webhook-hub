@@ -23,6 +23,9 @@ import {
   toAmqpMsg,
 } from './delivery-fixtures';
 
+/** BP2: bản republish mang gợi ý ĐÚNG với row vừa đọc (buildDeliveryRow: dest-1, rps 0). */
+const ROW_HINT = { destinationId: 'dest-1', rateLimitRps: 0 };
+
 /**
  * DeliveryConsumer (§3.3 Deliver, §5.4 Circuit breaker, S1-1 message chỉ mang tham chiếu, S1-2 lease)
  *
@@ -156,7 +159,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(channel1.sendToQueue).toHaveBeenCalledWith('q.delivery.retry.10s', expect.any(Buffer), expect.anything());
     const retried = JSON.parse(channel1.sendToQueue.mock.calls[0][1].toString());
-    expect(retried).toEqual(buildSlimMsg({ attemptCount: 1 }));
+    expect(retried).toEqual({ ...buildSlimMsg({ attemptCount: 1 }), ...ROW_HINT });
 
     const channel2 = buildChannel();
     await consumer.handleMessage(toAmqpMsg(buildSlimMsg({ attemptCount: 1 })), channel2);
@@ -178,7 +181,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(repo.claimForSend).not.toHaveBeenCalled();
     expect(channel.sendToQueue).toHaveBeenCalledTimes(1);
     expect(channel.sendToQueue).toHaveBeenCalledWith('q.delivery.retry.1m', expect.any(Buffer), expect.anything());
-    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual(buildSlimMsg({ attemptCount: 2 }));
+    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual({ ...buildSlimMsg({ attemptCount: 2 }), ...ROW_HINT });
     const [, nextAt] = repo.deferDelivery.mock.calls[0];
     expect(nextAt.getTime()).toBeGreaterThanOrEqual(before + 60_000);
     expect(pub).not.toHaveBeenCalled(); // DEFERRED không publish (ngân sách Redis)
@@ -237,7 +240,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     await consumer.handleMessage(toAmqpMsg(buildSlimMsg()), channel);
     expect(sendSpy).not.toHaveBeenCalled();
     expect(channel.sendToQueue).toHaveBeenCalledWith('q.delivery.retry.1m', expect.anything(), expect.anything());
-    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual(buildSlimMsg());
+    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual({ ...buildSlimMsg(), ...ROW_HINT });
     expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 
@@ -522,7 +525,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(opts.headers[CIRCUIT_DEFERRALS_HEADER]).toBe(0); // lần thử mới -> đếm lại
     expect(opts.headers).not.toHaveProperty(CIRCUIT_DEFERRED_SINCE_HEADER); // BP2: lần thử thật -> xoá since
     expect(opts.headers).not.toHaveProperty(DEFER_WRITTEN_AT_HEADER);
-    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual(buildSlimMsg({ attemptCount: 2 }));
+    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual({ ...buildSlimMsg({ attemptCount: 2 }), ...ROW_HINT });
     expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 

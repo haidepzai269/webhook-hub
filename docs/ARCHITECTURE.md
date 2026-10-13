@@ -188,8 +188,8 @@ Rollback vì lý do khác (không phải unique) → trả **5xx** để provide
 
 ### 3.3. Deliver
 
-0. Message chỉ mang tham chiếu (ADR-042); nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
-1. Kiểm **circuit breaker** — một lệnh: `MGET`, hoặc một `EVAL` gộp circuit + throttle khi đích có `rate_limit_rps` (review #2, ADR-064). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần **thời gian** `CIRCUIT_MAX_DEFER_MS` (mặc định 30 phút, header `x-circuit-deferred-since`; ADR-048/054, BP2 ADR-196); `next_attempt_at` ghi thưa ≤ 1 lần/2 phút (sweeper vẫn dựa vào nó).
+0. Message chỉ mang tham chiếu (ADR-042) + **gợi ý** `destinationId`/`rateLimitRps` (BP2, ADR-196). Có gợi ý → **gate trước khi nạp** (bước 1 chạy trước): OPEN / HALF_OPEN không giành probe → hoãn, vượt throttle → `retry.10s`, cả hai **0 truy vấn đọc**; sau khi nạp, gợi ý lệch row thì gate lại với giá trị thật. Nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
+1. Kiểm **circuit breaker** — **gate**: LUÔN một `EVAL` (`LUA_GATE`: circuit + throttle khi có `rate_limit_rps` + PTTL của `:open`; BP2 §6, ADR-196, thay `MGET`/ADR-064). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần **thời gian** `CIRCUIT_MAX_DEFER_MS` (mặc định 30 phút, header `x-circuit-deferred-since`; ADR-048/054, BP2 ADR-196); `next_attempt_at` ghi thưa ≤ 1 lần/2 phút (sweeper vẫn dựa vào nó).
 2. Áp **outbound throttle** (cửa sổ cố định 1 giây, chỉ khi `rate_limit_rps > 0` và circuit CLOSED; bộ đếm đã tăng trong lệnh ở bước 1). Vượt → `q.delivery.retry.10s`, `ack`. *(§5.4b)*
 3. Render template → gọi HTTP, timeout tổng mặc định 5s (`AbortSignal.timeout`), cấu hình `DELIVERY_TIMEOUT_MS` kẹp 1–10s (ADR-078), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
 4. INSERT `delivery_attempts` (status code, duration_ms, response body cắt 2KB, error).

@@ -16,6 +16,9 @@ import {
 import { CIRCUIT_MAX_DEFER_MS } from '@hub/messaging';
 import { buildChannel, buildDeliveryRow, buildFakeCircuitBreaker, buildSlimMsg } from './delivery-fixtures';
 
+/** BP2: bản republish mang gợi ý ĐÚNG với row vừa đọc (buildDeliveryRow: dest-1, rps 0). */
+const ROW_HINT = { destinationId: 'dest-1', rateLimitRps: 0 };
+
 /**
  * BP2 §3.3 (ADR-196): hoãn vì circuit ghi `next_attempt_at` THƯA (≤ 1 lần / 2 phút, không bỏ hẳn — F7) và trần tính theo THỜI GIAN.
  */
@@ -71,7 +74,7 @@ describe('BP2 §3.3 — hoãn thưa + trần theo thời gian', () => {
     expect(ch2.sendToQueue.mock.calls[0][2].headers[DEFER_WRITTEN_AT_HEADER]).toEqual(expect.any(Number));
   });
 
-  it('[BP:T10] message cũ (không destinationId, có x-circuit-deferrals, chưa có since) vẫn chạy: since = now, KHÔNG bị tính quá trần theo số lần cũ', async () => {
+  it('[BP:T10] (phần a) message cũ (không destinationId, có x-circuit-deferrals, chưa có since) vẫn chạy: since = now, KHÔNG bị tính quá trần theo số lần cũ', async () => {
     const { repo, consumer } = setup();
     const ch = buildChannel();
     const before = Date.now();
@@ -80,7 +83,7 @@ describe('BP2 §3.3 — hoãn thưa + trần theo thời gian', () => {
     expect(repo.claimForSend).not.toHaveBeenCalled(); // không thành lần thử thất bại
     const [queue, content, opts] = ch.sendToQueue.mock.calls[0];
     expect(queue).toBe('q.delivery.retry.1m');
-    expect(JSON.parse(content.toString())).toEqual(buildSlimMsg({ attemptCount: 2 }));
+    expect(JSON.parse(content.toString())).toEqual({ ...buildSlimMsg({ attemptCount: 2 }), ...ROW_HINT });
     expect(opts.headers[CIRCUIT_DEFERRALS_HEADER]).toBe(31);
     expect(opts.headers[CIRCUIT_DEFERRED_SINCE_HEADER]).toBeGreaterThanOrEqual(before);
     expect(repo.deferDelivery).toHaveBeenCalledTimes(1);
