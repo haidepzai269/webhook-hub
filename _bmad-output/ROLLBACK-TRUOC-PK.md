@@ -25,3 +25,4 @@ Commit PK đầu tiên trên master sẽ được ghi thêm vào đây khi merge
 |---|---|---|---|
 | 2026-10-14 đêm (chặng 1) | `314ace0..9d84dcd` | PK0, PK1, PK2 (code đầu tiên: `10afed4`) | Không có migration. Rollback code = quay về `57c81ad` (hoặc `314ace0`, chỉ thêm docs) |
 | 2026-10-14 đêm (chặng 2) | `e6d61d6..8bcb4fa` | PK3 (signed-template), PK9 (danh mục 21 mục + identify + GET /api/v1/catalog), sửa hub-api khởi động (ADR-210) | Không có migration. CI e2e của `a4094b3` xanh. Mốc an toàn trước chặng 2: `e6d61d6` (= PK0–PK2) |
+| 2026-10-14 sáng sớm (chặng 3) | `1aedcf2..db875bd` | PK4 (bắt tay khai báo được, GET chỉ cho bắt tay, HEAD `head-ok`, ack 200/202/204 · 401/403/503), mã lỗi mới `method_not_allowed`/`handshake_invalid`/`uri_too_long`, danh mục 24 mục | Không có migration. CI e2e của `a8abda4` xanh. Mốc an toàn trước chặng 3: `1aedcf2` |
