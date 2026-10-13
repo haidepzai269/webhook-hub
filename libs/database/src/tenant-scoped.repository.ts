@@ -302,10 +302,14 @@ export class TenantScopedRepository {
    * thấy một lần đổi trạng thái thì chỉ một bên đổi được dòng (trả 1) — bên đó mới phát realtime.
    * Cột này chỉ để hiển thị; Redis là nguồn chạy.
    */
-  async updateDestinationCircuitState(id: string, state: CircuitState): Promise<number> {
+  /**
+   * BP3 (C4, ADR-197): `halfOpenAt` = lúc `:open` hết hạn, tính ĐÚNG LÚC trip (now + TTL vừa SET EX) — ghi CÙNG UPDATE đổi trạng
+   * thái để cảnh báo "Thử lại lúc …" không phải gọi Redis. Trạng thái khác OPEN -> NULL.
+   */
+  async updateDestinationCircuitState(id: string, state: CircuitState, halfOpenAt: Date | null = null): Promise<number> {
     const result = await this.prisma.destination.updateMany({
       where: { id, tenantId: this.tenantId, circuitState: { not: state } },
-      data: { circuitState: state },
+      data: { circuitState: state, circuitHalfOpenAt: state === 'OPEN' ? halfOpenAt : null },
     });
     return result.count;
   }
@@ -1231,7 +1235,8 @@ export class TenantScopedRepository {
    */
   async findAlertDestinations(includeIds: string[], limit = ALERT_INPUT_LIMIT): Promise<AlertDestinationRow[]> {
     return this.prisma.$queryRaw<AlertDestinationRow[]>(Prisma.sql`
-      SELECT id, is_active AS "isActive", archived_at AS "archivedAt", circuit_state::text AS "circuitState"
+      SELECT id, is_active AS "isActive", archived_at AS "archivedAt", circuit_state::text AS "circuitState",
+             circuit_half_open_at AS "circuitHalfOpenAt"
       FROM hub.destinations
       WHERE tenant_id = ${this.tenantId}::uuid AND (archived_at IS NULL OR id = ANY(${uuidArray(includeIds)}))
       ORDER BY (id = ANY(${uuidArray(includeIds)})) DESC, created_at
@@ -2183,6 +2188,8 @@ export interface AlertDestinationRow {
   isActive: boolean;
   archivedAt: Date | null;
   circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  /** BP3 (C4): lúc `:open` hết hạn, ghi lúc trip — câu "Thử lại lúc …" (evaluator KHÔNG gọi Redis). */
+  circuitHalfOpenAt: Date | null;
 }
 
 export interface AlertSourceRow {

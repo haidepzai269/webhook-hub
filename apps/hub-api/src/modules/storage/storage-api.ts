@@ -380,7 +380,7 @@ export async function getStoragePolicies(store: StorageStore, projectId: string,
 /**
  * `PUT …/storage/policies` (scope `storage:write`): `{ policies: [{ importance, action, afterDays, trigger }] }` — chỉ
  * junk/low/medium (Cao/Giữ KHÔNG đặt được: 400), Rác chỉ `delete`/`off`, `afterDays` nguyên 1–365 (≥ 1 ngày > sàn retry
- * window ≈ 5h44m40s sau BP2 — TOTAL_RETRY_WINDOW_MS), `trigger` `always`|`above_85`. Ghi + `audit_logs` `storage.policies.update` (trước/sau) CÙNG transaction.
+ * window ≈ 6h08m40s sau BP3 — TOTAL_RETRY_WINDOW_MS), `trigger` `always`|`above_85`. Ghi + `audit_logs` `storage.policies.update` (trước/sau) CÙNG transaction.
  */
 export async function putStoragePolicies(store: StorageStore, projectId: string, body: unknown, actor: string, flags: StorageFlags, floorMs = TOTAL_RETRY_WINDOW_MS): Promise<StoragePoliciesResponse> {
   const list = (body as { policies?: unknown } | null)?.policies;

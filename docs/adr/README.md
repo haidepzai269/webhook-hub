@@ -2086,3 +2086,18 @@ không thấy gì.
 - `syncObserved` không chạy ở lần hoãn trước khi nạp (không có `persistedState`) → DB/console thấy OPEN→HALF_OPEN trễ một nhịp (tới khi có message nạp row, thường là người giữ probe). Không ảnh hưởng gửi.
 - Cửa sổ retry dài ra ≈ 3 giờ → lệnh dọn `olderThan` dưới ~5h45m (vd. `3h`, trước đây hợp lệ) nay bị 400; đổi lại không dọn mất chốt chống trùng của message còn đang hoãn (lỗi đúng sai, không phải hiệu năng).
 - Ghi thưa nghĩa là `next_attempt_at` trên console có thể cũ tối đa ~2 phút trong lúc hoãn.
+
+## ADR-197 — OPEN 60s → 300s theo số probe thất bại; hoãn tới hết OPEN theo PTTL thật; "thử lại lúc" ghi lúc trip (BP3, 2026-10-13)
+
+**Vấn đề:** OPEN cố định 60s nghĩa là hub coi mọi sự cố như sự cố một phút: đích chết 3 giờ thì khoảng 180 lần probe vào đích, và mỗi message trong hàng bị bốc ra, bỏ vào lại khoảng 180 lần — dù probe thất bại lần đầu đã là bằng chứng sự cố không ngắn. Thời điểm "thử lại" viết cứng 60s ở đường gửi (`CIRCUIT_OPEN_SECONDS`, `CIRCUIT_DEFER`), còn câu "Thử lại lúc …" của cảnh báo `destination.circuit_open` không bao giờ hiện vì evaluator không có `halfOpenAt` (SPEC-ap-luc-nguoc §4, C4).
+**Chọn:**
+- Backoff ở cấp **đích**: trip lần đầu (đủ ngưỡng khi CLOSED) OPEN 60s; **probe thất bại** → OPEN `CIRCUIT_OPEN_MAX_SECONDS` (mặc định 300, kẹp 60..300 — chỉ được thấp hơn), `:trips` +1 (DEL khi CLOSED, cùng lệnh DEL với 3 khoá cũ). `:failures`/`:trips` EXPIRE `openSeconds + 120` — HALF_OPEN là trạng thái suy ra từ "hết `:open` mà `:failures` còn", `:failures` hết trước thì mạch nhảy thẳng về CLOSED bỏ qua probe.
+- Hoãn **tới hết OPEN**: gate (vẫn 1 EVAL) trả PTTL của `:open`; consumer hoãn vào `circuitDeferTier(pttl)` = tầng ngắn nhất có TTL ≥ PTTL — `retry.1m` hoặc `retry.5m`; HALF_OPEN không giành probe vẫn 1m; thua lease (không thuộc circuit) vẫn 1m. Hai mức 60/300 khớp đúng hai tầng TTL sẵn có — không thêm queue, không sửa `topology.ts` (C6 Q2: không tầng 2m).
+- `circuitDeferTier`, `CIRCUIT_OPEN_MS/MAX_MS`, `circuitOpenMaxSeconds` ở `@hub/messaging` `retry-window.ts` — MỘT nguồn cho circuit breaker, consumer và cửa sổ retry (`CIRCUIT_DEFER_ROUND_MS` = tầng hoãn dài nhất = 5m). `TOTAL_RETRY_WINDOW_MS` = … + 6 × (30 phút + 5 phút) ≈ 6h08m40s, cùng commit.
+- `destinations.circuit_half_open_at` (migration `20261013120000_circuit_half_open_at`, cột nullable): `now + TTL vừa SET EX` (60 hoặc 300s) tính ĐÚNG LÚC trip, ghi CÙNG `UPDATE circuit_state` (về trạng thái khác → NULL). Evaluator đọc cột này (truy vấn đích sẵn có) và truyền `halfOpenAt` vào `evalCircuitOpen` — không gọi Redis mỗi tick (quota Upstash), không suy ra bằng `openedAt + 60s`.
+**Đánh đổi:**
+- Đích hồi phục thì phải chờ tối đa khoảng 5 phút hub mới biết (Sally muốn 2 phút; không có tầng 2m — muốn có phải sửa topology, cạm bẫy `PRECONDITION_FAILED`). 5 phút là mức tối đa chấp nhận cho một khách vừa sửa xong server; cao hơn (30 phút) thì sự cố 10 phút thành 37 phút trễ. Đổi lại, đích chết lâu chỉ tốn ~1 lệnh Redis mỗi 5 phút cho mỗi message thay vì mỗi phút.
+- PTTL hơi quá 60s (vd. 61s) cũng rơi vào tầng 5m — hoãn thừa tới ~4 phút; chỉ xảy ra với OPEN 300s nên chấp nhận.
+- Lệnh dọn `olderThan` dưới ~6h09m (vd. `6h`) nay bị 400.
+- `halfOpenAt` chỉ được ghi khi UPDATE đổi được `circuit_state` (có điều kiện, ADR-054). Probe thất bại luôn đi qua HALF_OPEN (người giữ probe nạp row và `syncObserved` OPEN→HALF_OPEN trước khi gửi) nên lần trip lại ghi được mốc mới; nếu `syncObserved` bị bỏ (Redis degraded) thì mốc có thể cũ một nhịp — chỉ ảnh hưởng câu hiển thị.
+- `:trips` hiện chỉ để quan sát (hai mức 60/300 nên "đã có probe thất bại" là đủ); giữ theo spec để BP sau có thể bậc thang thêm.

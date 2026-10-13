@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { CircuitState, fastFailRedisOptions, logger } from '@hub/common';
 import { PrismaService } from '@hub/database';
+import { CIRCUIT_OPEN_MS as OPEN_FIRST_MS, circuitOpenMaxSeconds } from '@hub/messaging';
 
 /** Token DI tuỳ chọn để test tiêm Redis giả; production tự tạo client riêng. */
 export const CIRCUIT_REDIS = Symbol('CIRCUIT_REDIS');
@@ -12,13 +13,20 @@ export const CIRCUIT_REDIS = Symbol('CIRCUIT_REDIS');
 export const CIRCUIT_CHANNEL = 'hub:realtime:circuit';
 
 export const CIRCUIT_FAILURE_THRESHOLD = 5;
-/** Còn khoá `:open` = OPEN. Hết hạn mà `:failures` còn >= ngưỡng = HALF_OPEN (suy ra, không lưu). */
-export const CIRCUIT_OPEN_SECONDS = 60;
-export const CIRCUIT_OPEN_MS = CIRCUIT_OPEN_SECONDS * 1000;
+/**
+ * Còn khoá `:open` = OPEN. Hết hạn mà `:failures` còn >= ngưỡng = HALF_OPEN (suy ra, không lưu).
+ * BP3 (ADR-197): OPEN lần đầu 60s; từ lần PROBE thất bại thứ nhất là `CIRCUIT_OPEN_MAX_SECONDS` (60..300, mặc định 300).
+ * Nguồn hằng số: `@hub/messaging` retry-window.ts (cùng nguồn với cửa sổ retry).
+ */
+export const CIRCUIT_OPEN_MS = OPEN_FIRST_MS;
+export const CIRCUIT_OPEN_SECONDS = CIRCUIT_OPEN_MS / 1000;
 /** Lỗi cách nhau hơn 2 phút không còn là "liên tiếp". */
 const FAILURES_WINDOW_SECONDS = 120;
-/** Lúc OPEN, gia hạn `:failures` qua hết OPEN + một khoảng HALF_OPEN — nếu không, bộ đếm có thể hết hạn trước `:open` và circuit nhảy thẳng về CLOSED mà không probe. */
-const FAILURES_AFTER_OPEN_SECONDS = CIRCUIT_OPEN_SECONDS + FAILURES_WINDOW_SECONDS;
+/**
+ * Lúc OPEN, gia hạn `:failures` (và `:trips`) qua hết OPEN + một khoảng HALF_OPEN — nếu không, bộ đếm có thể hết hạn trước `:open`
+ * và circuit nhảy thẳng về CLOSED mà không probe. BP3: áp cho cả OPEN 300s (`openSeconds + 120`).
+ */
+const failuresAfterOpenSeconds = (openSeconds: number) => openSeconds + FAILURES_WINDOW_SECONDS;
 const PROBE_SECONDS = 30;
 
 /**
@@ -118,7 +126,7 @@ export class CircuitBreakerService {
 
   private keys(destinationId: string) {
     const base = `circuit:${destinationId}`;
-    return { failures: `${base}:failures`, open: `${base}:open`, probe: `${base}:probe` };
+    return { failures: `${base}:failures`, open: `${base}:open`, probe: `${base}:probe`, trips: `${base}:trips` };
   }
 
   /**
@@ -195,7 +203,7 @@ export class CircuitBreakerService {
     }
     const k = this.keys(target.destinationId);
     try {
-      await this.redis.del(k.failures, k.open, k.probe);
+      await this.redis.del(k.failures, k.open, k.probe, k.trips); // BP3: CLOSED -> xoá cả `:trips` (vẫn MỘT lệnh)
     } catch {}
     // `persistedState` đọc kèm delivery có thể đã cũ (worker khác vừa ghi OPEN): KHÔNG dựa vào nó để bỏ
     // qua — UPDATE có điều kiện `circuit_state <> 'CLOSED'` quyết định (review SPEC-2 #6c).
@@ -217,21 +225,27 @@ export class CircuitBreakerService {
     }
 
     if (failures >= CIRCUIT_FAILURE_THRESHOLD || view.state === 'HALF_OPEN') {
+      // BP3 (ADR-197): probe thất bại (HALF_OPEN) = bằng chứng sự cố không ngắn -> OPEN dài (300s), `:trips` +1.
+      const probeFailed = view.state === 'HALF_OPEN';
+      const openSeconds = probeFailed ? circuitOpenMaxSeconds() : CIRCUIT_OPEN_SECONDS;
+      // C4: "thử lại lúc" = now + PTTL(:open) lấy ĐÚNG LÚC trip = giá trị vừa SET EX (không suy ra từ openedAt + 60s).
+      const halfOpenAt = new Date(Date.now() + openSeconds * 1000);
       try {
-        await this.redis
+        const m = this.redis
           .multi()
-          .set(k.open, 'OPEN', 'EX', CIRCUIT_OPEN_SECONDS)
-          .expire(k.failures, FAILURES_AFTER_OPEN_SECONDS)
-          .del(k.probe)
-          .exec();
+          .set(k.open, 'OPEN', 'EX', openSeconds)
+          .expire(k.failures, failuresAfterOpenSeconds(openSeconds))
+          .del(k.probe);
+        if (probeFailed) m.incr(k.trips).expire(k.trips, failuresAfterOpenSeconds(openSeconds));
+        await m.exec();
       } catch {
         return { state: 'CLOSED', failures, degraded: true };
       }
       if (target.persistedState !== 'OPEN') {
-        logger.warn({ destinationId: target.destinationId, failures }, 'Circuit breaker -> OPEN (hoãn gửi 60s)');
+        logger.warn({ destinationId: target.destinationId, failures, openSeconds, probeFailed }, `Circuit breaker -> OPEN (hoãn gửi ${openSeconds}s)`);
       }
-      await this.transition(target, 'OPEN', failures);
-      return { state: 'OPEN', failures };
+      await this.transition(target, 'OPEN', failures, false, halfOpenAt);
+      return { state: 'OPEN', failures, openPttlMs: openSeconds * 1000 };
     }
     return { state: view.state === 'OPEN' ? 'OPEN' : 'CLOSED', failures };
   }
@@ -250,14 +264,14 @@ export class CircuitBreakerService {
    * (`circuit_state <> to`) — nhiều worker cùng thấy một lần đổi thì chỉ một bên đổi được dòng;
    * (b) chỉ bên đó PUBLISH `hub:realtime:circuit`. Lỗi ở đây không được chặn việc gửi.
    */
-  private async transition(target: CircuitTarget, to: CircuitState, failures: number, force = false): Promise<void> {
+  private async transition(target: CircuitTarget, to: CircuitState, failures: number, force = false, halfOpenAt: Date | null = null): Promise<void> {
     const from = target.persistedState;
     if (from === to && !force) return;
     target.persistedState = to;
     try {
       const changed = await this.prisma
         .forTenant(target.tenantId)
-        .updateDestinationCircuitState(target.destinationId, to);
+        .updateDestinationCircuitState(target.destinationId, to, to === 'OPEN' ? halfOpenAt : null);
       if (changed !== 1) return;
       circuitTransitions.inc({ to });
       const msg = { tenantId: target.tenantId, destinationId: target.destinationId, from, to, failures, at: new Date().toISOString() };

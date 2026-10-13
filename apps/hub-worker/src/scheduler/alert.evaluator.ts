@@ -380,7 +380,11 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
       }
       case 'destination.circuit_open': {
         const dests = await lap.destinations();
-        return dests.map((d) => ({ subjectId: d.id, decide: (ctx) => evalCircuitOpen({ destination: lifecycleOf(d), circuitState: d.circuitState }, ctx) }));
+        // BP3 (C4): `halfOpenAt` đọc từ DB (ghi lúc trip) — KHÔNG gọi Redis mỗi tick, KHÔNG suy ra bằng openedAt + 60s.
+        return dests.map((d) => ({
+          subjectId: d.id,
+          decide: (ctx) => evalCircuitOpen({ destination: lifecycleOf(d), circuitState: d.circuitState, halfOpenAt: d.circuitHalfOpenAt ?? null }, ctx),
+        }));
       }
       case 'delivery.dead_spike': {
         const dead = await repo.countDeadForSpike(lap.since(DEAD_SPIKE_WINDOW_MS), DESTINATION_ARCHIVED_ERROR_PREFIX, Math.max(DEAD_SPIKE_COUNT_CAP, DEAD_SPIKE_MIN));

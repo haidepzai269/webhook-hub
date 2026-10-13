@@ -578,6 +578,8 @@ model Destination {
   signingSecretEncrypted String?              @map("signing_secret_encrypted") @db.Text
   rateLimitRps           Int                  @default(0) @map("rate_limit_rps")
   circuitState           CircuitState         @default(CLOSED) @map("circuit_state")
+  /// BP3 (C4, ADR-197): lúc `:open` hết hạn (-> HALF_OPEN), ghi ĐÚNG LÚC trip cùng UPDATE circuit_state. NULL khi không OPEN.
+  circuitHalfOpenAt      DateTime?            @map("circuit_half_open_at") @db.Timestamptz(6)
   /// @deprecated CB1/CB7 (SPEC §3.3, ADR-172): cờ chết — không code nào đọc. Thay bằng luật `destination.circuit_open`
   /// (luôn bật). Đã bỏ khỏi view/UI (CB7); cột drop ở một migration sau. KHÔNG dùng mới.
   alertOnOpen            Boolean              @default(false) @map("alert_on_open")

@@ -10,6 +10,7 @@ import {
   LUA_GATE,
 } from '../src/circuit/circuit-breaker.service';
 import { describeDb } from '../../../libs/database/test/support/test-db';
+import { circuitOpenMaxSeconds } from '@hub/messaging';
 
 /**
  * Redis giả trong bộ nhớ, đủ cho circuit breaker: MGET, SET (EX/NX), DEL nhiều khoá, INCR, EXPIRE,
@@ -18,6 +19,7 @@ import { describeDb } from '../../../libs/database/test/support/test-db';
  */
 function fakeRedis() {
   const store = new Map<string, string>();
+  const ttls = new Map<string, number>();
   const calls: string[] = [];
   const writes = () => calls.filter((c) => !['mget', 'get'].includes(c)).length;
   const r: any = {
@@ -93,13 +95,23 @@ function fakeRedis() {
       }
       throw new Error('script lạ');
     }),
+    // BP3: TTL (giây) đặt trong MULTI — để kiểm OPEN 60/300s và `:failures`/`:trips` sống quá `:open`.
+    ttls,
     multi: jest.fn(() => {
       calls.push('multi');
       const ops: Array<() => void> = [];
       const chain: any = {
-        set: (k: string, v: string) => (ops.push(() => store.set(k, v)), chain),
+        set: (k: string, v: string, ...args: any[]) => (
+          ops.push(() => {
+            store.set(k, v);
+            const i = args.indexOf('EX');
+            if (i >= 0) ttls.set(k, Number(args[i + 1]));
+          }),
+          chain
+        ),
         del: (...ks: string[]) => (ops.push(() => ks.forEach((k) => store.delete(k))), chain),
-        expire: () => chain,
+        incr: (k: string) => (ops.push(() => store.set(k, String(parseInt(store.get(k) ?? '0', 10) + 1))), chain),
+        expire: (k: string, sec: number) => (ops.push(() => ttls.set(k, Number(sec))), chain),
         exec: async () => (ops.forEach((op) => op()), []),
       };
       return chain;
@@ -112,7 +124,7 @@ function fakeRedis() {
 function fakePrisma(initial: Record<string, string> = {}) {
   const db = new Map<string, string>(Object.entries(initial));
   const repo = {
-    updateDestinationCircuitState: jest.fn(async (id: string, to: string) => {
+    updateDestinationCircuitState: jest.fn(async (id: string, to: string, _halfOpenAt?: Date | null) => {
       if ((db.get(id) ?? 'CLOSED') === to) return 0;
       db.set(id, to);
       return 1;
@@ -231,23 +243,56 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
 
     expect(await cb.recordSuccess(target('HALF_OPEN'), view)).toBe('CLOSED');
     expect(redis.del).toHaveBeenCalledTimes(1);
-    expect(redis.del).toHaveBeenCalledWith(K('failures'), K('open'), K('probe'));
+    expect(redis.del).toHaveBeenCalledWith(K('failures'), K('open'), K('probe'), K('trips')); // BP3: + :trips, vẫn MỘT lệnh
     expect(redis.store.size).toBe(0);
     expect(db.get(DEST)).toBe('CLOSED');
     expect(JSON.parse(redis.publish.mock.calls[0][1])).toMatchObject({ from: 'HALF_OPEN', to: 'CLOSED' });
   });
 
-  it('probe thất bại -> OPEN lại ngay (không cần đủ 5 lần nữa), nhả :probe', async () => {
+  it('[BP:T12] (phần a) probe thất bại -> OPEN lại ngay với TTL 300s (không phải 60s); :failures và :trips sống quá :open; nhả :probe; halfOpenAt = lúc trip + 300s', async () => {
     const redis = fakeRedis();
-    const { prisma, db } = fakePrisma({ [DEST]: 'HALF_OPEN' });
+    const { prisma, db, repo } = fakePrisma({ [DEST]: 'HALF_OPEN' });
     const cb = new CircuitBreakerService(prisma, redis);
     redis.store.set(K('failures'), '5');
     await cb.tryAcquireProbe(DEST);
+    const before = Date.now();
     const after = await cb.recordFailure(target('HALF_OPEN'), await cb.getState(DEST));
-    expect(after.state).toBe('OPEN');
+    expect(after).toMatchObject({ state: 'OPEN', openPttlMs: 300_000 });
     expect(redis.store.get(K('open'))).toBe('OPEN');
+    expect(redis.ttls.get(K('open'))).toBe(300);
+    expect(redis.ttls.get(K('failures'))).toBeGreaterThan(300);
+    expect(redis.store.get(K('trips'))).toBe('1');
+    expect(redis.ttls.get(K('trips'))).toBeGreaterThan(300);
     expect(redis.store.has(K('probe'))).toBe(false);
     expect(db.get(DEST)).toBe('OPEN');
+    const [, to, halfOpenAt] = repo.updateDestinationCircuitState.mock.calls.at(-1)! as [string, string, Date];
+    expect(to).toBe('OPEN');
+    expect(halfOpenAt.getTime()).toBeGreaterThanOrEqual(before + 300_000);
+    expect(halfOpenAt.getTime()).toBeLessThan(before + 301_000);
+  });
+
+  it('[BP:T12] (phần b) trip LẦN ĐẦU (đủ ngưỡng khi CLOSED) -> OPEN 60s, không tăng :trips; halfOpenAt = lúc trip + 60s; CIRCUIT_OPEN_MAX_SECONDS kẹp 60..300', async () => {
+    const redis = fakeRedis();
+    const { prisma, repo } = fakePrisma();
+    const cb = new CircuitBreakerService(prisma, redis);
+    redis.store.set(K('failures'), '4');
+    const before = Date.now();
+    const after = await cb.recordFailure(target('CLOSED'), await cb.getState(DEST));
+    expect(after).toMatchObject({ state: 'OPEN', openPttlMs: 60_000 });
+    expect(redis.ttls.get(K('open'))).toBe(60);
+    expect(redis.ttls.get(K('failures'))).toBe(180);
+    expect(redis.store.has(K('trips'))).toBe(false);
+    const halfOpenAt = repo.updateDestinationCircuitState.mock.calls.at(-1)![2] as Date;
+    expect(halfOpenAt.getTime() - before).toBeGreaterThanOrEqual(60_000);
+    expect(halfOpenAt.getTime() - before).toBeLessThan(61_000);
+    expect(circuitOpenMaxSeconds(undefined)).toBe(300);
+    expect(circuitOpenMaxSeconds('120')).toBe(120);
+    expect(circuitOpenMaxSeconds('9999')).toBe(300); // chỉ được thấp hơn (cửa sổ retry tính theo 300)
+    expect(circuitOpenMaxSeconds('10')).toBe(60);
+    expect(circuitOpenMaxSeconds('abc')).toBe(300);
+    // trạng thái khác OPEN -> halfOpenAt NULL
+    await cb.recordSuccess(target('OPEN'), { state: 'HALF_OPEN', failures: 5 });
+    expect(repo.updateDestinationCircuitState.mock.calls.at(-1)).toEqual([DEST, 'CLOSED', null]);
   });
 
   it('gửi thành công khi failures == 0 -> 0 lệnh Redis, 0 lệnh DB', async () => {
@@ -326,7 +371,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     const cb = new CircuitBreakerService(prisma, redis);
     redis.store.set(K('failures'), '3');
     await cb.recordSuccess(target('CLOSED'), await cb.getState(DEST)); // persistedState cũ = CLOSED
-    expect(repo.updateDestinationCircuitState).toHaveBeenCalledWith(DEST, 'CLOSED');
+    expect(repo.updateDestinationCircuitState).toHaveBeenCalledWith(DEST, 'CLOSED', null);
     expect(db.get(DEST)).toBe('CLOSED');
   });
 
@@ -361,7 +406,7 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
   const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
 
   afterAll(async () => {
-    await redis.del(k('failures'), k('open'), k('probe'), `throttle:destination:${dest}:${Math.floor(Date.now() / 1000)}`);
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'), `throttle:destination:${dest}:${Math.floor(Date.now() / 1000)}`);
     await redis.quit();
   });
 
@@ -459,6 +504,38 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     expect(await cb.tryAcquireProbe(dest)).toBeNull();
     await cb.releaseProbe(dest, t1);
     await redis.del(k('failures'), k('open'), k('probe'), tk);
+  });
+
+  it('[BP:T12] (phần c) Redis THẬT: trip lần đầu OPEN 60s; probe thất bại -> OPEN 300s, :failures/:trips sống quá :open, gate trả PTTL ~300s; probe thành công xoá cả :trips', async () => {
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'));
+    const t = { destinationId: dest, tenantId: 'tenant-1', persistedState: 'CLOSED' as const };
+    for (let i = 0; i < 5; i++) await cb.recordFailure(t, await cb.getState(dest));
+    const p1 = await redis.pttl(k('open'));
+    expect(p1).toBeGreaterThan(55_000);
+    expect(p1).toBeLessThanOrEqual(60_000);
+    expect(await redis.exists(k('trips'))).toBe(0);
+    // :open hết hạn -> HALF_OPEN -> probe thất bại
+    await redis.del(k('open'));
+    const half = await cb.getState(dest);
+    expect(half.state).toBe('HALF_OPEN');
+    const token = await cb.tryAcquireProbe(dest);
+    expect(token).toEqual(expect.any(String));
+    const after = await cb.recordFailure(t, half);
+    expect(after).toMatchObject({ state: 'OPEN', openPttlMs: 300_000 });
+    const p2 = await redis.pttl(k('open'));
+    expect(p2).toBeGreaterThan(295_000);
+    expect(await redis.ttl(k('failures'))).toBeGreaterThan(300);
+    expect(await redis.ttl(k('trips'))).toBeGreaterThan(300);
+    expect(await redis.get(k('trips'))).toBe('1');
+    expect(await redis.exists(k('probe'))).toBe(0);
+    const g = await cb.getState(dest);
+    expect(g.state).toBe('OPEN');
+    expect(g.openPttlMs).toBeGreaterThan(290_000);
+    // hồi phục: probe thành công -> xoá 4 khoá
+    await redis.del(k('open'));
+    await cb.tryAcquireProbe(dest);
+    await cb.recordSuccess(t, await cb.getState(dest));
+    expect(await redis.exists(k('failures'), k('open'), k('probe'), k('trips'))).toBe(0);
   });
 
   it('BP2 §6 LUA_GATE: Redis LỖI (cổng chết) -> fail-open CLOSED degraded, không ném', async () => {

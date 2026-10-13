@@ -18,7 +18,7 @@ import { describeDb } from '../../../libs/database/test/support/test-db';
  * Row giả: đích thật `dest-1`, rps 0 (buildDeliveryRow).
  */
 type State = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
-function setup(states: Record<string, State>, opts: { probe?: boolean; throttleAllowed?: boolean; row?: any } = {}) {
+function setup(states: Record<string, State>, opts: { probe?: boolean; throttleAllowed?: boolean; row?: any; openPttlMs?: number } = {}) {
   const row = opts.row === undefined ? buildDeliveryRow() : opts.row;
   const tx = {
     deliveryAttempt: { create: jest.fn().mockResolvedValue({}) },
@@ -40,6 +40,7 @@ function setup(states: Record<string, State>, opts: { probe?: boolean; throttleA
   cb.getState.mockImplementation(async (id: string, rps: number) => {
     const state = states[id] ?? 'CLOSED';
     const v: any = { state, failures: state === 'CLOSED' ? 0 : 5 };
+    if (state === 'OPEN' && opts.openPttlMs !== undefined) v.openPttlMs = opts.openPttlMs;
     if (state === 'CLOSED' && rps > 0) v.throttleAllowed = opts.throttleAllowed ?? true;
     return v;
   });
@@ -151,6 +152,36 @@ describe('BP2 §3.2 — gate trước khi nạp DB', () => {
     expect(ch.ack).toHaveBeenCalledTimes(1);
   });
 
+  it('[BP:T13] (phần a) OPEN còn 250s (PTTL thật từ gate) -> hoãn vào retry.5m, next_attempt_at = now + 5m; còn 40s -> retry.1m (C4: không cứng 60s)', async () => {
+    for (const [pttl, queue, ttl] of [[250_000, 'q.delivery.retry.5m', 300_000], [40_000, 'q.delivery.retry.1m', 60_000]] as const) {
+      const { consumer, repo } = setup({ 'dest-1': 'OPEN' }, { openPttlMs: pttl });
+      const ch = buildChannel();
+      const before = Date.now();
+      await consumer.handleMessage(amqp(hinted('dest-1', 0)), ch);
+      expect(ch.sendToQueue.mock.calls[0][0]).toBe(queue);
+      const nextAt: Date = repo.deferDelivery.mock.calls[0][1];
+      expect(nextAt.getTime() - before).toBeGreaterThanOrEqual(ttl);
+      expect(nextAt.getTime() - before).toBeLessThan(ttl + 1_000);
+    }
+  });
+
+  it('[BP:T13] (phần b) đường cũ (không gợi ý) cũng hoãn theo PTTL; HALF_OPEN không giành probe vẫn 1m; thua lease vẫn 1m (không thuộc circuit)', async () => {
+    let s1 = setup({ 'dest-1': 'OPEN' }, { openPttlMs: 280_000 });
+    let ch = buildChannel();
+    await s1.consumer.handleMessage(amqp(buildSlimMsg()), ch);
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.5m');
+    s1 = setup({ 'dest-1': 'HALF_OPEN' }, { probe: false });
+    ch = buildChannel();
+    await s1.consumer.handleMessage(amqp(hinted('dest-1', 0)), ch);
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+    s1 = setup({});
+    s1.repo.claimForSend.mockResolvedValue(0);
+    s1.repo.getDeliveryLeaseState.mockResolvedValue({ status: 'DELIVERING', attemptGeneration: 1, attemptCount: 0 });
+    ch = buildChannel();
+    await s1.consumer.handleMessage(amqp(hinted('dest-1', 0)), ch);
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+  });
+
   it('[BP:T10] (phần b) message thiếu gợi ý (hoặc chỉ có destinationId, không rps) -> đường cũ: nạp row rồi mới gate', async () => {
     for (const body of [buildSlimMsg(), buildSlimMsg({ destinationId: 'dest-1' })]) {
       const { consumer, repo, cb, send } = setup({});
@@ -173,7 +204,7 @@ describeRedis('BP2 — gate trước khi nạp DB trên Redis THẬT', () => {
   const dest = `gate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const k = (x: string) => `circuit:${dest}:${x}`;
   afterAll(async () => {
-    await redis.del(k('failures'), k('open'), k('probe'));
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'));
     await redis.quit();
   });
 
@@ -203,6 +234,25 @@ describeRedis('BP2 — gate trước khi nạp DB trên Redis THẬT', () => {
     return { consumer: new DeliveryConsumer(prisma, new CircuitBreakerService(prisma, redis)), repo, send, cmd };
   }
   afterEach(() => jest.restoreAllMocks());
+
+  it('[BP:T13] (phần d) Redis thật: probe thất bại -> :open 300s; message kế (gợi ý) hoãn vào retry.5m theo PTTL thật', async () => {
+    await redis.del(k('open'), k('probe'), k('trips'));
+    await redis.set(k('failures'), '5'); // HALF_OPEN
+    const s1 = realSetup();
+    s1.send.mockResolvedValue({ status: 503, body: 'down', error: 'Service Unavailable', durationMs: 2 });
+    await s1.consumer.handleMessage(amqp(hinted(dest, 0)), buildChannel()); // probe -> 503 -> OPEN 300s
+    expect(await redis.pttl(k('open'))).toBeGreaterThan(290_000);
+    expect(await redis.ttl(k('failures'))).toBeGreaterThan(await redis.ttl(k('open')));
+    expect(await redis.get(k('trips'))).toBe('1');
+    jest.restoreAllMocks();
+    const s2 = realSetup();
+    const ch = buildChannel();
+    await s2.consumer.handleMessage(amqp(hinted(dest, 0)), ch);
+    expect(s2.repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.5m');
+    expect(s2.cmd).toHaveBeenCalledTimes(1); // R1: hoãn = 1 lệnh
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'));
+  });
 
   it('[BP:T6] (phần d) Redis thật: OPEN + gợi ý -> đúng 1 lệnh Redis, 0 truy vấn đọc, hoãn retry.1m; CLOSED -> gửi; HALF_OPEN -> probe giành + nhả sau khi thành công', async () => {
     await redis.set(k('failures'), '5');

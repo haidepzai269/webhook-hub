@@ -318,8 +318,8 @@ Mọi replay ghi `audit_logs` (ai, lúc nào, lý do).
 | Trạng thái | Điều kiện | Hành vi |
 |---|---|---|
 | `CLOSED` | bình thường | gửi |
-| `OPEN` | ≥ 5 lỗi phía đích (5xx/408/429/mạng) trong cửa sổ `:failures` | ngừng 60s (`:open` EX 60); message hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, trần 30 lần hoãn |
-| `HALF_OPEN` | `:open` hết hạn mà `failures ≥ 5` (trạng thái **suy ra**, không lưu) | đúng **1** probe (Lua `SET NX` có token); thành công → `CLOSED` (DEL 3 khoá), thất bại → `OPEN` lại; probe nhận 4xx → nhả probe, giữ `HALF_OPEN` |
+| `OPEN` | ≥ 5 lỗi phía đích (5xx/408/429/mạng) trong cửa sổ `:failures` | lần đầu ngừng 60s (`:open` EX 60); **probe thất bại → 300s** (`CIRCUIT_OPEN_MAX_SECONDS`, `:trips`+1; BP3, ADR-197). Message hoãn **tới hết OPEN** theo PTTL thật gate trả về: `q.delivery.retry.1m` hoặc `q.delivery.retry.5m`, không tăng `attemptCount`, trần **thời gian** `CIRCUIT_MAX_DEFER_MS`. `destinations.circuit_half_open_at` = lúc trip + TTL vừa đặt (câu "Thử lại lúc …" của cảnh báo, không gọi Redis) |
+| `HALF_OPEN` | `:open` hết hạn mà `failures ≥ 5` (trạng thái **suy ra**, không lưu; `:failures` sống tới `openSeconds + 120`) | đúng **1** probe (Lua `SET NX` có token); thành công → `CLOSED` (DEL 4 khoá: failures, open, probe, trips), thất bại → `OPEN` 300s; probe nhận 4xx → nhả probe, giữ `HALF_OPEN` |
 
 Redis chết → circuit breaker **fail-open** + log cảnh báo. 4xx khác không tính vào circuit (lỗi cấu hình của ta, đích vẫn sống).
 

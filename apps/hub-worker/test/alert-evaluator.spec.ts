@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { ALERT_REALTIME_CHANNEL } from '@hub/common';
+import { ALERT_REALTIME_CHANNEL, buildAlertText, createAlertTextT } from '@hub/common';
 import { AlertEvaluator } from '../src/scheduler/alert.evaluator';
 import { alertEvalErrors, alertTransitions, alertsOpen } from '../src/metrics';
 
@@ -33,7 +33,7 @@ function world() {
   const alerts: Row[] = [];
   const emails: { alertId: string; userId: string; kind: string }[] = [];
   const data = {
-    destinations: [{ id: DEST, isActive: true, archivedAt: null as Date | null, circuitState: 'CLOSED' }],
+    destinations: [{ id: DEST, isActive: true, archivedAt: null as Date | null, circuitState: 'CLOSED', circuitHalfOpenAt: null as Date | null }],
     attempts: [] as { destinationId: string; status: number | null; at: Date }[],
     dead: 0,
     fail: new Set<string>(),
@@ -318,6 +318,22 @@ describe('CB2 AlertEvaluator (đi dây, repo giả)', () => {
     w2.data.destinations[0].isActive = false;
     await ev2.evaluateOnce(at(2 * MIN));
     expect(auth(w2).map((a) => a.state)).toEqual(['RESOLVED', 'OPEN']);
+  });
+
+  it('[BP:T13] (phần c) circuit OPEN: evaluator truyền halfOpenAt (đọc từ DB, ghi lúc trip) -> facts + câu "Thử lại lúc …"; KHÔNG gọi Redis', async () => {
+    const w = world();
+    const redis = fakeRedis();
+    const ev = new AlertEvaluator(w.prisma, redis as any);
+    const halfOpenAt = new Date(NOW.getTime() + 300_000);
+    w.data.destinations[0].circuitState = 'OPEN';
+    w.data.destinations[0].circuitHalfOpenAt = halfOpenAt;
+    await ev.evaluateOnce(NOW);
+    const a = w.alerts.find((x) => x.rule === 'destination.circuit_open')!;
+    expect(a.facts).toMatchObject({ circuitState: 'OPEN', halfOpenAt: halfOpenAt.toISOString() });
+    const text = buildAlertText(a as any, createAlertTextT('vi'), { locale: 'vi', now: NOW.getTime(), timeZone: 'UTC' });
+    expect(text.message).toMatch(/thử lại lúc/i);
+    // Redis giả của evaluator CHỈ có publish/on/connect — đọc circuit từ Redis (get/eval/pttl) sẽ ném ngay.
+    expect(Object.keys(redis).sort()).toEqual(['connect', 'on', 'publish']);
   });
 
   it('ảnh chụp OPEN bị cắt + circuit HALF_OPEN -> đọc bù dòng OPEN thật, cảnh báo circuit_open GIỮ MỞ (không đóng nhầm, không email/publish)', async () => {

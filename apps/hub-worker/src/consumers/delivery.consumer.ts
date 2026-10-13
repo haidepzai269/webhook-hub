@@ -3,10 +3,10 @@ import { deliveriesTotal, deliveryDuration, deliveryHandleDuration, deliveryInfr
 import { classifyInfraError } from './infra-errors';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { Prisma } from '@prisma/client';
-import { CIRCUIT_OPEN_MS, CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
+import { CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
 import { SenderRegistry } from '../senders/sender.registry';
 import { SendResult } from '../senders/sender.interface';
-import { EXCHANGES, ROUTING_KEYS, circuitMaxDeferMs, getNextRetryQueue, retryQueueForDelay, retryTtlMs } from '@hub/messaging';
+import { EXCHANGES, ROUTING_KEYS, circuitDeferTier, circuitMaxDeferMs, getNextRetryQueue, retryQueueForDelay, retryTtlMs } from '@hub/messaging';
 import {
   logger,
   CircuitState,
@@ -26,9 +26,10 @@ import * as amqp from 'amqplib';
 import { performance } from 'perf_hooks';
 import Redis from 'ioredis';
 
-// S2-1: circuit OPEN chỉ mở 60s -> hoãn vào tầng NGẮN NHẤT có TTL >= 60s (q.delivery.retry.1m),
-// không phải tầng 2h như trước. Tính từ RETRY_TIERS theo giá trị TTL (topology một chỗ duy nhất).
-const CIRCUIT_DEFER = retryQueueForDelay(CIRCUIT_OPEN_MS);
+// BP3 (C4, ADR-197): hoãn vì circuit tới HẾT OPEN theo PTTL thật của `:open` mà gate trả về -> `circuitDeferTier(pttl)`
+// (@hub/messaging — cùng nguồn với cửa sổ retry): `retry.1m` (OPEN 60s) hoặc `retry.5m` (OPEN 300s). Không thêm queue.
+// Thua lease (không thuộc circuit): hoãn 1 phút để thử giành lại sau khi lease 60s hết.
+const LEASE_DEFER = retryQueueForDelay(60_000);
 // Throttle: phòng ngừa, giữ tầng ngắn nhất.
 const THROTTLE_DEFER = retryQueueForDelay(0);
 
@@ -210,21 +211,23 @@ export class DeliveryConsumer {
     state: CircuitState,
     d: ReturnType<typeof circuitDeferDecision>,
     log: Pick<typeof logger, 'warn'>,
+    openPttlMs?: number,
   ): Promise<void> {
     const now = Date.now();
+    const tier = circuitDeferTier(state === 'OPEN' ? openPttlMs : undefined);
     let writtenAt = headerEpoch(msg.properties.headers?.[DEFER_WRITTEN_AT_HEADER]);
     if (d.writeDb) {
-      const n = await repo.deferDelivery(deliveryId, new Date(now + CIRCUIT_DEFER.ttlMs)).catch(() => null);
+      const n = await repo.deferDelivery(deliveryId, new Date(now + tier.ttlMs)).catch(() => null);
       if (n !== null) writtenAt = now; // ghi lỗi -> lần sau thử ghi lại
     }
-    log.warn({ queue: CIRCUIT_DEFER.queueName, circuit: state, deferrals: d.deferrals, wroteDb: d.writeDb }, 'Circuit chưa cho gửi -> hoãn (DEFERRED)');
+    log.warn({ queue: tier.queueName, circuit: state, openPttlMs, deferrals: d.deferrals, wroteDb: d.writeDb }, 'Circuit chưa cho gửi -> hoãn (DEFERRED)');
     const headers: Record<string, unknown> = {
       ...msg.properties.headers,
       [CIRCUIT_DEFERRALS_HEADER]: d.deferrals,
       [CIRCUIT_DEFERRED_SINCE_HEADER]: d.since,
     };
     if (writtenAt !== null) headers[DEFER_WRITTEN_AT_HEADER] = writtenAt;
-    channel.sendToQueue(CIRCUIT_DEFER.queueName, slim(), { persistent: true, headers });
+    channel.sendToQueue(tier.queueName, slim(), { persistent: true, headers });
     channel.ack(msg);
   }
 
@@ -283,7 +286,7 @@ export class DeliveryConsumer {
         if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !probeToken)) {
           const d = circuitDeferDecision(msg.properties.headers, Date.now());
           if (!d.exceeded) {
-            await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log);
+            await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs);
             return;
           }
           // Quá trần thời gian -> phải nạp row để ghi một lần thử thất bại (nhánh chung bên dưới quyết định lại).
@@ -376,7 +379,7 @@ export class DeliveryConsumer {
       if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !isProbe)) {
         const d = circuitDeferDecision(msg.properties.headers, Date.now());
         if (!d.exceeded) {
-          await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log);
+          await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs);
           return;
         }
         const waitedMin = Math.round((Date.now() - d.since) / 60_000);
@@ -432,8 +435,8 @@ export class DeliveryConsumer {
           lease.attemptGeneration === deliveryMsg.attemptGeneration &&
           lease.attemptCount === attemptCount
         ) {
-          log.info({ messageId, queue: CIRCUIT_DEFER.queueName }, 'Lease DELIVERING còn hạn -> hoãn 1 phút rồi thử giành lại');
-          channel.sendToQueue(CIRCUIT_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          log.info({ messageId, queue: LEASE_DEFER.queueName }, 'Lease DELIVERING còn hạn -> hoãn 1 phút rồi thử giành lại');
+          channel.sendToQueue(LEASE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
           channel.ack(msg);
           return;
         }

@@ -238,6 +238,13 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     expect(await repo.updateDestinationCircuitState(dest.id, 'OPEN')).toBe(1);
     expect(await repo.updateDestinationCircuitState(dest.id, 'OPEN')).toBe(0);
     expect(await repo.updateDestinationCircuitState(dest.id, 'HALF_OPEN')).toBe(1);
+    // BP3 (C4): halfOpenAt ghi CÙNG UPDATE khi về OPEN; trạng thái khác -> NULL
+    const at = new Date(Date.now() + 300_000);
+    expect(await repo.updateDestinationCircuitState(dest.id, 'OPEN', at)).toBe(1);
+    expect((await prisma.destination.findUnique({ where: { id: dest.id } }))?.circuitHalfOpenAt?.getTime()).toBe(at.getTime());
+    expect((await repo.findAlertDestinations([dest.id])).find((d) => d.id === dest.id)?.circuitHalfOpenAt?.getTime()).toBe(at.getTime());
+    expect(await repo.updateDestinationCircuitState(dest.id, 'CLOSED')).toBe(1);
+    expect((await prisma.destination.findUnique({ where: { id: dest.id } }))?.circuitHalfOpenAt).toBeNull();
     await prisma.destination.delete({ where: { id: dest.id } });
   });
 });
