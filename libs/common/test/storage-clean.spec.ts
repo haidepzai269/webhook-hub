@@ -9,10 +9,12 @@ import {
   parseOlderThan,
   resolveStorageAutoCleanEnabled,
 } from '../src';
+import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
 
 /** QT4 (SPEC-han-muc-dung-luong §5.1–§5.5, ADR-184): hợp đồng thuần của lệnh dọn. */
 const NOW = Date.parse('2026-10-12T12:00:00Z');
-const FLOOR = 2.6 * 3_600_000; // ~ TOTAL_RETRY_WINDOW_MS (2h36m)
+// Sàn thật (BP2 C2: ≈ 5h38m40s) — import, không viết cứng, để test luôn phản ánh cửa sổ retry hiện hành.
+const FLOOR = TOTAL_RETRY_WINDOW_MS;
 
 describe('QT4: lệnh dọn — kiểm request (thuần)', () => {
   it('[QT:T9] (phần a) olderThan MỚI hơn sàn retry window -> lỗi field olderThan; đúng sàn trở lên thì nhận', () => {
@@ -21,9 +23,11 @@ describe('QT4: lệnh dọn — kiểm request (thuần)', () => {
     expect(tooNew).toMatchObject({ field: 'olderThan' });
     const iso = parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: new Date(NOW - 3_600_000).toISOString() }, FLOOR, NOW);
     expect(iso).toMatchObject({ field: 'olderThan' });
-    const ok = parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '3h' }, FLOOR, NOW);
+    // '3h' từng hợp lệ (sàn 2h38m); sau BP2 sàn ≈ 5h38m40s -> bị từ chối.
+    expect(parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '3h' }, FLOOR, NOW)).toMatchObject({ field: 'olderThan' });
+    const ok = parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '6h' }, FLOOR, NOW);
     expect(isCleanRequestError(ok)).toBe(false);
-    expect(ok).toMatchObject({ action: 'trim', importance: ['low'], sourceId: null, olderThan: { label: '3h', cutoff: new Date(NOW - 3 * 3_600_000), minAgeDays: 0 } });
+    expect(ok).toMatchObject({ action: 'trim', importance: ['low'], sourceId: null, olderThan: { label: '6h', cutoff: new Date(NOW - 6 * 3_600_000), minAgeDays: 0 } });
   });
 
   it('mức Cao cần confirmHigh: true; "Giữ" không bao giờ; mẫu từ chối (junk) chỉ Xoá hẳn; action/importance lạ -> lỗi đúng field', () => {

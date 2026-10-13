@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import { CIRCUIT_OPEN_MS, CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
 import { SenderRegistry } from '../senders/sender.registry';
 import { SendResult } from '../senders/sender.interface';
-import { EXCHANGES, ROUTING_KEYS, getNextRetryQueue, retryQueueForDelay, retryTtlMs } from '@hub/messaging';
+import { EXCHANGES, ROUTING_KEYS, circuitMaxDeferMs, getNextRetryQueue, retryQueueForDelay, retryTtlMs } from '@hub/messaging';
 import {
   logger,
   CircuitState,
@@ -36,7 +36,8 @@ const THROTTLE_DEFER = retryQueueForDelay(0);
  * Review SPEC-2 #4 (ADR-054): số lần hoãn LIÊN TIẾP vì circuit (OPEN / HALF_OPEN không giành được probe)
  * đếm trong header message. Không có trần thì một đích chết hẳn làm delivery quay vòng retry.1m mãi,
  * đốt Redis/DB. Vượt trần -> tính là MỘT lần thử thất bại (ghi attempt) và đi tầng retry kế tiếp như
- * lỗi retryable, cuối cùng thành DEAD. Mặc định 30 lần ≈ 30 phút (tầng 1m).
+ * lỗi retryable, cuối cùng thành DEAD. BP2 (ADR-196): trần nay tính theo THỜI GIAN (`x-circuit-deferred-since`,
+ * `CIRCUIT_MAX_DEFER_MS`); header đếm số lần giữ lại chỉ để quan sát.
  */
 export const CIRCUIT_DEFERRALS_HEADER = 'x-circuit-deferrals';
 /**
@@ -87,9 +88,54 @@ export function deadErrorHeader(err: unknown): string {
   return `${name}: ${message}`.slice(0, 200);
 }
 
-export function maxCircuitDeferrals(env: string | undefined = process.env.CIRCUIT_MAX_DEFERRALS): number {
-  const n = Number(env ?? 30);
-  return Number.isInteger(n) && n > 0 ? n : 30;
+/**
+ * BP2 §3.3 (ADR-196): trần hoãn vì circuit tính theo THỜI GIAN (`CIRCUIT_MAX_DEFER_MS`, @hub/messaging retry-window.ts), không
+ * theo số lần — OPEN dài 5 phút (BP3) thì "30 lần" thành 2,5 giờ. `x-circuit-deferred-since` (epoch ms) đặt ở lần hoãn đầu của
+ * MỘT lần thử, xoá khi lần thử thật diễn ra. Message cũ chỉ có `x-circuit-deferrals` (chưa có since) -> since = now.
+ * `x-circuit-deferrals` vẫn đếm để quan sát (log), không còn là trần.
+ */
+export const CIRCUIT_DEFERRED_SINCE_HEADER = 'x-circuit-deferred-since';
+/**
+ * BP2 §3.3 (F7): VẪN ghi `next_attempt_at` (sweeper dựa vào nó để biết PENDING/RETRYING nào đang hoãn hợp lệ — bỏ hẳn thì cứ
+ * 10 phút sweeper nhân bản message), nhưng THƯA: chỉ khi header chưa có hoặc đã cũ hơn 2 phút. Mốc = now + TTL tầng hoãn.
+ */
+export const DEFER_WRITTEN_AT_HEADER = 'x-defer-written-at';
+export const DEFER_WRITE_EVERY_MS = 120_000;
+
+function headerEpoch(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Quyết định thuần cho MỘT lần hoãn vì circuit (BP2 §3.3). */
+export function circuitDeferDecision(
+  headers: Record<string, unknown> | undefined,
+  now: number,
+  maxDeferMs: number = circuitMaxDeferMs(),
+): { since: number; exceeded: boolean; writeDb: boolean; deferrals: number } {
+  const since = headerEpoch(headers?.[CIRCUIT_DEFERRED_SINCE_HEADER]) ?? now;
+  const writtenAt = headerEpoch(headers?.[DEFER_WRITTEN_AT_HEADER]);
+  return {
+    since,
+    exceeded: now - since > maxDeferMs,
+    writeDb: writtenAt === null || now - writtenAt > DEFER_WRITE_EVERY_MS,
+    deferrals: (Number(headers?.[CIRCUIT_DEFERRALS_HEADER]) || 0) + 1,
+  };
+}
+
+/** Header cho lần thử MỚI (tầng retry kế): mọi bộ đếm/mốc "trong một lần thử" về 0 / bị xoá. */
+function freshAttemptHeaders(headers: Record<string, unknown> | undefined, attempt: number): Record<string, unknown> {
+  const h: Record<string, unknown> = {
+    ...headers,
+    'x-attempt': attempt,
+    [CIRCUIT_DEFERRALS_HEADER]: 0,
+    // BP1 review M1: bộ đếm lỗi hạ tầng/lỗi lạ cũng là "liên tiếp trong MỘT lần thử" -> về 0 như bộ đếm circuit.
+    [UNKNOWN_ERRORS_HEADER]: 0,
+    [INFRA_DEFERRALS_HEADER]: 0,
+  };
+  delete h[CIRCUIT_DEFERRED_SINCE_HEADER];
+  delete h[DEFER_WRITTEN_AT_HEADER];
+  return h;
 }
 
 /**
@@ -149,6 +195,37 @@ export class DeliveryConsumer {
     // Không để ioredis văng 'Unhandled error event' khi Redis chết (BB-2: Redis được phép sai).
     this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (delivery) lỗi'));
     this.redisPub.connect().catch(() => {});
+  }
+
+  /**
+   * Hoãn vì circuit (BP2 §3.3): KHÔNG phải một lần thử — giữ nguyên attemptCount. Ghi `next_attempt_at` THƯA (≤ 1 lần / 2 phút,
+   * F7: không bỏ hẳn), giữ `since` để trần tính theo thời gian, rồi republish + ack. Không cần row (dùng được trước khi nạp).
+   */
+  private async deferForCircuit(
+    msg: amqp.ConsumeMessage,
+    channel: amqp.Channel,
+    repo: Pick<TenantScopedRepository, 'deferDelivery'>,
+    deliveryId: string,
+    slim: () => Buffer,
+    state: CircuitState,
+    d: ReturnType<typeof circuitDeferDecision>,
+    log: Pick<typeof logger, 'warn'>,
+  ): Promise<void> {
+    const now = Date.now();
+    let writtenAt = headerEpoch(msg.properties.headers?.[DEFER_WRITTEN_AT_HEADER]);
+    if (d.writeDb) {
+      const n = await repo.deferDelivery(deliveryId, new Date(now + CIRCUIT_DEFER.ttlMs)).catch(() => null);
+      if (n !== null) writtenAt = now; // ghi lỗi -> lần sau thử ghi lại
+    }
+    log.warn({ queue: CIRCUIT_DEFER.queueName, circuit: state, deferrals: d.deferrals, wroteDb: d.writeDb }, 'Circuit chưa cho gửi -> hoãn (DEFERRED)');
+    const headers: Record<string, unknown> = {
+      ...msg.properties.headers,
+      [CIRCUIT_DEFERRALS_HEADER]: d.deferrals,
+      [CIRCUIT_DEFERRED_SINCE_HEADER]: d.since,
+    };
+    if (writtenAt !== null) headers[DEFER_WRITTEN_AT_HEADER] = writtenAt;
+    channel.sendToQueue(CIRCUIT_DEFER.queueName, slim(), { persistent: true, headers });
+    channel.ack(msg);
   }
 
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
@@ -245,22 +322,14 @@ export class DeliveryConsumer {
       /** Khác null = hoãn vì circuit đã quá trần -> ghi một lần thử thất bại thay vì gửi (ADR-054). */
       let circuitTimeout: string | null = null;
       if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !isProbe)) {
-        const deferrals = (Number(msg.properties.headers?.[CIRCUIT_DEFERRALS_HEADER]) || 0) + 1;
-        const maxDeferrals = maxCircuitDeferrals();
-        if (deferrals <= maxDeferrals) {
-          // Hoãn gửi, KHÔNG phải một lần thử: giữ nguyên attemptCount, chỉ tăng bộ đếm hoãn.
-          const nextAttemptAt = new Date(Date.now() + CIRCUIT_DEFER.ttlMs);
-          log.warn({ queue: CIRCUIT_DEFER.queueName, circuit: view.state, deferrals }, 'Circuit chưa cho gửi -> hoãn (DEFERRED)');
-          await repo.deferDelivery(deliveryId, nextAttemptAt).catch(() => 0);
-          channel.sendToQueue(CIRCUIT_DEFER.queueName, slim(), {
-            persistent: true,
-            headers: { ...msg.properties.headers, [CIRCUIT_DEFERRALS_HEADER]: deferrals },
-          });
-          channel.ack(msg);
+        const d = circuitDeferDecision(msg.properties.headers, Date.now());
+        if (!d.exceeded) {
+          await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log);
           return;
         }
-        circuitTimeout = `circuit ${view.state} quá lâu: đã hoãn ${maxDeferrals} lần liên tiếp -> tính là một lần thử thất bại`;
-        log.warn({ circuit: view.state, deferrals: maxDeferrals }, 'Circuit hoãn quá trần -> ghi một lần thử thất bại, đi tầng retry kế');
+        const waitedMin = Math.round((Date.now() - d.since) / 60_000);
+        circuitTimeout = `circuit ${view.state} quá lâu: đã hoãn ${waitedMin} phút (trần ${Math.round(circuitMaxDeferMs() / 60_000)} phút) -> tính là một lần thử thất bại`;
+        log.warn({ circuit: view.state, deferredSince: d.since, deferrals: d.deferrals }, 'Circuit hoãn quá trần thời gian -> ghi một lần thử thất bại, đi tầng retry kế');
       }
       const releaseProbe = () => (isProbe ? this.circuitBreaker.releaseProbe(destinationId, probeToken) : Promise.resolve());
 
@@ -447,15 +516,8 @@ export class DeliveryConsumer {
         });
         channel.sendToQueue(nextQueue, slim(currentAttemptNo), {
           persistent: true,
-          // Lần thử mới -> bộ đếm hoãn vì circuit bắt đầu lại từ 0.
-          // BP1 review M1: bộ đếm lỗi hạ tầng/lỗi lạ cũng là "liên tiếp trong MỘT lần thử" -> về 0 như bộ đếm circuit.
-          headers: {
-            ...msg.properties.headers,
-            'x-attempt': currentAttemptNo,
-            [CIRCUIT_DEFERRALS_HEADER]: 0,
-            [UNKNOWN_ERRORS_HEADER]: 0,
-            [INFRA_DEFERRALS_HEADER]: 0,
-          },
+          // Lần thử mới -> bộ đếm/mốc hoãn trong một lần thử bắt đầu lại (BP2: xoá `since`, `written-at`).
+          headers: freshAttemptHeaders(msg.properties.headers, currentAttemptNo),
         });
         channel.ack(msg);
         return;

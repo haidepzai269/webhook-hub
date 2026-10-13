@@ -6,7 +6,8 @@ jest.mock('ioredis', () => {
   }));
 });
 
-import { CIRCUIT_DEFERRALS_HEADER, DeliveryConsumer, countsTowardCircuit, maxCircuitDeferrals } from '../src/consumers/delivery.consumer';
+import { CIRCUIT_DEFERRALS_HEADER, CIRCUIT_DEFERRED_SINCE_HEADER, DEFER_WRITTEN_AT_HEADER, DeliveryConsumer, countsTowardCircuit } from '../src/consumers/delivery.consumer';
+import { CIRCUIT_MAX_DEFER_MS, circuitMaxDeferMs } from '@hub/messaging';
 import { SenderRegistry } from '../src/senders/sender.registry';
 import { Prisma } from '@prisma/client';
 import {
@@ -472,6 +473,15 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     m.properties.headers[CIRCUIT_DEFERRALS_HEADER] = n;
     return m;
   };
+  /** BP2: đã hoãn từ `agoMs` trước (trần tính theo thời gian). */
+  const deferredSince = (body: unknown, agoMs: number) => {
+    const m = toAmqpMsg(body);
+    m.properties.headers[CIRCUIT_DEFERRALS_HEADER] = 30;
+    m.properties.headers[CIRCUIT_DEFERRED_SINCE_HEADER] = Date.now() - agoMs;
+    m.properties.headers[DEFER_WRITTEN_AT_HEADER] = Date.now() - 30_000;
+    return m;
+  };
+  const OVER_CAP = CIRCUIT_MAX_DEFER_MS + 60_000;
 
   it('#4: mỗi lần hoãn +1 header x-circuit-deferrals (thiếu header = 0)', async () => {
     const { prisma } = buildFakePrisma();
@@ -485,7 +495,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(c2.sendToQueue.mock.calls[0][2].headers[CIRCUIT_DEFERRALS_HEADER]).toBe(8);
   });
 
-  it('#4: vượt trần (mặc định 30) -> ghi attempt "circuit OPEN quá lâu", RETRYING tầng kế theo attemptCount, KHÔNG gọi đích/không chạm circuit', async () => {
+  it('[BP:T9] (phần a) #4: vượt trần THỜI GIAN CIRCUIT_MAX_DEFER_MS -> ghi attempt "circuit OPEN quá lâu", RETRYING tầng kế theo attemptCount, xoá since, KHÔNG gọi đích/không chạm circuit', async () => {
     const { prisma, repo, tx } = buildFakePrisma();
     const cb = buildFakeCircuitBreaker('OPEN');
     const consumer = new DeliveryConsumer(prisma, cb);
@@ -493,7 +503,7 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: sendSpy } as any);
     const channel = buildChannel();
     const before = Date.now();
-    await consumer.handleMessage(withDeferrals(buildSlimMsg({ attemptCount: 1 }), 30), channel);
+    await consumer.handleMessage(deferredSince(buildSlimMsg({ attemptCount: 1 }), OVER_CAP), channel);
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(cb.recordFailure).not.toHaveBeenCalled();
@@ -510,6 +520,8 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(data.nextAttemptAt.getTime()).toBeLessThan(before + 120_000);
     const [, , opts] = channel.sendToQueue.mock.calls[0];
     expect(opts.headers[CIRCUIT_DEFERRALS_HEADER]).toBe(0); // lần thử mới -> đếm lại
+    expect(opts.headers).not.toHaveProperty(CIRCUIT_DEFERRED_SINCE_HEADER); // BP2: lần thử thật -> xoá since
+    expect(opts.headers).not.toHaveProperty(DEFER_WRITTEN_AT_HEADER);
     expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString())).toEqual(buildSlimMsg({ attemptCount: 2 }));
     expect(channel.ack).toHaveBeenCalledTimes(1);
   });
@@ -519,25 +531,27 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('OPEN'));
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn() } as any);
     const channel = buildChannel();
-    await consumer.handleMessage(withDeferrals(buildSlimMsg({ attemptCount: 5 }), 30), channel);
+    await consumer.handleMessage(deferredSince(buildSlimMsg({ attemptCount: 5 }), OVER_CAP), channel);
     const data = tx.delivery.updateMany.mock.calls[0][0].data;
     expect(data.status).toBe('DEAD');
     expect(data.lastError).toMatch(/circuit OPEN quá lâu/);
     expect(channel.publish).toHaveBeenCalledTimes(1);
   });
 
-  it('#4: trần cấu hình qua CIRCUIT_MAX_DEFERRALS; giá trị bậy -> 30', () => {
-    expect(maxCircuitDeferrals(undefined)).toBe(30);
-    expect(maxCircuitDeferrals('5')).toBe(5);
-    expect(maxCircuitDeferrals('0')).toBe(30);
-    expect(maxCircuitDeferrals('abc')).toBe(30);
+  it('[BP:T9] (phần b) CIRCUIT_MAX_DEFER_MS: mặc định 30 phút từ @hub/messaging; env chỉ KẸP THẤP HƠN (C2); bậy -> mặc định', () => {
+    expect(CIRCUIT_MAX_DEFER_MS).toBe(1_800_000);
+    expect(circuitMaxDeferMs(undefined)).toBe(CIRCUIT_MAX_DEFER_MS);
+    expect(circuitMaxDeferMs('600000')).toBe(600_000);
+    expect(circuitMaxDeferMs('99999999')).toBe(CIRCUIT_MAX_DEFER_MS); // cao hơn -> kẹp (sàn dọn QT không theo kịp)
+    expect(circuitMaxDeferMs('0')).toBe(CIRCUIT_MAX_DEFER_MS);
+    expect(circuitMaxDeferMs('abc')).toBe(CIRCUIT_MAX_DEFER_MS);
   });
 
-  it('#4: HALF_OPEN không giành được probe cũng đếm và cũng chịu trần', async () => {
+  it('#4: HALF_OPEN không giành được probe cũng đếm và cũng chịu trần (thời gian, BP2)', async () => {
     const { prisma, tx } = buildFakePrisma();
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('HALF_OPEN', { probe: false }));
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn() } as any);
-    await consumer.handleMessage(withDeferrals(buildSlimMsg(), 30), buildChannel());
+    await consumer.handleMessage(deferredSince(buildSlimMsg(), OVER_CAP), buildChannel());
     expect(tx.deliveryAttempt.create.mock.calls[0][0].data.error).toMatch(/circuit HALF_OPEN quá lâu/);
   });
 });

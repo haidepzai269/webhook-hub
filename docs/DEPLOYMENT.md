@@ -572,7 +572,7 @@ EDGE_TRUSTED_PROXIES=    # set_real_ip_from (CIDR). Lần bật đầu: 0.0.0.0/
 HOST=                    # không đặt tay: hub-all tự đặt 127.0.0.1 cho hub-api khi EDGE_NGINX=1
 METRICS_TICK_MS=5000
 NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE); hub-api KHÔNG đăng ký /mock/* (ADR-054)
-CIRCUIT_MAX_DEFERRALS=30 # hub-worker: trần số lần hoãn liên tiếp vì circuit (≈30 phút) rồi tính là một lần thử thất bại (ADR-054)
+CIRCUIT_MAX_DEFER_MS=1800000 # hub-worker: trần THỜI GIAN hoãn vì circuit cho một lần thử rồi tính là một lần thử thất bại (BP2, ADR-196; thay CIRCUIT_MAX_DEFERRALS). Chỉ đặt THẤP hơn mặc định
 METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub-worker :WORKER_METRICS_PORT/metrics đòi
                          # "Authorization: Bearer <token>" (review #6). Prometheus/scraper phải gửi token: trong
                          # prometheus.yml bỏ comment khối `authorization: {type: Bearer, credentials: ...}` ở cả 2 job

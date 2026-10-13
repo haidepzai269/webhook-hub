@@ -215,6 +215,19 @@ describeDb('Lease + sweeper (Postgres, S1-2)', () => {
     expect(await outboxFor(deferred)).toBe(0);
   });
 
+  it('[BP:T8] sweeper (SQL thật) KHÔNG quét delivery đang hoãn suốt 3 giờ với ghi thưa (mốc cũ nhất có thể = now − 2 phút); đối chứng: mốc cũ 11 phút thì bị quét', async () => {
+    // Ghi thưa BP2: ghi khi mốc ghi trước cũ hơn 2 phút, mốc = lúc ghi + TTL tầng hoãn (1m) -> tệ nhất next_attempt_at ≈ now − 2 phút.
+    const pending = await mkDelivery(15, 180, 'PENDING', { nextAttemptMinutesFromNow: -2 });
+    const retrying = await mkDelivery(16, 180, 'RETRYING', { attemptCount: 2, nextAttemptMinutesFromNow: -2 });
+    const stalePending = await mkDelivery(17, 180, 'PENDING', { nextAttemptMinutesFromNow: -11 });
+    const staleRetrying = await mkDelivery(18, 180, 'RETRYING', { attemptCount: 2, nextAttemptMinutesFromNow: -6 });
+    await prisma.$executeRaw(buildSweepSql(10 * 60_000, 10_000, 5 * 60_000));
+    expect(await outboxFor(pending)).toBe(0);
+    expect(await outboxFor(retrying)).toBe(0);
+    expect(await outboxFor(stalePending)).toBe(1);
+    expect(await outboxFor(staleRetrying)).toBe(1);
+  });
+
   it('updateDestinationCircuitState: chỉ đổi khi khác giá trị (1 rồi 0); tenant khác = 0', async () => {
     const dest = await prisma.destination.create({
       data: { tenantId: tenant, name: `circuit-${runId}`, type: 'webhook', configEncrypted: 'x' },
