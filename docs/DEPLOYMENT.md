@@ -295,6 +295,43 @@ Connection string của Shop: `postgresql://shop_user:<pw>@<ep>-pooler.<region>.
   - → Job `cleanup` phải chạy thật: xoá `raw_events` + `delivery_attempts` + `processed_messages` cũ hơn N ngày.
 - **Neon branching**: nhánh `dev` riêng cho phát triển, `main` cho production. Rẻ, và là một đoạn hay trong báo cáo.
 
+### 4.3. Hạn mức dung lượng theo project (QT, SPEC-han-muc-dung-luong, ADR-182..187, 189, 190)
+
+Ổ Neon free (~0,5GB) dùng chung cho mọi project. Mỗi project có hạn mức `PROJECT_STORAGE_QUOTA_MB` (mặc định 50, operator
+ghi đè ở trang Dự án); tổng hạn mức được **cấp vượt** (10 × 50MB ≈ cả ổ) nên có thêm chốt toàn cục `DB_DISK_BUDGET_MB × 80%`.
+Nấc: 70 / 85 / 95 cảnh báo (email owner + operator, banner, webhook `hub.project.storage`), 100% `LOCKED` (507 cho source
+thường), 110% `HARD_LOCKED` (507 cả source "Giữ lâu"). Số liệu là **ước tính** (cộng dồn byte qua bộ gộp EG4, hiệu chỉnh
+bằng quét thật mỗi 24h).
+
+**Hai cờ an toàn — mặc định 0 ở production (E5).** Deploy tự động có thể chạy ban đêm; không được để nó tự khoá project thật
+hay tự xoá dữ liệu thật trước khi Admin kiểm số đo trên dữ liệu thật. Cờ đọc MỘT lần lúc khởi động (đổi = đổi env + restart,
+tắt lại là rollback tức thì). Đặt `STORAGE_LOCK_ENABLED` giống nhau ở hub-api VÀ hub-worker (worker dùng nó để câu email /
+webhook `lockEnabled` nói thật).
+
+| Cờ = 0 | Hệ thống vẫn làm | Không làm |
+|---|---|---|
+| `STORAGE_LOCK_ENABLED` | đo, đổi nấc, alert, email, webhook, banner ("Khoá chưa bật…, sự kiện vẫn được nhận"); đếm `hub_ingest_storage_would_reject_total` | trả 507 |
+| `STORAGE_AUTO_CLEAN_ENABLED` | seed policy mặc định (Rác xoá 1 ngày, Thấp dọn 3 ngày), hiện trên console "Đã cài, chưa chạy"; dọn tay vẫn chạy | dọn tự động |
+
+**Checklist bật** (ghi ngày bật từng cờ vào bảng dưới):
+1. Deploy với cả hai cờ = 0.
+2. Chờ ≥ 24h để có ít nhất một lượt hiệu chỉnh. Log `Storage: hiệu chỉnh (quét thật)` có `driftPct` = (cộng dồn − quét thật) / quét
+   thật. |driftPct| > 20% thì CHƯA bật — xem lại `bloat_factor`.
+3. Xem danh sách project ≥ 95% (cột "Mức sử dụng" ở trang Dự án của operator). Owner đã nhận email chưa (`hub.alert_emails`)?
+4. Bật `STORAGE_LOCK_ENABLED=1` (hub-api + hub-worker). Theo dõi `hub_ingest_storage_rejected_total`.
+5. Xem policy dọn tự động của từng project thật (trang Dung lượng), rồi bật `STORAGE_AUTO_CLEAN_ENABLED=1`.
+6. Ghi ngày bật:
+
+| Cờ | Ngày bật | Người bật |
+|---|---|---|
+| `STORAGE_LOCK_ENABLED` | — | — |
+| `STORAGE_AUTO_CLEAN_ENABLED` | — | — |
+
+**Chi phí Redis của StorageJob** (không nằm trên đường nóng — `redis-budget.spec.ts` không đổi): 1 `SET NX EX` mỗi nhịp nấc
+(60s) + 1 `SET NX EX` mỗi nhịp kiểm hiệu chỉnh (≤ 1h) **mỗi instance worker** ≈ 1.440 + 24 lệnh/ngày/instance. Đổi nấc
+dung lượng PUBLISH `hub:realtime:alerts` (hiếm, dùng chung kết nối của AlertEvaluator). Email/webhook đi Postgres (outbox),
+0 lệnh Redis. Đường ingest: +0 lệnh Redis, +0 lượt DB (khoá đọc `level` trong chính câu nạp source).
+
 ---
 
 ## 5. Upstash (Redis)
@@ -559,6 +596,14 @@ EDGE_PENALTY_MAX_ENTRIES=50000 # trần số khoá trong bộ nhớ (LRU, khoá 
 TRAFFIC_FLUSH_MS=60000   # hub-api (EG4, ADR-179): nhịp đẩy lưu lượng theo source từ bộ nhớ xuống Postgres, kẹp 5000–600000.
                          # Ghi lỗi -> giữ tối đa 10 phút dữ liệu rồi bỏ phần cũ (metric hub_traffic_flush_dropped_total)
 TRAFFIC_RETENTION_DAYS=7 # hub-worker: cleanup xoá hub.source_traffic_minutely cũ hơn N ngày, kẹp 1–90
+# --- Hạn mức dung lượng theo project (QT, ADR-182..187, 189, 190) — xem §4.3 ---
+PROJECT_STORAGE_QUOTA_MB=50       # hub-api + hub-worker: hạn mức mặc định mỗi project (operator ghi đè từng project ở console)
+DB_DISK_BUDGET_MB=512             # hub-worker: ngân sách ổ Postgres chung; > 80% -> cảnh báo operator hub.storage_near_full
+STORAGE_LEVEL_INTERVAL_MS=60000   # hub-worker: nhịp cập nhật nấc (một truy vấn gộp xuyên project)
+STORAGE_RECALIBRATE_INTERVAL_MS=86400000 # hub-worker: nhịp hiệu chỉnh (quét thật từng project)
+STORAGE_LOCK_ENABLED=0            # hub-api + hub-worker: 1 = trả 507 khi LOCKED/HARD_LOCKED. MẶC ĐỊNH 0 ở production (E5)
+STORAGE_AUTO_CLEAN_ENABLED=0      # hub-worker (+ hub-api cho câu console): 1 = chạy dọn tự động theo policy. MẶC ĐỊNH 0 (E5)
+SOURCE_LIMIT_PER_PROJECT=20       # hub-api: trần source chưa lưu trữ mỗi project (operator miễn), 409 source_limit
 DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078); đổi phải restart worker
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần
                          # WEB_PUBLIC_URL (gốc deep link trong thư) + MAIL_DRIVER/MAIL_FROM/GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN

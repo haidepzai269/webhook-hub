@@ -106,8 +106,11 @@ curl -si -X PATCH "$API/api/v1/projects/$PID/members/$UID" -b cookies.txt -H "x-
 ## operator_required
 
 **403 (console).** Chỉ **người vận hành hub** (`users.is_operator`) mới gọi được: cảnh báo `/api/v1/alerts*` và tuỳ chọn
-cảnh báo `/api/v1/me/alert-preferences` (SPEC-canh-bao-nhan-dinh §5.2, ADR-169). Owner của project vẫn nhận mã này.
-**Sửa:** đăng nhập bằng tài khoản operator, hoặc nhờ admin của hub.
+cảnh báo `/api/v1/me/alert-preferences` (SPEC-canh-bao-nhan-dinh §5.2, ADR-169), "Đã xem" (`/alerts/:id/ack`, `ack-all`) và
+ghi đè hạn mức `PUT /api/v1/projects/:id/storage-quota` (ADR-191). Từ QT6 (ADR-190) **owner** đọc được `GET /api/v1/alerts`,
+`/alerts/summary` — nhưng chỉ cảnh báo dung lượng (`project.storage_*`) của project mình là owner; developer/viewer (không
+owner project nào) vẫn nhận mã này.
+**Sửa:** đăng nhập bằng tài khoản operator, hoặc nhờ admin của hub. Owner tắt email 70%/85% ở trang Dung lượng.
 ```bash
 curl -si "$API/api/v1/alerts" -b cookies-cua-owner.txt
 ```
@@ -292,7 +295,8 @@ tới 110%; ở `HARD_LOCKED` (≥ 110%) mọi source đều bị từ chối. K
 Event đã lưu vẫn được giao; polling, console và dọn dẹp vẫn chạy. Trả trước khi verify chữ ký nên không tốn HMAC/Redis.
 Chỉ xảy ra khi người vận hành bật `STORAGE_LOCK_ENABLED=1`.
 **Sửa:** vào trang Dung lượng của project: áp dụng gợi ý dọn, hoặc dọn / xoá hẳn event cũ; project mở khoá khi dưới 90%.
-Hoặc nhờ người vận hành tăng hạn mức.
+Hoặc nhờ người vận hành tăng hạn mức (`PUT /api/v1/projects/:id/storage-quota`, chỉ operator). Trước khi khoá, owner đã nhận
+email ở 70/85/95% và webhook `hub.project.storage` mỗi lần đổi nấc.
 ```bash
 curl -si -X POST $API/hooks/github/$SOURCE_KEY -H 'content-type: application/json' -d '{}'
 ```

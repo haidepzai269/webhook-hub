@@ -2038,3 +2038,25 @@ Cũng trong review này: **L1** ghi tiến độ lệnh dọn chỉ khi `status=
 - Lên lại cùng nấc trong CÙNG ngày không có thư thứ hai (tag theo ngày) — chống bão thư khi trạng thái dao động quanh vùng đệm.
 - `hub.storage_near_full` gắn chip project gốc trong chuông dù không thuộc project nào; xoá project gốc thì alert đi theo CASCADE và lượt chốt sau mở lại ở project kế.
 - Owner nhận email theo trần chung 6/giờ/người với mọi cảnh báo khác của họ.
+
+## ADR-191 — Console dung lượng: banner theo nấc của dự án đang chọn, operator ghi đè hạn mức qua route riêng, event đã Dọn không hứa Replay (QT7, 2026-10-13)
+
+**Vấn đề:** spec §9 cần banner theo nấc (70 vàng, 85 toast, 95 đỏ, LOCKED hai nút), cột mức sử dụng + ô ghi đè hạn mức cho
+operator, và giao diện không được hứa điều server từ chối (Replay event đã dọn -> 409, "Nâng cấp" khi chưa có gói trả phí).
+Banner cảnh báo CB chỉ hiện critical MỚI đến trong phiên và chỉ cho người thấy cảnh báo — developer của project đang LOCKED
+không thấy gì.
+**Chọn:**
+- `StorageBanner` riêng ở layout, đọc `GET …/storage` của dự án đang chọn (mọi thành viên có `storage:read`); quyết định là hàm
+  thuần `storageBannerFor(level, lockEnabled)` — cờ khoá tắt thì câu chính là "Khoá chưa bật…, sự kiện vẫn được nhận". 70/85
+  ẩn được trong phiên (sessionStorage), 85 toast một lần mỗi phiên, 95/LOCKED không tắt. Không có nút "Nâng cấp"; "Liên hệ
+  người vận hành" chỉ là câu giải thích.
+- Operator: `GET /api/v1/projects` thêm `usage` (escape hatch có tên `operatorProjectUsage`, chỉ số gộp); `PUT
+  /api/v1/projects/:id/storage-quota` (OperatorGuard, 1–102400 | null, audit `project.storage_quota_changed` cùng transaction).
+  Nấc tính lại ở lượt 60s kế tiếp.
+- Hành trình event: server bỏ hành động `replay_delivery` khi `events.trimmed_at` có (`withoutReplayWhenTrimmed`) và trả
+  `trimmedAt`; trang chi tiết ẩn nút Replay, hiện "Nội dung đã được dọn ngày X".
+- Gợi ý: bấm ĐÚNG hành động hub gợi ý -> `apply` (idempotent, tính lại khi gọi); hành động kia -> lệnh dọn tay cùng tham số.
+**Đánh đổi:**
+- Có thể thấy hai dải cùng lúc (banner CB critical vừa đến + banner dung lượng) trong vài giây đầu — chấp nhận, CB tự thu lại khi "Đã xem"/đóng.
+- Banner đọc overview mỗi lần đổi dự án (staleTime 30s): thêm một GET nhẹ; viewer nhận 403 và không thấy banner.
+- Đổi hạn mức không đổi nấc tức thì (≤ 60s) — tránh thêm đường ghi nấc thứ ba ngoài job đo và lô dọn.

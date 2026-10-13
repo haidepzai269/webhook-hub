@@ -1004,6 +1004,31 @@ Console có hai nút "một bước" thay cho làm tay ở hai đầu:
 
 Đảo 1 và 2 thì provider gọi vào source chưa tồn tại (probe P-KN2 làm `[KN:U8]` đỏ). Credentials provider **được lưu** (`source_connections.credentials_encrypted`, AES-256-GCM `MASTER_KEY`, RLS + FORCE, chỉ ghi — không route nào trả, audit/log chỉ tên trường, nút "Xoá credentials"); an toàn ngang `MASTER_KEY` (ADR-138). Base URL provider tường minh (`connectorBaseUrl(spec)`): production luôn URL cứng; `*_FAKE_BASE_URL` chỉ ngoài production (production có → không khởi động). `HUB_PUBLIC_URL` localhost / IP nội bộ → 422 `public_url_required`, không gọi provider. PayOS chỉ một URL/kênh → bắt buộc `acknowledgeOverwrite: true`; request kiểm tra của PayOS (bộ mẫu cố định của tài liệu: `orderCode 123` + `description "VQRIO123"` + `reference "TF230204212323"`, khớp đủ cả ba, sau verify) → `payos.webhook_test`, `normalized:false`, `probe:true` (KQ1, ADR-159). Cột `events.probe`: lõi LƯU event (console thấy) nhưng KHÔNG định tuyến (0 delivery, kể cả subscription `*`) và polling KHÔNG trả; chỉ adapter đặt cờ, lõi không hỏi provider.
 
+## 20. Cô lập tài nguyên — hạn mức dung lượng theo project (QT, ADR-182..187, 189, 190)
+
+Cô lập **dữ liệu** (A không đọc được B) đã có ba lớp: `TenantScopedRepository`, RLS `FORCE` (role `hub_app NOBYPASSRLS`),
+test `rls-db.spec.ts`. Cô lập **tài nguyên** (noisy neighbor: một project lấp đầy ổ chung thì INSERT của mọi project lỗi)
+là lớp thứ tư:
+
+| Lớp | Chặn gì | Ở đâu |
+|---|---|---|
+| Rate limit theo source (EG3) + hộp phạt (EG2) | tốc độ | đường nóng ingest, 1 `EVAL` |
+| Trần `SOURCE_LIMIT_PER_PROJECT=20` (QT9) | N × 100 req/phút | tạo source, khoá đếm trong transaction |
+| Hạn mức dung lượng (QT1–QT7) | ổ Postgres chung | đo trong worker, khoá chiều ghi ở bước 2q |
+| Chốt toàn cục `DB_DISK_BUDGET_MB × 80%` | cấp vượt hạn mức | cảnh báo operator `hub.storage_near_full` |
+
+- **Đo** (ADR-183): ingest cộng `rawBody.length` vào bộ gộp lưu lượng EG4 (+0 DB, +0 Redis); worker tính
+  `used = mốc + bloat_factor × Σ byte sau mốc − đã giải phóng` mỗi 60s (một truy vấn gộp), hiệu chỉnh bằng quét thật mỗi 24h.
+- **Khoá** chỉ chiều ghi mới (507 `project_storage_full` ở bước 2q, trước verify/rate limit; ADR-182/189): giao event đã
+  COMMIT, polling, dọn luôn chạy. Source "Giữ lâu" (cờ user tự gắn — hub không đoán nghiệp vụ, BB-1) còn nhận tới 110%.
+- **Lối thoát** (ADR-184/186/187): "Dọn" (bỏ nội dung, giữ dòng gầy — BB-2 còn) hoặc "Xoá hẳn" (mất chống trùng); mức quan
+  trọng là hàm thuần trên tín hiệu chung (trạng thái giao, tuổi, cờ user); gợi ý qua interface `CleanupAdvisor` với hàng rào
+  an toàn nằm ngoài advisor; dọn tự động theo policy user đặt. `audit_logs` không bao giờ bị dọn.
+- **Cảnh báo** (ADR-190): luật `project.storage_*` có `audience: owners+operator` — owner thấy ở chuông/banner/trang Cảnh báo
+  của project mình, nhận email theo nấc; webhook `hub.project.storage` qua outbox như mọi event (vẫn phát khi LOCKED).
+- **Cờ an toàn** (E5): `STORAGE_LOCK_ENABLED` / `STORAGE_AUTO_CLEAN_ENABLED` mặc định 0 ở production — checklist bật ở
+  `DEPLOYMENT.md` §4.3.
+
 ## Tham khảo
 
 PayOS https://payos.vn/docs · SePay https://developer.sepay.vn · SePay Test Mode https://docs.sepay.vn/test-mode.html · GitHub Webhooks https://docs.github.com/en/webhooks · Standard Webhooks https://www.standardwebhooks.com · CloudEvents https://cloudevents.io · RabbitMQ DLX https://www.rabbitmq.com/docs/dlx · Transactional Outbox https://microservices.io/patterns/data/transactional-outbox.html
