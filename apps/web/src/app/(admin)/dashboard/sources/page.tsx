@@ -4,7 +4,7 @@ import { createContext, useContext, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Activity, Ear, Link2, Plug, Plus } from "lucide-react";
-import { type Control, Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -31,10 +31,11 @@ import {
   buildGenericConfig,
   GENERIC_SCHEMES,
   type GenericFormIssue,
-  type GenericFormValues,
   genericFormIssues,
   HMAC_ALGO_CHOICES,
   KEY_ENCODING_CHOICES,
+  SECRET_MAX,
+  SECRET_MIN,
   TOKEN_LOCATION_CHOICES,
 } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
@@ -43,7 +44,7 @@ import { useLocale, useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
-import { GenericFields } from "./generic-fields";
+import { GenericFields, type SourceFormValues } from "./generic-fields";
 import { ListenSheet } from "./listen-sheet";
 import { TrafficSheet } from "./traffic-sheet";
 
@@ -116,6 +117,7 @@ const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
   "secret-hex": "page.sources.generic.secret-hex",
   "secret-base64": "page.sources.generic.secret-base64",
   "secret-basic": "page.sources.generic.secret-basic",
+  "secret-query": "page.sources.generic.secret-query",
 };
 
 /**
@@ -128,7 +130,7 @@ const makeSchema = (t: TranslateFn) =>
     .object({
       provider: z.enum(PROVIDERS),
       name: z.string().trim().min(1, t("page.sources.form.name-required")).max(255),
-      secret: z.string().min(8, t("page.sources.form.secret-min")),
+      secret: z.string().min(SECRET_MIN, t("page.sources.form.secret-min")).max(SECRET_MAX, t("page.sources.form.secret-max")),
       scheme: z.enum(GENERIC_SCHEMES),
       header: z.string(),
       encoding: z.enum(["hex", "base64"]),
@@ -148,6 +150,13 @@ const makeSchema = (t: TranslateFn) =>
       }
     });
 type Values = z.infer<ReturnType<typeof makeSchema>>;
+/**
+ * Review PK2 T-7: form = đúng `SourceFormValues` (khuôn mà `GenericFields` nhận) — lệch một trường là tsc đỏ ở đây, không còn
+ * ép kiểu `as unknown as Control<…>`.
+ */
+type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const _formShape: SameShape<Values, SourceFormValues> = true;
+void _formShape;
 
 const fullUrl = (s: Source) => `${HUB_API_URL}${s.webhookUrl}`;
 
@@ -438,7 +447,7 @@ export default function SourcesPage() {
                 </Field>
               )}
             />
-            {provider === "generic" && <GenericFields control={form.control as unknown as Control<GenericFormValues>} scheme={scheme} />}
+            {provider === "generic" && <GenericFields control={form.control} scheme={scheme} />}
           </FieldGroup>
         </form>
       </FormDialog>

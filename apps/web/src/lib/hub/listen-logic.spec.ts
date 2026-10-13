@@ -19,6 +19,8 @@ import {
   listenRefetchInterval,
   playgroundSources,
   RESERVED_NAMESPACES,
+  SECRET_MAX,
+  SECRET_MIN,
   TOKEN_LOCATION_CHOICES,
 } from "./listen-logic";
 
@@ -221,6 +223,14 @@ describe("PK2: form tay — tham số hmac + vị trí token, cùng luật serve
       [{ ...FORM, scheme: "static-token", location: "query", param: "a b" }, "tok-123456"],
       [{ ...FORM, scheme: "static-token", location: "query", param: "hub.verify_token" }, "tok-123456"],
       [{ ...FORM, eventType: "payment.received" }, "utf8-secret-123"],
+      // Review PK2 T-4/T-5/T-6.
+      [{ ...FORM, keyEncoding: "base64" }, "AAAAAB=="],
+      [{ ...FORM, keyEncoding: "base64" }, "AAAAAA=="],
+      [{ ...FORM, keyEncoding: "base64" }, KEY.toString("base64").replace(/=+$/, "")],
+      [{ ...FORM, scheme: "static-token", location: "query", param: "token" }, "abc+def/ghi="],
+      [{ ...FORM, scheme: "static-token", location: "query", param: "token" }, "A.b_c~d-9"],
+      [{ ...FORM, algo: "sha256", prefix: "<algo>=" }, "utf8-secret-123"],
+      [{ ...FORM, algo: "sha1", prefix: "<algo>=" }, "utf8-secret-123"],
     ];
     for (const [f, secret] of cases) {
       const client = genericFormIssues(f, secret).length > 0;
@@ -231,5 +241,19 @@ describe("PK2: form tay — tham số hmac + vị trí token, cùng luật serve
 
   it("diagnosisParts: tham số query hiện là ?tên (không giá trị)", () => {
     expect(diagnosisParts({ ok: false, reason: "token_mismatch", expectedQueryParam: "token" })).toEqual({ reason: "token_mismatch", name: "?token", candidates: [] });
+  });
+});
+
+describe("review PK2: T-6 form khớp server", () => {
+  it("gõ tay tiền tố `<algo>=` -> không gửi algo (server nhận), như chọn 'Đọc từ tiền tố'", () => {
+    const built = buildGenericConfig({ ...FORM, algo: "sha256", prefix: ALGO_IN_PREFIX });
+    expect(built).toMatchObject({ prefix: ALGO_IN_PREFIX });
+    expect(built).not.toHaveProperty("algo");
+    expect(validateGenericConfig(built).ok).toBe(true);
+    expect(built).toEqual(buildGenericConfig({ ...FORM, algo: "from-prefix" }));
+  });
+
+  it("độ dài khoá bí mật client = server (8–512)", () => {
+    expect([SECRET_MIN, SECRET_MAX]).toEqual([8, 512]);
   });
 });

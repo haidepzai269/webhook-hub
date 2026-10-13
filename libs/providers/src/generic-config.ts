@@ -22,6 +22,11 @@ export interface GenericConfig {
   prefix?: string;
   /** PK2: chỉ scheme `hmac` (bí danh cũ luôn sha256). Vắng khi `prefix` là `"<algo>="`. */
   algo?: HmacAlgo;
+  /**
+   * Review PK2 T-3: tập thuật toán nhận được khi `prefix` là `"<algo>="`. Vắng = `DEFAULT_PREFIX_ALGOS` (sha256, sha512) —
+   * sha1 phải khai rõ (WebSub). Kẻ gửi không hạ được xuống thuật toán ngoài tập.
+   */
+  algos?: HmacAlgo[];
   /** PK2: chỉ scheme `hmac` — secret giải mã thế nào trước khi làm khoá HMAC. */
   keyEncoding?: KeyEncoding;
   /** PK2: chỉ `static-token`; vắng = header (khuôn cũ). */
@@ -47,6 +52,8 @@ const SCHEMES_WITH_ENCODING: readonly GenericScheme[] = [PARAM_SCHEME, LEGACY_SC
 const ENCODINGS = ['hex', 'base64'];
 /** PK2: tập thuật toán. sha1 là ngoại lệ có chủ đích (provider quy định: Vercel, Intercom, Trello, WebSub), ADR-203. */
 export const HMAC_ALGOS: readonly HmacAlgo[] = ['sha1', 'sha256', 'sha512'];
+/** Review PK2 T-3: tập mặc định của `"<algo>="` khi config không khai `algos` (gồm config đã lưu trước bản này). */
+export const DEFAULT_PREFIX_ALGOS: readonly HmacAlgo[] = ['sha256', 'sha512'];
 export const KEY_ENCODINGS: readonly KeyEncoding[] = ['utf8', 'hex', 'base64'];
 export const TOKEN_LOCATIONS: readonly TokenLocation[] = ['header', 'basic', 'query'];
 /** PK2: giá trị `prefix` đặc biệt — chữ ký dạng `<algo>=<sig>` (Bitbucket, Jira, WebSub), thuật toán chỉ nhận trong `HMAC_ALGOS`. */
@@ -74,6 +81,8 @@ export interface HmacParams {
   keyEncoding: KeyEncoding;
   /** Tiền tố tĩnh (không có khi đọc thuật toán từ tiền tố). */
   prefix?: string;
+  /** Review PK2 T-3: chỉ khi `algo: null` — thuật toán tiền tố được nhận. */
+  algos?: readonly HmacAlgo[];
 }
 
 /** Config là một mẫu HMAC (`hmac` hoặc bí danh cũ `hmac-sha256`). */
@@ -86,7 +95,7 @@ export const isHmacScheme = (c: Pick<GenericConfig, 'scheme'>): boolean => SCHEM
 export function hmacParams(c: GenericConfig): HmacParams {
   const encoding = c.encoding ?? 'hex';
   if (c.scheme === LEGACY_SCHEME) return { algo: 'sha256', encoding, keyEncoding: 'utf8', ...(c.prefix !== undefined ? { prefix: c.prefix } : {}) };
-  if (c.prefix === ALGO_IN_PREFIX) return { algo: null, encoding, keyEncoding: c.keyEncoding ?? 'utf8' };
+  if (c.prefix === ALGO_IN_PREFIX) return { algo: null, encoding, keyEncoding: c.keyEncoding ?? 'utf8', algos: c.algos ?? DEFAULT_PREFIX_ALGOS };
   return { algo: c.algo ?? 'sha256', encoding, keyEncoding: c.keyEncoding ?? 'utf8', ...(c.prefix !== undefined ? { prefix: c.prefix } : {}) };
 }
 
@@ -96,6 +105,8 @@ const B64_KEY_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}
 /**
  * PK2: khoá HMAC từ secret theo `keyEncoding`. Sai khuôn (hex lẻ / ký tự lạ, base64 hỏng) -> null: KHÔNG giải mã
  * "lỏng" (Buffer.from bỏ qua ký tự lạ — hai secret khác nhau thành cùng một khoá). Rỗng -> null.
+ * Review PK2 T-4: base64 còn phải KHỨ HỒI (mã hoá lại ra đúng chuỗi, bỏ qua `=`): `AB==` và `AA==` cùng ra byte 0x00 —
+ * bit thừa khác 0 bị từ chối, nên mỗi khoá chỉ có một cách viết.
  */
 export function decodeHmacKey(secret: string, keyEncoding: KeyEncoding): Buffer | null {
   if (typeof secret !== 'string' || secret.length === 0) return null;
@@ -103,6 +114,7 @@ export function decodeHmacKey(secret: string, keyEncoding: KeyEncoding): Buffer 
   if (keyEncoding === 'hex') return HEX_KEY_RE.test(secret) ? Buffer.from(secret, 'hex') : null;
   if (!B64_KEY_RE.test(secret)) return null;
   const key = Buffer.from(secret, 'base64');
+  if (key.toString('base64').replace(/=+$/, '') !== secret.replace(/=+$/, '')) return null;
   return key.length > 0 ? key : null;
 }
 
@@ -117,10 +129,20 @@ export function secretProblem(c: GenericConfig, secret: string): string | null {
   if (c.scheme === 'static-token' && c.location === 'basic' && !secret.includes(':')) {
     return 'basic: secret là "user:pass" (có dấu hai chấm)';
   }
+  // Review PK2 T-5: query giải mã `+` thành dấu cách, `%xx` thành byte — token chứa ký tự cần mã hoá sẽ 401 mãi.
+  if (c.scheme === 'static-token' && c.location === 'query' && !QUERY_TOKEN_RE.test(secret)) {
+    return 'query: token chỉ gồm A-Z a-z 0-9 . _ ~ - (không cần mã hoá URL); có + / = & # % thì dùng tiêu đề hoặc Basic';
+  }
   return null;
 }
 
+/** Review PK2 T-5: ký tự không cần mã hoá URL (RFC 3986 unreserved). */
+export const QUERY_TOKEN_RE = /^[A-Za-z0-9._~-]+$/;
+
 const bad = (field: string, message: string): ConfigCheck => ({ ok: false, field, message });
+const isAlgo = (x: unknown): boolean => (HMAC_ALGOS as readonly unknown[]).includes(x);
+/** T-3: mảng thuật toán khác rỗng, không trùng, mỗi phần tử trong tập. */
+const isAlgoList = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every(isAlgo) && new Set(v).size === v.length;
 const isObj = (v: unknown): v is Record<string, any> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 export function validateGenericConfig(input: unknown): ConfigCheck {
@@ -164,6 +186,11 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
     if (!isParam) return bad('algo', 'algo chỉ cho scheme hmac (hmac-sha256 luôn là sha256)');
     if (c.prefix === ALGO_IN_PREFIX) return bad('algo', 'prefix "<algo>=" đọc thuật toán từ chữ ký — bỏ trường algo');
     if (!HMAC_ALGOS.includes(c.algo)) return bad('algo', `algo là một trong ${HMAC_ALGOS.join(', ')}`);
+  }
+  // Review PK2 T-3: tập thuật toán của "<algo>=" (vắng = sha256 + sha512; sha1 phải khai rõ).
+  if (c.algos !== undefined) {
+    if (!isParam || c.prefix !== ALGO_IN_PREFIX) return bad('algos', 'algos chỉ dùng khi prefix là "<algo>=" (thuật toán đọc từ chữ ký)');
+    if (!isAlgoList(c.algos)) return bad('algos', `algos là mảng không trùng, khác rỗng, gồm ${HMAC_ALGOS.join(', ')}`);
   }
   if (c.keyEncoding !== undefined && (!isParam || !KEY_ENCODINGS.includes(c.keyEncoding))) {
     return bad('keyEncoding', 'keyEncoding chỉ cho scheme hmac: utf8 | hex | base64');
@@ -225,6 +252,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if (isParam) {
     if (c.prefix !== ALGO_IN_PREFIX) config.algo = c.algo ?? 'sha256';
     config.keyEncoding = c.keyEncoding ?? 'utf8';
+    if (c.algos !== undefined) config.algos = [...c.algos];
   }
   if (location !== 'header') config.location = location;
   if (location === 'query') config.param = c.param;

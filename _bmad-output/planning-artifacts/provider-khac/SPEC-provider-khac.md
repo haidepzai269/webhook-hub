@@ -676,6 +676,14 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
   - Token ở query: lõi không lưu query ở đâu cả nên **không** cần `__hub_meta.query` (E6 "nếu cần lưu"); `diagnose` của location query chỉ trả `expectedQueryParam` (trường mới của `Diagnosis`), không phân biệt thiếu/sai.
   - Thêm (ngoài spec): `secretProblem` lúc tạo source — keyEncoding hex/base64 không giải mã được, basic thiếu `:` → 422 `secret`.
   - Form console chỉ tạo `hmac` (không còn lựa chọn `hmac-sha256`); kiểm client `genericFormIssues` đối chiếu từng ca với `validateGenericConfig` + `secretProblem` trong `listen-logic.spec.ts`.
+- **Sửa review PK2 (2026-10-14, Amelia):**
+  - **T-1 (chấp nhận, ghi lại):** `signature_header` của `static-token` có prefix mà request thiếu prefix: master lưu `***`, PK2 lưu `null`. `verify` không đổi, `null` không lộ gì → giữ.
+  - **T-2:** sửa câu ADR-203 (5), câu nhắc console (`location-query-hint`) và comment `sensitiveHeaders`: access log nginx không in query, nhưng error_log nginx (cầu chì, lỗi upstream) in nguyên request line → khuyên tiêu đề/Basic. Không thêm test tĩnh `log_format` (ngoài phạm vi lần sửa này).
+  - **T-3:** `algos?` cho `"<algo>="`, mặc định `["sha256","sha512"]`; config đã lưu không có `algos` nhận mặc định mới (ADR-203 bổ sung). Form tay chưa có ô `algos` (luôn mặc định) — bên cần `sha1=` (WebSub) tạo qua API hoặc PK7.
+  - **T-4:** base64 khứ hồi (server `decodeHmacKey` + client `genericFormIssues`).
+  - **T-5:** chọn cách 1 (422 `secret` khi token query có ký tự cần mã hoá URL), client cùng luật.
+  - **T-6:** form kiểm secret ≤ 512 (zod, mọi provider); gõ tay `<algo>=` = "Đọc từ tiền tố" (ẩn ô thuật toán, không gửi `algo`).
+  - **T-7:** bỏ `as unknown as Control`: `GenericFields` nhận `Control<SourceFormValues>`; `page.tsx` khẳng định bằng kiểu rằng `z.infer` của schema = `SourceFormValues` (lệch là tsc đỏ).
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

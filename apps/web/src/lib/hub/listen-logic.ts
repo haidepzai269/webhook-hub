@@ -85,6 +85,12 @@ export const needsHeader = (v: Pick<GenericFormValues, "scheme" | "location">): 
 /** Ô tiền tố tĩnh có dùng không. */
 export const needsPrefix = (v: Pick<GenericFormValues, "scheme" | "location" | "algo">): boolean =>
   needsHeader(v) && !(v.scheme === "hmac" && v.algo === "from-prefix");
+/**
+ * Review PK2 T-6: thuật toán đọc từ tiền tố — chọn "Đọc từ tiền tố" HOẶC gõ tay đúng `<algo>=` vào ô tiền tố. Khi đó form ẩn
+ * ô thuật toán và KHÔNG gửi `algo` (server từ chối `algo` đi cùng `"<algo>="`).
+ */
+export const algoFromPrefix = (v: Pick<GenericFormValues, "scheme" | "algo" | "prefix">): boolean =>
+  v.scheme === "hmac" && (v.algo === "from-prefix" || v.prefix === ALGO_IN_PREFIX);
 
 /**
  * Review PK1 T-1: standard-webhooks lấy khoá chống trùng từ TIÊU ĐỀ (id của bộ header đang dùng, đã được ký) — không có
@@ -105,15 +111,15 @@ export function buildGenericConfig(v: GenericFormValues): Record<string, unknown
     // PK2: tham số HMAC. "Đọc từ tiền tố" -> prefix "<algo>=", không có algo.
     config.encoding = v.encoding;
     config.keyEncoding = v.keyEncoding;
-    if (v.algo === "from-prefix") config.prefix = ALGO_IN_PREFIX;
+    if (algoFromPrefix(v)) config.prefix = ALGO_IN_PREFIX;
     else config.algo = v.algo;
   }
   if (v.scheme === "static-token" && v.location !== "header") {
     config.location = v.location;
     if (v.location === "query") config.param = v.param.trim();
   }
-  // Tiền tố KHÔNG trim (vd "Bearer " có dấu cách thật); rỗng = không có.
-  if (needsPrefix(v) && v.prefix !== "") config.prefix = v.prefix;
+  // Tiền tố KHÔNG trim (vd "Bearer " có dấu cách thật); rỗng = không có. `<algo>=` gõ tay đã xử lý ở trên.
+  if (needsPrefix(v) && v.prefix !== "" && !algoFromPrefix(v)) config.prefix = v.prefix;
   const idValue = v.idValue.trim();
   if (idValue) config.idempotency = idKindOf(v) === "header" ? { header: idValue.toLowerCase() } : { field: idValue };
   config.eventType = v.eventType.trim();
@@ -136,6 +142,17 @@ const PARAM_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const EVENT_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
 const HEX_KEY_RE = /^(?:[0-9a-fA-F]{2})+$/;
 const B64_KEY_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2,3})?$/;
+/** Review PK2 T-5: token ở query chỉ gồm ký tự không cần mã hoá URL (như `QUERY_TOKEN_RE` của server). */
+const QUERY_TOKEN_RE = /^[A-Za-z0-9._~-]+$/;
+/** Review PK2 T-6: độ dài khoá bí mật như server (`parseSourceInput`: 8–512) — mọi nhà cung cấp. */
+export const SECRET_MIN = 8;
+export const SECRET_MAX = 512;
+/** Review PK2 T-4: base64 khứ hồi (bit thừa khác 0 bị từ chối) — như `decodeHmacKey` của server. */
+function isCanonicalBase64(s: string): boolean {
+  if (s.length === 0 || !B64_KEY_RE.test(s)) return false;
+  const bin = atob(s.replace(/=+$/, "").padEnd(Math.ceil(s.replace(/=+$/, "").length / 4) * 4, "="));
+  return btoa(bin).replace(/=+$/, "") === s.replace(/=+$/, "");
+}
 /** E15: tiền tố ≤ 32 ký tự (như server). */
 export const PREFIX_MAX = 32;
 
@@ -148,7 +165,8 @@ export type GenericFormIssue =
   | "event-type-reserved"
   | "secret-hex"
   | "secret-base64"
-  | "secret-basic";
+  | "secret-basic"
+  | "secret-query";
 
 /**
  * PK2: kiểm form tay theo CÙNG luật server (`validateGenericConfig` + `secretProblem` của @hub/providers) — test
@@ -167,8 +185,9 @@ export function genericFormIssues(v: GenericFormValues, secret: string): { path:
   // Review PK1 T-2: kiểu chuẩn cần ánh xạ trường (PK7 / API) — form tay không có ô mapping, server sẽ 422.
   else if (isReservedType(eventType)) out.push({ path: "eventType", issue: "event-type-reserved" });
   if (v.scheme === "hmac" && v.keyEncoding === "hex" && !HEX_KEY_RE.test(secret)) out.push({ path: "secret", issue: "secret-hex" });
-  if (v.scheme === "hmac" && v.keyEncoding === "base64" && (!B64_KEY_RE.test(secret) || secret.length === 0)) out.push({ path: "secret", issue: "secret-base64" });
+  if (v.scheme === "hmac" && v.keyEncoding === "base64" && !isCanonicalBase64(secret)) out.push({ path: "secret", issue: "secret-base64" });
   if (v.scheme === "static-token" && v.location === "basic" && !secret.includes(":")) out.push({ path: "secret", issue: "secret-basic" });
+  if (v.scheme === "static-token" && v.location === "query" && !QUERY_TOKEN_RE.test(secret)) out.push({ path: "secret", issue: "secret-query" });
   return out;
 }
 

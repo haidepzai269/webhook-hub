@@ -111,7 +111,10 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.location.query": "Tham số trên URL (query)",
     "page.sources.generic.location-basic-hint": "Khoá bí mật nhập dạng `tên:mật khẩu`; so cả cặp.",
     "page.sources.generic.location-query-hint":
-      "Token trên URL lộ qua log của các máy trung gian. Hub không lưu và không ghi log query, nhưng chỉ dùng khi nhà cung cấp không cho cách khác.",
+      "Token trên URL lộ qua log của các máy trung gian, kể cả log lỗi của cổng vào hub (khi bị chặn tần suất hoặc lỗi máy chủ phía sau). Hub không lưu query; ưu tiên tiêu đề hoặc Basic, chỉ dùng query khi nhà cung cấp không cho cách khác. Token chỉ gồm chữ, số và . _ ~ -.",
+    "page.sources.generic.secret-query": "Token ở query chỉ gồm chữ, số và . _ ~ - (có + / = & # % thì dùng tiêu đề hoặc Basic).",
+    "page.sources.generic.algo-in-prefix-typed": "Tiền tố `<algo>=`: thuật toán đọc từ chữ ký (sha256 / sha512), ô thuật toán bỏ qua.",
+    "page.sources.form.secret-max": "Khoá bí mật tối đa 512 ký tự.",
     "page.sources.generic.param": "Tên tham số query",
     "page.sources.generic.param-hint": "VD `token` trong …?token=…",
     "page.sources.generic.param-required": "Nhập tên tham số (chữ, số, _ . -).",
@@ -263,7 +266,10 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.location.query": "A URL parameter (query)",
     "page.sources.generic.location-basic-hint": "Enter the secret as `user:password`; the whole pair is compared.",
     "page.sources.generic.location-query-hint":
-      "Tokens in URLs leak through intermediary logs. The hub neither stores nor logs the query, but use this only when the provider offers nothing else.",
+      "Tokens in URLs leak through intermediary logs, including the hub edge's error log (when rate-limited or when the backend fails). The hub does not store the query; prefer a header or Basic and use the query only when the provider offers nothing else. Token may only contain letters, digits and . _ ~ -.",
+    "page.sources.generic.secret-query": "A query token may only contain letters, digits and . _ ~ - (with + / = & # % use a header or Basic).",
+    "page.sources.generic.algo-in-prefix-typed": "Prefix `<algo>=`: the algorithm is read from the signature (sha256 / sha512); the algorithm field is ignored.",
+    "page.sources.form.secret-max": "The secret is at most 512 characters.",
     "page.sources.generic.param": "Query parameter name",
     "page.sources.generic.param-hint": "E.g. `token` in …?token=…",
     "page.sources.generic.param-required": "Enter the parameter name (letters, digits, _ . -).",

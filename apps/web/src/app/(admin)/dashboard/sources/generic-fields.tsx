@@ -6,6 +6,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  ALGO_IN_PREFIX,
   GENERIC_SCHEMES,
   type GenericFormValues,
   HMAC_ALGO_CHOICES,
@@ -14,8 +15,15 @@ import {
   needsPrefix,
   TOKEN_LOCATION_CHOICES,
 } from "@/lib/hub/listen-logic";
+import type { Provider } from "@/lib/hub/types";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+
+/**
+ * Review PK2 T-7: khuôn ĐẦY ĐỦ của form tạo nguồn (trang `sources/page.tsx` khẳng định `z.infer` của schema = kiểu này) — các ô
+ * generic gắn thẳng vào `Control<SourceFormValues>`, không ép kiểu.
+ */
+export type SourceFormValues = GenericFormValues & { provider: Provider; name: string; secret: string };
 
 const SCHEME_KEY: Record<GenericFormValues["scheme"], MessageKey> = {
   hmac: "page.sources.generic.scheme.hmac",
@@ -47,7 +55,7 @@ function SelectField({
   options,
   hint,
 }: {
-  control: Control<GenericFormValues>;
+  control: Control<SourceFormValues>;
   name: "scheme" | "algo" | "encoding" | "keyEncoding" | "location" | "idKind";
   label: string;
   options: readonly { value: string; label: string }[];
@@ -88,7 +96,7 @@ function TextField({
   placeholder,
   hint,
 }: {
-  control: Control<GenericFormValues>;
+  control: Control<SourceFormValues>;
   name: "header" | "prefix" | "param" | "idValue" | "eventType";
   id: string;
   label: string;
@@ -118,12 +126,15 @@ function TextField({
  * - `static-token`: vị trí token — tiêu đề (+ tiền tố) | Basic (Authorization, secret "user:pass") | query (tên tham số);
  * - `standard-webhooks`: không ô nào (đọc bộ webhook-* / svix-*), khoá chống trùng luôn là tiêu đề.
  */
-export function GenericFields({ control, scheme }: { control: Control<GenericFormValues>; scheme: GenericFormValues["scheme"] }) {
+export function GenericFields({ control, scheme }: { control: Control<SourceFormValues>; scheme: GenericFormValues["scheme"] }) {
   const t = useT();
   const algo = useWatch({ control, name: "algo" });
   const location = useWatch({ control, name: "location" });
+  const prefix = useWatch({ control, name: "prefix" });
   const sw = scheme === "standard-webhooks";
   const v = { scheme, algo, location };
+  // Review PK2 T-6: gõ tay `<algo>=` = đọc thuật toán từ tiền tố -> ẩn ô thuật toán (form không gửi `algo`).
+  const typedAlgoPrefix = scheme === "hmac" && algo !== "from-prefix" && prefix === ALGO_IN_PREFIX;
   const locationHint =
     location === "basic" ? t("page.sources.generic.location-basic-hint") : location === "query" ? t("page.sources.generic.location-query-hint") : undefined;
   const algoHint =
@@ -160,13 +171,15 @@ export function GenericFields({ control, scheme }: { control: Control<GenericFor
       )}
       {scheme === "hmac" && (
         <>
-          <SelectField
-            control={control}
-            name="algo"
-            label={t("page.sources.generic.algo")}
-            options={HMAC_ALGO_CHOICES.map((a) => ({ value: a, label: t(ALGO_KEY[a]) }))}
-            hint={algoHint}
-          />
+          {!typedAlgoPrefix && (
+            <SelectField
+              control={control}
+              name="algo"
+              label={t("page.sources.generic.algo")}
+              options={HMAC_ALGO_CHOICES.map((a) => ({ value: a, label: t(ALGO_KEY[a]) }))}
+              hint={algoHint}
+            />
+          )}
           <SelectField
             control={control}
             name="encoding"
@@ -191,7 +204,7 @@ export function GenericFields({ control, scheme }: { control: Control<GenericFor
           id="src-prefix"
           label={t("page.sources.generic.prefix")}
           placeholder={scheme === "hmac" ? "sha256=" : "Bearer "}
-          hint={t("page.sources.generic.prefix-hint")}
+          hint={t(typedAlgoPrefix ? "page.sources.generic.algo-in-prefix-typed" : "page.sources.generic.prefix-hint")}
         />
       )}
       {/* Review PK1 T-1: standard-webhooks lấy khoá từ tiêu đề (id của bộ đang dùng) — không có lựa chọn "trường body". */}

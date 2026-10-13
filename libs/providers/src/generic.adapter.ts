@@ -61,7 +61,10 @@ export class GenericAdapter implements ProviderAdapter {
   /**
    * Header chứa token static phải được che TRƯỚC khi lưu raw_events (redactHeaders chỉ biết danh sách cố định).
    * PK2: basic -> `authorization` (đã có trong danh sách cố định, khai lại cho rõ). Token ở query KHÔNG nằm trong header:
-   * lõi không lưu query ở đâu cả (raw_events chỉ có headers + body), log không in URL (E6, `[PK:T7]`).
+   * lõi không lưu query ở đâu cả (raw_events chỉ có headers + body), log của hub không in URL (E6, `[PK:T7]`).
+   * Review PK2 T-2: access log nginx dùng `$uri` (không query), NHƯNG error_log của nginx (cầu chì `limit_req`, upstream
+   * timeout/502) in nguyên request line kèm query — token có thể lọt vào log nền tảng lúc đó. Nginx không che được query
+   * trong error_log -> khuyên dùng tiêu đề hoặc Basic thay query khi provider cho phép (console nhắc, ADR-203).
    */
   sensitiveHeaders(ctx?: AdapterContext): string[] {
     const c = configOf(ctx);
@@ -215,11 +218,14 @@ const CANDIDATE_HEADER_RE = /sig|token|auth|hmac|key/;
 const isStandardWebhooks = (c: GenericConfig) => c.scheme === 'standard-webhooks';
 const isStaticToken = (c: GenericConfig) => c.scheme === 'static-token';
 
-/** PK2: `sha256=abc` -> ['sha256','abc']; thuật toán ngoài `HMAC_ALGOS` (md5=, sha384=) -> null (trượt, không ném). */
+/**
+ * PK2: `sha256=abc` -> ['sha256','abc']; thuật toán ngoài `HMAC_ALGOS` (md5=, sha384=) -> null (trượt, không ném).
+ * Review PK2 T-3: còn phải nằm trong `allowed` (`algos` của config, mặc định sha256 + sha512) — sha1 chỉ khi khai rõ.
+ */
 const ALGO_PREFIX_RE = /^([a-z0-9]{1,16})=([\s\S]*)$/;
-function splitAlgoPrefix(v: string): { algo: HmacAlgo; presented: string } | null {
+function splitAlgoPrefix(v: string, allowed: readonly HmacAlgo[]): { algo: HmacAlgo; presented: string } | null {
   const m = ALGO_PREFIX_RE.exec(v);
-  if (!m || !HMAC_ALGOS.includes(m[1] as HmacAlgo)) return null;
+  if (!m || !HMAC_ALGOS.includes(m[1] as HmacAlgo) || !allowed.includes(m[1] as HmacAlgo)) return null;
   return { algo: m[1] as HmacAlgo, presented: m[2] };
 }
 
@@ -237,7 +243,7 @@ function verifyMac(c: GenericConfig, req: RawWebhookRequest, secrets: string[]):
     algo = p.algo;
     presented = stripPrefix(raw, p.prefix);
   } else {
-    const split = splitAlgoPrefix(raw);
+    const split = splitAlgoPrefix(raw, p.algos ?? []);
     if (!split) return false;
     ({ algo, presented } = split);
   }

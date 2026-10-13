@@ -44,8 +44,9 @@ describe('[PK:T6] hmac ma trận algo × encoding × prefix × keyEncoding', () 
     const sig = createHmac(algo, key).update(BODY).digest(encoding);
     const algoInPrefix = prefix === ALGO_IN_PREFIX;
     const header = algoInPrefix ? `${algo}=${sig}` : `${prefix ?? ''}${sig}`;
-    // prefix "<algo>=" -> không khai algo (đọc từ chữ ký); còn lại khai algo tường minh.
-    const ctx = ctxOf({ scheme: 'hmac', encoding, keyEncoding, ...(prefix ? { prefix } : {}), ...(algoInPrefix ? {} : { algo }) });
+    // prefix "<algo>=" -> không khai algo (đọc từ chữ ký); sha1 phải khai rõ trong `algos` (review PK2 T-3); còn lại khai algo.
+    const inPrefix = algoInPrefix ? (algo === 'sha1' ? { algos: ['sha1'] } : {}) : { algo };
+    const ctx = ctxOf({ scheme: 'hmac', encoding, keyEncoding, ...(prefix ? { prefix } : {}), ...inPrefix });
     expect(await a.verify(req(BODY, { 'x-sig': header }), [secret], ctx)).toBe(true);
     expect(await a.verify(req(BODY.replace('50000', '50001'), { 'x-sig': header }), [secret], ctx)).toBe(false);
     const sigStart = header.length - sig.length;
@@ -53,7 +54,7 @@ describe('[PK:T6] hmac ma trận algo × encoding × prefix × keyEncoding', () 
     // Thiếu tiền tố (khi có) -> false; khoá viết sai cách (utf8 của chuỗi hex/base64) -> false.
     if (prefix) expect(await a.verify(req(BODY, { 'x-sig': sig }), [secret], ctx)).toBe(false);
     if (keyEncoding !== 'utf8') {
-      const wrongKey = ctxOf({ scheme: 'hmac', encoding, keyEncoding: 'utf8', ...(prefix ? { prefix } : {}), ...(algoInPrefix ? {} : { algo }) });
+      const wrongKey = ctxOf({ scheme: 'hmac', encoding, keyEncoding: 'utf8', ...(prefix ? { prefix } : {}), ...inPrefix });
       expect(await a.verify(req(BODY, { 'x-sig': header }), [secret], wrongKey)).toBe(false);
     }
   });
@@ -163,5 +164,57 @@ describe('PK2: config hmac / bí danh hmac-sha256 / static-token location', () =
     expect(await a.verify(req(BODY, {}), ['hub:pass-123'], c)).toBe(false);
     expect(a.extractSignature(req(BODY, { authorization: basic('hub:pass-123') }), c)).toBe('***');
     expect(a.sensitiveHeaders(c)).toEqual(['authorization']);
+  });
+});
+
+describe('review PK2: T-3 algos của "<algo>=", T-4 base64 khứ hồi, T-5 token query không cần mã hoá URL', () => {
+  const ok = (c: Record<string, unknown>) => {
+    const r = validateGenericConfig({ header: 'x-sig', idempotency: { field: 'x' }, eventType: 'acme.x', ...c });
+    if (!r.ok) throw new Error(`config sai: ${(r as { field: string }).field}`);
+    return (r as { config: any }).config;
+  };
+  const field = (c: Record<string, unknown>) => (validateGenericConfig({ header: 'x-sig', idempotency: { field: 'x' }, eventType: 'acme.x', ...c }) as { field?: string }).field;
+  const { secret, key } = secretFor('utf8');
+  const signed = (algo: HmacAlgo) => `${algo}=${createHmac(algo, key).update(BODY).digest('hex')}`;
+
+  it('T-3: "<algo>=" không khai algos (gồm config đã lưu trước bản này) -> chỉ sha256 + sha512; sha1 bị từ chối dù ký đúng', async () => {
+    const ctx = { verificationConfig: ok({ scheme: 'hmac', prefix: ALGO_IN_PREFIX }) };
+    expect(await a.verify(req(BODY, { 'x-sig': signed('sha256') }), [secret], ctx)).toBe(true);
+    expect(await a.verify(req(BODY, { 'x-sig': signed('sha512') }), [secret], ctx)).toBe(true);
+    expect(await a.verify(req(BODY, { 'x-sig': signed('sha1') }), [secret], ctx)).toBe(false);
+    expect(hmacParams(ctx.verificationConfig)).toMatchObject({ algo: null, algos: ['sha256', 'sha512'] });
+  });
+
+  it('T-3: algos khai rõ -> đúng tập đó (WebSub có sha1; chỉ sha256 thì sha512 cũng bị từ chối); algos sai luật -> 422 algos', async () => {
+    const websub = { verificationConfig: ok({ scheme: 'hmac', prefix: ALGO_IN_PREFIX, algos: ['sha1', 'sha256', 'sha512'] }) };
+    for (const algo of ['sha1', 'sha256', 'sha512'] as HmacAlgo[]) expect(await a.verify(req(BODY, { 'x-sig': signed(algo) }), [secret], websub)).toBe(true);
+    const only256 = { verificationConfig: ok({ scheme: 'hmac', prefix: ALGO_IN_PREFIX, algos: ['sha256'] }) };
+    expect(await a.verify(req(BODY, { 'x-sig': signed('sha512') }), [secret], only256)).toBe(false);
+    expect(only256.verificationConfig.algos).toEqual(['sha256']);
+    expect(field({ scheme: 'hmac', algos: ['sha256'] })).toBe('algos'); // không phải "<algo>="
+    expect(field({ scheme: 'hmac-sha256', prefix: ALGO_IN_PREFIX, algos: ['sha256'] })).toBe('algos'); // bí danh cũ
+    expect(field({ scheme: 'hmac', prefix: ALGO_IN_PREFIX, algos: [] })).toBe('algos');
+    expect(field({ scheme: 'hmac', prefix: ALGO_IN_PREFIX, algos: ['md5'] })).toBe('algos');
+    expect(field({ scheme: 'hmac', prefix: ALGO_IN_PREFIX, algos: ['sha1', 'sha1'] })).toBe('algos');
+    expect(field({ scheme: 'hmac', prefix: ALGO_IN_PREFIX, algos: 'sha1' })).toBe('algos');
+  });
+
+  it('T-4: base64 phải khứ hồi — bit thừa khác 0 ("AB==", "AB") bị từ chối, cách viết chuẩn (có/không padding) thì nhận', () => {
+    expect(decodeHmacKey('AA==', 'base64')).toEqual(Buffer.from([0]));
+    expect(decodeHmacKey('AA', 'base64')).toEqual(Buffer.from([0]));
+    expect(decodeHmacKey('AB==', 'base64')).toBeNull();
+    expect(decodeHmacKey('AB', 'base64')).toBeNull();
+    expect(decodeHmacKey('AAB=', 'base64')).toBeNull();
+    expect(decodeHmacKey(KEY_BYTES.toString('base64'), 'base64')).toEqual(KEY_BYTES);
+    expect(decodeHmacKey(KEY_BYTES.toString('base64').replace(/=+$/, ''), 'base64')).toEqual(KEY_BYTES);
+  });
+
+  it('T-5: static-token location query -> secret chỉ gồm [A-Za-z0-9._~-] (422 secret); header/basic không bị luật này', () => {
+    const q = ok({ scheme: 'static-token', header: undefined, location: 'query', param: 'token' });
+    for (const bad of ['abc+def/ghi=', 'a b', 'a&b=c', 'a#b', 'a%20b', 'khoá-có-dấu']) expect([bad, secretProblem(q, bad)]).toEqual([bad, expect.stringMatching(/query/)]);
+    for (const good of ['tok-123456', 'A.b_c~d-9']) expect(secretProblem(q, good)).toBeNull();
+    expect(secretProblem(ok({ scheme: 'static-token' }), 'abc+def/ghi=')).toBeNull();
+    // Vì sao: URLSearchParams giải mã "+" thành dấu cách — token có "+" sẽ không bao giờ khớp.
+    expect(new URLSearchParams('token=abc+def').get('token')).toBe('abc def');
   });
 });
