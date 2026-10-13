@@ -29,6 +29,6 @@ describe('BP6 — docs-sync', () => {
     expect(s4).toMatch(/\| jitter \| \*\*không có ở tầng retry\*\*.*TTL \*\*cố định\*\*.*slow-start/);
     expect(arch).toMatch(/### 5\.4e\. Áp lực ngược khi hạ tầng của chính hub lỗi/);
     // CLAUDE.md: ngân sách đường hoãn
-    expect(read('CLAUDE.md')).toMatch(/đường hoãn\/throttle\/ramp \*\*≤ 1 lệnh, 0 truy vấn DB\*\*/);
+    expect(read('CLAUDE.md')).toMatch(/đường hoãn\/throttle\/ramp \*\*≤ 1 lệnh, 0 truy vấn đọc\*\*/);
   });
 });

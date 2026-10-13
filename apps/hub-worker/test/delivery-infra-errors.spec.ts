@@ -360,6 +360,14 @@ describe('BP1 — DeliveryConsumer không còn vòng lặp nóng requeue (ADR-19
       expect(ch.ack).toHaveBeenCalledTimes(1);
       expect(ch.publish.mock.invocationCallOrder[0]).toBeLessThan(ch.ack.mock.invocationCallOrder[0]);
     }
+    // review BP6 TH-5: không phải JSON (vd. message cũ bị cắt cụt còn secret) -> KHÔNG đưa byte thô vào DLQ, chỉ giữ chỗ
+    const cut = Buffer.from('{"deliveryId":"d","signingSecret":"s3cr3t-cut');
+    const chCut = buildChannel();
+    await consumer.handleMessage({ content: cut, properties: { headers: {} } } as any, chCut);
+    const placeholder = JSON.parse(chCut.publish.mock.calls[0][2].toString());
+    expect(placeholder).toEqual({ unparsable: true, bytes: cut.length, sha256: require('crypto').createHash('sha256').update(cut).digest('hex') });
+    expect(chCut.publish.mock.calls[0][2].toString()).not.toMatch(/s3cr3t/);
+    expect(chCut.publish.mock.calls[0][3].headers['x-dead-reason']).toBe('parse_error');
     // spill (BP5) cũng đi cùng đường
     const ch2 = buildChannel();
     consumer.spill({ content: Buffer.from('{'), properties: { headers: {} } } as any, ch2);

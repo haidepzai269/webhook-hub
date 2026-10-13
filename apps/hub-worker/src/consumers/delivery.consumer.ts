@@ -25,6 +25,7 @@ import {
 import { aesGcmDecrypt } from '@hub/crypto';
 import * as amqp from 'amqplib';
 import { performance } from 'perf_hooks';
+import { createHash } from 'crypto';
 import Redis from 'ioredis';
 
 // BP3 (C4, ADR-197): hoãn vì circuit tới HẾT OPEN theo PTTL thật của `:open` mà gate trả về -> `circuitDeferTier(pttl)`
@@ -89,15 +90,19 @@ export class LogThrottle {
  * không giữ secret). Publish ném lỗi (channel đóng) -> không ack, RabbitMQ giao lại.
  */
 function deadLetterUnparsable(msg: amqp.ConsumeMessage, channel: amqp.Channel, err: unknown): void {
-  let content = msg.content;
+  // Review BP6 TH-5: KHÔNG đưa byte thô vào DLQ khi không parse được — message kiểu cũ bị cắt cụt (JSON hỏng) có thể còn chuỗi
+  // secret. Chỉ giữ chỗ: độ dài + sha256 (đối chiếu log/broker nếu cần), lý do nằm ở header `x-dead-reason`.
+  let content: Buffer;
   try {
     const raw = JSON.parse(msg.content.toString());
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       for (const k of ['config', 'signingSecret', 'event']) delete (raw as Record<string, unknown>)[k];
       content = Buffer.from(JSON.stringify(raw));
+    } else {
+      content = unparsablePlaceholder(msg.content);
     }
   } catch {
-    /* không phải JSON: giữ nguyên byte để điều tra */
+    content = unparsablePlaceholder(msg.content);
   }
   logger.error({ err: (err as Error)?.message }, 'Lỗi parse DeliveryMessage -> bản sao vào q.delivery.dlq (x-dead-reason=parse_error), ack');
   try {
@@ -109,6 +114,10 @@ function deadLetterUnparsable(msg: amqp.ConsumeMessage, channel: amqp.Channel, e
   } catch (e: any) {
     logger.error({ err: e?.message }, 'Không publish được bản sao DLQ (channel đóng?) -> để RabbitMQ giao lại');
   }
+}
+
+function unparsablePlaceholder(body: Buffer): Buffer {
+  return Buffer.from(JSON.stringify({ unparsable: true, bytes: body.length, sha256: createHash('sha256').update(body).digest('hex') }));
 }
 
 /** `x-dead-error`: chỉ tên lỗi + message cắt 200 ký tự, không stack (review T4). */
