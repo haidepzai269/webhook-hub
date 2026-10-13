@@ -3,13 +3,7 @@ import { Request, Response } from 'express';
 import { IngestService } from './ingest.service';
 import { HttpMethod, ProviderType, RawWebhookRequest } from '@hub/common';
 import { PublicRoute } from '../service-api/require-scope.decorator';
-
-/** E6: chuỗi query thô sau `?` (chưa decode), '' nếu không có. */
-function rawQueryOf(url: string | undefined): string {
-  if (!url) return '';
-  const i = url.indexOf('?');
-  return i < 0 ? '' : url.slice(i + 1);
-}
+import { hooksQueryOf } from './hooks-path';
 
 @Controller('hooks')
 @PublicRoute('provider gọi vào; xác thực bằng chữ ký của provider trong ProviderAdapter (timingSafeEqual)')
@@ -40,7 +34,7 @@ export class IngestController {
       contentType: req.headers['content-type'],
       ip: req.ip,
       method: req.method.toUpperCase() as HttpMethod,
-      query: rawQueryOf(req.originalUrl ?? req.url),
+      query: hooksQueryOf({ url: req.originalUrl ?? req.url }), // E6: tách như router (parseurl), `#frag` không lọt
     };
 
     const result = await this.ingestService.ingestWebhook(rawReq);

@@ -66,6 +66,9 @@ describe('[PK:T1] ingest — segment provider phải khớp provider của sourc
     const unknown = jest.spyOn(svc.penalty, 'recordUnknownSource');
     const badSig = jest.spyOn(svc.penalty, 'recordBadSignature');
     const before = await notFound('github');
+    // Review PK0 TB-1: khẳng định TRỰC TIẾP trên trace — dời phép so xuống sau `trace.tenantId` thì đỏ ở đây.
+    const traffic = jest.spyOn(svc as any, 'recordTraffic');
+    const metrics = jest.spyOn(svc as any, 'recordMetrics');
 
     const r = await svc.ingestWebhook(githubReq() as any);
 
@@ -82,6 +85,13 @@ describe('[PK:T1] ingest — segment provider phải khớp provider của sourc
     expect(notifier.traceIngested).not.toHaveBeenCalled(); // trước `trace.tenantId = …`: không mang tenant
     expect(prisma.forTenant).not.toHaveBeenCalled(); // không lưu lượng của tenant
     expect(await notFound('github')).toBe(before + 1);
+    expect(traffic).toHaveBeenCalledTimes(1);
+    expect(metrics).toHaveBeenCalledTimes(1);
+    for (const trace of [traffic.mock.calls[0][1], metrics.mock.calls[0][1]] as any[]) {
+      expect(trace.tenantId).toBeUndefined();
+      expect(trace.sourceId).toBeUndefined();
+      expect(trace.outcome).toBeUndefined();
+    }
   });
 
   it('đối chứng: segment khớp (sepay) thì đi tiếp tới verify như cũ', async () => {

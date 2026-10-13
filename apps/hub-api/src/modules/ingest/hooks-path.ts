@@ -10,7 +10,7 @@ import type { IncomingMessage } from 'http';
  * `parseurl` lấy từ ĐÚNG bản mà `router` của `@nestjs/platform-express` dùng (không thêm dependency, không lệch phiên bản);
  * nó cache kết quả trên `req._parsedUrl` — router đã parse rồi thì đây là tra cache.
  */
-type ParseUrl = (req: { url?: string }) => { pathname?: string | null } | undefined;
+type ParseUrl = (req: { url?: string }) => { pathname?: string | null; query?: string | null } | undefined;
 
 function loadParseurl(): ParseUrl {
   try {
@@ -29,6 +29,16 @@ const parseurl: ParseUrl = loadParseurl();
 export function hooksPathOf(req: Pick<IncomingMessage, 'url'>): string | undefined {
   if (!req.url) return undefined;
   return parseurl(req)?.pathname ?? undefined;
+}
+
+/**
+ * PK0 / E6 (review PK0 T-1): chuỗi query THÔ (chưa decode, không có `?`) như router thấy — cùng `parseurl` với
+ * `hooksPathOf`, nên `#frag` không lọt vào query (`/k#x?tok=1` -> ''; `/k?a=1#b` -> 'a=1'). Không có -> ''.
+ */
+export function hooksQueryOf(req: Pick<IncomingMessage, 'url'>): string {
+  if (!req.url) return '';
+  const q = parseurl(req)?.query;
+  return typeof q === 'string' ? q : '';
 }
 
 /** Như `hooksPathOf` cho một request-target thô (test, công cụ). */
