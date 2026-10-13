@@ -158,7 +158,7 @@ describe('[ADR-162] body parser limit = MAX_INGEST_PAYLOAD_BYTES, rawBody giữ 
  * json/urlencoded, controller dựng lại body bằng `JSON.stringify(req.body || {})` -> SNS (text/plain), WebSub (XML),
  * Wix (JWT), Auth0 (JSON lines), Google Drive (body rỗng) đều thành `"{}"`. E6: controller điền `method` + `query` thô.
  */
-describe('[PK:T33] /hooks giữ rawBody đúng từng byte với mọi content-type', () => {
+describe('[PK:T33] (phần a) /hooks giữ rawBody đúng từng byte với mọi content-type', () => {
   let app: INestApplication;
   let base = '';
   beforeAll(async () => ({ app, base } = await start(true)));
