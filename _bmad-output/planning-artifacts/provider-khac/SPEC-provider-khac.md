@@ -744,7 +744,7 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 - [x] **PK0** — segment + cổng phạt mọi method + bytes gốc mọi content-type + `query`/`method`
 - [x] **PK1** — generic lên console + Lắng nghe + Svix + "request đầu tiên ✓"
 - [x] **PK2** — `hmac` mở rộng + `static-token` basic/query
-- [ ] **PK3** — `signed-template`
+- [x] **PK3** — `signed-template`
 - [ ] **PK9** — danh mục + `identify` (client)
 - [ ] **PK4** — bắt tay + GET bắt tay + ack/rejectStatus
 - [ ] **PK5** — `unverified` (bốn khoá + E4/E5/E7)
