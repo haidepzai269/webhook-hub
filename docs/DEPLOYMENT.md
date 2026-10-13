@@ -577,6 +577,10 @@ CIRCUIT_OPEN_MAX_SECONDS=300 # hub-worker: OPEN sau probe thất bại (60..300s
 DELIVERY_RAMP_START_RPS=2    # hub-worker: slow-start sau hồi phục (BP4, ADR-198) — trần đầu (rps)
 DELIVERY_RAMP_STEP_SECONDS=10 # mỗi bước nhân đôi trần
 DELIVERY_RAMP_SECONDS=60     # thời lượng ramp; 0 = tắt; chỉ đặt THẤP hơn 60
+BACKPRESSURE_SET_POINT=0.05  # hub-worker: áp lực ngược cho DB (BP5, ADR-200) — tỷ lệ lỗi hạ tầng để bắt đầu lùi
+BACKPRESSURE_PROBE_INTERVAL_MS=5000 # chế độ dò: 1 message / khoảng này khi lùi hẳn
+BACKPRESSURE_HOLD_MAX_MS=60000 # giữ message chờ permit tối đa (phải < consumer_timeout của RabbitMQ), quá thì hoãn không đốt lượt
+NORMALIZE_MAX_DEFER_MS=3600000 # normalize hoãn không đốt lượt khi DB ốm; chỉ đặt THẤP hơn mặc định
 METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub-worker :WORKER_METRICS_PORT/metrics đòi
                          # "Authorization: Bearer <token>" (review #6). Prometheus/scraper phải gửi token: trong
                          # prometheus.yml bỏ comment khối `authorization: {type: Bearer, credentials: ...}` ở cả 2 job

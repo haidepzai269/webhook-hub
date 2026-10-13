@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { deliveriesTotal, deliveryDuration, deliveryHandleDuration, deliveryInfraErrors } from '../metrics';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { deliveriesDeferred, deliveriesTotal, deliveryDuration, deliveryHandleDuration, deliveryInfraErrors } from '../metrics';
+import { BACKPRESSURE_DB, FailureRateController } from '../backpressure/failure-rate.controller';
 import { classifyInfraError } from './infra-errors';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { Prisma } from '@prisma/client';
@@ -190,6 +191,8 @@ export class DeliveryConsumer {
   constructor(
     private readonly prisma: PrismaService,
     private readonly circuitBreaker: CircuitBreakerService,
+    /** BP5 (ADR-200): bộ điều khiển áp lực ngược `db` — chỉ nhận tín hiệu lỗi HẠ TẦNG của hub, không bao giờ lỗi của đích. */
+    @Optional() @Inject(BACKPRESSURE_DB) private readonly backpressure: FailureRateController | null = null,
   ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisPub = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3: không xếp hàng publish vô hạn khi Redis chết
@@ -227,6 +230,7 @@ export class DeliveryConsumer {
       [CIRCUIT_DEFERRED_SINCE_HEADER]: d.since,
     };
     if (writtenAt !== null) headers[DEFER_WRITTEN_AT_HEADER] = writtenAt;
+    deliveriesDeferred.inc({ reason: 'circuit' });
     channel.sendToQueue(tier.queueName, slim(), { persistent: true, headers });
     channel.ack(msg);
   }
@@ -234,13 +238,34 @@ export class DeliveryConsumer {
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
     const end = deliveryHandleDuration.startTimer(); // R-4: 0 lệnh Redis, đếm trong bộ nhớ
     try {
-      await this.handle(msg, channel);
+      const outcome = await this.handle(msg, channel);
+      // BP5 §7.2: tín hiệu CHỈ là lỗi hạ tầng của hub. Đích trả 5xx/4xx/timeout vẫn là `ok` (xử lý xong). Lỗi lạ / dữ liệu
+      // và các lần hoãn không chạm DB (gate trước khi nạp) không ghi gì.
+      if (outcome === 'infra_fail') this.backpressure?.record('infra_fail');
+      else if (outcome === undefined) this.backpressure?.record('ok');
     } finally {
       end();
     }
   }
 
-  private async handle(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
+  /**
+   * BP5 §7.3: giữ quá `BACKPRESSURE_HOLD_MAX_MS` chờ permit -> republish message GỌN sang `retry.10s` KHÔNG tăng attemptCount
+   * (header giữ nguyên), rồi ack. Message hỏng -> như nhánh parse lỗi của `handle`.
+   */
+  spill(msg: amqp.ConsumeMessage, channel: amqp.Channel): void {
+    let m: DeliveryMessage;
+    try {
+      m = parseDeliveryMessage(msg.content, String(msg.properties.headers?.['x-correlation-id'] || 'unknown'));
+    } catch {
+      channel.nack(msg, false, false);
+      return;
+    }
+    channel.sendToQueue(INFRA_DEFER.queueName, Buffer.from(JSON.stringify(buildDeliveryMessage(m))), { persistent: true, headers: msg.properties.headers });
+    channel.ack(msg);
+  }
+
+  /** `undefined` = xử lý xong có chạm DB (tín hiệu `ok`); 'nodb' = hoãn trước khi nạp; 'infra_fail' / 'unknown' = catch. */
+  private async handle(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<'infra_fail' | 'unknown' | 'nodb' | void> {
     const correlationHeader = msg.properties.headers?.['x-correlation-id'] || 'unknown';
     let deliveryMsg: DeliveryMessage;
 
@@ -251,7 +276,7 @@ export class DeliveryConsumer {
     } catch (e: any) {
       logger.error({ err: e.message }, 'Lỗi parse DeliveryMessage -> chuyển DLQ');
       channel.nack(msg, false, false);
-      return;
+      return 'unknown';
     }
 
     const { deliveryId, attemptCount, tenantId } = deliveryMsg;
@@ -287,7 +312,7 @@ export class DeliveryConsumer {
           const d = circuitDeferDecision(msg.properties.headers, Date.now());
           if (!d.exceeded) {
             await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs);
-            return;
+            return 'nodb';
           }
           // Quá trần thời gian -> phải nạp row để ghi một lần thử thất bại (nhánh chung bên dưới quyết định lại).
         } else if (view.throttleAllowed === false) {
@@ -297,9 +322,10 @@ export class DeliveryConsumer {
             { destinationId: hint.destinationId, rateLimitRps: hint.rateLimitRps, rampCap: view.rampCap },
             'Outbound Throttle / slow-start (gợi ý) -> tầng retry ngắn nhất, không nạp DB',
           );
+          deliveriesDeferred.inc({ reason: view.rampCap !== undefined ? 'ramp' : 'throttle' });
           channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
           channel.ack(msg);
-          return;
+          return 'nodb';
         }
       }
       const releaseHeldProbe = async () => {
@@ -406,6 +432,7 @@ export class DeliveryConsumer {
             'Outbound Throttle / slow-start kích hoạt (vượt trần) -> đẩy sang tầng retry ngắn nhất',
           );
           await releaseProbe();
+          deliveriesDeferred.inc({ reason: view.rampCap !== undefined ? 'ramp' : 'throttle' });
           channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
           channel.ack(msg);
           return;
@@ -607,7 +634,8 @@ export class DeliveryConsumer {
       const headers = msg.properties.headers ?? {};
       try {
         if (kind === 'transient') {
-          // TODO(BP5): báo tín hiệu infra_fail cho bộ điều khiển áp lực ngược.
+          // BP5: tín hiệu `infra_fail` ghi ở handleMessage (giá trị trả về); hoãn không đốt lượt.
+          deliveriesDeferred.inc({ reason: 'infra' });
           const n = (Number(headers[INFRA_DEFERRALS_HEADER]) || 0) + 1;
           // Lỗi hạ tầng lặp mỗi 10s cho TỪNG message tới khi DB về -> tối đa 1 dòng / 30s / tiến trình (review M3).
           const suppressed = this.infraLogThrottle.take();
@@ -619,7 +647,7 @@ export class DeliveryConsumer {
           }
           channel.sendToQueue(INFRA_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [INFRA_DEFERRALS_HEADER]: n } });
           channel.ack(msg);
-          return;
+          return 'infra_fail';
         }
         const n = (Number(headers[UNKNOWN_ERRORS_HEADER]) || 0) + 1;
         if (n >= UNKNOWN_ERROR_MAX) {
@@ -632,16 +660,17 @@ export class DeliveryConsumer {
             headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n, 'x-dead-reason': 'unknown_error', 'x-dead-error': deadErrorHeader(err) },
           });
           channel.ack(msg);
-          return;
+          return 'unknown';
         }
         log.warn({ err: err?.message, queue: UNKNOWN_DEFER.queueName, unknownErrors: n }, 'Lỗi lạ ở delivery -> hoãn 1 phút');
         channel.sendToQueue(UNKNOWN_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n } });
         channel.ack(msg);
       } catch (e: any) {
         // Channel/kết nối đã đóng: không ack được -> message unacked, RabbitMQ giao lại khi tiến trình nối lại (main.ts thoát
-        // khi CONNECTION đóng). Riêng channel đóng mà connection sống thì worker không dựng lại channel — nợ cũ, SPEC-BP §16.
+        // khi CONNECTION hoặc channel consumer đóng — BP5 đóng nợ channel zombie, SPEC-BP §16).
         log.error({ err: e?.message, cause: err?.message }, 'Không hoãn được message lỗi (channel đóng?) -> để RabbitMQ giao lại');
       }
+      return kind === 'transient' ? 'infra_fail' : 'unknown';
     }
   }
 }

@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { BACKPRESSURE_DB, FailureRateController } from '../backpressure/failure-rate.controller';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 import { ProviderRegistry } from '@hub/providers';
-import { QUEUES } from '@hub/messaging';
+import { QUEUES, normalizeMaxDeferMs } from '@hub/messaging';
 import {
   logger,
   OutboxPayload,
@@ -22,7 +23,10 @@ import {
   classifyNormalizeError,
   readNormalizeRetryCount,
 } from './normalize-errors';
-import { normalizeRetries, normalizeSchemaErrors } from '../metrics';
+import { normalizeDeferred, normalizeRetries, normalizeSchemaErrors } from '../metrics';
+
+/** BP5 §7.4: mốc bắt đầu hoãn không đốt lượt của một raw event ở normalize (epoch ms). */
+export const NORMALIZE_DEFERRED_SINCE_HEADER = 'x-normalize-deferred-since';
 import { DELIVERY_REQUESTED_TOPIC, routeEventToSubscriptions } from './route-event';
 
 /**
@@ -66,7 +70,11 @@ export class NormalizeConsumer {
    */
   private faultsLeft: number;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    /** BP5 (ADR-200): bộ điều khiển áp lực ngược `db` (dùng chung với delivery trong tiến trình). */
+    @Optional() @Inject(BACKPRESSURE_DB) private readonly backpressure: FailureRateController | null = null,
+  ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisPub = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3
     this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (normalize) lỗi'));
@@ -79,6 +87,22 @@ export class NormalizeConsumer {
   }
 
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
+    const outcome = await this.handle(msg, channel);
+    // BP5 §7.2: chỉ lỗi HẠ TẦNG (transient) là tín hiệu; lỗi dữ liệu (permanent) không ghi gì.
+    if (outcome === 'transient') this.backpressure?.record('infra_fail');
+    else if (outcome === undefined) this.backpressure?.record('ok');
+  }
+
+  /**
+   * BP5 §7.3: giữ quá `BACKPRESSURE_HOLD_MAX_MS` chờ permit -> `retry.30s` KHÔNG tăng `x-normalize-retry` (header giữ nguyên),
+   * rồi ack. Không xử lý, không đọc DB.
+   */
+  spill(msg: amqp.ConsumeMessage, channel: amqp.Channel): void {
+    channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, { persistent: true, headers: { ...(msg.properties.headers || {}) } });
+    channel.ack(msg);
+  }
+
+  private async handle(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<'transient' | 'permanent' | void> {
     const correlationId = msg.properties.headers?.['x-correlation-id'] || 'unknown';
     let payload: OutboxPayload;
 
@@ -87,7 +111,7 @@ export class NormalizeConsumer {
     } catch (e: any) {
       logger.error({ err: e.message }, 'Lỗi parse JSON payload trong NormalizeConsumer -> chuyển DLQ');
       channel.nack(msg, false, false);
-      return;
+      return 'permanent';
     }
 
     const { rawEventId, tenantId, sourceId, provider } = payload;
@@ -196,14 +220,33 @@ export class NormalizeConsumer {
       channel.ack(msg);
       log.info({ deliveryCount: routedCount }, 'Normalize & Route hoàn thành (delivery đi qua outbox)');
     } catch (err: any) {
-      this.handleFailure(err, msg, channel, log);
+      return this.handleFailure(err, msg, channel, log);
     }
   }
 
   /** S1-3: lỗi tạm -> hàng đợi 30s (tối đa 5 lần); lỗi dữ liệu hoặc hết lượt -> DLQ. */
-  private handleFailure(err: any, msg: amqp.ConsumeMessage, channel: amqp.Channel, log: typeof logger) {
+  private handleFailure(err: any, msg: amqp.ConsumeMessage, channel: amqp.Channel, log: typeof logger): 'transient' | 'permanent' {
     const kind = classifyNormalizeError(err);
     const retries = readNormalizeRetryCount(msg.properties.headers);
+
+    // BP5 §7.4 (ADR-200): hub ĐÃ BIẾT DB đang ốm (factor > 0) -> lỗi tạm HOÃN không đốt lượt, tối đa NORMALIZE_MAX_DEFER_MS.
+    // DB khoẻ (factor = 0, lỗi lẻ) -> hành vi cũ 5 lượt × 30s, để một message có vấn đề riêng không được hoãn mãi.
+    if (kind === 'transient' && (this.backpressure?.factor() ?? 0) > 0) {
+      const now = Date.now();
+      const sinceRaw = Number(msg.properties.headers?.[NORMALIZE_DEFERRED_SINCE_HEADER]);
+      const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : now;
+      if (now - since <= normalizeMaxDeferMs()) {
+        normalizeDeferred.inc();
+        log.debug({ err: err?.message, deferredSince: since }, 'Lỗi tạm ở normalize khi DB đang ốm -> retry.30s, KHÔNG đốt lượt');
+        channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, {
+          persistent: true,
+          headers: { ...(msg.properties.headers || {}), [NORMALIZE_DEFERRED_SINCE_HEADER]: since },
+        });
+        channel.ack(msg);
+        return kind;
+      }
+      log.warn({ deferredSince: since }, 'Normalize hoãn quá NORMALIZE_MAX_DEFER_MS -> đốt lượt như cũ');
+    }
 
     if (kind === 'transient' && retries < NORMALIZE_MAX_RETRIES) {
       log.warn(
@@ -216,7 +259,7 @@ export class NormalizeConsumer {
         headers: { ...(msg.properties.headers || {}), [NORMALIZE_RETRY_HEADER]: retries + 1 },
       });
       channel.ack(msg);
-      return;
+      return kind;
     }
 
     log.error(
@@ -224,6 +267,7 @@ export class NormalizeConsumer {
       kind === 'transient' ? 'Lỗi tạm ở normalize đã hết lượt thử lại -> DLQ' : 'Lỗi dữ liệu ở normalize -> DLQ',
     );
     channel.nack(msg, false, false);
+    return kind;
   }
 
   private maybeInjectFault() {

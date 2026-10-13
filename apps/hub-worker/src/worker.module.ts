@@ -12,6 +12,7 @@ import { AlertEvaluator } from './scheduler/alert.evaluator';
 import { AlertEmailSender } from './scheduler/alert-email.sender';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
+import { BACKPRESSURE_DB, FailureRateController, backpressureOptionsFromEnv } from './backpressure/failure-rate.controller';
 
 const PROVIDERS = [
   PrismaService,
@@ -26,6 +27,8 @@ const PROVIDERS = [
   AlertEmailSender, // CB5: vòng gửi email cảnh báo (outbox theo người) — tách khỏi evaluator
   NormalizeConsumer,
   DeliveryConsumer,
+  // BP5 (ADR-200): MỘT bộ điều khiển áp lực ngược cho phụ thuộc `db`, dùng chung normalize + delivery trong tiến trình.
+  { provide: BACKPRESSURE_DB, useFactory: () => new FailureRateController({ dependency: 'db', ...backpressureOptionsFromEnv() }) },
 ];
 
 @Module({

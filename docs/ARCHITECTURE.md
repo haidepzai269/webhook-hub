@@ -336,6 +336,8 @@ Bộ đếm throttle nằm trong `LUA_GATE` (một `EVAL` cùng circuit, BP2 ADR
 
 **Slow-start sau hồi phục (BP4, ADR-198).** Probe HALF_OPEN thành công → MỘT lệnh xoá `failures/open/probe/trips` + `SET circuit:{id}:ramp = nowMs EX DELIVERY_RAMP_SECONDS` (60). Trong ramp, gate tính `rampCap = DELIVERY_RAMP_START_RPS × 2^floor((now − rampStart)/DELIVERY_RAMP_STEP_SECONDS)` (2 → 4 → … → 64 rps) và dùng chung cửa sổ 1 giây với `rate_limit_rps`: trần = min(rps nếu > 0, rampCap). Vượt → `retry.10s` như throttle. Lỗi đủ ngưỡng trong ramp → OPEN và xoá `:ramp`. Mạch tự về CLOSED (khoá hết hạn) thì không ramp. Mất `:ramp` (Redis) → gửi bình thường; Redis lỗi → fail-open. Đây là câu trả lời thay cho jitter: hàng hoãn chảy về đích theo nhịp tăng dần, không dồn thành một cục.
 
+**Áp lực ngược cho hạ tầng của CHÍNH hub (BP5, ADR-200).** Một bộ điều khiển `FailureRateController` cho phụ thuộc `db` mỗi tiến trình worker, dùng chung normalize + delivery, đếm trong bộ nhớ (0 lệnh Redis). Tín hiệu chỉ là lỗi hạ tầng của hub (`classifyInfraError === 'transient'`); **lỗi của đích không bao giờ là tín hiệu** (một đích chết của tenant này không làm chậm tenant khác). Cửa sổ 30s, mỗi 1s: tỷ lệ lỗi > 5% → factor +0.25, ngược lại −0.1; permits = max(1, ceil(20 × (1 − factor))); factor = 1 → chế độ dò (1 message / 5s). Message chờ permit trong tiến trình (unacked, prefetch giữ 20); quá 60s → republish không đốt lượt. Khi DB ốm (factor > 0), normalize hoãn lỗi tạm vào `retry.30s` **không đốt lượt** tối đa 60 phút. Tắt máy: message đang chờ permit không xử lý/không ack (C5).
+
 ### 5.4c. Cố tình không làm (và vì sao)
 
 | Không làm | Vì sao | Bù lại |

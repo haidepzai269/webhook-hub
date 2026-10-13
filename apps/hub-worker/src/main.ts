@@ -13,6 +13,8 @@ import { AlertEmailSender } from './scheduler/alert-email.sender';
 import { NormalizeConsumer } from './consumers/normalize.consumer';
 import { DeliveryConsumer } from './consumers/delivery.consumer';
 import { InFlightTracker } from './consumers/in-flight';
+import { BACKPRESSURE_DB, FailureRateController } from './backpressure/failure-rate.controller';
+import { runGated } from './backpressure/gate';
 import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
 import * as amqp from 'amqplib';
 
@@ -123,17 +125,30 @@ async function bootstrap() {
   const confirmChannel = await connection.createConfirmChannel();
   outboxRelay.setChannel(confirmChannel);
 
-  // Đếm handler đang chạy để graceful shutdown chờ chúng xong (review SPEC-1 #3).
+  // Đếm handler đang chạy để graceful shutdown chờ chúng xong (review SPEC-1 #3). BP5 C5: CHỈ message đã có permit.
   const inFlight = new InFlightTracker();
+  // BP5 (ADR-200): áp lực ngược cho DB — permit trong tiến trình thay vì đổi prefetch (giữ 20).
+  const backpressure = app.get<FailureRateController>(BACKPRESSURE_DB);
+  backpressure.start();
+
+  // BP5 (đóng nợ BP1 "channel zombie"): channel consumer đóng riêng (lỗi mức channel) mà connection còn sống thì worker không
+  // consume nữa -> thoát như khi mất connection để orchestrator dựng lại; message unacked được RabbitMQ giao lại.
+  const exitOnChannelClose = (name: string) => () => {
+    if (shuttingDown) return;
+    logger.error({ channel: name }, 'AMQP channel consumer đóng bất thường -> thoát để orchestrator khởi động lại');
+    process.exit(1);
+  };
 
   // 3. Normalize Consumer (prefetch = 20)
   const normalizeConsumer = app.get(NormalizeConsumer);
   const normalizeChannel = await connection.createChannel();
+  normalizeChannel.on('close', exitOnChannelClose('normalize'));
+  normalizeChannel.on('error', (err: Error) => logger.error({ err: err.message }, 'AMQP channel normalize error'));
   await normalizeChannel.prefetch(20);
   const normalizeTag = await normalizeChannel.consume(
     QUEUES.NORMALIZE,
     (msg) => {
-      if (msg) inFlight.track(normalizeConsumer.handleMessage(msg, normalizeChannel));
+      if (msg) void runGated(backpressure, 'normalize', normalizeConsumer, msg, normalizeChannel, inFlight);
     },
     { noAck: false },
   );
@@ -142,11 +157,13 @@ async function bootstrap() {
   // 4. Delivery Consumer (prefetch = 20)
   const deliveryConsumer = app.get(DeliveryConsumer);
   const deliveryChannel = await connection.createChannel();
+  deliveryChannel.on('close', exitOnChannelClose('delivery'));
+  deliveryChannel.on('error', (err: Error) => logger.error({ err: err.message }, 'AMQP channel delivery error'));
   await deliveryChannel.prefetch(20);
   const deliveryTag = await deliveryChannel.consume(
     QUEUES.DELIVERY_MAIN,
     (msg) => {
-      if (msg) inFlight.track(deliveryConsumer.handleMessage(msg, deliveryChannel));
+      if (msg) void runGated(backpressure, 'delivery', deliveryConsumer, msg, deliveryChannel, inFlight);
     },
     { noAck: false },
   );
@@ -176,6 +193,8 @@ async function bootstrap() {
           // Chừa ~5s cuối cho việc đóng kết nối, trong ngân sách SHUTDOWN_TIMEOUT_MS (25s < SIGKILL 30s của Render).
           await normalizeChannel.cancel(normalizeTag.consumerTag).catch(() => {});
           await deliveryChannel.cancel(deliveryTag.consumerTag).catch(() => {});
+          // BP5 C5: message đang CHỜ permit trả về ngay — không xử lý, không republish, không ack (đóng channel -> giao lại).
+          backpressure.shutdown();
           // Lượt cảnh báo dừng ở ranh giới luật SONG SONG với chờ handler — cùng một ngân sách 25s, không cộng dồn.
           const [, , idle] = await Promise.all([alertsStopped, emailsStopped, inFlight.waitIdle(Math.max(0, shutdownTimeoutMs - 5_000))]);
           logger.info({ idle, stillRunning: inFlight.count }, 'Đã chờ handler đang chạy trước khi đóng channel');

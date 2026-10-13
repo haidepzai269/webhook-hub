@@ -70,6 +70,45 @@ export const deliveryInfraErrors = new Counter({
   registers: [workerRegistry],
 });
 
+/** BP5 (ADR-200, §7.6): hệ số lùi của bộ điều khiển áp lực ngược theo phụ thuộc (0 = chạy hết tốc, 1 = chế độ dò). */
+export const backpressureFactor = new Gauge({
+  name: 'hub_backpressure_factor',
+  help: 'Hệ số lùi của bộ điều khiển áp lực ngược (0..1) theo phụ thuộc hạ tầng của hub',
+  labelNames: ['dependency'] as const,
+  registers: [workerRegistry],
+});
+
+/** BP5: số message đang chờ permit trong tiến trình (unacked, chưa xử lý). */
+export const backpressureHeld = new Gauge({
+  name: 'hub_backpressure_held',
+  help: 'Số message đang chờ permit của bộ điều khiển áp lực ngược',
+  labelNames: ['consumer'] as const,
+  registers: [workerRegistry],
+});
+
+/** BP5: message giữ quá BACKPRESSURE_HOLD_MAX_MS -> republish sang hàng hoãn KHÔNG đốt lượt. */
+export const backpressureSpilled = new Counter({
+  name: 'hub_backpressure_spilled_total',
+  help: 'Số message giữ quá trần chờ permit, được đẩy sang hàng hoãn không đốt lượt',
+  labelNames: ['consumer'] as const,
+  registers: [workerRegistry],
+});
+
+/** BP5 §7.6: lần hoãn delivery KHÔNG đốt lượt theo lý do (circuit | throttle | ramp | infra). */
+export const deliveriesDeferred = new Counter({
+  name: 'hub_deliveries_deferred_total',
+  help: 'Số lần hoãn delivery không đốt lượt theo lý do',
+  labelNames: ['reason'] as const,
+  registers: [workerRegistry],
+});
+
+/** BP5 §7.4: lỗi tạm ở normalize khi DB đang ốm -> retry.30s KHÔNG đốt lượt. */
+export const normalizeDeferred = new Counter({
+  name: 'hub_normalize_deferred_total',
+  help: 'Số lần normalize gặp lỗi tạm khi bộ điều khiển áp lực ngược đang lùi và hoãn không đốt lượt',
+  registers: [workerRegistry],
+});
+
 /** Lỗi tạm ở normalize được đẩy vào q.normalize.retry.30s (ADR-044). */
 export const normalizeRetries = new Counter({
   name: 'hub_normalize_retries_total',

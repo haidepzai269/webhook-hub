@@ -357,6 +357,6 @@
     "DX:TX3": "E2E làm tay: hub listen + examples/quickstart-node + SePay mock trên stack dev (PASS 2026-10-11 ở §9). Phần lõi phủ tự động ở L0 [DX:UX9], [DX:UX10], [DX:UX12]-[DX:UX14] (webhook-body.spec, listen.spec).",
     "DX:TX4": "E2E làm tay: đếm hub.deliveries trước/sau TX3 trên stack dev (PASS 2026-10-11 ở §9). listen chỉ đọc vì đi qua polling A (GET), không tạo delivery.",
     "DX:TX5": "E2E làm tay: npx hub trigger + listen trên stack (SPEC-dev-experience §6.2), chưa ghi kết quả ở §9. Phần lõi phủ tự động ở L0 [DX:UX16] (libs/hub-sdk/test/trigger.spec.ts: body qua validateCanonical).",
-    "BP:T4": "Chaos LOCAL (dừng Postgres 60s dưới tải, docker-compose) — chưa chạy. Cận trên số lần gọi Prisma/s KHÔNG có ở BP1 (nhánh transient không trần, ≈ backlog/10 truy vấn/s khi DB fail nhanh) — thuộc BP5, nên T4 nằm nhóm BP5 (SPEC-BP §13, §16). BP1 chỉ chặn log ≤ 1 dòng/30s/tiến trình (L0: delivery-infra-errors.spec 'review M3') và đổi vòng nóng không nhịp thành nhịp 10s/message."
+    "BP:T4": "Phần chaos LOCAL (dừng Postgres thật 60s dưới tải, docker-compose) chưa chạy (C8). Cận trên số lần gọi Prisma/s có ở BP5: L0 mô phỏng backpressure.spec [BP:T4] (phần a)."
   }
 }
