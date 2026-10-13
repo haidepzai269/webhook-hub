@@ -18,3 +18,9 @@ Migration Neon mới nhất tại mốc này: `20261013120000_circuit_half_open_
 - **Git:** không force-push. Muốn gỡ trên master thì `git revert` các commit PK.
 
 Commit PK đầu tiên trên master sẽ được ghi thêm vào đây khi merge.
+
+## Nhật ký gộp PK vào master
+
+| Thời điểm | master | Gồm | Ghi chú |
+|---|---|---|---|
+| 2026-10-14 đêm (chặng 1) | `314ace0..9d84dcd` | PK0, PK1, PK2 (code đầu tiên: `10afed4`) | Không có migration. Rollback code = quay về `57c81ad` (hoặc `314ace0`, chỉ thêm docs) |
