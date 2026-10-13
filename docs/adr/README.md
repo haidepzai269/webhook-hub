@@ -2118,3 +2118,9 @@ không thấy gì.
 - Đích hồi phục mất thêm ~60s mới chạy hết tốc; message bị ramp hoãn quay lại sau 10s (vòng `retry.10s`), nên trần thực tế mỗi giây ≤ rampCap nhưng thông lượng trung bình thấp hơn trần một chút.
 - Ramp tính bằng đồng hồ của worker (nowMs trong ARGV, mốc trong `:ramp`); lệch đồng hồ giữa worker chỉ làm bậc ramp lệch tương ứng.
 - Mất `:ramp` (Redis mất dữ liệu) → gửi bình thường không ramp; Redis lỗi → gate fail-open (BB-2: chậm/khác đi, không sai). Không gộp `tryAcquireProbe` vào gate (C11).
+
+## ADR-199 — Retention không xoá event còn delivery chưa tới đích (phát hiện trong review BP4, 2026-10-13)
+
+**Vấn đề:** `deleteExpiredEventsBatchAccounted` (retention theo `CLEANUP_RETENTION_DAYS`) xoá event quá N ngày mà không xét delivery; FK `deliveries.event_id` là `onDelete: Cascade` nên delivery đang chờ (PENDING/DELIVERING/RETRYING — vd. đích có `rate_limit_rps` thấp tồn hàng lâu hơn retention) bị xoá theo, worker nạp row gặp `!row` thì ack → **mất webhook âm thầm**. Lỗi có từ trước BP; lệnh dọn QT (`cleanStorageBatch`) đã chặn đúng điều này nhưng retention thì không.
+**Chọn:** CTE chọn lô của retention thêm `NOT EXISTS (delivery của event với status IN ('PENDING','DELIVERING','RETRYING'))`, cùng tập trạng thái với `cleanStorageBatch` qua một hằng duy nhất `IN_FLIGHT_DELIVERY_STATUSES` (`libs/database/src/constants.ts`, SQL `IN_FLIGHT_DELIVERY_STATUS_SQL`). Đã kiểm các đường xoá `events`/`raw_events` khác: lệnh dọn QT (đã chặn), mẫu REJECTED và raw ACCEPTED mồ côi (không có event/delivery). Test DB `retention-db.spec`.
+**Đánh đổi:** event (và byte của nó trong `project_usage`) có thể sống lâu hơn retention khi đích chậm/hoãn kéo dài — chỉ tới khi delivery tới đích hoặc thành DEAD; lượt retention sau xoá được. Index `deliveries(event_id, …)` (unique) phục vụ `NOT EXISTS` nên lô retention không chậm đi đáng kể.

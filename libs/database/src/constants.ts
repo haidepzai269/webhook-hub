@@ -26,3 +26,11 @@ export function getMasterKey(): string {
   }
   return key;
 }
+
+/**
+ * Delivery CHƯA tới đích (còn đang chờ / gửi / thử lại). NGUỒN DUY NHẤT cho mọi đường xoá `events` theo tuổi hay theo lệnh
+ * dọn: event còn delivery ở các trạng thái này KHÔNG được xoá — FK `deliveries.event_id` là CASCADE, xoá event là xoá luôn
+ * delivery đang chờ, worker gặp `!row` thì ack -> mất webhook âm thầm (ADR-199). Dùng trong SQL qua
+ * `IN_FLIGHT_DELIVERY_STATUS_SQL` (danh sách hằng, không tham số người dùng).
+ */
+export const IN_FLIGHT_DELIVERY_STATUSES = ['PENDING', 'DELIVERING', 'RETRYING'] as const;

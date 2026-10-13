@@ -1,5 +1,9 @@
 import { BUCKET_MAX_AGE_DAYS, DEFAULT_STORAGE_POLICIES, eventTypeCandidates, levelFor, parseStorageLevel } from '@hub/common';
 import { PrismaClient, Destination, Delivery, Prisma, CircuitState, Source, SourceSecret } from '@prisma/client';
+import { IN_FLIGHT_DELIVERY_STATUSES } from './constants';
+
+/** `('PENDING', 'DELIVERING', 'RETRYING')` — dựng từ hằng `IN_FLIGHT_DELIVERY_STATUSES` (không có đầu vào người dùng). */
+export const IN_FLIGHT_DELIVERY_STATUS_SQL = Prisma.raw(`(${IN_FLIGHT_DELIVERY_STATUSES.map((s) => `'${s}'`).join(', ')})`);
 
 /**
  * `PrismaClient` gốc HOẶC `Prisma.TransactionClient` (bên trong một `$transaction`
@@ -1577,7 +1581,7 @@ export class TenantScopedRepository {
         FROM hub.events e LEFT JOIN hub.sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id
         WHERE e.tenant_id = ${t}::uuid AND e.received_at < ${before} ${onlyUntrimmed} ${bySource}
           AND NOT EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id
-                          AND d.status IN ('PENDING', 'DELIVERING', 'RETRYING'))
+                          AND d.status IN ${IN_FLIGHT_DELIVERY_STATUS_SQL})
           AND ${eventImportanceSql} = ANY(${eventImportance}::text[])
         ORDER BY e.received_at LIMIT ${room} FOR UPDATE OF e SKIP LOCKED`);
       events = victims.length;

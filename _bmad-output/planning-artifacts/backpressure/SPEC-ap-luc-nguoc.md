@@ -380,8 +380,8 @@ Mỗi story đi theo VF (RED → PROBED → REVIEWED), review riêng, rồi mớ
 | 196 | Message giao hàng mang `destinationId` làm gợi ý để gate trước khi nạp DB; trần hoãn tính theo thời gian (BP2) |
 | 197 | OPEN 60s → 300s theo số probe thất bại; hoãn tới hết OPEN (BP3) |
 | 198 | Slow-start sau probe thành công thay cho jitter (BP4); phụ lục được đính chính |
-| 199 | Áp lực ngược cục bộ kiểu Canva, chỉ cho phụ thuộc của chính hub; lỗi đích không bao giờ là tín hiệu (BP5) |
-| 200 | Cửa sổ retry của QT phải gồm thời gian hoãn (§9) |
+| 199 | ~~BP5~~ → **Retention không xoá event còn delivery chưa tới đích** (phát hiện trong review BP4, TH-2; số do phòng giao) |
+| 200 | Áp lực ngược cục bộ kiểu Canva, chỉ cho phụ thuộc của chính hub; lỗi đích không bao giờ là tín hiệu (BP5). (Mục "cửa sổ retry của QT phải gồm thời gian hoãn" (§9) đã nằm trong ADR-196/197/198 — không cần số riêng.) |
 
 ## 13. Test
 
@@ -441,3 +441,4 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 - **Cho BP3 (review BP2 lượt 2):** gộp `CIRCUIT_DEFER_ROUND_MS` (`libs/messaging/src/retry-window.ts`, cộng vào cửa sổ retry) và `CIRCUIT_DEFER` (`delivery.consumer.ts`, tầng hoãn thật) về **một nguồn** — BP3 hoãn theo PTTL tới `retry.5m` nên một vòng hoãn thành 5 phút; hai hằng số lệch nhau là cửa sổ dọn của QT sai.
 - **BP3 review (2026-10-13), chỉ ghi nhận:** (TH-3) request gửi với view CLOSED thất bại sau lần trip lại 300s có thể đặt lại `:open` EX 60 (rút OPEN xuống 60s) — hầu như không xảy ra, chấp nhận. (TH-4) rolling deploy với worker BP2: không NULL `circuit_half_open_at`, không DEL `:trips` — vô hại, tự lành ở lần trip kế / sau ≤ 420s. Chi tiết ở đánh đổi ADR-197.
 - **Nợ (BP3 review lượt 2, 2026-10-13):** câu "Thử lại lúc …" (`libs/common/src/alerts/text.ts`) so `halfOpenAt` với `ctx.now`. Email dựng ở server nên dùng giờ server; web dùng `Date.now()` của trình duyệt qua `useMinuteClock` — lệch theo đồng hồ máy người dùng và tối đa ~1 phút do nhịp cập nhật. Web nên cộng độ lệch `asOf − Date.now()` (cùng hướng ADR-188). Không sửa code web trong đợt BP.
+- **Phát hiện trong review BP4 (TH-2, 2026-10-13), lỗi có từ trước BP:** retention `deleteExpiredEventsBatchAccounted` xoá event quá N ngày mà không xét delivery; FK `deliveries.event_id` CASCADE xoá luôn delivery đang chờ (vd. đích throttle chậm, hoặc hoãn lâu hơn retention), worker gặp `!row` thì ack -> mất webhook âm thầm. Đã sửa (ADR-199): `NOT EXISTS` delivery PENDING/DELIVERING/RETRYING, cùng tập trạng thái với `cleanStorageBatch` (hằng `IN_FLIGHT_DELIVERY_STATUSES`). Các đường xoá khác đã kiểm: lệnh dọn QT (đã chặn), mẫu REJECTED và raw mồ côi (không có event/delivery). Số ADR của BP5 dời sang 200 (§12).

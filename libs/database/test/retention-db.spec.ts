@@ -37,14 +37,14 @@ describeDb('Retention events (S7)', () => {
     await svc.$disconnect();
   });
 
-  async function eventWithRaw(name: string, days: number) {
+  async function eventWithRaw(name: string, days: number, status: 'SUCCEEDED' | 'DEAD' | 'PENDING' | 'DELIVERING' | 'RETRYING' = 'SUCCEEDED') {
     const r = await raw.rawEvent.create({
       data: { sourceId, idempotencyKey: `${run}:${name}`, headers: {}, body: {}, bodyRaw: new Uint8Array(), signatureValid: true, status: 'ACCEPTED', receivedAt: ago(days) },
     });
     const e = await raw.event.create({
       data: { id: `ret_${run}_${name}`, tenantId: tenant, rawEventId: r.id, idempotencyKey: `ret:${run}:${name}`, correlationId: randomUUID(), type: 'order.x', source: 'api', data: {}, receivedAt: ago(days), createdAt: ago(days) },
     });
-    const d = await raw.delivery.create({ data: { tenantId: tenant, eventId: e.id, subscriptionId: subId, status: 'SUCCEEDED' } });
+    const d = await raw.delivery.create({ data: { tenantId: tenant, eventId: e.id, subscriptionId: subId, status } });
     await raw.deliveryAttempt.create({ data: { deliveryId: d.id, attemptNo: 1, durationMs: 1 } });
     return { raw: r, event: e, delivery: d };
   }
@@ -64,5 +64,27 @@ describeDb('Retention events (S7)', () => {
 
     const orphans = await new TenantScopedRepository(appDb, tenant).findOrphanRawEvents({ limit: 100, maxAgeSeconds: 9 * DAY });
     expect(orphans.items.map((o) => o.id)).not.toContain(old.raw.id);
+  });
+
+  it('(ADR-199, review BP4 TH-2) retention KHÔNG xoá event quá hạn còn delivery PENDING/DELIVERING/RETRYING (CASCADE = mất webhook, ADR-199); SUCCEEDED/DEAD thì xoá', async () => {
+    const held = await Promise.all((['PENDING', 'DELIVERING', 'RETRYING'] as const).map((st) => eventWithRaw(`held-${st}`, 10, st)));
+    const gone = await Promise.all((['SUCCEEDED', 'DEAD'] as const).map((st) => eventWithRaw(`gone-${st}`, 10, st)));
+    while ((await svc.deleteExpiredEventsBatch(9 * DAY, 1000)) > 0) {
+      /* tiếp */
+    }
+    for (const h of held) {
+      expect(await raw.event.findUnique({ where: { id: h.event.id } })).not.toBeNull();
+      expect(await raw.delivery.findUnique({ where: { id: h.delivery.id } })).not.toBeNull();
+    }
+    for (const g of gone) {
+      expect(await raw.event.findUnique({ where: { id: g.event.id } })).toBeNull();
+      expect(await raw.delivery.findUnique({ where: { id: g.delivery.id } })).toBeNull();
+    }
+    // Delivery tới đích xong (RETRYING -> SUCCEEDED) -> lượt retention sau xoá được
+    await raw.delivery.update({ where: { id: held[2].delivery.id }, data: { status: 'SUCCEEDED' } });
+    while ((await svc.deleteExpiredEventsBatch(9 * DAY, 1000)) > 0) {
+      /* tiếp */
+    }
+    expect(await raw.event.findUnique({ where: { id: held[2].event.id } })).toBeNull();
   });
 });

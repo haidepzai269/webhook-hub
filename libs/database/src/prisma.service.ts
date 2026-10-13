@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma, Source, SourceSecret } from '@prisma/client';
-import { AlertRow, TenantScopedRepository } from './tenant-scoped.repository';
+import { AlertRow, IN_FLIGHT_DELIVERY_STATUS_SQL, TenantScopedRepository } from './tenant-scoped.repository';
 import { logger } from '@hub/common';
 import { IdentityRepository } from './identity.repository';
 
@@ -129,6 +129,7 @@ export class PrismaService {
    * Escape hatch HẠ TẦNG cho retention (S7, DINH-CHINH §3, ADR-077): xoá MỘT lô `events` có `received_at` cũ
    * hơn `olderThanSeconds`, XUYÊN project (job cleanup không thuộc tenant nào). FK CASCADE kéo theo
    * `deliveries` -> `delivery_attempts`. KHÔNG đụng `raw_events` (ACCEPTED giữ vô hạn, ADR-045). Chỉ CleanupJob gọi.
+   * ADR-199: KHÔNG xoá event còn delivery PENDING/DELIVERING/RETRYING (CASCADE sẽ xoá delivery đang chờ -> mất webhook).
    */
   public async deleteExpiredEventsBatch(olderThanSeconds: number, limit: number): Promise<number> {
     return (await this.deleteExpiredEventsBatchAccounted(olderThanSeconds, limit)).deleted;
@@ -142,9 +143,13 @@ export class PrismaService {
   public async deleteExpiredEventsBatchAccounted(olderThanSeconds: number, limit: number): Promise<{ deleted: number; freed: { tenantId: string; bytes: number }[] }> {
     const [r] = await this.systemTx('cleanup: retention events', (tx) => tx.$queryRaw<{ n: number; freed: { t: string; b: number }[] | null }[]>`
       WITH v AS (
-        SELECT id, tenant_id FROM "hub"."events"
-        WHERE received_at < now() - make_interval(secs => ${olderThanSeconds}::double precision)
-        LIMIT ${limit} FOR UPDATE SKIP LOCKED),
+        SELECT ev.id, ev.tenant_id FROM "hub"."events" ev
+        WHERE ev.received_at < now() - make_interval(secs => ${olderThanSeconds}::double precision)
+          -- ADR-199: event còn delivery chưa tới đích thì GIỮ (đích chậm/throttle/hoãn lâu hơn retention) — cùng tập
+          -- trạng thái với lệnh dọn QT (cleanStorageBatch).
+          AND NOT EXISTS (SELECT 1 FROM "hub"."deliveries" d WHERE d.event_id = ev.id AND d.tenant_id = ev.tenant_id
+                          AND d.status IN ${IN_FLIGHT_DELIVERY_STATUS_SQL})
+        LIMIT ${limit} FOR UPDATE OF ev SKIP LOCKED),
       sz AS (
         SELECT v.tenant_id, sum(COALESCE(pg_column_size(e.data), 0)
                + COALESCE((SELECT sum(COALESCE(pg_column_size(d.last_error), 0)
