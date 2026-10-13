@@ -346,6 +346,35 @@ describe('BP1 — DeliveryConsumer không còn vòng lặp nóng requeue (ADR-19
     expect(h).not.toMatch(/\n\s+at /);
   });
 
+  it('(BP6, nợ §16 BP1) message delivery HỎNG: bản sao vào x.hub.delivery.dlx (x-dead-reason=parse_error, bỏ secret của message cũ) rồi ack — không nack(false) vứt message; publish ném -> không ack', async () => {
+    const consumer = new DeliveryConsumer(fakePrisma(new Error('x')).prisma, buildFakeCircuitBreaker('CLOSED'));
+    for (const body of [Buffer.from('không phải json'), Buffer.from(JSON.stringify({ config: { url: 'x' }, signingSecret: 's3cr3t', tenantId: 't' }))]) {
+      const ch = buildChannel();
+      await consumer.handleMessage({ content: body, properties: { headers: { 'x-correlation-id': 'c' } } } as any, ch);
+      expect(ch.nack).not.toHaveBeenCalled();
+      expect(ch.publish).toHaveBeenCalledTimes(1);
+      const [ex, rk, content, opts] = ch.publish.mock.calls[0];
+      expect([ex, rk]).toEqual([EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD]);
+      expect(opts.headers['x-dead-reason']).toBe('parse_error');
+      expect(content.toString()).not.toMatch(/s3cr3t|config/);
+      expect(ch.ack).toHaveBeenCalledTimes(1);
+      expect(ch.publish.mock.invocationCallOrder[0]).toBeLessThan(ch.ack.mock.invocationCallOrder[0]);
+    }
+    // spill (BP5) cũng đi cùng đường
+    const ch2 = buildChannel();
+    consumer.spill({ content: Buffer.from('{'), properties: { headers: {} } } as any, ch2);
+    expect(ch2.publish.mock.calls[0][3].headers['x-dead-reason']).toBe('parse_error');
+    expect(ch2.nack).not.toHaveBeenCalled();
+    // publish ném (channel đóng) -> không ack
+    const ch3 = buildChannel();
+    ch3.publish.mockImplementation(() => {
+      throw new Error('Channel closed');
+    });
+    await consumer.handleMessage({ content: Buffer.from('x'), properties: { headers: {} } } as any, ch3);
+    expect(ch3.ack).not.toHaveBeenCalled();
+    expect(ch3.nack).not.toHaveBeenCalled();
+  });
+
   it('classifyInfraError: bảng mã giữ nguyên; classifyNormalizeError ánh xạ unknown -> permanent', () => {
     for (const code of ['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2028', 'P2034']) {
       const e = new Prisma.PrismaClientKnownRequestError('x', { code, clientVersion: '5.22.0' });

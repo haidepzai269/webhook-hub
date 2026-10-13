@@ -70,7 +70,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
 
   private scheduleNext(immediate = false) {
     if (!this.isRunning) return;
-    // Jitter ±20% quanh 500ms; lô vừa rồi đầy -> chạy ngay (vẫn qua setTimeout 0 để không đệ quy sâu).
+    // Độ lệch ngẫu nhiên ±100ms quanh nhịp poll 500ms (N worker không cùng đập vào bảng outbox một nhịp — KHÔNG phải tầng retry); lô vừa rồi đầy -> chạy ngay (vẫn qua setTimeout 0 để không đệ quy sâu).
     const jitter = Math.floor(Math.random() * 200) - 100;
     const interval = immediate ? 0 : Math.max(200, 500 + jitter);
     // Luôn giữ đúng MỘT timer: lỡ có ai gọi trùng thì timer cũ bị huỷ, không sinh vòng lặp song song.

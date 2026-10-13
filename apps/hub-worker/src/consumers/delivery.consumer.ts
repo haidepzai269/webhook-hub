@@ -82,6 +82,35 @@ export class LogThrottle {
   }
 }
 
+/**
+ * BP6 (nợ §16 của BP1): message delivery HỎNG (không parse được). `q.delivery.main` KHÔNG có DLX (topology.ts) nên
+ * `nack(requeue=false)` là VỨT message — log cũ "chuyển DLQ" sai. Publish bản sao vào `x.hub.delivery.dlx` (như nhánh DEAD và
+ * lỗi lạ của BP1), header `x-dead-reason: parse_error`, RỒI ack. Bỏ các trường cấu hình/bí mật của message kiểu cũ (S1-1: DLQ
+ * không giữ secret). Publish ném lỗi (channel đóng) -> không ack, RabbitMQ giao lại.
+ */
+function deadLetterUnparsable(msg: amqp.ConsumeMessage, channel: amqp.Channel, err: unknown): void {
+  let content = msg.content;
+  try {
+    const raw = JSON.parse(msg.content.toString());
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      for (const k of ['config', 'signingSecret', 'event']) delete (raw as Record<string, unknown>)[k];
+      content = Buffer.from(JSON.stringify(raw));
+    }
+  } catch {
+    /* không phải JSON: giữ nguyên byte để điều tra */
+  }
+  logger.error({ err: (err as Error)?.message }, 'Lỗi parse DeliveryMessage -> bản sao vào q.delivery.dlq (x-dead-reason=parse_error), ack');
+  try {
+    channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, content, {
+      persistent: true,
+      headers: { ...(msg.properties.headers ?? {}), 'x-dead-reason': 'parse_error', 'x-dead-error': deadErrorHeader(err) },
+    });
+    channel.ack(msg);
+  } catch (e: any) {
+    logger.error({ err: e?.message }, 'Không publish được bản sao DLQ (channel đóng?) -> để RabbitMQ giao lại');
+  }
+}
+
 /** `x-dead-error`: chỉ tên lỗi + message cắt 200 ký tự, không stack (review T4). */
 export function deadErrorHeader(err: unknown): string {
   const e = err as { name?: unknown; message?: unknown } | null;
@@ -256,8 +285,8 @@ export class DeliveryConsumer {
     let m: DeliveryMessage;
     try {
       m = parseDeliveryMessage(msg.content, String(msg.properties.headers?.['x-correlation-id'] || 'unknown'));
-    } catch {
-      channel.nack(msg, false, false);
+    } catch (e: any) {
+      deadLetterUnparsable(msg, channel, e);
       return;
     }
     channel.sendToQueue(INFRA_DEFER.queueName, Buffer.from(JSON.stringify(buildDeliveryMessage(m))), { persistent: true, headers: msg.properties.headers });
@@ -274,8 +303,7 @@ export class DeliveryConsumer {
       // nhưng CHỈ lấy các trường tham chiếu — cấu hình luôn đọc lại từ DB (S1-1).
       deliveryMsg = parseDeliveryMessage(msg.content, String(correlationHeader));
     } catch (e: any) {
-      logger.error({ err: e.message }, 'Lỗi parse DeliveryMessage -> chuyển DLQ');
-      channel.nack(msg, false, false);
+      deadLetterUnparsable(msg, channel, e);
       return 'unknown';
     }
 
