@@ -957,6 +957,9 @@ export class TenantScopedRepository {
       AND r.received_at >= now() - make_interval(secs => ${maxAge}::double precision)
       AND NOT EXISTS (SELECT 1 FROM hub.events e WHERE e.raw_event_id = r.id)
       AND NOT EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text)
+      -- Review QT-S2 R2 N1: raw đã "Dọn" (body rỗng, user đã xác nhận mức Cao) KHÔNG còn là ứng viên chuẩn hoá lại — không
+      -- banner, không normalize.backlog, nút Chuẩn hoá lại không bắn body rỗng.
+      AND r.trimmed_at IS NULL
       ${idFilter}`;
     const [items, [countRow]] = await Promise.all([
       this.prisma.$queryRaw<OrphanRawEvent[]>(Prisma.sql`

@@ -206,13 +206,16 @@ npx hub trigger payment.received --data '{"amount":1.5}'    # amount phải là 
 
 ## reserved_type
 
-**422.** Publish (hoặc `hub trigger`) kiểu thuộc không gian **`hub.*`** — chỉ chính hub được phát (vd
+**422.** Publish (`POST /v1/p/:project/events`, SDK `publish`) kiểu thuộc không gian **`hub.*`** — chỉ chính hub được phát (vd
 `hub.project.cleanup_suggested`, ADR-187). Bị từ chối kể cả khi `data` đúng khuôn: nếu không, service có `publish:events`
 giả mạo được sự kiện của hub tới mọi subscriber. Tham số: `type`, `field` (= `type`). Hub kiểm **trước khi ghi**. Adapter
 (kể cả Generic) map ra `hub.*` thì normalize báo lỗi sai khuôn vĩnh viễn.
 **Sửa:** dùng không gian tên riêng của service (vd `order.created`). Muốn **nhận** sự kiện của hub thì đăng ký `hub.*` ở endpoint.
+`hub trigger hub.*` không tới được server: CLI dừng ngay ở máy (không có mẫu cho không gian dành riêng, mã thoát 2) — muốn thấy
+mã lỗi này thì publish thẳng:
 ```bash
-npx hub trigger hub.project.cleanup_suggested    # 422 reserved_type
+curl -si $API/v1/p/cafe/events -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"type":"hub.project.cleanup_suggested","data":{}}'    # 422 reserved_type, field = type
 ```
 
 ## scope_not_grantable

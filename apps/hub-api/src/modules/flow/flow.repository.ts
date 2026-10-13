@@ -99,11 +99,11 @@ export class FlowScopedRepository extends TenantScopedRepository {
       rejected: Prisma.sql`j.raw_status = 'REJECTED'`,
       failed: Prisma.sql`j.raw_status IS DISTINCT FROM 'REJECTED' AND (
           COALESCE(dl.n_dead, 0) > 0
-          OR (j.event_id IS NULL AND j.raw_status = 'ACCEPTED' AND NOT j.processed
+          OR (j.event_id IS NULL AND j.raw_status = 'ACCEPTED' AND NOT j.processed AND NOT j.raw_trimmed
               AND j.x_at < now() - make_interval(secs => ${orphanSecs}::double precision)))`,
       in_progress: Prisma.sql`j.raw_status IS DISTINCT FROM 'REJECTED' AND COALESCE(dl.n_dead, 0) = 0 AND (
           COALESCE(dl.n_active, 0) > 0
-          OR (j.event_id IS NULL AND j.raw_status = 'ACCEPTED' AND NOT j.processed
+          OR (j.event_id IS NULL AND j.raw_status = 'ACCEPTED' AND NOT j.processed AND NOT j.raw_trimmed
               AND j.x_at >= now() - make_interval(secs => ${orphanSecs}::double precision)))`,
       succeeded: Prisma.sql`j.raw_status IS DISTINCT FROM 'REJECTED' AND COALESCE(dl.n_dead, 0) = 0
           AND COALESCE(dl.n_active, 0) = 0 AND (j.event_id IS NOT NULL OR j.processed)`,
@@ -137,6 +137,7 @@ export class FlowScopedRepository extends TenantScopedRepository {
           SELECT r.received_at AS x_at, r.id::text AS x_key, r.id AS raw_id, r.status::text AS raw_status,
                  r.signature_valid, s.id AS source_id, s.name AS source_name, s.provider::text AS provider,
                  EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text) AS processed,
+                 (r.trimmed_at IS NOT NULL) AS raw_trimmed,
                  e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
                  COALESCE(e.probe, false) AS probe
           FROM hub.raw_events r
@@ -147,7 +148,7 @@ export class FlowScopedRepository extends TenantScopedRepository {
         SELECT * FROM (
           SELECT e.received_at AS x_at, e.id::text AS x_key, NULL::uuid AS raw_id, NULL::text AS raw_status, true AS signature_valid,
                  NULL::uuid AS source_id, NULL::varchar AS source_name, e.source::text AS provider,
-                 true AS processed, e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
+                 true AS processed, false AS raw_trimmed, e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
                  e.probe
           FROM hub.events e WHERE e.tenant_id = ${t}::uuid AND e.raw_event_id IS NULL
         ) e WHERE true ${evConds.length ? Prisma.join(evConds, ' ') : Prisma.empty}
@@ -208,7 +209,7 @@ export class FlowScopedRepository extends TenantScopedRepository {
       SELECT count(*) FILTER (WHERE r.received_at < now() - make_interval(secs => ${orphanMinAgeSeconds}::double precision))::int AS orphans,
              count(*) FILTER (WHERE r.received_at >= now() - make_interval(secs => ${orphanMinAgeSeconds}::double precision))::int AS pending
       FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
-      WHERE s.tenant_id = ${this.tenantId}::uuid AND r.status = 'ACCEPTED' AND r.received_at >= ${since}
+      WHERE s.tenant_id = ${this.tenantId}::uuid AND r.status = 'ACCEPTED' AND r.received_at >= ${since} AND r.trimmed_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM hub.events e WHERE e.raw_event_id = r.id)
         AND NOT EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text)`);
     return { ...ev, ...orph };

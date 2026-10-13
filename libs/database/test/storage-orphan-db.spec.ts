@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { RuleAdvisor, guardSuggestions, levelFor, parseOlderThan } from '@hub/common';
+import { RuleAdvisor, TRIM_FREE_RATIO, guardSuggestions, levelFor, parseOlderThan } from '@hub/common';
 import { PrismaService } from '../src/prisma.service';
 import { describeDb, newTestPrisma } from './support/test-db';
 
@@ -71,7 +71,8 @@ describeDb('QT4: raw ACCEPTED mồ côi dọn được (Postgres)', () => {
     });
     const { accepted } = guardSuggestions(raw, { buckets: buckets as any, keepLongerSourceIds: [keepId], floorMs: 3 * 3_600_000, now });
     const low = accepted.find((s) => s.importance.includes('low'))!;
-    expect(low).toMatchObject({ action: 'trim', estimatedBytes: 600 * KB, estimatedEvents: 2 });
+    // Review QT-S2 R2 F1: "Dọn" ước ~90% (TRIM_FREE_RATIO, estimateClean) — số đo thật (freedBytes dưới) là 100% body_raw.
+    expect(low).toMatchObject({ action: 'trim', estimatedBytes: Math.round(600 * KB * TRIM_FREE_RATIO), estimatedEvents: 2 });
 
     const r = await repo.cleanStorageBatch({
       action: low.action, importance: low.importance as string[], cutoff: parseOlderThan(low.olderThan, now)!.cutoff, floor: FLOOR, sourceId: low.sourceId, limit: 1000, quotaBytes,
@@ -97,6 +98,19 @@ describeDb('QT4: raw ACCEPTED mồ côi dọn được (Postgres)', () => {
     // đã dọn -> rời by_bucket, lần dọn sau không tính lại
     expect((await repo.measureStorageBuckets()).filter((b) => b.importance === 'low')).toHaveLength(0);
     expect((await repo.cleanStorageBatch({ action: 'trim', importance: ['low'], cutoff: ago(3), floor: FLOOR, limit: 1000, quotaBytes })).events).toBe(0);
+  });
+
+  it('[QT:T33] (phần g) review R2 N1: raw mồ côi mức Cao đã "Dọn" KHÔNG còn là ứng viên chuẩn hoá lại (findOrphanRawEvents = 0) — không banner, không normalize.backlog, Chuẩn hoá lại không bắn body rỗng', async () => {
+    const repo = svc.forTenant(A);
+    const cand = await orphan({ days: 1, kb: 5 }); // còn trong hạn, chưa normalize -> ứng viên renormalize (Cao)
+    const before = await repo.findOrphanRawEvents({ limit: 100, ids: [cand.id], olderThanSeconds: 60 });
+    expect(before.total).toBe(1);
+    const r = await repo.cleanStorageBatch({ action: 'trim', importance: ['high'], cutoff: ago(0.5), floor: FLOOR, limit: 1000, quotaBytes: 50 * 1024 * 1024 });
+    expect(r.events).toBeGreaterThanOrEqual(1);
+    expect((await owner.rawEvent.findUnique({ where: { id: cand.id } }))!.trimmedAt).toBeInstanceOf(Date);
+    const after = await repo.findOrphanRawEvents({ limit: 100, ids: [cand.id], olderThanSeconds: 60 });
+    expect(after.total).toBe(0);
+    expect(after.items ?? []).toEqual([]);
   });
 
   it('raw mồ côi: "Xoá hẳn" xoá dòng; ứng viên renormalize chỉ dọn khi nêu mức Cao; raw đã normalize ra 0 event (có processed_messages) = Thấp', async () => {
