@@ -28,8 +28,10 @@ const ISO8601_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d{1,9})?(Z|[+-]\d{
  * nano giây) — cắt về mili giây trước khi parse.
  */
 export function parseTimestamp(raw: string, format: TimestampFormat): number | null {
-  if (format === 'unix') return /^\d{1,12}$/.test(raw) ? Number(raw) : null;
-  if (format === 'unix-ms') return /^\d{1,15}$/.test(raw) ? Number(raw) / 1000 : null;
+  // Review PK3 T-1: không nhận số 0 đứng đầu — `01700000000` và `1700000000` là hai chuỗi ký khác nhau mà cùng một
+  // thời điểm: ranh giới `{id}{timestamp}` / `{body}{timestamp}` dời được một byte mà vẫn trong cửa sổ.
+  if (format === 'unix') return /^(0|[1-9]\d{0,11})$/.test(raw) ? Number(raw) : null;
+  if (format === 'unix-ms') return /^(0|[1-9]\d{0,14})$/.test(raw) ? Number(raw) / 1000 : null;
   const m = ISO8601_RE.exec(raw);
   if (!m) return null;
   const frac = m[2] ? m[2].slice(0, 4) : '';
@@ -77,9 +79,24 @@ export function presentedSignatures(c: GenericConfig, headers: Headers): Present
   return { sigs, timestamp: c.timestampHeader ? headerValue(headers, c.timestampHeader) : null };
 }
 
+/**
+ * Review PK3 T-6: dạng kv — header chữ ký có mang khoá `key` không (để `diagnose` nói "thiếu khoá `t` trong
+ * `stripe-signature`" thay vì "lệch giờ"). Chỉ đếm TÊN khoá, không đọc giá trị.
+ */
+export function kvHasKey(c: GenericConfig, headers: Headers, key: string): boolean {
+  const s = c.signature!;
+  if (!('kv' in s)) return false;
+  const raw = headerValue(headers, s.header);
+  if (raw === null) return false;
+  return raw.split(s.kv.sep).some((part) => {
+    const i = part.indexOf('=');
+    return i > 0 && part.slice(0, i).trim() === key;
+  });
+}
+
 /** Timestamp nằm trong cửa sổ `toleranceSec` quanh `nowSec`. */
 export function withinTolerance(c: GenericConfig, timestamp: string | null, nowSec: number): boolean {
-  if (timestamp === null) return false;
+  if (timestamp === null || !Number.isFinite(nowSec)) return false; // review PK3 T-2: "bây giờ" hỏng -> fail-closed
   const ts = parseTimestamp(timestamp, c.timestampFormat ?? 'unix');
   if (ts === null) return false;
   return Math.abs(nowSec - ts) <= c.toleranceSec!;

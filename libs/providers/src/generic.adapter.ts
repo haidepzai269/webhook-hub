@@ -4,7 +4,7 @@ import { swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
 import { AdapterContext, Diagnosis, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
 import { GenericConfig, HMAC_ALGOS, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
-import { presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
+import { kvHasKey, presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
 import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
 /**
@@ -24,6 +24,8 @@ export class GenericAdapter implements ProviderAdapter {
     const c = configOf(ctx);
     if (!c || secrets.length === 0) return false;
     const nowMs = ctx?.verifyAt ? ctx.verifyAt.getTime() : Date.now();
+    // Review PK3 T-2: `verifyAt` không hợp lệ (Invalid Date -> NaN) thì không có "bây giờ" để kiểm độ lệch -> fail-closed.
+    if (!Number.isFinite(nowMs)) return false;
     if (c.scheme === 'standard-webhooks') {
       const opts = { nowSec: Math.floor(nowMs / 1000) };
       return secrets.some((s) => swVerify(s, req.headers, req.rawBody, opts));
@@ -246,6 +248,9 @@ function diagnoseTemplate(
   const presented = presentedSignatures(c, headers);
   if (c.toleranceSec !== undefined) {
     if (req.timestamp !== null && !has(req.timestamp)) return { ok: false, reason: 'missing_header', expectedHeader: req.timestamp, candidateHeaders: candidates(req.timestamp) };
+    // Review PK3 T-6: dạng kv thiếu hẳn khoá timestamp -> nói tên khoá thiếu (không phải "lệch giờ").
+    const kvTs = 'kv' in c.signature! ? c.signature.kv.timestamp : undefined;
+    if (kvTs !== undefined && !kvHasKey(c, headers, kvTs)) return { ok: false, reason: 'missing_kv_key', expectedHeader: req.signature[0], expectedKvKey: kvTs };
     if (!withinTolerance(c, presented.timestamp, new Date(raw.receivedAt).getTime() / 1000)) return { ok: false, reason: 'timestamp_out_of_range', expectedHeader: req.timestamp ?? req.signature[0] };
   }
   if (req.id !== null && !has(req.id)) return { ok: false, reason: 'missing_header', expectedHeader: req.id, candidateHeaders: candidates(req.id) };

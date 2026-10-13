@@ -11,6 +11,8 @@ export interface InspectDiagnosis {
   field?: string;
   /** PK2: tên tham số query chứa token (giá trị không bao giờ được lưu). */
   expectedQueryParam?: string;
+  /** Review PK3 T-6: tên khoá thiếu trong tiêu đề khoá=giá trị (vd `t` của `stripe-signature`). */
+  expectedKvKey?: string;
 }
 
 /** Một dòng của `GET /api/v1/sources/:id/inspect` (cùng khuôn `GET /v1/p/:project/sources/:id/inspect`). */
@@ -47,7 +49,9 @@ export function connectionState(rows: InspectRow[] | undefined): ConnectionState
 export function diagnosisParts(d: InspectDiagnosis): { reason: string; name: string | null; candidates: string[] } {
   return {
     reason: d.reason ?? "unknown",
-    name: d.expectedHeader ?? d.expectedField ?? d.field ?? (d.expectedQueryParam ? `?${d.expectedQueryParam}` : null),
+    name: d.expectedKvKey
+      ? `${d.expectedKvKey} (${d.expectedHeader ?? ""})`
+      : (d.expectedHeader ?? d.expectedField ?? d.field ?? (d.expectedQueryParam ? `?${d.expectedQueryParam}` : null)),
     candidates: d.candidateHeaders ?? [],
   };
 }
@@ -278,7 +282,9 @@ export function genericFormIssues(v: GenericFormValues, secret: string): { path:
 function templateIssues(v: GenericFormValues): { path: keyof GenericFormValues; issue: GenericFormIssue }[] {
   const out: { path: keyof GenericFormValues; issue: GenericFormIssue }[] = [];
   const template = v.template.trim();
-  if (!TEMPLATE_RE.test(template) || template.split("{body}").length !== 2) out.push({ path: "template", issue: "template-invalid" });
+  // Review PK3 T-1: `{id}` sát `{body}` -> 422 `template` ở server (dời byte qua ranh giới), client cùng luật.
+  const idTouchesBody = template.includes("{id}{body}") || template.includes("{body}{id}");
+  if (!TEMPLATE_RE.test(template) || template.split("{body}").length !== 2 || idTouchesBody) out.push({ path: "template", issue: "template-invalid" });
   if (!(TEMPLATE_ALGO_CHOICES as readonly string[]).includes(v.algo)) out.push({ path: "algo", issue: "algo-template" });
   const h2 = v.header2.trim().toLowerCase();
   if (v.sigMode === "headers" && h2 !== "" && (!HEADER_RE.test(h2) || h2 === v.header.trim().toLowerCase())) out.push({ path: "header2", issue: "header2-invalid" });

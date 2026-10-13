@@ -18,6 +18,7 @@ const REASON_KEY: Record<string, MessageKey> = {
   signature_mismatch: "page.sources.listen.reason.signature-mismatch",
   token_mismatch: "page.sources.listen.reason.token-mismatch",
   timestamp_out_of_range: "page.sources.listen.reason.timestamp-out-of-range",
+  missing_kv_key: "page.sources.listen.reason.missing-kv-key",
   missing_idempotency_key: "page.sources.listen.reason.missing-idempotency-key",
   mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
   mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",

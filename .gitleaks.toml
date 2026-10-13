@@ -33,4 +33,10 @@ regexes = [
   # libs/common/test/alert-email.spec.ts (CB:T9, ADR-173) — chuỗi ĐÁNH DẤU giả để test khẳng định secret trong facts KHÔNG
   # lọt vào email cảnh báo (đã xác minh 2026-10-12, không phải secret thật).
   '''whsec_SECRET789''',
+  # libs/providers/test/generic-signed-template.spec.ts (review PK3 T-4) — vector CÔNG KHAI trong tài liệu Slack
+  # (docs.slack.dev/authentication/verifying-requests-from-slack): signing secret, token slash-command và chữ ký mẫu
+  # (đã xác minh 2026-10-14: HMAC của secret mẫu trên chuỗi mẫu ra đúng chữ ký mẫu; không phải khoá thật).
+  '''8f742231b10e8888abcd99yyyzzz85a5''',
+  '''xyzz0WbapA4vBCDEFasx0q6G''',
+  '''a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503''',
 ]

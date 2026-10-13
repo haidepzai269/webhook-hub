@@ -264,10 +264,11 @@ Sau đợt này: **S1–S4 = 60 bên** đi bằng config có verify; **S5/S6/S8/
   "scheme": "signed-template",
   "template": "v0:{timestamp}:{body}",     // ^([^{}]|\{(timestamp|body|id)\}){1,128}$, {body} đúng 1 lần
   "algo": "sha256", "encoding": "hex", "keyEncoding": "utf8",
-  "signature": { "header": "x-slack-signature", "prefix": "v0=" },
+  "signature": { "headers": ["x-slack-signature"], "prefix": "v0=" },   // E16: 1–2 header, khớp một là đủ (Box primary/secondary)
   //   hoặc khoá=giá trị trong MỘT header (Stripe, Paddle): { "header": "stripe-signature", "kv": { "sep": ",", "sig": "v1", "timestamp": "t" } }
+  "timestampFormat": "unix",                     // unix | unix-ms | iso8601 (E16); unix không nhận số 0 đứng đầu
   "timestampHeader": "x-slack-request-timestamp", // bỏ khi timestamp nằm trong kv
-  "idHeader": null,                              // bắt buộc nếu template có {id}
+  "idHeader": null,                              // bắt buộc nếu template có {id}; {id} không được đứng sát {body} (ADR-204 bổ sung)
   "toleranceSec": 300,                           // 5..900, bắt buộc khi có {timestamp}
   "idempotency": { "header": "…" } | { "field": "…" },
   "eventType": "slack.event"
@@ -276,7 +277,7 @@ Sau đợt này: **S1–S4 = 60 bên** đi bằng config có verify; **S5/S6/S8/
 
 - `kv.sep` chỉ là `;` hoặc `,`. Nhiều giá trị `sig` (xoay khoá) → khớp một là đủ, không dừng sớm.
 - HMAC tính trên `Buffer.concat` các phần, trong đó `{body}` là **bytes gốc**. So bằng `timingSafeCompare`.
-- `toleranceSec` cho xuống 5 vì Paddle SDK chỉ chấp nhận lệch 5s (nghiên cứu §1.5). Mặc định 300.
+- `toleranceSec` cho xuống 5 vì Paddle SDK chỉ chấp nhận lệch 5s (nghiên cứu §1.5). **Không có mặc định**: có `{timestamp}` thì bắt buộc khai (form console điền sẵn 300). Sửa theo review PK3 T-7.
 - `[PK:T8]` thiếu `{body}`, `{body}` hai lần, token lạ, có `{timestamp}` mà không có `toleranceSec` → 422, có đúng tên trường. `[PK:T9]` fixture Slack, Stripe, Paddle, Zendesk verify qua; lệch `toleranceSec + 1` giây → false; phát lại sau 10 phút → false.
 
 ## 6. PK4: Bắt tay khai báo được (S7), GET cho bắt tay, ack theo cấu hình
@@ -692,6 +693,13 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
   - **`[PK:T9]` vào:** Slack, Stripe, Paddle, **Calendly, Box, Twitch** (thuật toán đối chiếu tài liệu chính thức 2026-10-14; body là mẫu chính thức rút gọn, chữ ký tính lúc chạy). Ghi chú: Box — tài liệu không có ví dụ giá trị `box-delivery-timestamp`, chỉ nói "parse được bằng Date.parse" → dùng `iso8601` có offset; mã Node mẫu của Box ghép chéo primary/secondary (mâu thuẫn với lời văn) — hub thử mọi tiêu đề × mọi secret nên không phụ thuộc cách ghép. Cửa sổ chính thức của Box đúng 10 phút → ca "phát lại sau 10 phút" dùng 10 phút + 1 giây. Twitch — trang tài liệu không nêu cửa sổ → fixture dùng 300 (mặc định hub). Calendly — mã mẫu ký `JSON.stringify(req.body)`, hub ký bytes gốc (khớp khi Calendly gửi JSON gọn như mẫu).
   - **`[PK:T9]` không vào:** **Zendesk** — tài liệu chính thức chỉ có công thức `base64(HMACSHA256(TIMESTAMP + BODY))`, không có định dạng timestamp (chỉ blog bên thứ ba ghi ISO 8601) và không nêu cửa sổ → chưa xác minh được, để `entries-pending/` (E16). **Recurly** — header `<ts>,<sig>` không có tên khoá, không khớp khuôn kv (E16) → cần mở rộng khuôn kv có ADR, hoặc `unverified`. **Webflow / Sanity / SePay HMAC / Zoom** — chưa đối chiếu tài liệu trong lượt này (Webflow có test `unix-ms` dựng tay, không gắn tag); Zoom còn chờ E3 (`hmac-echo`, PK4).
   - **Console:** form generic thêm `signed-template` (chuỗi ký, chữ ký ở tiêu đề 1–2 + tiền tố hoặc khoá=giá trị, tiêu đề/khoá thời điểm, định dạng, độ lệch, tiêu đề `{id}`, thuật toán sha256/sha512) + 3 nút điền nhanh Stripe/Slack/Paddle (chỉ ghi đè ô ký, giữ tên/khoá/khoá chống trùng/kiểu sự kiện). `genericFormIssues` đối chiếu từng ca với server trong `listen-logic.spec.ts`.
+- **Sửa review PK3 (2026-10-14, Amelia):**
+  - **T-1:** unix/unix-ms không nhận số 0 đứng đầu; `{id}` sát `{body}` → 422 `template` (server + client cùng luật). `{timestamp}` sát token khác vẫn được (Twitch, Box) — khuôn cứng + cửa sổ. ADR-204 bổ sung.
+  - **T-2:** `verifyAt` Invalid Date → false (adapter + `swVerify` fail-closed).
+  - **T-3, T-4:** thêm test body không phải UTF-8; vector chính thức Slack (đáp án cố định, chuỗi mẫu công khai được allowlist trong `.gitleaks.toml` kèm lý do) và header sinh bằng `stripe.webhooks.generateTestHeaderString`.
+  - **T-5:** giữ 5 giây cho điền nhanh Paddle, câu nhắc ở form về khởi động lạnh.
+  - **T-6:** reason mới `missing_kv_key` + `expectedKvKey` (thay "lệch giờ" khi kv thiếu hẳn khoá timestamp). Có khoá mà lệch vẫn là `timestamp_out_of_range`.
+  - **T-7:** thân §5 sửa: ví dụ dùng `signature.headers` (E16), `toleranceSec` không có mặc định (bắt buộc khi có `{timestamp}`). Zendesk vào `entries-pending/` ở PK9.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

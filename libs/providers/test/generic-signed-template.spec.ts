@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from 'crypto';
+import Stripe from 'stripe';
 import { RawWebhookRequest } from '@hub/common';
-import { swHeaders } from '@hub/crypto';
+import { swHeaders, swVerify } from '@hub/crypto';
 import { GenericAdapter } from '../src/generic.adapter';
 import { GenericConfig, validateGenericConfig } from '../src/generic-config';
 import { parseTimestamp } from '../src/signed-template';
@@ -171,7 +172,7 @@ const FIXTURES: Fixture[] = [
   },
 ];
 
-describe('[PK:T9] signed-template: fixture Slack, Stripe, Paddle, Calendly, Box, Twitch', () => {
+describe('[PK:T9] (phần a) signed-template: fixture Slack, Stripe, Paddle, Calendly, Box, Twitch', () => {
   it.each(FIXTURES.map((f) => [f.name, f] as const))('%s: ký đúng -> true; lệch toleranceSec+1 (hai phía) -> false; biên toleranceSec -> true; phát lại sau 10 phút -> false; sửa 1 byte -> false', async (_n, f) => {
     const c = cfg({ ...f.config, idempotency: f.idempotency });
     const tol = c.toleranceSec!;
@@ -297,10 +298,11 @@ describe('PK3: diagnose / extractSignature của signed-template (chỉ tên hea
     expect(JSON.stringify(a.diagnose(stored(h, NOW + 30), ctx))).not.toContain(h['x-slack-signature'].slice(3, 20));
   });
 
-  it('kv (Stripe): thiếu t -> timestamp_out_of_range trên header chữ ký; idHeader (Twitch) thiếu -> missing_header', () => {
+  it('kv (Stripe): thiếu khoá t -> missing_kv_key (review PK3 T-6); có t mà lệch -> timestamp_out_of_range; idHeader (Twitch) thiếu -> missing_header', () => {
     const s = FIXTURES.find((x) => x.name === 'Stripe')!;
     const sc = { verificationConfig: cfg({ ...s.config, idempotency: s.idempotency }) };
-    expect(a.diagnose(stored({ 'stripe-signature': 'v1=ab' }), sc)).toMatchObject({ reason: 'timestamp_out_of_range', expectedHeader: 'stripe-signature' });
+    expect(a.diagnose(stored({ 'stripe-signature': 'v1=ab' }), sc)).toEqual({ ok: false, reason: 'missing_kv_key', expectedHeader: 'stripe-signature', expectedKvKey: 't' });
+    expect(a.diagnose(stored({ 'stripe-signature': `t=${NOW - 400},v1=ab` }), sc)).toMatchObject({ reason: 'timestamp_out_of_range', expectedHeader: 'stripe-signature' });
     const t = FIXTURES.find((x) => x.name === 'Twitch')!;
     const th = t.sign('khoa-test-chan-doan', t.body, NOW);
     const { 'twitch-eventsub-message-id': _id, ...noId } = th;
@@ -378,5 +380,101 @@ describe('[PK:T8] (phần a) validateGenericConfig: template sai luật -> đún
     // Config đã lưu được kiểm lại mỗi lần dùng: dựng lại lần hai không đổi.
     const again = validateGenericConfig((r as { config: unknown }).config);
     expect(again).toEqual(r);
+  });
+});
+
+describe('Review PK3 (T-1..T-4): ranh giới token, verifyAt hỏng, bytes không phải UTF-8, vector biết trước đáp án', () => {
+  it('[PK:T8] (phần c) T-1: unix / unix-ms không nhận số 0 đứng đầu; "0" vẫn là số hợp lệ', () => {
+    expect(parseTimestamp('01700000000', 'unix')).toBeNull();
+    expect(parseTimestamp('00001', 'unix')).toBeNull();
+    expect(parseTimestamp('01700000000000', 'unix-ms')).toBeNull();
+    expect(parseTimestamp('0', 'unix')).toBe(0);
+    expect(parseTimestamp('1700000000', 'unix')).toBe(1700000000);
+    expect(parseTimestamp('1234567890123', 'unix')).toBeNull(); // 13 chữ số > 12
+  });
+
+  it('[PK:T8] (phần d) T-1: {id} đứng sát {body} -> 422 template (cả hai phía); có ký tự ngăn cách hoặc sát {timestamp} -> được', () => {
+    const base = { scheme: 'signed-template', idempotency: { header: 'x-id' }, eventType: 'acme.event', signature: { headers: ['x-sig'] }, idHeader: 'x-id' };
+    const field = (template: string, extra: Record<string, unknown> = {}) => {
+      const r = validateGenericConfig({ ...base, template, ...extra });
+      return r.ok ? 'ok' : (r as { field: string }).field;
+    };
+    const ts = { timestampHeader: 'x-ts', toleranceSec: 300 };
+    expect(field('{id}{body}')).toBe('template');
+    expect(field('{body}{id}')).toBe('template');
+    expect(field('{timestamp}.{id}{body}', ts)).toBe('template');
+    expect(field('{id}.{body}')).toBe('ok');
+    expect(field('{id}{timestamp}{body}', ts)).toBe('ok'); // Twitch
+    expect(field('{body}{timestamp}', { ...ts, idHeader: undefined })).toBe('ok'); // Box
+  });
+
+  it('T-1 kịch bản 1: id "evt-10" + ts T được ký; phát lại với id "evt-1" + ts "0"+T (cùng bytes, khoá chống trùng mới) -> false', async () => {
+    const secret = rnd();
+    const c = cfg({ template: '{id}{timestamp}{body}', signature: { headers: ['x-sig'] }, timestampHeader: 'x-ts', idHeader: 'x-id', toleranceSec: 300, idempotency: { header: 'x-id' } });
+    const body = '{"a":1}';
+    const sig = hmac('sha256', secret, `evt-10${NOW}${body}`, 'hex');
+    expect(await verifyAt(c, req(body, { 'x-id': 'evt-10', 'x-ts': String(NOW), 'x-sig': sig }), [secret], NOW)).toBe(true);
+    expect(await verifyAt(c, req(body, { 'x-id': 'evt-1', 'x-ts': `0${NOW}`, 'x-sig': sig }), [secret], NOW)).toBe(false);
+  });
+
+  it('T-2: verifyAt không hợp lệ (Invalid Date) -> false ở signed-template VÀ standard-webhooks (fail-closed)', async () => {
+    const f = FIXTURES.find((x) => x.name === 'Slack')!;
+    const c = cfg({ ...f.config, idempotency: f.idempotency });
+    const secret = f.secret();
+    const r = req(f.body, f.sign(secret, f.body, NOW));
+    expect(await a.verify(r, [secret], { verificationConfig: c, verifyAt: new Date(NaN) })).toBe(false);
+
+    const sw = `whsec_${randomBytes(24).toString('base64')}`;
+    const body = '{"type":"user.created","id":"u1"}';
+    const sr: RawWebhookRequest = { provider: 'generic', sourceKey: 'k', headers: swHeaders(sw, 'msg_1', body, 1000), rawBody: Buffer.from(body), body: JSON.parse(body), contentType: 'application/json' };
+    const vc = (validateGenericConfig({ scheme: 'standard-webhooks', eventType: 'user.created' }) as { config: unknown }).config;
+    expect(await a.verify(sr, [sw], { verificationConfig: vc, verifyAt: new Date(NaN) })).toBe(false);
+    // Thẳng vào swVerify: nowSec NaN không được bỏ qua kiểm độ lệch (chữ ký năm 1970).
+    expect(swVerify(sw, sr.headers, sr.rawBody, { nowSec: NaN })).toBe(false);
+    expect(swVerify(sw, sr.headers, sr.rawBody, { nowSec: 1000 })).toBe(true);
+  });
+
+  it('T-3: {body} là bytes gốc kể cả byte KHÔNG phải UTF-8 hợp lệ (khứ hồi toString/Buffer.from làm đổi bytes)', async () => {
+    const secret = rnd();
+    const c = cfg({ template: '{timestamp}.{body}', signature: { headers: ['x-sig'] }, timestampHeader: 'x-ts', toleranceSec: 60, idempotency: { header: 'x-ts' } });
+    const raw = Buffer.from([0x61, 0xff, 0xfe, 0x62]);
+    expect(Buffer.from(raw.toString('utf8'), 'utf8').equals(raw)).toBe(false); // tiền đề: khứ hồi UTF-8 làm hỏng
+    const sig = createHmac('sha256', secret).update(Buffer.concat([Buffer.from(`${NOW}.`), raw])).digest('hex');
+    const r: RawWebhookRequest = { provider: 'generic', sourceKey: 'k', headers: { 'x-sig': sig, 'x-ts': String(NOW) }, rawBody: raw, body: null, contentType: 'application/octet-stream' };
+    expect(await verifyAt(c, r, [secret], NOW)).toBe(true);
+  });
+
+  it('[PK:T9] (phần b) T-4: vector CHÍNH THỨC của Slack (docs.slack.dev, đáp án cố định) verify qua cấu hình điền nhanh Slack', async () => {
+    // https://docs.slack.dev/authentication/verifying-requests-from-slack — ví dụ công khai trong tài liệu (không phải khoá thật).
+    const slackDocKey = '8f742231b10e8888abcd99yyyzzz85a5';
+    const ts = 1531420618;
+    const body =
+      'token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J&team_domain=testteamnow&channel_id=G8PSS9T3V&channel_name=foobar&user_id=U2CERLKJA&user_name=roadrunner&command=%2Fwebhook-collect&text=&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2FT1DC2JH3J%2F397700885554%2F96rGlfmibIGlgcZRskXaIFfN&trigger_id=398738663015.47445629121.803a0bc887a14d10d2c447fce8b6703c';
+    const docSig = 'v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503';
+    const f = FIXTURES.find((x) => x.name === 'Slack')!;
+    const c = cfg({ ...f.config, idempotency: { header: 'x-slack-request-timestamp' } });
+    const r: RawWebhookRequest = {
+      provider: 'generic',
+      sourceKey: 'k',
+      headers: { 'x-slack-request-timestamp': String(ts), 'x-slack-signature': docSig },
+      rawBody: Buffer.from(body, 'utf8'),
+      body: null,
+      contentType: 'application/x-www-form-urlencoded',
+    };
+    expect(await verifyAt(c, r, [slackDocKey], ts + 10)).toBe(true);
+    expect(await verifyAt(c, r, [slackDocKey], ts + 301)).toBe(false);
+    expect(await verifyAt(c, { ...r, rawBody: Buffer.from(body.replace('foobar', 'foobaz'), 'utf8') }, [slackDocKey], ts)).toBe(false);
+  });
+
+  it('[PK:T9] (phần c) T-4: header sinh bằng SDK stripe (webhooks.generateTestHeaderString) verify qua cấu hình điền nhanh Stripe', async () => {
+    const f = FIXTURES.find((x) => x.name === 'Stripe')!;
+    const c = cfg({ ...f.config, idempotency: f.idempotency });
+    const whsec = f.secret();
+    const sdk = new Stripe('sk_placeholder_webhook_verify_only');
+    const header = sdk.webhooks.generateTestHeaderString({ payload: f.body, secret: whsec, timestamp: NOW });
+    const r = req(f.body, { 'stripe-signature': header });
+    expect(await verifyAt(c, r, [whsec], NOW)).toBe(true);
+    expect(await verifyAt(c, r, [f.secret()], NOW)).toBe(false);
+    expect(await verifyAt(c, r, [whsec], NOW + 301)).toBe(false);
   });
 });

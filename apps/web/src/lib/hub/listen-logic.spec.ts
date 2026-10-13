@@ -73,6 +73,8 @@ describe("[PK:T5] trạng thái kết nối: chờ -> ✓ khi có ACCEPTED đầ
     });
     expect(diagnosisParts({ ok: false, reason: "missing_idempotency_key", expectedField: "transId" })).toEqual({ reason: "missing_idempotency_key", name: "transId", candidates: [] });
     expect(diagnosisParts({ ok: false })).toEqual({ reason: "unknown", name: null, candidates: [] });
+    // Review PK3 T-6: kv thiếu khoá thời điểm -> nêu tên khoá + tiêu đề.
+    expect(diagnosisParts({ ok: false, reason: "missing_kv_key", expectedHeader: "stripe-signature", expectedKvKey: "t" })).toEqual({ reason: "missing_kv_key", name: "t (stripe-signature)", candidates: [] });
   });
 });
 
@@ -312,6 +314,9 @@ describe("PK3: form signed-template — điền nhanh + cùng luật server (val
       [{ ...TPL, timestampHeader: "" }, "secret-pk3-123"],
       [{ ...TPL, template: "{id}{timestamp}{body}" }, "secret-pk3-123"],
       [{ ...TPL, template: "{id}{timestamp}{body}", idHeader: "Twitch-Eventsub-Message-Id" }, "secret-pk3-123"],
+      [{ ...TPL, template: "{id}{body}", idHeader: "x-id" }, "secret-pk3-123"], // review PK3 T-1: {id} sát {body}
+      [{ ...TPL, template: "{timestamp}.{body}{id}", idHeader: "x-id" }, "secret-pk3-123"],
+      [{ ...TPL, template: "{id}.{body}", idHeader: "x-id" }, "secret-pk3-123"],
       [{ ...TPL, algo: "sha1" }, "secret-pk3-123"],
       [{ ...TPL, algo: "from-prefix" }, "secret-pk3-123"],
       [{ ...TPL, header2: "x-slack-signature" }, "secret-pk3-123"],

@@ -346,6 +346,13 @@ function validateSignedTemplate(c: Record<string, any>): ConfigCheck {
   if (countToken(template, 'body') !== 1) return bad('template', 'template phải có {body} đúng một lần (chữ ký phải phủ toàn bộ body)');
   const hasTs = countToken(template, 'timestamp') > 0;
   const hasId = countToken(template, 'id') > 0;
+  // Review PK3 T-1 (ADR-204 bổ sung): `{id}` và `{body}` đều không có khuôn cố định — đứng sát nhau thì dời được byte qua
+  // ranh giới (`evt-1` + `{"a":1}` = `evt-` + `1{"a":1}`) mà chữ ký vẫn đúng: body bị đổi, khoá chống trùng đổi. Bắt buộc
+  // có ký tự ngăn cách. `{timestamp}` đứng sát thì an toàn vì khuôn cứng (unix/unix-ms không số 0 đứng đầu, ISO cố định)
+  // + cửa sổ độ lệch: dời một byte đổi giá trị ≥ 10 lần hoặc làm hỏng khuôn (Twitch `{id}{timestamp}{body}` vẫn hợp lệ).
+  if (template.includes('{id}{body}') || template.includes('{body}{id}')) {
+    return bad('template', '{id} không được đứng sát {body} — thêm ký tự ngăn cách (vd "{id}.{body}")');
+  }
 
   const algo: HmacAlgo = c.algo ?? 'sha256';
   if (!TEMPLATE_ALGOS.includes(algo)) return bad('algo', `algo của signed-template là ${TEMPLATE_ALGOS.join(' | ')}`);

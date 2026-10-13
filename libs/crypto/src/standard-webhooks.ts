@@ -70,7 +70,8 @@ export function swVerify(
   if (!id || !tsRaw || !sigs || !/^\d{1,12}$/.test(tsRaw)) return false;
   const ts = Number(tsRaw);
   const now = opts.nowSec ?? Math.floor(Date.now() / 1000);
-  if (Math.abs(now - ts) > (opts.toleranceSec ?? SW_TOLERANCE_SEC)) return false;
+  // Review PK3 T-2: fail-closed — `now` NaN (verifyAt hỏng) làm `> tol` ra false và bỏ qua kiểm độ lệch; `!(… <= tol)` thì chặn.
+  if (!(Math.abs(now - ts) <= (opts.toleranceSec ?? SW_TOLERANCE_SEC))) return false;
   const expected = Buffer.from(swSign(secret, id, ts, rawBody));
   let ok = false;
   for (const s of sigs.split(' ')) {

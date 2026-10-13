@@ -38,6 +38,8 @@ export interface Diagnosis {
     | 'signature_mismatch'
     | 'token_mismatch'
     | 'timestamp_out_of_range'
+    /** Review PK3 T-6: signed-template dạng kv — header chữ ký có mặt nhưng thiếu khoá timestamp (`expectedKvKey`). */
+    | 'missing_kv_key'
     | 'missing_idempotency_key'
     | 'mapping_field_missing'
     | 'mapping_field_invalid'
@@ -48,6 +50,8 @@ export interface Diagnosis {
   field?: string;
   /** PK2: TÊN tham số query chứa token (static-token location query). Giá trị không bao giờ được lưu. */
   expectedQueryParam?: string;
+  /** Review PK3 T-6: TÊN khoá thiếu trong header khoá=giá trị (vd `t` của `stripe-signature`). */
+  expectedKvKey?: string;
 }
 
 /**
