@@ -6,7 +6,7 @@ import { CLEAN_STATEMENT_TIMEOUT_MS, CLEAN_TX_TIMEOUT_MS } from '../src/schedule
 const T = 't-1';
 const MB = 1024 * 1024;
 
-function fake(batches: { events: number; rejected: number; freedBytes: number; done: boolean; level?: any }[], o: { failAt?: number } = {}) {
+function fake(batches: { events: number; rejected: number; freedBytes: number; done: boolean; level?: any }[], o: { failAt?: number; lostAt?: number } = {}) {
   const log: string[] = [];
   const txOpts: unknown[] = [];
   const recorded: any[] = [];
@@ -30,7 +30,7 @@ function fake(batches: { events: number; rejected: number; freedBytes: number; d
     freedBytes: 0n,
   };
   const prisma: any = {
-    storageClaimCleanJobAcrossTenants: jest.fn().mockResolvedValueOnce({ id: 'job-1', tenantId: T }).mockResolvedValue(null),
+    storageClaimCleanJobAcrossTenants: jest.fn().mockResolvedValueOnce({ id: 'job-1', tenantId: T, attempts: 3 }).mockResolvedValue(null),
     findProjectById: jest.fn(async () => ({ id: T, storageQuotaMb: 10 })),
     tenantTx: jest.fn(async (t: string, fn: any, opts: unknown) => {
       txOpts.push(opts);
@@ -51,6 +51,7 @@ function fake(batches: { events: number; rejected: number; freedBytes: number; d
       recordCleanJobBatch: jest.fn(async (id: string, r: any) => {
         if (!tx) throw new Error('tiến độ phải cùng transaction với lô');
         recorded.push({ id, ...r });
+        return o.lostAt === recorded.length - 1 ? 0 : 1; // 0 dòng = fencing không khớp (lệnh đã bị nhận lại)
       }),
       createAuditLog: jest.fn(async (a: any) => {
         if (!tx) throw new Error('audit phải cùng transaction với lô cuối');
@@ -101,6 +102,20 @@ describe('QT4: StorageCleanRunner — lệnh dọn theo lô', () => {
     expect(r[0]).toMatchObject({ status: 'RUNNING', batches: 1 });
     expect(f.recorded).toHaveLength(1);
     expect(f.audits).toHaveLength(0);
+  });
+
+  it('review QT-S2 L1: ghi tiến độ có fencing (attempts của lượt nhận); 0 dòng (worker khác đã nhận lại) -> bỏ lô (rollback), dừng, không audit', async () => {
+    const f = fake(
+      [
+        { events: 1000, rejected: 0, freedBytes: 1, done: false },
+        { events: 7, rejected: 0, freedBytes: 1, done: true },
+      ],
+      { lostAt: 1 },
+    );
+    const r = await new StorageCleanRunner(f.prisma).tick();
+    expect(r[0]).toMatchObject({ status: 'LOST', batches: 1, events: 1000 });
+    expect(f.recorded.map((x) => x.attempts)).toEqual([3, 3]);
+    expect(f.audits).toHaveLength(0); // lô cuối ném trước khi ghi audit -> rollback cả lô
   });
 
   it('đang tắt (stop) -> dừng ở ranh giới lô, không nhận lệnh mới', async () => {

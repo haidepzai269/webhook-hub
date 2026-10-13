@@ -256,6 +256,11 @@ export async function applySuggestion(
   if (!SUGGESTION_ID_RE.test(suggestionId)) throw hubError('not_found');
   const now = opts.now ?? Date.now();
   const floorMs = opts.floorMs ?? TOTAL_RETRY_WINDOW_MS;
+  // Review QT-S2 M2: idempotent theo id TRƯỚC khi tính lại — hệ thống của user retry cùng id sau khi lượt hiệu chỉnh 24h đổi
+  // `by_bucket` (gợi ý biến mất / bản lưu hết hạn) vẫn nhận CÙNG lệnh dọn, không phải 409 `suggestion_stale` (§5.6).
+  const since = new Date(now - APPLY_IDEMPOTENT_MS);
+  const prior = await store.tenantTx(projectId, (tx) => store.forTenant(projectId, tx).lockAndFindCleanJobForSuggestion(suggestionId, since));
+  if (prior) return cleanJobView(prior);
   const repo = store.forTenant(projectId);
   const [project, usage, policies, keepLongerSourceIds, traffic24h] = await Promise.all([
     store.findProjectById(projectId),
@@ -303,7 +308,7 @@ export async function applySuggestion(
   if (isCleanRequestError(req)) throw hubError('suggestion_stale', { suggestions: fresh }, req.message);
   const job = await store.tenantTx(projectId, async (tx) => {
     const r = store.forTenant(projectId, tx);
-    const existing = await r.lockAndFindCleanJobForSuggestion(found.id, new Date(now - APPLY_IDEMPOTENT_MS));
+    const existing = await r.lockAndFindCleanJobForSuggestion(found.id, since); // hai lần gọi song song: lần sau thấy lệnh lần đầu
     if (existing) return existing;
     return insertCleanJob(r, req, actor, { origin: 'suggestion', suggestionId: found.id, advisor: found.advisor });
   });

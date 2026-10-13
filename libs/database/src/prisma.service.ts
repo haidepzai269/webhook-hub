@@ -547,24 +547,25 @@ export class PrismaService {
 
   /**
    * QT4 (§5.5, ADR-184): worker NHẬN một lệnh dọn — PENDING, hoặc RUNNING đã hết lease (worker trước chết giữa chừng; lô
-   * đã COMMIT giữ nguyên tiến độ, lô dở bị rollback, chạy tiếp từ chỗ còn lại). `FOR UPDATE SKIP LOCKED` -> nhiều instance
+   * đã COMMIT giữ nguyên tiến độ, lô dở bị rollback, chạy tiếp từ chỗ còn lại). `attempts` trả về là fencing token cho
+   * `recordCleanJobBatch` (review QT-S2 L1): worker cũ treo quá lease không ghi đè được tiến độ của worker mới. `FOR UPDATE SKIP LOCKED` -> nhiều instance
    * worker không nhận trùng (như outbox relay), không cần khoá Redis. Lệnh đã nhận quá `maxAttempts` lần -> FAILED (không
    * quay vòng mãi). Đọc xuyên project -> escape hatch có tên; THÂN lệnh được nạp lại và chạy qua `forTenant` (RLS).
    */
-  public storageClaimCleanJobAcrossTenants(leaseMs: number, maxAttempts: number): Promise<{ id: string; tenantId: string } | null> {
+  public storageClaimCleanJobAcrossTenants(leaseMs: number, maxAttempts: number): Promise<{ id: string; tenantId: string; attempts: number } | null> {
     return this.systemTx('storage: nhận lệnh dọn (SKIP LOCKED)', async (tx) => {
       await tx.$executeRaw(Prisma.sql`
         UPDATE hub.storage_clean_jobs SET status = 'FAILED', error = 'Quá số lần thử (worker dừng giữa chừng nhiều lần)',
                finished_at = now(), lease_until = NULL
         WHERE status = 'RUNNING' AND lease_until < now() AND attempts >= ${maxAttempts}::int`);
-      const rows = await tx.$queryRaw<{ id: string; tenantId: string }[]>(Prisma.sql`
+      const rows = await tx.$queryRaw<{ id: string; tenantId: string; attempts: number }[]>(Prisma.sql`
         UPDATE hub.storage_clean_jobs j SET status = 'RUNNING', attempts = j.attempts + 1, started_at = COALESCE(j.started_at, now()),
                lease_until = now() + make_interval(secs => ${leaseMs / 1000}::double precision)
         WHERE j.id = (
           SELECT id FROM hub.storage_clean_jobs
           WHERE status = 'PENDING' OR (status = 'RUNNING' AND lease_until < now())
           ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING j.id, j.tenant_id AS "tenantId"`);
+        RETURNING j.id, j.tenant_id AS "tenantId", j.attempts`);
       return rows[0] ?? null;
     });
   }

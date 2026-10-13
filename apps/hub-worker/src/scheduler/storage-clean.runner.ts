@@ -28,11 +28,19 @@ export function resolveStorageCleanPollMs(v: string | undefined = process.env.ST
 export interface CleanJobRunResult {
   id: string;
   tenantId: string;
-  status: 'DONE' | 'RUNNING' | 'MISSING';
+  status: 'DONE' | 'RUNNING' | 'MISSING' | 'LOST';
   batches: number;
   events: number;
   rejected: number;
   freedBytes: number;
+}
+
+/** Ghi tiến độ trả 0 dòng: lệnh đã bị worker khác nhận lại (fencing `attempts`) — lô hiện tại phải rollback. */
+export class CleanJobLostError extends Error {
+  constructor(readonly jobId: string) {
+    super(`Lệnh dọn ${jobId} không còn thuộc worker này`);
+    this.name = 'CleanJobLostError';
+  }
 }
 
 @Injectable()
@@ -75,14 +83,14 @@ export class StorageCleanRunner implements OnModuleInit, OnModuleDestroy {
     for (let i = 0; i < maxJobs; i++) {
       const claim = await this.prisma.storageClaimCleanJobAcrossTenants(STORAGE_CLEAN_LEASE_MS, STORAGE_CLEAN_MAX_ATTEMPTS);
       if (!claim) break;
-      out.push(await this.runJob(claim.id, claim.tenantId));
+      out.push(await this.runJob(claim.id, claim.tenantId, claim.attempts));
       if (this.stopped) break;
     }
     return out;
   }
 
   /** Chạy MỘT lệnh đã nhận. Lỗi giữa chừng: để RUNNING — lease hết thì lượt sau nhận lại (tối đa `STORAGE_CLEAN_MAX_ATTEMPTS`). */
-  async runJob(id: string, tenantId: string): Promise<CleanJobRunResult> {
+  async runJob(id: string, tenantId: string, attempts?: number): Promise<CleanJobRunResult> {
     const res: CleanJobRunResult = { id, tenantId, status: 'RUNNING', batches: 0, events: 0, rejected: 0, freedBytes: 0 };
     const job = await this.prisma.forTenant(tenantId).findStorageCleanJob(id);
     if (!job) return { ...res, status: 'MISSING' };
@@ -93,7 +101,9 @@ export class StorageCleanRunner implements OnModuleInit, OnModuleDestroy {
       let r;
       try {
         r = await runCleanBatch(this.prisma, tenantId, spec, quotaBytes, async (repo, b) => {
-          await repo.recordCleanJobBatch(id, { events: b.events, rejected: b.rejected, freedBytes: b.freedBytes, done: b.done, leaseMs: STORAGE_CLEAN_LEASE_MS });
+          const n = await repo.recordCleanJobBatch(id, { events: b.events, rejected: b.rejected, freedBytes: b.freedBytes, done: b.done, leaseMs: STORAGE_CLEAN_LEASE_MS, attempts });
+          // Review QT-S2 L1: 0 dòng = lệnh không còn của mình (lease hết, worker khác đã nhận lại / đã DONE) -> rollback lô
+          if (n === 0) throw new CleanJobLostError(id);
           if (b.done) {
             await repo.createAuditLog({
               action: 'storage.clean.completed',
@@ -116,6 +126,10 @@ export class StorageCleanRunner implements OnModuleInit, OnModuleDestroy {
           }
         });
       } catch (err: any) {
+        if (err instanceof CleanJobLostError) {
+          logger.warn({ jobId: id, tenantId, attempts }, 'Storage: mất lệnh dọn (lease hết, worker khác đã nhận) — bỏ lô, dừng');
+          return { ...res, status: 'LOST' };
+        }
         storageCleanBatches.inc({ trigger: 'manual', result: 'error' });
         logger.warn({ err: err?.message, jobId: id, tenantId }, 'Storage: lô dọn lỗi — lệnh giữ RUNNING, lease hết thì chạy lại');
         return res;

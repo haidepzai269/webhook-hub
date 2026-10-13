@@ -44,7 +44,7 @@ describeDb('QT4: lệnh dọn (Postgres)', () => {
   });
 
   /** Event + raw (ACCEPTED, body_raw `kb` KB) + delivery theo `status` (null = không có delivery). */
-  async function ev(o: { days: number; status?: 'SUCCEEDED' | 'DEAD' | 'PENDING' | 'RETRYING' | null; src?: string; kb?: number }) {
+  async function ev(o: { days: number; status?: 'SUCCEEDED' | 'DEAD' | 'PENDING' | 'DELIVERING' | 'RETRYING' | null; src?: string; kb?: number }) {
     const k = `${run}:${++n}`;
     const src = o.src ?? sourceId;
     const r = await owner.rawEvent.create({
@@ -108,13 +108,14 @@ describeDb('QT4: lệnh dọn (Postgres)', () => {
   it('[QT:T9] (phần c) KHÔNG đụng: delivery PENDING/RETRYING, dữ liệu trong cửa sổ retry (cutoff mới hơn sàn), source "Giữ lâu", mức không được nêu', async () => {
     const pending = await ev({ days: 10, status: 'PENDING' });
     const retrying = await ev({ days: 10, status: 'RETRYING' });
+    const delivering = await ev({ days: 10, status: 'DELIVERING' }); // review QT-S2 L8: ca đang gửi
     const fresh = await ev({ days: 0.01, status: 'SUCCEEDED' }); // ~15 phút — trong cửa sổ retry
     const keep = await ev({ days: 10, status: 'SUCCEEDED', src: keepId });
     const dead = await ev({ days: 10, status: 'DEAD' });
     const medium = await ev({ days: 10, status: null });
     // cutoff = "bây giờ" (mới hơn sàn) — sàn vẫn thắng
     await clean({ action: 'delete', importance: ['low', 'medium', 'high'], cutoff: new Date() });
-    for (const x of [pending, retrying, fresh, keep]) expect(await owner.event.findUnique({ where: { id: x.event.id } })).not.toBeNull();
+    for (const x of [pending, retrying, delivering, fresh, keep]) expect(await owner.event.findUnique({ where: { id: x.event.id } })).not.toBeNull();
     // mức nêu tên mới bị đụng (high/medium ở trên đã xoá DEAD + không delivery cũ)
     expect(await owner.event.findUnique({ where: { id: dead.event.id } })).toBeNull();
     expect(await owner.event.findUnique({ where: { id: medium.event.id } })).toBeNull();
@@ -174,7 +175,7 @@ describeDb('QT4: lệnh dọn (Postgres)', () => {
     expect(b).toMatchObject({ trimmed: false, data: { blob: expect.any(String) } });
   });
 
-  it('nhận lệnh: hai worker song song nhận HAI lệnh khác nhau (SKIP LOCKED); lệnh hết lease được nhận lại; quá số lần -> FAILED', async () => {
+  it('[QT:T10] (phần c) nhận lệnh: hai worker song song nhận HAI lệnh khác nhau (SKIP LOCKED); lệnh hết lease được nhận lại (fencing attempts); quá số lần -> FAILED', async () => {
     const repo = svc.forTenant(A);
     const mk = (id: string) => repo.createStorageCleanJob({ id, action: 'trim', importance: ['low'], olderThan: '3d', cutoff: ago(3), sourceId: null, origin: 'manual', requestedBy: 'u' });
     const j1 = randomUUID();
@@ -187,6 +188,25 @@ describeDb('QT4: lệnh dọn (Postgres)', () => {
       const mine = claims.filter((c) => c && c.tenantId === A).map((c) => c!.id);
       // DB kiểm chứng dùng chung: có thể nhận lệnh của test khác, nhưng không bao giờ hai lần cùng một lệnh
       expect(new Set(mine).size).toBe(mine.length);
+      // review QT-S2 L8: lệnh RUNNING hết lease (worker trước chết) được NHẬN LẠI, attempts +1 = fencing token mới
+      await owner.storageCleanJob.updateMany({ where: { id: { in: [j1, j2] } }, data: { status: 'DONE' } });
+      await owner.storageCleanJob.update({ where: { id: j1 }, data: { status: 'RUNNING', leaseUntil: ago(1), attempts: 1 } });
+      let re: { id: string; tenantId: string; attempts: number } | null = null;
+      for (let i = 0; i < 50 && re?.id !== j1; i++) {
+        re = await svc.storageClaimCleanJobAcrossTenants(60_000, 5); // DB dùng chung: có thể nhận lệnh khác trước
+        if (!re) break;
+      }
+      expect(re).toMatchObject({ id: j1, tenantId: A, attempts: 2 });
+      const reclaimed = await owner.storageCleanJob.findUnique({ where: { id: j1 } });
+      expect(reclaimed!.status).toBe('RUNNING');
+      expect(reclaimed!.leaseUntil!.getTime()).toBeGreaterThan(Date.now());
+      // review QT-S2 L1: worker cũ (attempts 1) tỉnh dậy ghi tiến độ -> 0 dòng; worker mới (attempts 2) ghi được
+      const prog = { events: 1, rejected: 0, freedBytes: 1, done: true, leaseMs: 60_000 };
+      expect(await repo.recordCleanJobBatch(j1, { ...prog, attempts: 1 })).toBe(0);
+      expect(await repo.recordCleanJobBatch(j1, { ...prog, attempts: 2 })).toBe(1);
+      // đã DONE -> mọi lần ghi sau (kể cả đúng attempts) không bật ngược về RUNNING
+      expect(await repo.recordCleanJobBatch(j1, { ...prog, done: false, attempts: 2 })).toBe(0);
+      expect((await owner.storageCleanJob.findUnique({ where: { id: j1 } }))!.status).toBe('DONE');
       await owner.storageCleanJob.updateMany({ where: { id: { in: [j1, j2] } }, data: { status: 'RUNNING', leaseUntil: ago(1), attempts: 5 } });
       await svc.storageClaimCleanJobAcrossTenants(60_000, 5);
       const after = await owner.storageCleanJob.findMany({ where: { id: { in: [j1, j2] } } });

@@ -27,6 +27,18 @@ export function isReservedType(type: string): boolean {
   return RESERVED_NAMESPACES.some((ns) => type === ns || type.startsWith(`${ns}.`));
 }
 
+/**
+ * Review QT-S2 M1 (ADR-187): `hub.*` là sự kiện CHỈ hub nội bộ phát (`emitHubEvent`, đi thẳng vào route — không qua
+ * publish/normalize). Mọi đường vào từ bên ngoài (publish của service, `hub trigger`, adapter kể cả Generic) phải từ chối
+ * CẢ namespace, kể cả khi `data` đúng khuôn — không thì service có `publish:events` giả mạo được sự kiện của hub. Luật theo
+ * namespace, không theo provider.
+ */
+export const HUB_ONLY_NAMESPACE = 'hub';
+
+export function isHubOnlyType(type: string): boolean {
+  return typeof type === 'string' && (type === HUB_ONLY_NAMESPACE || type.startsWith(`${HUB_ONLY_NAMESPACE}.`));
+}
+
 /** Tập khoá đầy đủ của `data` cho một kiểu chuẩn; null nếu kiểu không có trong catalog. */
 export function canonicalKeys(type: string): string[] | null {
   return paymentKeys(type) ?? repoKeys(type) ?? hubKeys(type);

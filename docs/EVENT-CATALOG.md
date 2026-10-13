@@ -111,9 +111,9 @@ Không chép email của author vào phần chung (dữ liệu cá nhân); email
 
 ## 4a. Miền hub — sự kiện do chính hub phát (`hub.*`, ADR-187)
 
-`hub.*` là không gian **dành riêng** như `payment.*`/`repo.*`: service tự phát (`POST /v1/p/:project/events`) hay adapter
-phát kiểu `hub.*` không có trong catalog / sai khuôn → từ chối (422 `schema_mismatch` / lỗi normalize vĩnh viễn) — không ai
-giả mạo được sự kiện của hub. Event của hub đi **đúng đường outbox của mọi event** (định tuyến theo subscription, push ký
+`hub.*` là không gian **chỉ hub phát**: service tự phát (`POST /v1/p/:project/events`, kể cả `hub trigger`) hay adapter
+(kể cả Generic) phát **bất kỳ** kiểu `hub.*` — dù `data` đúng khuôn — đều bị từ chối (422 `reserved_type` / lỗi normalize
+vĩnh viễn, review QT-S2 M1) — không ai giả mạo được sự kiện của hub. Subscription `eventTypes: ["*"]` cũng nhận `hub.*`. Event của hub đi **đúng đường outbox của mọi event** (định tuyến theo subscription, push ký
 Standard Webhooks, polling): `source = "hub"`, `sourceId = null` (subscription lọc theo `sourceIds` sẽ không nhận),
 `normalized: true`, `subject = "project:<projectId>"`. Đăng ký nhận bằng `eventTypes: ["hub.*"]` hoặc đúng tên kiểu.
 

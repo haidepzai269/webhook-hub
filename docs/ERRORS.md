@@ -204,6 +204,17 @@ Hub kiểm **trước khi ghi** — không có sự kiện nào được tạo.
 npx hub trigger payment.received --data '{"amount":1.5}'    # amount phải là số nguyên > 0
 ```
 
+## reserved_type
+
+**422.** Publish (hoặc `hub trigger`) kiểu thuộc không gian **`hub.*`** — chỉ chính hub được phát (vd
+`hub.project.cleanup_suggested`, ADR-187). Bị từ chối kể cả khi `data` đúng khuôn: nếu không, service có `publish:events`
+giả mạo được sự kiện của hub tới mọi subscriber. Tham số: `type`, `field` (= `type`). Hub kiểm **trước khi ghi**. Adapter
+(kể cả Generic) map ra `hub.*` thì normalize báo lỗi sai khuôn vĩnh viễn.
+**Sửa:** dùng không gian tên riêng của service (vd `order.created`). Muốn **nhận** sự kiện của hub thì đăng ký `hub.*` ở endpoint.
+```bash
+npx hub trigger hub.project.cleanup_suggested    # 422 reserved_type
+```
+
 ## scope_not_grantable
 
 **422 (console).** Tạo key với scope mà role của bạn không được cấp.
@@ -299,7 +310,9 @@ curl -si -X POST $API/v1/p/cafe/storage/suggestions/sug_0123456789abcdef01234567
 **409 (console: replay delivery).** Nội dung của event đã được **"Dọn"** để giải phóng dung lượng (SPEC-han-muc-dung-luong
 §5.1, ADR-184): chỉ còn dòng gầy (khoá chống trùng, kiểu, thời gian, trạng thái giao) — `data` là `null`, polling trả
 `trimmed: true`. Không còn gì để gửi lại. Replay hàng loạt bỏ qua các delivery này với lý do `event_trimmed`.
-**Sửa:** không replay được event đã dọn. Cần dữ liệu thì nhờ bên gửi phát lại; lần sau gắn "Giữ lâu" cho source quan trọng
+**Sửa:** không replay được event đã dọn. "Dọn" **giữ** khoá chống trùng, nên bên gửi phát lại với **cùng** khoá sẽ bị chặn
+trùng (BB-2) — dữ liệu chỉ vào lại được dưới một khoá **mới** (vd publish lại với `idempotencyKey` khác; provider gửi lại
+cùng id thì không cứu được). Lần sau gắn "Giữ lâu" cho source quan trọng
 hoặc tắt "Dọn" tự động cho mức tương ứng ở trang Dung lượng.
 ```bash
 curl -si -X POST $API/api/v1/deliveries/$DELIVERY_ID/replay?projectId=$PROJECT -b cookies.txt -H "x-csrf-token: $CSRF"

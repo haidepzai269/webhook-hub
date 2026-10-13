@@ -1,4 +1,5 @@
 import { HttpException } from '@nestjs/common';
+import { ERROR_CATALOG, HUB_CLEANUP_SUGGESTED, validateCanonical } from '@hub/common';
 import { ServiceApiController } from '../src/modules/service-api/service-api.controller';
 
 /** S4 (SPEC §4.4, §4.14.1 luật 4): POST /v1/p/:project/events kiểm đầu vào + catalog ĐỒNG BỘ, trước persistAccepted. */
@@ -36,6 +37,19 @@ describe('POST /v1/p/:project/events (S4)', () => {
     const ok = await call({ type: 'order.created', data: { anything: [1, 2] }, idempotencyKey: 'o1' });
     expect(ok.status).toBe(202);
     expect(ingest.publishFromService).toHaveBeenCalledWith(PA, 'src-api', expect.objectContaining({ provider: 'api', body: expect.objectContaining({ type: 'order.created' }) }));
+  });
+
+  it('[QT:T24] (phần f) review QT-S2 M1: publish hub.project.cleanup_suggested với data ĐÚNG khuôn -> 422 reserved_type (chỉ hub nội bộ phát); không ghi', async () => {
+    const { call, ingest } = setup();
+    const data = { level: 'WARN_85', usedBytes: 1, quotaBytes: 2, forecastHours: null, suggestions: [] };
+    expect(validateCanonical(HUB_CLEANUP_SUGGESTED, data)).toEqual({ ok: true }); // khuôn đúng — vẫn bị chặn theo namespace
+    for (const type of [HUB_CLEANUP_SUGGESTED, 'hub.anything.else']) {
+      expect(await call({ type, data, idempotencyKey: 'h1' })).toEqual({ status: 422, body: { error: 'reserved_type', type, field: 'type' } });
+    }
+    expect(ingest.publishFromService).not.toHaveBeenCalled();
+    expect(ERROR_CATALOG.reserved_type.status).toBe(422);
+    // namespace khác bắt đầu bằng "hub" nhưng không phải hub.* -> của service, cho qua
+    expect((await call({ type: 'hubspot.contact', data: {}, idempotencyKey: 'h2' })).status).toBe(202);
   });
 
   it('kiểm đầu vào -> 422 có tên trường: type sai, thiếu idempotencyKey, data không phải object', async () => {

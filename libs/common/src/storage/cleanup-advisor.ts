@@ -77,7 +77,7 @@ export const RULES_V1: readonly { importance: Importance; action: CleanAction; o
     olderThan: '3d',
     reasonCode: 'delivered_old',
     describe: (n, b) =>
-      `Dọn ${n} event mức Thấp (đã giao thành công tới mọi đích) cũ hơn 3 ngày → ~${fmtMb(b)}. Giữ dòng chống trùng; mất nội dung, không replay được nữa.`,
+      `Dọn ${n} event mức Thấp (đã giao thành công tới mọi đích, hoặc chỉ còn bản gốc sau khi event hết hạn lưu) cũ hơn 3 ngày → ~${fmtMb(b)}. Giữ dòng chống trùng; mất nội dung, không replay được nữa.`,
   },
   {
     importance: 'medium',

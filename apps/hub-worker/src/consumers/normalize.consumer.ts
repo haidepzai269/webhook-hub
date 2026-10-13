@@ -8,6 +8,7 @@ import {
   NormalizedEvent,
   buildDeliveryMessage,
   EventReceivedNotice,
+  isHubOnlyType,
   isReservedType,
   validateCanonical,
   fastFailRedisOptions,
@@ -44,7 +45,8 @@ export class CanonicalSchemaError extends Error {
 export function assertCanonical(events: NormalizedEvent[], source: string): void {
   for (const evt of events) {
     if (!isReservedType(evt.type)) continue;
-    const r = validateCanonical(evt.type, evt.data);
+    // Review QT-S2 M1: adapter (kể cả Generic map kiểu tuỳ ý) không được sinh `hub.*` — chỉ `emitHubEvent` phát kiểu này.
+    const r = isHubOnlyType(evt.type) ? { ok: false as const, field: 'type' } : validateCanonical(evt.type, evt.data);
     if (!r.ok) {
       normalizeSchemaErrors.inc({ source });
       throw new CanonicalSchemaError(evt.type, r.field);

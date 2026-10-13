@@ -1,6 +1,6 @@
 import { Controller, Get, HttpException, HttpStatus, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
-import { RawWebhookRequest, isReservedType, validateCanonical } from '@hub/common';
+import { RawWebhookRequest, isHubOnlyType, isReservedType, validateCanonical } from '@hub/common';
 import { IngestService } from '../ingest/ingest.service';
 import { ApiKeyGuard } from './api-key.guard';
 import { RequireScope } from './require-scope.decorator';
@@ -32,6 +32,8 @@ export function validatePublishBody(body: any): void {
   if (body.subject !== undefined && body.subject !== null && (typeof body.subject !== 'string' || body.subject.length > 255)) {
     unprocessable({ error: 'validation_failed', field: 'subject', message: 'subject là chuỗi ≤ 255 ký tự' });
   }
+  // Review QT-S2 M1: `hub.*` chỉ hub nội bộ phát — từ chối cả namespace dù `data` đúng khuôn (không giả mạo được).
+  if (isHubOnlyType(body.type)) unprocessable({ error: 'reserved_type', type: body.type, field: 'type' });
   if (isReservedType(body.type)) {
     const r = validateCanonical(body.type, body.data);
     if (!r.ok) unprocessable({ error: 'schema_mismatch', type: body.type, field: r.field });

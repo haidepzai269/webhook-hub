@@ -120,3 +120,16 @@ describe('[MS:U45] U45 NormalizeConsumer kiểm catalog', () => {
     expect(normalize.mock.calls[0][1].receivedAt).toBe('2026-10-10T03:04:05.000Z');
   });
 });
+
+describe('[QT:T24] (phần g) review QT-S2 M1: adapter sinh hub.* -> lỗi normalize vĩnh viễn', () => {
+  it('hub.project.cleanup_suggested data đúng khuôn từ adapter (vd Generic) vẫn bị từ chối ở field type', () => {
+    const data = { level: 'WARN_85', usedBytes: 1, quotaBytes: 2, forecastHours: null, suggestions: [] };
+    expect(() => assertCanonical([envelopeOf('hub.project.cleanup_suggested', data) as any], 'generic')).toThrow(CanonicalSchemaError);
+    try {
+      assertCanonical([envelopeOf('hub.project.cleanup_suggested', data) as any], 'generic');
+    } catch (e) {
+      expect((e as CanonicalSchemaError).field).toBe('type');
+    }
+    expect(() => assertCanonical([envelopeOf('order.created', { a: 1 }) as any], 'generic')).not.toThrow();
+  });
+});

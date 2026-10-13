@@ -66,7 +66,21 @@ describe('QT4b: POST …/storage/suggestions/:id/apply', () => {
     const b = await applySuggestion(s, P, LOW, 'u', { now: NOW + 5_000 });
     expect(b.id).toBe(a.id);
     expect(st.jobs).toHaveLength(1);
-    expect(st.locks).toEqual([LOW, LOW]);
+    // kiểm idempotent trước khi tính lại (M2) + kiểm lại trong transaction tạo lệnh (gọi song song)
+    expect(st.locks).toEqual([LOW, LOW, LOW]);
+  });
+
+  it('[QT:T25] (phần d) review QT-S2 M2: apply, hiệu chỉnh đổi bộ gợi ý (id biến mất), apply lại CÙNG id -> CÙNG lệnh dọn, không 409', async () => {
+    const o: { buckets?: any[] } = {};
+    const { s, st } = store(o);
+    const a = await applySuggestion(s, P, LOW, 'u', { now: NOW });
+    o.buckets = [{ sourceId: null, importance: 'junk', ageDays: 3, events: 2, bytes: 100 }]; // lượt hiệu chỉnh: low đã dọn hết
+    const b = await applySuggestion(s, P, LOW, 'u', { now: NOW + 3_600_000 });
+    expect(b.id).toBe(a.id);
+    expect(st.jobs).toHaveLength(1);
+    expect(st.saved).toHaveLength(0);
+    // quá 24h -> không còn idempotent, tính lại như thường -> 409 kèm bộ mới
+    expect(await err(applySuggestion(s, P, LOW, 'u', { now: NOW + 25 * 3_600_000 }))).toMatchObject({ status: 409, error: 'suggestion_stale' });
   });
 
   it('[QT:T25] (phần c) gợi ý không còn trong bộ hiện tại (đã dọn hết) -> 409 suggestion_stale KÈM bộ mới (và lưu bộ mới); hết hạn -> 409; không tạo lệnh', async () => {

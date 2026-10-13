@@ -284,7 +284,7 @@ Tổng: 376 mã khai báo · 307 mã có test · 0 mồ côi · 24 mồ côi có
 | `MS:U46` | SPEC-hub-multi-service.md · S8 | L0 | libs/providers/test/generic.adapter.spec.ts:125 | ✅ pass |
 | `MS:U47` | SPEC-hub-multi-service.md · S8 | L0 | libs/providers/test/generic.adapter.spec.ts:133 | ✅ pass |
 | `MS:U48` | SPEC-hub-multi-service.md · S8 | L0 | libs/providers/test/generic.adapter.spec.ts:145<br>libs/providers/test/generic.adapter.spec.ts:194 | ✅ pass |
-| `MS:U49` | SPEC-hub-multi-service.md · S4 | L0 | apps/hub-api/test/publish-canonical.spec.ts:30 | ✅ pass |
+| `MS:U49` | SPEC-hub-multi-service.md · S4 | L0 | apps/hub-api/test/publish-canonical.spec.ts:31 | ✅ pass |
 | `MS:U50` | SPEC-hub-multi-service.md · S14 | L0 | libs/providers/test/canonical-contract.spec.ts:9 | ✅ pass |
 | `QT:T1` | SPEC-han-muc-dung-luong.md · QT1 | L0 | libs/common/test/storage-level.spec.ts:18 | chưa chạy |
 | `QT:T2` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:84 | chưa chạy |
@@ -294,28 +294,28 @@ Tổng: 376 mã khai báo · 307 mã có test · 0 mồ côi · 24 mồ côi có
 | `QT:T7` | SPEC-han-muc-dung-luong.md · QT3 | L0,L1 | apps/hub-api/test/storage-lock.spec.ts:213<br>libs/database/test/storage-quota-db.spec.ts:53 | chưa chạy |
 | `QT:T8` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:179 | chưa chạy |
 | `QT:T9` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/storage-api.spec.ts:79<br>libs/common/test/storage-clean.spec.ts:18<br>libs/database/test/storage-clean-db.spec.ts:108 | chưa chạy |
-| `QT:T10` | SPEC-han-muc-dung-luong.md · QT4 | L0 | apps/hub-api/test/storage-api.spec.ts:93<br>apps/hub-worker/test/storage-clean-runner.spec.ts:65 | chưa chạy |
+| `QT:T10` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/storage-api.spec.ts:93<br>apps/hub-worker/test/storage-clean-runner.spec.ts:66<br>libs/database/test/storage-clean-db.spec.ts:178 | chưa chạy |
 | `QT:T12` | SPEC-han-muc-dung-luong.md · QT2 | L0 | apps/hub-worker/test/storage-job.spec.ts:75<br>apps/hub-worker/test/storage-job.spec.ts:262 | chưa chạy |
 | `QT:T13` | SPEC-han-muc-dung-luong.md · QT1 | L1 | libs/database/test/storage-quota-db.spec.ts:34 | chưa chạy |
 | `QT:T14` | SPEC-han-muc-dung-luong.md · QT2 | L0 | apps/hub-worker/test/storage-job.spec.ts:162<br>libs/common/test/storage-usage.spec.ts:47 | chưa chạy |
 | `QT:T15` | SPEC-han-muc-dung-luong.md · QT4 | L1 | libs/database/test/storage-clean-db.spec.ts:66 | chưa chạy |
 | `QT:T16` | SPEC-han-muc-dung-luong.md · QT4 | L1 | libs/database/test/storage-clean-db.spec.ts:95 | chưa chạy |
-| `QT:T17` | SPEC-han-muc-dung-luong.md · QT1 | L0,L1 | libs/common/test/storage-level.spec.ts:92<br>libs/database/test/storage-clean-db.spec.ts:149 | chưa chạy |
-| `QT:T18` | SPEC-han-muc-dung-luong.md · QT5 | L0,L1 | apps/hub-api/test/storage-policies.spec.ts:57<br>apps/hub-worker/test/auto-clean.spec.ts:47<br>libs/database/test/storage-auto-clean-db.spec.ts:33 | chưa chạy |
-| `QT:T20` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/replay-message.spec.ts:54<br>libs/database/test/storage-clean-db.spec.ts:166 | chưa chạy |
+| `QT:T17` | SPEC-han-muc-dung-luong.md · QT1 | L0,L1 | libs/common/test/storage-level.spec.ts:92<br>libs/database/test/storage-clean-db.spec.ts:150 | chưa chạy |
+| `QT:T18` | SPEC-han-muc-dung-luong.md · QT5 | L0,L1 | apps/hub-api/test/storage-policies.spec.ts:57<br>apps/hub-worker/test/auto-clean.spec.ts:47<br>apps/hub-worker/test/auto-clean.spec.ts:130<br>libs/database/test/storage-auto-clean-db.spec.ts:33 | chưa chạy |
+| `QT:T20` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/replay-message.spec.ts:54<br>libs/database/test/storage-clean-db.spec.ts:167 | chưa chạy |
 | `QT:T21` | SPEC-han-muc-dung-luong.md · QT4b | L0 | libs/common/test/cleanup-advisor.spec.ts:43 | chưa chạy |
 | `QT:T22` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:56<br>libs/common/test/cleanup-advisor.spec.ts:64 | chưa chạy |
 | `QT:T23` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:74<br>libs/common/test/cleanup-advisor.spec.ts:98 | chưa chạy |
-| `QT:T24` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:84<br>apps/hub-worker/test/cleanup-suggested.spec.ts:108<br>libs/common/test/cleanup-advisor.spec.ts:113<br>libs/common/test/cleanup-advisor.spec.ts:124<br>libs/providers/test/canonical-contract.spec.ts:62 | chưa chạy |
-| `QT:T25` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-api/test/storage-apply.spec.ts:53<br>apps/hub-api/test/storage-apply.spec.ts:63<br>apps/hub-api/test/storage-apply.spec.ts:72 | chưa chạy |
+| `QT:T24` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-api/test/publish-canonical.spec.ts:42<br>apps/hub-worker/test/cleanup-suggested.spec.ts:84<br>apps/hub-worker/test/cleanup-suggested.spec.ts:108<br>apps/hub-worker/test/normalize-canonical.spec.ts:124<br>libs/common/test/cleanup-advisor.spec.ts:113<br>libs/common/test/cleanup-advisor.spec.ts:124<br>libs/providers/test/canonical-contract.spec.ts:62 | chưa chạy |
+| `QT:T25` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-api/test/storage-apply.spec.ts:53<br>apps/hub-api/test/storage-apply.spec.ts:63<br>apps/hub-api/test/storage-apply.spec.ts:73<br>apps/hub-api/test/storage-apply.spec.ts:86 | chưa chạy |
 | `QT:T26` | SPEC-han-muc-dung-luong.md · QT1 | L0,L1 | libs/common/test/storage-level.spec.ts:119<br>libs/database/test/storage-quota-db.spec.ts:70<br>libs/database/test/storage-quota-db.spec.ts:80 | chưa chạy |
 | `QT:T27` | SPEC-han-muc-dung-luong.md · QT9 | L1,L0 | apps/hub-api/test/source-limit-db.spec.ts:35<br>apps/hub-api/test/source-limit.spec.ts:11<br>apps/hub-api/test/source-limit.spec.ts:32 | chưa chạy |
 | `QT:T28` | SPEC-han-muc-dung-luong.md · QT1 | L0 | libs/common/test/storage-level.spec.ts:50 | chưa chạy |
 | `QT:T29` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:147 | chưa chạy |
-| `QT:T30` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:164<br>apps/hub-api/test/storage-policies.spec.ts:42<br>apps/hub-worker/test/auto-clean.spec.ts:93<br>libs/common/test/storage-clean.spec.ts:73<br>libs/common/test/storage-level.spec.ts:77 | chưa chạy |
+| `QT:T30` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:164<br>apps/hub-api/test/storage-policies.spec.ts:42<br>apps/hub-worker/test/auto-clean.spec.ts:95<br>libs/common/test/storage-clean.spec.ts:73<br>libs/common/test/storage-level.spec.ts:77 | chưa chạy |
 | `QT:T31` | SPEC-han-muc-dung-luong.md · QT2 | L0,L1 | apps/hub-api/test/storage-bytes.spec.ts:26<br>apps/hub-api/test/storage-bytes.spec.ts:74<br>libs/database/test/storage-measure-db.spec.ts:36 | chưa chạy |
 | `QT:T32` | SPEC-han-muc-dung-luong.md · QT2 | L0,L1 | apps/hub-worker/test/storage-job.spec.ts:95<br>apps/hub-worker/test/storage-job.spec.ts:127<br>apps/hub-worker/test/storage-job.spec.ts:181<br>apps/hub-worker/test/storage-job.spec.ts:223<br>libs/common/test/storage-usage.spec.ts:19<br>libs/database/test/storage-measure-db.spec.ts:45<br>libs/database/test/storage-measure-db.spec.ts:73 | chưa chạy |
-| `QT:T33` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-worker/test/auto-clean.spec.ts:126<br>apps/hub-worker/test/storage-clean-runner.spec.ts:91<br>apps/hub-worker/test/storage-job.spec.ts:248<br>libs/database/test/storage-auto-clean-db.spec.ts:47<br>libs/database/test/storage-clean-db.spec.ts:123 | chưa chạy |
+| `QT:T33` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-worker/test/auto-clean.spec.ts:141<br>apps/hub-worker/test/storage-clean-runner.spec.ts:92<br>apps/hub-worker/test/storage-job.spec.ts:248<br>libs/database/test/storage-auto-clean-db.spec.ts:47<br>libs/database/test/storage-clean-db.spec.ts:124<br>libs/database/test/storage-orphan-db.spec.ts:46 | chưa chạy |
 | `SK:T1` | SPEC-shop-ket-noi-project.md | — | — | mồ côi có lý do: L2 trên hubv chưa chạy: cần rebuild image hub-api/shop/web của hubv với code SK (phiên dev không được rebuild/restart container). Phủ ở L0 settings.spec [SK:U1]-[SK:U5], L1 settings-db.spec [SK:U4] + GRANT shop_user, console-projects-db.spec [SK:U6]. Kịch bản tay: HUONG-DAN-TEST-TINH-HUONG Kịch bản 10. |
 | `SK:U1` | SPEC-shop-ket-noi-project.md · SK2 | L0 | apps/shop/test/settings.spec.ts:134<br>apps/shop/test/settings.spec.ts:252 | ✅ pass |
 | `SK:U2` | SPEC-shop-ket-noi-project.md · SK2 | L0 | apps/shop/test/settings.spec.ts:98<br>apps/shop/test/settings.spec.ts:112<br>apps/shop/test/settings.spec.ts:298<br>apps/shop/test/settings.spec.ts:316 | ✅ pass |
@@ -340,6 +340,6 @@ Tổng: 376 mã khai báo · 307 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (215 file, 1374 khai báo it/test)
+## File test (216 file, 1381 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

@@ -272,9 +272,26 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
         if (!Number.isInteger(p.afterDays) || p.afterDays < 1) continue;
         const spec = { action: p.action as 'trim' | 'delete', importance: [p.importance], cutoff: new Date(Date.now() - p.afterDays * DAY_MS), sourceId: null };
         const sum = { events: 0, rejected: 0, freed: 0 };
+        const meta = (x: typeof sum) => ({
+          importance: p.importance, action: p.action, afterDays: p.afterDays, trigger: p.trigger,
+          events: x.events, rejectedSamples: x.rejected, freedBytes: x.freed, freedMb: toMb(x.freed),
+        });
+        const audit = { action: 'storage.auto_clean', entityType: 'storage_policy', entityId: p.importance, actor: 'system:auto-clean' };
+        let audited = false;
         try {
           for (let i = 0; i < AUTO_CLEAN_MAX_BATCHES; i++) {
-            const r = await runCleanBatch(this.prisma, t.tenantId, spec, quotaBytes);
+            const last = i === AUTO_CLEAN_MAX_BATCHES - 1;
+            let auditedHere = false;
+            // Review QT-S2 L5: audit ghi TRONG transaction của lô cuối (xong, hoặc chạm trần lô của lượt) với số cộng dồn —
+            // lô COMMIT thì audit COMMIT cùng; không còn khe "có dọn mà không có dấu vết".
+            const r = await runCleanBatch(this.prisma, t.tenantId, spec, quotaBytes, async (repo, b) => {
+              const tot = { events: sum.events + b.events, rejected: sum.rejected + b.rejected, freed: sum.freed + b.freedBytes };
+              if ((b.done || last) && tot.events + tot.rejected > 0) {
+                await repo.createAuditLog({ ...audit, metadata: meta(tot) });
+                auditedHere = true;
+              }
+            });
+            if (auditedHere) audited = true;
             storageCleanBatches.inc({ trigger: 'auto', result: 'ok' });
             sum.events += r.events;
             sum.rejected += r.rejected;
@@ -294,14 +311,10 @@ export class CleanupJob implements OnModuleInit, OnModuleDestroy {
         out.rejectedSamples += sum.rejected;
         out.freedBytes += sum.freed;
         if (sum.freed > 0) storageCleanFreedBytes.inc({ trigger: 'auto' }, sum.freed);
+        if (audited) continue;
+        // Chỉ còn đường lỗi giữa chừng: các lô TRƯỚC đã COMMIT, lô lỗi rollback -> ghi audit cho phần đã COMMIT (ngoài tx).
         try {
-          await this.prisma.forTenant(t.tenantId).createAuditLog({
-            action: 'storage.auto_clean',
-            entityType: 'storage_policy',
-            entityId: p.importance,
-            actor: 'system:auto-clean',
-            metadata: { importance: p.importance, action: p.action, afterDays: p.afterDays, trigger: p.trigger, events: sum.events, rejectedSamples: sum.rejected, freedBytes: sum.freed, freedMb: toMb(sum.freed) },
-          });
+          await this.prisma.forTenant(t.tenantId).createAuditLog({ ...audit, metadata: meta(sum) });
         } catch (err: any) {
           logger.warn({ err: err?.message, tenantId: t.tenantId }, 'Cleanup: không ghi được audit dọn tự động');
         }

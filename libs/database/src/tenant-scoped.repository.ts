@@ -1563,8 +1563,37 @@ export class TenantScopedRepository {
         }
       }
     }
+    // Review QT-S2 H1 (bổ sung ADR-184): raw ACCEPTED MỒ CÔI — event của nó đã bị retention xoá (raw giữ theo ADR-045, FK
+    // SET NULL) hoặc adapter chuẩn hoá ra 0 event. `measureStorage` đếm byte của chúng nên lệnh dọn PHẢI với tới được, không
+    // thì khoá 507 thành bẫy (§13). Mức quan trọng theo `orphanRawImportanceSql` (CÙNG biểu thức với `by_bucket`): ứng viên
+    // renormalize còn trong hạn (ADR-045 / S1-3) = `high` (chỉ dọn khi xác nhận Cao), còn lại `low`, source Giữ lâu = `keep`.
+    // Cùng sàn retry (`before`). "Dọn" = body rỗng, GIỮ dòng (khoá chống trùng còn, BB-2); "Xoá hẳn" = xoá dòng. Số dòng cộng
+    // vào `events` (một ô `by_bucket` của raw mồ côi cũng đếm là một "event").
+    const orphanImportance = eventImportance;
+    const roomRaw = o.limit - rejected - events;
+    let orphans = 0;
+    if (orphanImportance.length > 0 && roomRaw > 0) {
+      const src = o.sourceId ? Prisma.sql`AND s.id = ${o.sourceId}::uuid` : Prisma.empty;
+      const onlyUntrimmed = o.action === 'trim' ? Prisma.sql`AND r.trimmed_at IS NULL` : Prisma.empty;
+      const op =
+        o.action === 'trim'
+          ? Prisma.sql`UPDATE hub.raw_events r SET body_raw = ''::bytea, body = 'null'::jsonb, headers = '{}'::jsonb, trimmed_at = now()
+                       FROM v WHERE r.id = v.id RETURNING v.b`
+          : Prisma.sql`DELETE FROM hub.raw_events r USING v WHERE r.id = v.id RETURNING v.b`;
+      const [r] = await this.prisma.$queryRaw<{ n: number; b: bigint | null }[]>(Prisma.sql`
+        WITH v AS (
+          SELECT r.id, octet_length(r.body_raw) AS b FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
+          WHERE s.tenant_id = ${t}::uuid AND r.status = 'ACCEPTED' AND r.received_at < ${before} ${src} ${onlyUntrimmed}
+            AND NOT EXISTS (SELECT 1 FROM hub.events e WHERE e.raw_event_id = r.id)
+            AND ${orphanRawImportanceSql()} = ANY(${orphanImportance}::text[])
+          ORDER BY r.received_at LIMIT ${roomRaw} FOR UPDATE OF r SKIP LOCKED),
+        d AS (${op})
+        SELECT count(*)::int AS n, sum(b)::bigint AS b FROM d`);
+      orphans = Number(r?.n ?? 0);
+      freed += Number(r?.b ?? 0);
+    }
     const level = freed > 0 ? await this.applyFreedBytes(freed, o.quotaBytes) : null;
-    return { events, rejected, freedBytes: freed, level, done: events + rejected < o.limit };
+    return { events: events + orphans, rejected, freedBytes: freed, level, done: events + orphans + rejected < o.limit };
   }
 
   /** Byte của một tập event theo ĐÚNG công thức §2 (`measureStorage`): events.data + body_raw + deliveries + attempts. */
@@ -1615,7 +1644,8 @@ export class TenantScopedRepository {
 
   /**
    * §7 + E2 (QT4): `by_bucket` — byte + số event CHƯA dọn theo (source, mức quan trọng, tuổi theo ngày), cùng công thức §2
-   * và CÙNG biểu thức mức quan trọng với lệnh dọn (`eventImportanceSql`), cộng mẫu REJECTED (`junk`). Chạy trong lượt hiệu
+   * và CÙNG biểu thức mức quan trọng với lệnh dọn (`eventImportanceSql`), cộng mẫu REJECTED (`junk`) và raw ACCEPTED mồ côi
+   * (`orphanRawImportanceSql`, review QT-S2 H1) — mọi byte `measureStorage` đếm đều nằm trong một ô dọn được. Chạy trong lượt hiệu
    * chỉnh (24h, transaction có hạn của job), không bao giờ trên đường nóng. Số liệu có thể cũ tới 24h (console ghi "tính lúc").
    */
   async measureStorageBuckets(): Promise<StorageBucketRow[]> {
@@ -1637,10 +1667,19 @@ export class TenantScopedRepository {
                LEAST(${BUCKET_MAX_AGE}::int, floor(extract(epoch FROM now() - r.received_at) / 86400)::int) AS age,
                octet_length(r.body_raw) AS b
         FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
-        WHERE s.tenant_id = ${t}::uuid AND r.status = 'REJECTED')
+        WHERE s.tenant_id = ${t}::uuid AND r.status = 'REJECTED'),
+      orph AS (
+        SELECT r.source_id, ${orphanRawImportanceSql()} AS imp,
+               LEAST(${BUCKET_MAX_AGE}::int, floor(extract(epoch FROM now() - r.received_at) / 86400)::int) AS age,
+               octet_length(r.body_raw) AS b
+        FROM hub.raw_events r JOIN hub.sources s ON s.id = r.source_id
+        WHERE s.tenant_id = ${t}::uuid AND r.status = 'ACCEPTED' AND r.trimmed_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM hub.events e WHERE e.raw_event_id = r.id))
       SELECT source_id::text AS "sourceId", imp AS importance, age AS "ageDays", count(*)::int AS events, sum(b)::bigint AS bytes FROM ev GROUP BY 1, 2, 3
       UNION ALL
-      SELECT source_id::text, imp, age, count(*)::int, sum(b)::bigint FROM rj GROUP BY 1, 2, 3`);
+      SELECT source_id::text, imp, age, count(*)::int, sum(b)::bigint FROM rj GROUP BY 1, 2, 3
+      UNION ALL
+      SELECT source_id::text, imp, age, count(*)::int, sum(b)::bigint FROM orph GROUP BY 1, 2, 3`);
     return rows.map((r) => ({ sourceId: r.sourceId, importance: r.importance, ageDays: Number(r.ageDays), events: Number(r.events), bytes: Number(r.bytes ?? 0) }));
   }
 
@@ -1744,16 +1783,25 @@ export class TenantScopedRepository {
     });
   }
 
-  /** Tiến độ của lệnh sau MỘT lô — gọi trong CÙNG transaction với lô (số đếm khớp dữ liệu đã đổi, kể cả khi worker chết). */
-  async recordCleanJobBatch(id: string, r: { events: number; rejected: number; freedBytes: number; done: boolean; leaseMs: number }): Promise<void> {
+  /**
+   * Tiến độ của lệnh sau MỘT lô — gọi trong CÙNG transaction với lô (số đếm khớp dữ liệu đã đổi, kể cả khi worker chết).
+   * Review QT-S2 L1: chỉ ghi khi lệnh còn `RUNNING` và (nếu có) `attempts` = lượt nhận của CHÍNH worker này (fencing) —
+   * worker treo quá lease rồi tỉnh dậy không ghi đè DONE/tiến độ của worker đã nhận lại. Trả số dòng: 0 = đã mất lệnh,
+   * người gọi phải bỏ lô (ném để rollback).
+   */
+  async recordCleanJobBatch(
+    id: string,
+    r: { events: number; rejected: number; freedBytes: number; done: boolean; leaseMs: number; attempts?: number },
+  ): Promise<number> {
+    const fence = r.attempts === undefined ? Prisma.empty : Prisma.sql`AND attempts = ${r.attempts}::int`;
     const finished = r.done ? Prisma.sql`now()` : Prisma.sql`NULL`;
     const lease = r.done ? Prisma.sql`NULL` : Prisma.sql`now() + make_interval(secs => ${r.leaseMs / 1000}::double precision)`;
-    await this.prisma.$executeRaw(Prisma.sql`
+    return this.prisma.$executeRaw(Prisma.sql`
       UPDATE hub.storage_clean_jobs SET
         events_affected = events_affected + ${r.events}::int, rejected_affected = rejected_affected + ${r.rejected}::int,
         freed_bytes = freed_bytes + ${Math.round(r.freedBytes)}::bigint, batches = batches + 1,
         status = ${r.done ? 'DONE' : 'RUNNING'}, finished_at = ${finished}, lease_until = ${lease}
-      WHERE tenant_id = ${this.tenantId}::uuid AND id = ${id}::uuid`);
+      WHERE tenant_id = ${this.tenantId}::uuid AND id = ${id}::uuid AND status = 'RUNNING' ${fence}`);
   }
 
   async failCleanJob(id: string, error: string): Promise<void> {
@@ -1970,6 +2018,21 @@ const eventImportanceSql = Prisma.sql`(CASE
                                AND n.attempt_generation > d.attempt_generation)) THEN 'high'
   WHEN NOT EXISTS (SELECT 1 FROM hub.deliveries d WHERE d.event_id = e.id AND d.tenant_id = e.tenant_id) THEN 'medium'
   ELSE 'low' END)`;
+
+/**
+ * Review QT-S2 H1 (bổ sung ADR-184): mức quan trọng của raw ACCEPTED mồ côi (không event nào trỏ tới — alias `r` raw, `s`
+ * source). Ứng viên renormalize (chưa có `processed_messages(normalize)` và còn trong hạn retention — đúng điều kiện
+ * `findOrphanRawEvents`, mục đích giữ raw của ADR-045) = `high`: việc khôi phục còn dở, như DEAD chưa replay. Phần còn lại
+ * (event đã bị retention xoá, hoặc adapter cố ý ra 0 event) = `low`: vòng đời event đã xong. Source Giữ lâu = `keep`.
+ */
+function orphanRawImportanceSql(): Prisma.Sql {
+  const retentionSecs = eventRetentionDaysFromEnv() * 86_400;
+  return Prisma.sql`(CASE
+  WHEN s.keep_longer THEN 'keep'
+  WHEN r.received_at >= now() - make_interval(secs => ${retentionSecs}::double precision)
+       AND NOT EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text) THEN 'high'
+  ELSE 'low' END)`;
+}
 
 const notSuperseded = Prisma.sql`NOT EXISTS (
   SELECT 1 FROM hub.deliveries n

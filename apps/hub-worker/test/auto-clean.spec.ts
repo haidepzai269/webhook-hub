@@ -26,7 +26,7 @@ function fake(targets: any[], batch: (spec: any) => any = () => ({ events: 3, re
         st.specs.push(a);
         return batch(a);
       }),
-      createAuditLog: jest.fn(async (a: any) => st.audits.push(a)),
+      createAuditLog: jest.fn(async (a: any) => st.audits.push({ ...a, inTx: !!tx })),
       recomputeStorageLevel: jest.fn(async (q: number) => {
         st.recompute.push(q);
         return { from: 'LOCKED', to: 'WARN_85', usedBytes: 8.5 * MB };
@@ -76,6 +76,8 @@ describe('QT5: dọn tự động trong cleanup job', () => {
     expect(st.audits).toHaveLength(2);
     expect(st.audits[1]).toMatchObject({ action: 'storage.auto_clean', actor: 'system:auto-clean', metadata: expect.objectContaining({ importance: 'low', events: 3, freedBytes: 2 * MB, freedMb: 2 }) });
     expect(r.autoClean).toEqual({ enabled: true, projects: 1, events: 6, rejectedSamples: 0, freedBytes: 4 * MB });
+    // review QT-S2 L5: audit nằm TRONG transaction của lô (lô COMMIT thì audit COMMIT cùng)
+    expect(st.audits.every((a) => a.inTx)).toBe(true);
 
     // ≥ 85% -> above_85 chạy; lô trả 0 dòng -> không audit
     const hot = fake([{ tenantId: T, quotaMb: 10, usedBytes: 9 * MB, policies: [{ importance: 'medium', action: 'trim', afterDays: 5, trigger: 'above_85' }] }], () => ({
@@ -116,11 +118,24 @@ describe('QT5: dọn tự động trong cleanup job', () => {
     const storage: any = { reportLevelChange: jest.fn(async () => undefined) };
     await new CleanupJob(prisma, redis(), storage).runOnce();
     expect(st.specs).toHaveLength(20); // AUTO_CLEAN_MAX_BATCHES
+    // L5: chạm trần lô -> MỘT audit trong tx lô cuối, số cộng dồn cả 20 lô
+    expect(st.audits).toEqual([expect.objectContaining({ action: 'storage.auto_clean', inTx: true, metadata: expect.objectContaining({ events: 20_000 }) })]);
     expect(storage.reportLevelChange).toHaveBeenCalledWith(expect.objectContaining({ tenantId: T, from: 'LOCKED', to: 'CRITICAL_95' }));
     const locked = fake([{ tenantId: T, quotaMb: 10, usedBytes: 9 * MB, policies: [{ importance: 'low', action: 'trim', afterDays: 3, trigger: 'always' }] }]);
     const noLock = { set: jest.fn().mockResolvedValue(null), on: jest.fn() } as any;
     expect((await new CleanupJob(locked.prisma, noLock).runOnce()).skipped).toBe(true);
     expect(locked.st.specs).toHaveLength(0);
+  });
+
+  it('[QT:T18] (phần d) review QT-S2 L5: lô 1 COMMIT, lô 2 lỗi -> audit phần đã COMMIT (ngoài tx, đường dự phòng duy nhất)', async () => {
+    process.env.STORAGE_AUTO_CLEAN_ENABLED = '1';
+    let i = 0;
+    const { prisma, st } = fake([{ tenantId: T, quotaMb: 10, usedBytes: 9 * MB, policies: [{ importance: 'low', action: 'trim', afterDays: 3, trigger: 'always' }] }], () => {
+      if (++i === 2) throw new Error('statement timeout');
+      return { events: 1000, rejected: 0, freedBytes: 5, done: false, level: null };
+    });
+    await new CleanupJob(prisma, redis()).runOnce();
+    expect(st.audits).toEqual([expect.objectContaining({ inTx: false, metadata: expect.objectContaining({ events: 1000, freedBytes: 5 }) })]);
   });
 
   it('[QT:T33] (phần d) retention 7 ngày trừ byte giải phóng theo tenant (trong câu xoá) rồi tính lại nấc NGAY + báo đổi nấc', async () => {

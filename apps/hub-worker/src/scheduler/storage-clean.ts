@@ -10,9 +10,11 @@ import { retryWindowFloor } from '@hub/messaging';
  * Sàn cửa sổ retry (`retryWindowFloor`, cùng hằng số với `assertRetentionSafe`) áp ở ĐÂY lần nữa, không chỉ ở API: dữ liệu
  * nhận sau `now − TOTAL_RETRY_WINDOW_MS` không bao giờ bị đụng dù `cutoff` người gọi đưa vào mới hơn.
  */
-export const CLEAN_TX_TIMEOUT_MS = 30_000;
+// Review QT-S2 L7: tx lô ≤ 20s < SHUTDOWN_TIMEOUT_MS 25s (Render SIGKILL ~30s) — lô đang chạy lúc tắt máy kịp COMMIT/rollback
+// trước khi bị giết; statement_timeout cục bộ thấp hơn tx để Postgres tự huỷ câu chậm trước khi Prisma bỏ transaction.
+export const CLEAN_TX_TIMEOUT_MS = 20_000;
 export const CLEAN_TX_MAX_WAIT_MS = 10_000;
-export const CLEAN_STATEMENT_TIMEOUT_MS = 25_000;
+export const CLEAN_STATEMENT_TIMEOUT_MS = 18_000;
 
 export interface CleanSpec {
   action: CleanAction;

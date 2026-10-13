@@ -123,6 +123,13 @@ export const ERROR_CATALOG = {
     fix: (p) =>
       `"${s(p.type, 'payment.* / repo.*')}" is a canonical type: field "${s(p.field, '?')}" has the wrong shape. See docs/EVENT-CATALOG.md, or publish under your own namespace (e.g. order.created).`,
   },
+  reserved_type: {
+    status: 422,
+    message: 'This event type is reserved for events emitted by the hub itself.',
+    params: ['type', 'field'],
+    fix: (p) =>
+      `"${s(p.type, 'hub.*')}" is in the hub.* namespace, which only the hub can emit (e.g. hub.project.cleanup_suggested). Publish under your own namespace (e.g. order.created); to receive hub events, subscribe to hub.* instead.`,
+  },
   scope_not_grantable: {
     status: 422,
     message: 'You cannot grant this scope.',
@@ -288,7 +295,8 @@ export const ERROR_CATALOG = {
   event_trimmed: {
     status: 409,
     message: 'The content of this event was cleaned up to free storage; it can no longer be replayed.',
-    fix: () => 'Trimmed events keep only their dedup key, type and timestamps. Replay is not possible; ask the sender to resend if you still need the data.',
+    fix: () =>
+      'Trimmed events keep only their dedup key, type and timestamps, so replay is not possible — and a resend with the SAME idempotency key is still blocked as a duplicate. To get the data in again it must arrive under a NEW key (e.g. publish it again with a different idempotencyKey).',
   },
   // 507 Insufficient Storage: KHÔNG 2xx (BB-3 giữ, provider tự gửi lại). Trả TRƯỚC verify/rate limit — 0 HMAC, 0 Redis.
   project_storage_full: {
