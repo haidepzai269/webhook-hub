@@ -2,9 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { StorageOverview, StoragePolicies, StoragePolicyView } from "@/lib/storage/storage-logic";
+import { canReadStorage, type StorageOverview, type StoragePolicies, type StoragePolicyView } from "@/lib/storage/storage-logic";
 
 import { HubApiError, hubFetch } from "./client";
+import { useMeStore } from "./me-store";
 
 /**
  * QT7 (SPEC-han-muc-dung-luong §5.5, §9): query của trang Dung lượng — route `/api/v1/projects/:p/storage*` (id trên path).
@@ -28,6 +29,14 @@ export function useStorage(projectId: string | null, opts: { poll?: boolean } = 
     refetchInterval: (q) =>
       opts.poll && q.state.data?.recentCleanJobs?.some((j) => j.status === "PENDING" || j.status === "RUNNING") ? 5_000 : opts.poll ? 60_000 : false,
     staleTime: 30_000,
+  });
+}
+
+/** Review QT-S3 L9: người đang xem có `storage:read` trên `projectId`? (vai trò từ `/auth/me`; chưa nạp -> false). */
+export function useCanReadStorage(projectId: string | null): boolean {
+  return useMeStore((s) => {
+    if (!projectId || !s.me) return false;
+    return canReadStorage(s.me.memberships.find((m) => m.projectId === projectId)?.role, s.me.user.isOperator === true);
   });
 }
 

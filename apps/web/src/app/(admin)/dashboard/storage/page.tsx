@@ -317,7 +317,18 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
                 {ck?.bodyKeys.map((k) => (
                   <p key={k}>{t(k)}</p>
                 ))}
-                {pending && <p className="font-medium">{t("page.storage.suggestion.frees", { size: formatBytes(pending.s.estimatedBytes), count: pending.s.estimatedEvents })}</p>}
+                {/* Review QT-S3 L3: số ước tính là của hành động GỢI Ý — chọn hành động khác thì nói rõ, không giả là số của nó. */}
+                {pending && (
+                  <p className="font-medium">
+                    {pending.action === pending.s.action
+                      ? t("page.storage.suggestion.frees", { size: formatBytes(pending.s.estimatedBytes), count: pending.s.estimatedEvents })
+                      : t("page.storage.suggestion.frees-of-suggested", {
+                          action: t(`page.storage.action.${pending.s.action}` as MessageKey),
+                          size: formatBytes(pending.s.estimatedBytes),
+                          count: pending.s.estimatedEvents,
+                        })}
+                  </p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -1,3 +1,6 @@
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { runGates, Gate, GATES } from '../lib/gates';
 
 // Chuỗi vi phạm được GHÉP để chính file này không vi phạm luật khi gate quét repo thật.
@@ -44,6 +47,41 @@ describe('grep gác cổng §7.3', () => {
     });
     const r = runGates([byId('operator-alerts')], f.list, f.read);
     expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/api/x.ts:1', 'apps/hub-api/src/modules/api/x.ts:2', 'apps/hub-worker/src/y.ts:1']);
+  });
+
+  it('review QT-S3 L6: escape hatch operatorProjectUsage gọi ngoài projects.controller → đỏ; controller / prisma.service thì xanh', () => {
+    const call = 'const rows = await this.prisma.operator' + 'ProjectUsage();';
+    const f = files({
+      'apps/hub-api/src/modules/storage/x.ts': call,
+      'apps/hub-api/src/modules/console/projects.controller.ts': call,
+      'libs/database/src/prisma.service.ts': 'public operator' + 'ProjectUsage() {}',
+    });
+    const r = runGates([byId('operator-project-usage')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/storage/x.ts:1']);
+  });
+
+  it('[QT:T4] LOCKED: delivery đã có vẫn được giao và retry — đường giao/retry của hub-worker không đọc nấc/khoá dung lượng (gate trên repo thật = 0; thêm kiểm khoá vào relay/consumer → đỏ)', () => {
+    const gate = byId('delivery-ignores-storage-lock');
+    // Ca đỏ tổng hợp: ai đó thêm "LOCKED thì đừng giao" vào consumer / relay / sweeper.
+    const f = files({
+      'apps/hub-worker/src/consumers/delivery.consumer.ts': 'if (is' + 'WriteBlocked(level, false, true)) return;',
+      'apps/hub-worker/src/scheduler/outbox.relay.ts': 'const u = await repo.lock' + 'ProjectUsageForSignal();',
+      'apps/hub-worker/src/scheduler/delivery.sweeper.ts': "// chú thích nhắc project" + "_usage không tính\nconst x = 'SKIP LOCKED';",
+      'apps/hub-worker/src/scheduler/storage.job.ts': 'is' + 'WriteBlocked(l)', // ngoài phạm vi: job đo nấc
+    });
+    const r = runGates([gate], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual([
+      'apps/hub-worker/src/consumers/delivery.consumer.ts:1',
+      'apps/hub-worker/src/scheduler/outbox.relay.ts:1',
+    ]);
+    // Repo thật: phạm vi không rỗng (gate thật sự quét file giao) và 0 vi phạm.
+    const ROOT = path.resolve(__dirname, '..', '..');
+    const out = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'apps/hub-worker/src'], { cwd: ROOT, encoding: 'utf8' });
+    const list = out.stdout.split('\n').map((x) => x.trim()).filter((x) => x && fs.existsSync(path.join(ROOT, x)));
+    const scoped = list.filter(gate.include);
+    expect(scoped).toEqual(expect.arrayContaining(['apps/hub-worker/src/consumers/delivery.consumer.ts', 'apps/hub-worker/src/scheduler/outbox.relay.ts', 'apps/hub-worker/src/scheduler/delivery.sweeper.ts']));
+    const real = runGates([gate], list, (x) => fs.readFileSync(path.join(ROOT, x), 'utf8'));
+    expect(real[0].violations.map((v) => `${v.file}:${v.line} ${v.text}`)).toEqual([]);
   });
 
   it('[CB:T8] (phần c) escape hatch vòng gửi email: gọi ngoài alert-email.sender → đỏ; trong sender / prisma.service thì xanh', () => {

@@ -128,25 +128,29 @@ export async function listAlertsFor(store: AlertStore, viewer: AlertViewer, q: A
   const limit = parseLimit(q.limit, ALERT_LIST_MAX);
   const page = parsePageCursor(q.cursor || q.before, q.after);
   const rules = filter.rule ? (ruleAudience(filter.rule) === 'owners+operator' ? [filter.rule] : []) : ownerVisibleRules();
+  // ADR-188 (review QT-S3 M0): owner cũng lấy mốc "cảnh báo mới" theo đồng hồ DB, đọc TRƯỚC danh sách như đường operator.
+  const asOf = await store.dbNow();
   const out = await runPage(
     (dir, cursor) => store.ownerAlertsAcrossTenants(viewer.userId, rules, { ...filter, rule: undefined, dir, cursor, limit }),
     page,
     limit,
     (r) => ({ at: r.cursorAt, id: r.id }),
   );
-  return { items: out.items.map(alertView), next: out.next, prev: out.prev, scope: 'owner' as const };
+  return { items: out.items.map(alertView), next: out.next, prev: out.prev, asOf: asOf.toISOString(), scope: 'owner' as const };
 }
 
 /** QT6: tóm tắt chuông theo quyền (owner: chỉ cảnh báo dung lượng của project mình). */
 export async function alertSummaryFor(store: AlertStore, viewer: AlertViewer) {
   if (viewer.isOperator) return alertSummary(store);
   await ownedProjectIds(store, viewer.userId);
+  const asOf = await store.dbNow(); // ADR-188 (M0): mốc đồng hồ DB, đọc trước tóm tắt
   const { totals, perProject } = await store.ownerAlertSummaryAcrossTenants(viewer.userId, ownerVisibleRules());
   return {
     openBySeverity: { critical: totals.critical, warning: totals.warning, info: totals.info },
     unacked: totals.unacked,
     unackedBySeverity: totals.unackedBySeverity,
     perProject,
+    asOf: asOf.toISOString(),
     scope: 'owner' as const,
   };
 }

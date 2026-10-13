@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
-import { useStorage } from "@/lib/hub/storage-queries";
+import { useCanReadStorage, useStorage } from "@/lib/hub/storage-queries";
 import { useT } from "@/lib/i18n/use-t";
 import { storageBannerFor } from "@/lib/storage/storage-logic";
 
@@ -19,7 +19,7 @@ import { storageBannerFor } from "@/lib/storage/storage-logic";
  * QT7 (SPEC-han-muc-dung-luong §3, §9 + E1/E5): banner dung lượng của DỰ ÁN ĐANG CHỌN, dính đầu vùng nội dung (cùng chỗ với
  * banner cảnh báo CB). 70% vàng (ẩn được trong phiên), 85% vàng + toast một lần mỗi phiên, 95% đỏ không tắt được, LOCKED /
  * HARD_LOCKED đỏ với HAI nút "Dọn theo gợi ý" + "Liên hệ người vận hành". Cờ khoá tắt -> câu nói thật. Không có "Nâng cấp".
- * Thành viên không có `storage:read` (viewer) nhận 403 -> không hiện gì.
+ * Thành viên không có `storage:read` (viewer) -> không gọi API, không hiện gì (server vẫn 403 nếu có gọi).
  */
 const SESSION_KEY = (projectId: string, level: string) => `hub:storage-banner:${projectId}:${level}`;
 const session = {
@@ -43,7 +43,8 @@ export function StorageBanner() {
   const t = useT();
   const pathname = usePathname();
   const projectId = useFlowProjectStore((s) => s.projectId);
-  const { data } = useStorage(projectId);
+  const canRead = useCanReadStorage(projectId); // L9: viewer không gọi GET storage (không 403 thừa)
+  const { data } = useStorage(canRead ? projectId : null);
   const [hidden, setHidden] = useState(false);
   const banner = data ? storageBannerFor(data.level, data.lockEnabled) : null;
   const key = projectId && data ? SESSION_KEY(projectId, data.level) : null;

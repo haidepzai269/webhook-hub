@@ -93,9 +93,16 @@ export class StorageAlerts implements OnModuleInit {
     }
     const idn = this.prisma.identity();
     // Người nhận đọc NGOÀI transaction khoá (bảng danh tính, không RLS) — lỗi đọc thì lần này không email, alert vẫn đúng.
+    // Review QT-S3 L1: lỗi đọc -> KHÔNG ghi dấu email (giữ notified_level/at cũ) để lượt nấc sau gửi bù, không mất thư 70/85.
+    let recipientsOk = true;
+    const failed = (err: any) => {
+      recipientsOk = false;
+      logger.warn({ err: err?.message, tenantId }, 'Storage alerts: lỗi đọc người nhận email — lượt sau gửi bù');
+      return [];
+    };
     const [owners, operators] = await Promise.all([
-      idn.listProjectOwnersForStorageEmail(tenantId).catch(() => []),
-      idn.listAlertEmailRecipients().catch(() => []),
+      idn.listProjectOwnersForStorageEmail(tenantId).catch(failed),
+      idn.listAlertEmailRecipients().catch(failed),
     ]);
     const out = await this.prisma.tenantTx(tenantId, async (tx) => {
       const repo = this.prisma.forTenant(tenantId, tx);
@@ -104,7 +111,10 @@ export class StorageAlerts implements OnModuleInit {
       const level = parseStorageLevel(u.level);
       const signaled = u.signaledLevel === null ? 'OK' : parseStorageLevel(u.signaledLevel);
       const changed = level !== signaled;
-      const plan = planStorageEmail({ level, notifiedLevel: u.notifiedLevel, notifiedAt: u.notifiedAt, now });
+      const planned = planStorageEmail({ level, notifiedLevel: u.notifiedLevel, notifiedAt: u.notifiedAt, now });
+      const plan = recipientsOk
+        ? planned
+        : { send: null, notifiedLevel: u.notifiedLevel === null ? null : parseStorageLevel(u.notifiedLevel), notifiedAt: u.notifiedAt };
       const notifiedSame = plan.notifiedLevel === (u.notifiedLevel === null ? null : parseStorageLevel(u.notifiedLevel)) && plan.notifiedAt?.getTime() === u.notifiedAt?.getTime();
       if (!changed && !plan.send && notifiedSame) return { notices: [] as { alert: AlertRow; rule: AlertRuleCode; to: 'OPEN' | 'RESOLVED' }[], acted: false };
 

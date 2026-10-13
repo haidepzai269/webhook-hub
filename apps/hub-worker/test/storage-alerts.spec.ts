@@ -44,6 +44,8 @@ function world(o: { level?: string; signaled?: string | null; owners?: any[]; op
     outbox: [] as any[],
     announced: [] as string[],
     txs: 0,
+    /** Review QT-S3 L1: đọc người nhận lỗi (DB danh tính chập chờn). */
+    failRecipients: false,
   };
   let seq = 0;
   const repo = (tenantId: string, inTx: boolean) => ({
@@ -95,7 +97,10 @@ function world(o: { level?: string; signaled?: string | null; owners?: any[]; op
   const prisma: any = {
     findProjectById: async (id: string) => ({ id, storageQuotaMb: 50 }),
     identity: () => ({
-      listProjectOwnersForStorageEmail: async () => o.owners ?? [{ userId: 'own-1', emailVerified: true, storageWarnEmail: true }],
+      listProjectOwnersForStorageEmail: async () => {
+        if (st.failRecipients) throw new Error('db danh tính lỗi');
+        return o.owners ?? [{ userId: 'own-1', emailVerified: true, storageWarnEmail: true }];
+      },
       listAlertEmailRecipients: async () => o.operators ?? [{ userId: 'op-1', emailRules: ['project.storage_locked', 'hub.storage_near_full'], mutedProjects: [] }],
       listProjectIds: async () => o.projects ?? [T],
     }),
@@ -157,6 +162,22 @@ describe('[QT:T19] (phần a) webhook hub.project.storage: đúng MỘT event m�
 });
 
 describe('[QT:T11] (phần b) email dung lượng qua outbox alert_emails: owner + operator, mỗi nấc đi lên một lần, 95%/LOCKED nhắc mỗi ngày', () => {
+  it('review QT-S3 L1: lỗi đọc người nhận -> alert + event vẫn đúng, KHÔNG ghi dấu email; lượt sau (đọc được) gửi bù thư lên 70%', async () => {
+    const { svc, st } = world({ level: 'WARN_70', signaled: 'OK', operators: [] });
+    st.failRecipients = true;
+    expect(await svc.signal(T, 50 * MB)).toBe(true);
+    expect(st.events).toHaveLength(1);
+    expect(st.emails).toEqual([]);
+    expect(st.usage).toMatchObject({ signaledLevel: 'WARN_70', notifiedLevel: null, notifiedAt: null }); // dấu email giữ nguyên
+    // Lượt nấc 60s thấy còn nợ thư -> báo lại; lần này đọc được -> đúng một thư, không event thứ hai.
+    st.failRecipients = false;
+    const row = { tenantId: T, level: 'WARN_70', finalLevel: 'WARN_70', signaledLevel: 'WARN_70', notifiedLevel: st.usage.notifiedLevel, notifiedAt: st.usage.notifiedAt, quotaMb: 50 } as any;
+    expect(await svc.sweep([row])).toBe(1);
+    expect(st.emails.map((e) => `${e.userId}:${e.tag}`)).toEqual(['own-1:up:WARN_70:2026-10-13']);
+    expect(st.events).toHaveLength(1);
+    expect(st.usage).toMatchObject({ notifiedLevel: 'WARN_70' });
+  });
+
   it('lên LOCKED: thư `up:LOCKED:<ngày>` cho owner + operator chọn luật; developer/viewer không (không có trong danh sách owner)', async () => {
     const { svc, st } = world({ level: 'LOCKED', signaled: 'CRITICAL_95' });
     await svc.signal(T, 50 * MB);

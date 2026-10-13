@@ -314,7 +314,9 @@ webhook `lockEnabled` nói thật).
 | `STORAGE_AUTO_CLEAN_ENABLED` | seed policy mặc định (Rác xoá 1 ngày, Thấp dọn 3 ngày), hiện trên console "Đã cài, chưa chạy"; dọn tay vẫn chạy | dọn tự động |
 
 **Checklist bật** (ghi ngày bật từng cờ vào bảng dưới):
-1. Deploy với cả hai cờ = 0.
+1. Deploy với cả hai cờ = 0. **Người vận hành đã lưu Cài đặt cảnh báo TRƯỚC QT6** (review QT-S3 L7): `email_rules` cũ không có
+   `hub.storage_near_full` / `project.storage_*` (`DEFAULT_EMAIL_RULES` chỉ áp cho người CHƯA có tuỳ chọn) -> vào Cài đặt cảnh
+   báo tick các luật mới, không thì không nhận email dung lượng.
 2. Chờ ≥ 24h để có ít nhất một lượt hiệu chỉnh. Log `Storage: hiệu chỉnh (quét thật)` có `driftPct` = (cộng dồn − quét thật) / quét
    thật. |driftPct| > 20% thì CHƯA bật — xem lại `bloat_factor`.
 3. Xem danh sách project ≥ 95% (cột "Mức sử dụng" ở trang Dự án của operator). Owner đã nhận email chưa (`hub.alert_emails`)?
@@ -328,9 +330,11 @@ webhook `lockEnabled` nói thật).
 | `STORAGE_AUTO_CLEAN_ENABLED` | — | — |
 
 **Chi phí Redis của StorageJob** (không nằm trên đường nóng — `redis-budget.spec.ts` không đổi): 1 `SET NX EX` mỗi nhịp nấc
-(60s) + 1 `SET NX EX` mỗi nhịp kiểm hiệu chỉnh (≤ 1h) **mỗi instance worker** ≈ 1.440 + 24 lệnh/ngày/instance. Đổi nấc
-dung lượng PUBLISH `hub:realtime:alerts` (hiếm, dùng chung kết nối của AlertEvaluator). Email/webhook đi Postgres (outbox),
-0 lệnh Redis. Đường ingest: +0 lệnh Redis, +0 lượt DB (khoá đọc `level` trong chính câu nạp source).
+(60s) + 1 `SET NX EX` mỗi nhịp kiểm hiệu chỉnh (≤ 1h) **mỗi instance worker** ≈ 1.440 + 24 lệnh/ngày/instance. **Đổi nấc
+không phải 0 lệnh Redis:** StorageAlerts gọi `evaluator.announce` -> 1 `PUBLISH hub:realtime:alerts` cho MỖI alert đổi trạng
+thái, tức tối đa **2 PUBLISH / lần đổi nấc** (đóng alert nấc cũ + mở alert nấc mới; về OK chỉ đóng = 1; lượt nhắc email
+24h không đổi alert = 0). Hiếm, sau COMMIT, dùng chung kết nối của AlertEvaluator. Chốt ổ `hub.storage_near_full` cũng
+1 PUBLISH khi mở/đóng. Email/webhook đi Postgres (outbox), 0 lệnh Redis. Đường ingest: +0 lệnh Redis, +0 lượt DB (khoá đọc `level` trong chính câu nạp source).
 
 ---
 

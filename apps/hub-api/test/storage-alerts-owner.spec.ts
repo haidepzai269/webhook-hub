@@ -26,6 +26,7 @@ const errOf = async (p: Promise<unknown>) => {
 
 function store(memberships: { projectId: string; role: string }[]) {
   const calls: any[] = [];
+  const order: string[] = [];
   const s: any = {
     operatorAlertsAcrossTenants: async (f: any) => {
       calls.push({ operator: f });
@@ -36,16 +37,23 @@ function store(memberships: { projectId: string; role: string }[]) {
       return { totals: { critical: 9, warning: 9, info: 0, unacked: 9, unackedBySeverity: { critical: 9, warning: 9, info: 0 } }, perProject: [] };
     },
     ownerAlertsAcrossTenants: async (userId: string, rules: string[], f: any) => {
+      order.push('ownerList');
       calls.push({ owner: userId, rules, f });
       return [];
     },
     ownerAlertSummaryAcrossTenants: async (userId: string, rules: string[]) => {
+      order.push('ownerSummary');
       calls.push({ ownerSummary: userId, rules });
       return { totals: { critical: 1, warning: 0, info: 0, unacked: 1, unackedBySeverity: { critical: 1, warning: 0, info: 0 } }, perProject: [] };
     },
+    // ADR-188: đồng hồ DB — đếm riêng (không vào `calls`) để các kỳ vọng thứ tự gọi escape hatch giữ nguyên.
+    dbNow: async () => {
+      order.push('dbNow');
+      return new Date('2026-10-13T08:00:00.000Z');
+    },
     identity: () => ({ listMemberships: async () => memberships.map((m) => ({ ...m, slug: 's', name: 'n', environment: 'dev' })) }),
   };
-  return { s, calls };
+  return { s, calls, order };
 }
 
 describe('[QT:T34] (phần b) API cảnh báo lọc theo quyền', () => {
@@ -61,6 +69,15 @@ describe('[QT:T34] (phần b) API cảnh báo lọc theo quyền', () => {
     const sum = await alertSummaryFor(s, { userId: 'u-own', isOperator: false });
     expect(sum).toMatchObject({ openBySeverity: { critical: 1 }, scope: 'owner' });
     expect(calls[3]).toEqual({ ownerSummary: 'u-own', rules: ownerVisibleRules() });
+  });
+
+  it('ADR-188 (review QT-S3 M0): owner list + summary trả `asOf` = đồng hồ DB, đọc TRƯỚC escape hatch — không theo đồng hồ trình duyệt', async () => {
+    const { s, order } = store([{ projectId: A, role: 'owner' }]);
+    const r = await listAlertsFor(s, { userId: 'u-own', isOperator: false }, {});
+    expect(r.asOf).toBe('2026-10-13T08:00:00.000Z');
+    const sum = await alertSummaryFor(s, { userId: 'u-own', isOperator: false });
+    expect(sum).toMatchObject({ asOf: '2026-10-13T08:00:00.000Z', scope: 'owner' });
+    expect(order).toEqual(['dbNow', 'ownerList', 'dbNow', 'ownerSummary']);
   });
 
   it('developer/viewer (không owner project nào) -> 403 operator_required như cũ; operator -> đường operator như cũ (mọi luật, mọi project)', async () => {

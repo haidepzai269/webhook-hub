@@ -13,7 +13,7 @@ import { alertActions } from "@/lib/alerts/links";
 import type { AlertView } from "@/lib/alerts/types";
 import { useAckAlert } from "@/lib/hub/alert-queries";
 import { formatRelative, formatStamp, shortId } from "@/lib/hub/format";
-import { useMeId } from "@/lib/hub/me-store";
+import { useIsOperator, useMeId } from "@/lib/hub/me-store";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 /**
@@ -35,6 +35,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
   const open = useOpenAlertTarget();
   const ack = useAckAlert();
   const me = useMeId();
+  const isOperator = useIsOperator(); // review QT-S3 L2: "Đã xem" chỉ operator (owner chỉ xem — bấm sẽ 403)
   const msg = text(a, subjectName);
   const rows = factRows(a.facts, t, { locale, now: Date.now() });
   const actions = alertActions(a);
@@ -102,7 +103,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
                   <ArrowRight />
                 </Button>
               ))}
-              {!a.acknowledgedAt && !resolved && (
+              {isOperator && !a.acknowledgedAt && !resolved && (
                 <Button size="sm" variant="ghost" disabled={ack.isPending} onClick={() => ack.mutate(a.id)}>
                   {t("page.alerts.sheet.ack")}
                 </Button>

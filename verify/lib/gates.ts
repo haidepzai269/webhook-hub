@@ -173,6 +173,27 @@ export const GATES: Gate[] = [
     check: grepLines(/\bowner(Alerts|AlertSummary)AcrossTenants\s*\(/),
   },
   {
+    id: 'operator-project-usage',
+    rule: 'Escape hatch dung lượng xuyên project `operatorProjectUsage(` (cột operator ở danh sách project) chỉ được gọi ở apps/hub-api/src/modules/console/projects.controller.ts (sau kiểm isOperator) và khai ở prisma.service.ts',
+    source: 'SPEC-han-muc-dung-luong QT7, review QT-S3 L6, ADR-191',
+    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && f !== 'apps/hub-api/src/modules/console/projects.controller.ts',
+    check: grepLines(/\boperatorProjectUsage\s*\(/),
+  },
+  {
+    id: 'delivery-ignores-storage-lock',
+    rule:
+      'Khoá dung lượng chỉ chặn CHIỀU GHI ở ingest (hub-api): đường giao/retry/DLQ của hub-worker (consumers/, senders/, circuit/, outbox.relay, delivery.sweeper) không được đọc nấc/khoá dung lượng — delivery đã có vẫn được giao và retry khi LOCKED',
+    source: 'SPEC-han-muc-dung-luong QT:T4, review QT-S3 M3, ADR-182',
+    include: (f) =>
+      isSrc(f) &&
+      (/^apps\/hub-worker\/src\/(consumers|senders|circuit)\//.test(f) ||
+        ['apps/hub-worker/src/scheduler/outbox.relay.ts', 'apps/hub-worker/src/scheduler/delivery.sweeper.ts'].includes(f)),
+    check: grepLines(
+      /\b(isWriteBlocked|parseStorageLevel|levelFor|resolveStorageLockEnabled|STORAGE_LOCK_ENABLED|project_storage_full|STORAGE_FULL|HARD_LOCKED|lockProjectUsage\w*|ProjectUsage|projectUsage|project_usage)\b/,
+      { skipComments: true },
+    ),
+  },
+  {
     id: 'alert-email-outbox',
     rule: 'Escape hatch vòng gửi email cảnh báo `alertEmailOutbox…(` (xuyên project, systemTx) chỉ được gọi ở apps/hub-worker/src/scheduler/alert-email.sender.ts và khai ở prisma.service.ts',
     source: 'SPEC-canh-bao-nhan-dinh §6, DINH-CHINH D2, ADR-173',
