@@ -94,6 +94,27 @@ describe('POST/GET /v1/p/:project/sources (S8)', () => {
     expect(parseSourceInput({ provider: 'generic', name: 'x', secret: Buffer.from('pk2-hex-key').toString('hex'), verificationConfig: hex }).verificationConfig).toMatchObject({ keyEncoding: 'hex', algo: 'sha256' });
     expect(parseSourceInput({ provider: 'generic', name: 'x', secret: 'hub:pass-123', verificationConfig: basic }).verificationConfig).toMatchObject({ location: 'basic' });
   });
+
+  it('[PK:T8] (phần b) signed-template sai luật -> 422 validation_failed đúng tên trường (thiếu {body}, {body} hai lần, token lạ, {timestamp} không toleranceSec); token query cần mã hoá URL -> 422 secret', () => {
+    const base = { scheme: 'signed-template', idempotency: { field: 'id' }, eventType: 'acme.x', signature: { headers: ['x-sig'] }, timestampHeader: 'x-ts', toleranceSec: 300 };
+    const fieldOf = (vc: any, secret = 'secret-pk3-123') => {
+      try {
+        parseSourceInput({ provider: 'generic', name: 'x', secret, verificationConfig: vc });
+        return 'ok';
+      } catch (e: any) {
+        return `${e.getStatus()} ${e.getResponse().error} ${e.getResponse().field}`;
+      }
+    };
+    expect(fieldOf({ ...base, template: '{timestamp}.' })).toBe('422 validation_failed verificationConfig.template');
+    expect(fieldOf({ ...base, template: '{body}{timestamp}{body}' })).toBe('422 validation_failed verificationConfig.template');
+    expect(fieldOf({ ...base, template: '{ts}.{body}' })).toBe('422 validation_failed verificationConfig.template');
+    expect(fieldOf({ ...base, template: '{timestamp}.{body}', toleranceSec: undefined })).toBe('422 validation_failed verificationConfig.toleranceSec');
+    expect(fieldOf({ ...base, template: '{id}{timestamp}{body}' })).toBe('422 validation_failed verificationConfig.idHeader');
+    expect(fieldOf({ ...base, template: '{timestamp}.{body}', keyEncoding: 'hex' }, 'khong-phai-hex')).toBe('422 validation_failed secret');
+    expect(fieldOf({ ...base, template: 'v0:{timestamp}:{body}' })).toBe('ok');
+    // Review PK2 T-5.
+    expect(fieldOf({ scheme: 'static-token', location: 'query', param: 'token', idempotency: { field: 'id' }, eventType: 'acme.x' }, 'abc+def/ghi=')).toBe('422 validation_failed secret');
+  });
 });
 
 describe('GET /v1/p/:project/sources/:id/inspect (S9)', () => {

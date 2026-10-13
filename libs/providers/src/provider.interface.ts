@@ -6,6 +6,11 @@ import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '
  */
 export interface AdapterContext {
   verificationConfig?: unknown;
+  /**
+   * PK3 (E2): "bây giờ" khi kiểm độ lệch timestamp (`standard-webhooks`, `signed-template`). Ingest thường KHÔNG truyền
+   * (= `Date.now()`); verify bù của chế độ thu (PK6) truyền `received_at` của dòng thu (DB đặt, không giả được).
+   */
+  verifyAt?: Date;
 }
 
 /**

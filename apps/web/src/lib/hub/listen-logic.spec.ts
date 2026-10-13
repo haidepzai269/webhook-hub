@@ -21,6 +21,9 @@ import {
   RESERVED_NAMESPACES,
   SECRET_MAX,
   SECRET_MIN,
+  TEMPLATE_FORM_DEFAULTS,
+  TEMPLATE_PRESETS,
+  type TemplatePreset,
   TOKEN_LOCATION_CHOICES,
 } from "./listen-logic";
 
@@ -86,6 +89,7 @@ const FORM: GenericFormValues = {
   idKind: "field",
   idValue: "transId",
   eventType: "acme.invoice.paid",
+  ...TEMPLATE_FORM_DEFAULTS,
 };
 
 describe("PK1: form tay \"Nhà cung cấp khác\" dựng verificationConfig đúng khuôn validateGenericConfig", () => {
@@ -255,5 +259,77 @@ describe("review PK2: T-6 form khớp server", () => {
 
   it("độ dài khoá bí mật client = server (8–512)", () => {
     expect([SECRET_MIN, SECRET_MAX]).toEqual([8, 512]);
+  });
+});
+
+describe("PK3: form signed-template — điền nhanh + cùng luật server (validateGenericConfig + secretProblem)", () => {
+  const TPL: GenericFormValues = { ...FORM, ...TEMPLATE_PRESETS.slack, idValue: "event_id" };
+  const serverIssues = (f: GenericFormValues, secret: string): string[] => {
+    const r = validateGenericConfig(buildGenericConfig(f));
+    if (!r.ok) return [`config:${(r as { field: string }).field}`];
+    const p = secretProblem((r as { config: GenericConfig }).config, secret);
+    return p ? ["secret"] : [];
+  };
+
+  it.each(Object.keys(TEMPLATE_PRESETS) as TemplatePreset[])("điền nhanh %s -> server nhận đúng điều form gửi, form không báo lỗi", (p) => {
+    const f: GenericFormValues = { ...FORM, ...TEMPLATE_PRESETS[p], idValue: "event_id" };
+    const built = buildGenericConfig(f);
+    const r = validateGenericConfig(built);
+    expect({ p, ok: r.ok }).toEqual({ p, ok: true });
+    expect((r as unknown as { config: Record<string, unknown> }).config).toMatchObject(built);
+    expect(genericFormIssues(f, "secret-pk3-123")).toEqual([]);
+  });
+
+  it("Stripe điền nhanh dựng đúng khuôn kv; Slack dựng tiêu đề + tiền tố + timestampHeader", () => {
+    expect(buildGenericConfig({ ...FORM, ...TEMPLATE_PRESETS.stripe, idValue: "id" })).toEqual({
+      scheme: "signed-template",
+      template: "{timestamp}.{body}",
+      algo: "sha256",
+      encoding: "hex",
+      keyEncoding: "utf8",
+      signature: { header: "stripe-signature", kv: { sep: ",", sig: "v1", timestamp: "t" } },
+      timestampFormat: "unix",
+      toleranceSec: 300,
+      idempotency: { field: "id" },
+      eventType: "acme.invoice.paid",
+    });
+    expect(buildGenericConfig(TPL)).toMatchObject({ signature: { headers: ["x-slack-signature"], prefix: "v0=" }, timestampHeader: "x-slack-request-timestamp", toleranceSec: 300 });
+  });
+
+  it("form lỗi đúng khi và chỉ khi server lỗi", () => {
+    const cases: [GenericFormValues, string][] = [
+      [TPL, "secret-pk3-123"],
+      [{ ...TPL, template: "{timestamp}." }, "secret-pk3-123"],
+      [{ ...TPL, template: "{body}{body}" }, "secret-pk3-123"],
+      [{ ...TPL, template: "{ts}.{body}" }, "secret-pk3-123"],
+      [{ ...TPL, template: `${"x".repeat(128)}{body}` }, "secret-pk3-123"],
+      [{ ...TPL, template: "{body}" }, "secret-pk3-123"], // không {timestamp}: ô timestamp bị bỏ qua, server nhận
+      [{ ...TPL, toleranceSec: "4" }, "secret-pk3-123"],
+      [{ ...TPL, toleranceSec: "901" }, "secret-pk3-123"],
+      [{ ...TPL, toleranceSec: "30.5" }, "secret-pk3-123"],
+      [{ ...TPL, toleranceSec: "" }, "secret-pk3-123"],
+      [{ ...TPL, toleranceSec: "5" }, "secret-pk3-123"],
+      [{ ...TPL, timestampHeader: "" }, "secret-pk3-123"],
+      [{ ...TPL, template: "{id}{timestamp}{body}" }, "secret-pk3-123"],
+      [{ ...TPL, template: "{id}{timestamp}{body}", idHeader: "Twitch-Eventsub-Message-Id" }, "secret-pk3-123"],
+      [{ ...TPL, algo: "sha1" }, "secret-pk3-123"],
+      [{ ...TPL, algo: "from-prefix" }, "secret-pk3-123"],
+      [{ ...TPL, header2: "x-slack-signature" }, "secret-pk3-123"],
+      [{ ...TPL, header2: "box-signature-secondary" }, "secret-pk3-123"],
+      [{ ...TPL, header: "" }, "secret-pk3-123"],
+      [{ ...TPL, prefix: "p".repeat(33) }, "secret-pk3-123"],
+      [{ ...TPL, keyEncoding: "hex" }, "khong-phai-hex"],
+      [{ ...FORM, ...TEMPLATE_PRESETS.stripe, kvSig: "" }, "secret-pk3-123"],
+      [{ ...FORM, ...TEMPLATE_PRESETS.stripe, kvSig: "t" }, "secret-pk3-123"],
+      [{ ...FORM, ...TEMPLATE_PRESETS.stripe, kvTimestamp: "" }, "secret-pk3-123"], // thời điểm phải ở tiêu đề riêng
+      [{ ...FORM, ...TEMPLATE_PRESETS.stripe, kvTimestamp: "", timestampHeader: "x-ts" }, "secret-pk3-123"],
+      [{ ...FORM, ...TEMPLATE_PRESETS.paddle, kvSep: ";", template: "{body}" }, "secret-pk3-123"], // không {timestamp}: kv timestamp bỏ qua
+      [{ ...TPL, idValue: "" }, "secret-pk3-123"],
+    ];
+    for (const [f, secret] of cases) {
+      const client = genericFormIssues(f, secret).length > 0;
+      const server = serverIssues(f, secret).length > 0;
+      expect({ f, secret, client }).toEqual({ f, secret, client: server });
+    }
   });
 });

@@ -34,8 +34,14 @@ import {
   genericFormIssues,
   HMAC_ALGO_CHOICES,
   KEY_ENCODING_CHOICES,
+  KV_SEP_CHOICES,
   SECRET_MAX,
   SECRET_MIN,
+  SIG_MODE_CHOICES,
+  TEMPLATE_FORM_DEFAULTS,
+  TEMPLATE_PRESETS,
+  type TemplatePreset,
+  TIMESTAMP_FORMAT_CHOICES,
   TOKEN_LOCATION_CHOICES,
 } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
@@ -118,6 +124,13 @@ const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
   "secret-base64": "page.sources.generic.secret-base64",
   "secret-basic": "page.sources.generic.secret-basic",
   "secret-query": "page.sources.generic.secret-query",
+  "template-invalid": "page.sources.generic.template-invalid",
+  "algo-template": "page.sources.generic.algo-template",
+  "header2-invalid": "page.sources.generic.header2-invalid",
+  "kv-key-invalid": "page.sources.generic.kv-key-invalid",
+  "timestamp-header-required": "page.sources.generic.timestamp-header-required",
+  "tolerance-invalid": "page.sources.generic.tolerance-invalid",
+  "id-header-required": "page.sources.generic.id-header-required",
 };
 
 /**
@@ -142,6 +155,17 @@ const makeSchema = (t: TranslateFn) =>
       idKind: z.enum(["header", "field"]),
       idValue: z.string(),
       eventType: z.string(),
+      // PK3 (ADR-204): signed-template.
+      template: z.string(),
+      sigMode: z.enum(SIG_MODE_CHOICES),
+      header2: z.string(),
+      kvSep: z.enum(KV_SEP_CHOICES),
+      kvSig: z.string(),
+      kvTimestamp: z.string(),
+      timestampHeader: z.string(),
+      timestampFormat: z.enum(TIMESTAMP_FORMAT_CHOICES),
+      idHeader: z.string(),
+      toleranceSec: z.string(),
     })
     .superRefine(({ provider, name: _n, secret, ...v }, ctx) => {
       if (provider !== "generic") return;
@@ -310,6 +334,7 @@ export default function SourcesPage() {
       idKind: "field",
       idValue: "",
       eventType: "",
+      ...TEMPLATE_FORM_DEFAULTS,
     },
   });
   // useWatch thay vì form.watch: React Compiler memo hoá form.watch → gợi ý không đổi theo provider.
@@ -447,7 +472,14 @@ export default function SourcesPage() {
                 </Field>
               )}
             />
-            {provider === "generic" && <GenericFields control={form.control} scheme={scheme} />}
+            {provider === "generic" && (
+              <GenericFields
+                control={form.control}
+                scheme={scheme}
+                // PK3: điền nhanh chỉ ghi đè các ô ký (giữ tên, khoá bí mật, khoá chống trùng, kiểu sự kiện).
+                onPreset={(p: TemplatePreset) => form.reset({ ...form.getValues(), ...TEMPLATE_PRESETS[p] }, { keepDefaultValues: true })}
+              />
+            )}
           </FieldGroup>
         </form>
       </FormDialog>

@@ -9,18 +9,27 @@ import { PAYMENT_TYPE_KEYS, isReservedType } from '@hub/common';
  * vòng lặp. `hmac-sha256` là bí danh cũ, đọc ra `{algo:"sha256", keyEncoding:"utf8"}` qua `hmacParams` — khuôn lưu
  * của source cũ KHÔNG đổi, hành vi không đổi. `static-token` thêm `location`: header | basic | query.
  */
-export type GenericScheme = 'hmac' | 'hmac-sha256' | 'static-token' | 'standard-webhooks';
+export type GenericScheme = 'hmac' | 'hmac-sha256' | 'static-token' | 'standard-webhooks' | 'signed-template';
 export type MappingValue = string | { const: string | number };
 export type HmacAlgo = 'sha1' | 'sha256' | 'sha512';
 export type KeyEncoding = 'utf8' | 'hex' | 'base64';
 export type TokenLocation = 'header' | 'basic' | 'query';
+export type TimestampFormat = 'unix' | 'unix-ms' | 'iso8601';
+/**
+ * PK3 (SPEC-provider-khac §5, E16, ADR-204): chữ ký của `signed-template` nằm ở đâu.
+ * - `{ headers, prefix? }`: 1–2 header, khớp MỘT là đủ (Box primary/secondary để xoay khoá).
+ * - `{ header, kv }`: khoá=giá trị trong MỘT header (Stripe `t=…,v1=…`, Paddle `ts=…;h1=…`); nhiều `sig` = xoay khoá.
+ */
+export type SignatureLocation =
+  | { headers: string[]; prefix?: string }
+  | { header: string; kv: { sep: ';' | ','; sig: string; timestamp?: string } };
 
 export interface GenericConfig {
   scheme: GenericScheme;
   header?: string;
   encoding?: 'hex' | 'base64';
   prefix?: string;
-  /** PK2: chỉ scheme `hmac` (bí danh cũ luôn sha256). Vắng khi `prefix` là `"<algo>="`. */
+  /** PK2: chỉ scheme `hmac` (bí danh cũ luôn sha256). Vắng khi `prefix` là `"<algo>="`. PK3: `signed-template` sha256|sha512. */
   algo?: HmacAlgo;
   /**
    * Review PK2 T-3: tập thuật toán nhận được khi `prefix` là `"<algo>="`. Vắng = `DEFAULT_PREFIX_ALGOS` (sha256, sha512) —
@@ -33,6 +42,16 @@ export interface GenericConfig {
   location?: Exclude<TokenLocation, 'header'>;
   /** PK2: tên tham số query khi `location: "query"`. */
   param?: string;
+  /** PK3 `signed-template`: chuỗi ký, chỉ 3 token `{timestamp}` `{body}` `{id}`; `{body}` đúng một lần. */
+  template?: string;
+  signature?: SignatureLocation;
+  /** PK3: header chứa timestamp (vắng khi timestamp nằm trong `signature.kv`). */
+  timestampHeader?: string;
+  timestampFormat?: TimestampFormat;
+  /** PK3: header chứa giá trị của `{id}` (bắt buộc khi template có `{id}`). */
+  idHeader?: string;
+  /** PK3: độ lệch tối đa giữa timestamp và "bây giờ" (giây, 5..900), bắt buộc khi có `{timestamp}`. */
+  toleranceSec?: number;
   idempotency: { header: string } | { field: string };
   eventType: string;
   mapping?: Record<string, MappingValue>;
@@ -41,13 +60,14 @@ export interface GenericConfig {
 
 export type ConfigCheck = { ok: true; config: GenericConfig } | { ok: false; field: string; message: string };
 
-const SCHEMES: GenericScheme[] = ['hmac', 'hmac-sha256', 'static-token', 'standard-webhooks'];
+const SCHEMES: GenericScheme[] = ['hmac', 'hmac-sha256', 'static-token', 'standard-webhooks', 'signed-template'];
 /**
  * Hai mẫu có `encoding` (tách hằng: gate sig-compare cấm `===`/`!==` trên dòng nhắc tới hmac). `LEGACY_SCHEME` là bí
  * danh cũ — giữ nguyên hành vi (sha256, khoá utf8, prefix tĩnh).
  */
 const PARAM_SCHEME: GenericScheme = 'hmac';
 const LEGACY_SCHEME: GenericScheme = 'hmac-sha256';
+const TEMPLATE_SCHEME: GenericScheme = 'signed-template';
 const SCHEMES_WITH_ENCODING: readonly GenericScheme[] = [PARAM_SCHEME, LEGACY_SCHEME];
 const ENCODINGS = ['hex', 'base64'];
 /** PK2: tập thuật toán. sha1 là ngoại lệ có chủ đích (provider quy định: Vercel, Intercom, Trello, WebSub), ADR-203. */
@@ -133,6 +153,9 @@ export function secretProblem(c: GenericConfig, secret: string): string | null {
   if (c.scheme === 'static-token' && c.location === 'query' && !QUERY_TOKEN_RE.test(secret)) {
     return 'query: token chỉ gồm A-Z a-z 0-9 . _ ~ - (không cần mã hoá URL); có + / = & # % thì dùng tiêu đề hoặc Basic';
   }
+  if (isTemplateScheme(c) && !decodeHmacKey(secret, c.keyEncoding ?? 'utf8')) {
+    return `secret phải là chuỗi ${c.keyEncoding ?? 'utf8'} hợp lệ (keyEncoding)`;
+  }
   return null;
 }
 
@@ -150,6 +173,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   const c = input;
   if (!SCHEMES.includes(c.scheme)) return bad('scheme', `scheme là một trong ${SCHEMES.join(', ')}`);
   const scheme = c.scheme as GenericScheme;
+  if (scheme === TEMPLATE_SCHEME) return validateSignedTemplate(c);
   const sw = scheme === 'standard-webhooks';
   const withEncoding = SCHEMES_WITH_ENCODING.includes(scheme);
   const isParam = scheme === PARAM_SCHEME;
@@ -196,55 +220,9 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
     return bad('keyEncoding', 'keyEncoding chỉ cho scheme hmac: utf8 | hex | base64');
   }
 
-  let idempotency: GenericConfig['idempotency'];
-  if (c.idempotency === undefined && sw) {
-    idempotency = { header: 'webhook-id' };
-  } else {
-    if (!isObj(c.idempotency)) return bad('idempotency', 'idempotency là {header} HOẶC {field}');
-    const keys = Object.keys(c.idempotency);
-    if (keys.length !== 1 || !['header', 'field'].includes(keys[0])) return bad('idempotency', 'idempotency có ĐÚNG MỘT trong header | field');
-    if (keys[0] === 'header') {
-      if (typeof c.idempotency.header !== 'string' || !HEADER_RE.test(c.idempotency.header)) {
-        return bad('idempotency.header', 'header viết thường ^[a-z0-9-]{1,64}$');
-      }
-      idempotency = { header: c.idempotency.header };
-    } else {
-      if (typeof c.idempotency.field !== 'string' || !FIELD_RE.test(c.idempotency.field)) {
-        return bad('idempotency.field', 'field là trường CẤP MỘT của body ^[A-Za-z0-9_]{1,64}$ (không JSONPath, không dấu chấm)');
-      }
-      idempotency = { field: c.idempotency.field };
-    }
-  }
-
-  if (typeof c.eventType !== 'string' || c.eventType.length > 128 || !EVENT_TYPE_RE.test(c.eventType)) {
-    return bad('eventType', 'eventType khớp ^[a-z0-9_]+(\\.[a-z0-9_]+)+$ (vd bank.transaction.received)');
-  }
-  const eventType: string = c.eventType;
-  const timeKey = paymentTimeKey(eventType);
-
-  if (c.timezone !== undefined && (typeof c.timezone !== 'string' || !OFFSET_RE.test(c.timezone))) {
-    return bad('timezone', 'timezone dạng ±hh:mm (vd +07:00)');
-  }
-
-  let mapping: GenericConfig['mapping'];
-  if (c.mapping === undefined) {
-    // Luật 4 §4.14.1: kiểu dành riêng (payment.*, repo.*) mà không ánh xạ thì data không thể đúng khuôn.
-    if (isReservedType(eventType)) return bad('mapping', `${eventType} là kiểu chuẩn: bắt buộc có mapping`);
-  } else {
-    if (!timeKey) return bad('mapping', 'mapping chỉ dùng cho payment.received | payment.sent | payment.failed | payment.refunded');
-    if (!isObj(c.mapping)) return bad('mapping', 'mapping là object');
-    const allowed = [...MAPPABLE_CORE, timeKey, ...(eventType === 'payment.failed' ? ['reason'] : [])];
-    for (const [k, v] of Object.entries(c.mapping)) {
-      if (!allowed.includes(k)) return bad(`mapping.${k}`, `khoá không ánh xạ được; cho phép: ${allowed.join(', ')}`);
-      const okField = typeof v === 'string' && FIELD_RE.test(v);
-      const okConst = isObj(v) && Object.keys(v).length === 1 && (typeof v.const === 'string' || typeof v.const === 'number');
-      if (!okField && !okConst) return bad(`mapping.${k}`, 'giá trị là tên trường CẤP MỘT (^[A-Za-z0-9_]{1,64}$) hoặc {"const": chuỗi|số}');
-    }
-    for (const k of [...REQUIRED_CORE, timeKey]) {
-      if (!(k in c.mapping)) return bad(`mapping.${k}`, `mapping thiếu trường bắt buộc ${k}`);
-    }
-    mapping = c.mapping as Record<string, MappingValue>;
-  }
+  const tail = parseTail(c, sw);
+  if ('bad' in tail) return tail.bad;
+  const { idempotency, eventType, mapping } = tail;
 
   const config: GenericConfig = { scheme, idempotency, eventType };
   if (!headerless) config.header = c.header;
@@ -258,6 +236,192 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if (location === 'query') config.param = c.param;
   if (c.prefix !== undefined) config.prefix = c.prefix;
   if (mapping) config.mapping = mapping;
+  if (c.timezone !== undefined) config.timezone = c.timezone;
+  return { ok: true, config };
+}
+
+type Tail = { ok: true; idempotency: GenericConfig['idempotency']; eventType: string; mapping?: GenericConfig['mapping'] } | { ok: false; bad: ConfigCheck };
+
+/** Phần chung mọi scheme: khoá chống trùng, kiểu sự kiện, múi giờ, ánh xạ (tách ra để `signed-template` dùng lại). */
+function parseTail(c: Record<string, any>, sw: boolean): Tail {
+  const fail = (field: string, message: string): Tail => ({ ok: false, bad: bad(field, message) });
+  let idempotency: GenericConfig['idempotency'];
+  if (c.idempotency === undefined && sw) {
+    idempotency = { header: 'webhook-id' };
+  } else {
+    if (!isObj(c.idempotency)) return fail('idempotency', 'idempotency là {header} HOẶC {field}');
+    const keys = Object.keys(c.idempotency);
+    if (keys.length !== 1 || !['header', 'field'].includes(keys[0])) return fail('idempotency', 'idempotency có ĐÚNG MỘT trong header | field');
+    if (keys[0] === 'header') {
+      if (typeof c.idempotency.header !== 'string' || !HEADER_RE.test(c.idempotency.header)) {
+        return fail('idempotency.header', 'header viết thường ^[a-z0-9-]{1,64}$');
+      }
+      idempotency = { header: c.idempotency.header };
+    } else {
+      if (typeof c.idempotency.field !== 'string' || !FIELD_RE.test(c.idempotency.field)) {
+        return fail('idempotency.field', 'field là trường CẤP MỘT của body ^[A-Za-z0-9_]{1,64}$ (không JSONPath, không dấu chấm)');
+      }
+      idempotency = { field: c.idempotency.field };
+    }
+  }
+
+  if (typeof c.eventType !== 'string' || c.eventType.length > 128 || !EVENT_TYPE_RE.test(c.eventType)) {
+    return fail('eventType', 'eventType khớp ^[a-z0-9_]+(\\.[a-z0-9_]+)+$ (vd bank.transaction.received)');
+  }
+  const eventType: string = c.eventType;
+  const timeKey = paymentTimeKey(eventType);
+
+  if (c.timezone !== undefined && (typeof c.timezone !== 'string' || !OFFSET_RE.test(c.timezone))) {
+    return fail('timezone', 'timezone dạng ±hh:mm (vd +07:00)');
+  }
+
+  let mapping: GenericConfig['mapping'];
+  if (c.mapping === undefined) {
+    // Luật 4 §4.14.1: kiểu dành riêng (payment.*, repo.*) mà không ánh xạ thì data không thể đúng khuôn.
+    if (isReservedType(eventType)) return fail('mapping', `${eventType} là kiểu chuẩn: bắt buộc có mapping`);
+  } else {
+    if (!timeKey) return fail('mapping', 'mapping chỉ dùng cho payment.received | payment.sent | payment.failed | payment.refunded');
+    if (!isObj(c.mapping)) return fail('mapping', 'mapping là object');
+    const allowed = [...MAPPABLE_CORE, timeKey, ...(eventType === 'payment.failed' ? ['reason'] : [])];
+    for (const [k, v] of Object.entries(c.mapping)) {
+      if (!allowed.includes(k)) return fail(`mapping.${k}`, `khoá không ánh xạ được; cho phép: ${allowed.join(', ')}`);
+      const okField = typeof v === 'string' && FIELD_RE.test(v);
+      const okConst = isObj(v) && Object.keys(v).length === 1 && (typeof v.const === 'string' || typeof v.const === 'number');
+      if (!okField && !okConst) return fail(`mapping.${k}`, 'giá trị là tên trường CẤP MỘT (^[A-Za-z0-9_]{1,64}$) hoặc {"const": chuỗi|số}');
+    }
+    for (const k of [...REQUIRED_CORE, timeKey]) {
+      if (!(k in c.mapping)) return fail(`mapping.${k}`, `mapping thiếu trường bắt buộc ${k}`);
+    }
+    mapping = c.mapping as Record<string, MappingValue>;
+  }
+
+  return { ok: true, idempotency, eventType, ...(mapping ? { mapping } : {}) };
+}
+
+// ───────────────────────── PK3: signed-template (SPEC-provider-khac §5, E16, ADR-204) ─────────────────────────
+
+/** Chỉ 3 token; thêm token = ADR kèm fixture provider thật. `{1,128}` đếm theo đơn vị (ký tự thường hoặc một token). */
+export const TEMPLATE_RE = /^([^{}]|\{(timestamp|body|id)\}){1,128}$/;
+export const TEMPLATE_ALGOS: readonly HmacAlgo[] = ['sha256', 'sha512'];
+export const TIMESTAMP_FORMATS: readonly TimestampFormat[] = ['unix', 'unix-ms', 'iso8601'];
+export const KV_SEPS = [';', ','] as const;
+/** Tên khoá trong header khoá=giá trị (`t`, `v1`, `ts`, `h1`). */
+export const KV_KEY_RE = /^[A-Za-z0-9_]{1,16}$/;
+export const TOLERANCE_MIN_SEC = 5; // Paddle SDK chỉ chấp nhận lệch 5s (nghiên cứu §1.5)
+export const TOLERANCE_MAX_SEC = 900;
+export const SIGNATURE_HEADERS_MAX = 2; // E16: Box primary + secondary
+
+/** Object chỉ có các khoá trong `allowed`. */
+const onlyKeys = (o: Record<string, unknown>, allowed: readonly string[]): boolean => Object.keys(o).every((k) => allowed.includes(k));
+const isTemplateScheme = (c: Pick<GenericConfig, 'scheme'>): boolean => c.scheme === TEMPLATE_SCHEME;
+
+export type TemplatePart = { token: 'timestamp' | 'body' | 'id' } | { text: string };
+
+/** Tách template (ĐÃ KIỂM) thành phần chữ và token, theo đúng thứ tự. */
+export function templateParts(template: string): TemplatePart[] {
+  return template
+    .split(/(\{(?:timestamp|body|id)\})/)
+    .filter((p) => p.length > 0)
+    .map((p) => (/^\{(timestamp|body|id)\}$/.test(p) ? { token: p.slice(1, -1) as 'timestamp' | 'body' | 'id' } : { text: p }));
+}
+
+/** Số lần token xuất hiện trong template. */
+export const countToken = (template: string, token: 'timestamp' | 'body' | 'id'): number => template.split(`{${token}}`).length - 1;
+
+/**
+ * PK3: `signed-template` — HMAC(algo, key, các phần của template nối bytes), `{body}` là bytes gốc. Luật (422 đúng tên trường):
+ * - `template` khớp `TEMPLATE_RE`, `{body}` ĐÚNG một lần (không có thì chữ ký không phủ body -> giả mạo được);
+ * - có `{timestamp}` -> bắt buộc nguồn timestamp (`timestampHeader` HOẶC `signature.kv.timestamp`, không cả hai) và
+ *   `toleranceSec` 5..900 (không kiểm độ lệch thì phát lại được mãi); không có `{timestamp}` thì các trường đó bị cấm;
+ * - có `{id}` <-> `idHeader`.
+ */
+function validateSignedTemplate(c: Record<string, any>): ConfigCheck {
+  for (const f of ['header', 'prefix', 'location', 'param', 'algos'] as const) {
+    if (c[f] !== undefined) return bad(f, `signed-template không có ${f} (chữ ký khai ở "signature")`);
+  }
+  if (typeof c.template !== 'string' || !TEMPLATE_RE.test(c.template)) {
+    return bad('template', 'template ≤ 128 đơn vị, chỉ token {timestamp} {body} {id}, không dấu { } lẻ (vd "v0:{timestamp}:{body}")');
+  }
+  const template: string = c.template;
+  if (countToken(template, 'body') !== 1) return bad('template', 'template phải có {body} đúng một lần (chữ ký phải phủ toàn bộ body)');
+  const hasTs = countToken(template, 'timestamp') > 0;
+  const hasId = countToken(template, 'id') > 0;
+
+  const algo: HmacAlgo = c.algo ?? 'sha256';
+  if (!TEMPLATE_ALGOS.includes(algo)) return bad('algo', `algo của signed-template là ${TEMPLATE_ALGOS.join(' | ')}`);
+  const encoding = c.encoding ?? 'hex';
+  if (!ENCODINGS.includes(encoding)) return bad('encoding', 'encoding: hex | base64');
+  const keyEncoding: KeyEncoding = c.keyEncoding ?? 'utf8';
+  if (!KEY_ENCODINGS.includes(keyEncoding)) return bad('keyEncoding', 'keyEncoding: utf8 | hex | base64');
+
+  const sig = c.signature;
+  if (!isObj(sig)) return bad('signature', 'signature là {headers:[…], prefix?} HOẶC {header, kv:{sep, sig, timestamp?}}');
+  let signature: SignatureLocation;
+  let kvTimestamp: string | undefined;
+  if ('kv' in sig) {
+    if (!onlyKeys(sig, ['header', 'kv'])) return bad('signature', 'signature dạng kv chỉ có header + kv');
+    if (typeof sig.header !== 'string' || !HEADER_RE.test(sig.header)) return bad('signature.header', 'header viết thường ^[a-z0-9-]{1,64}$');
+    const kv = sig.kv;
+    if (!isObj(kv) || Object.keys(kv).some((k) => !['sep', 'sig', 'timestamp'].includes(k))) return bad('signature.kv', 'kv là {sep, sig, timestamp?}');
+    if (!(KV_SEPS as readonly unknown[]).includes(kv.sep)) return bad('signature.kv.sep', 'sep là ";" hoặc ","');
+    if (typeof kv.sig !== 'string' || !KV_KEY_RE.test(kv.sig)) return bad('signature.kv.sig', 'sig là tên khoá ^[A-Za-z0-9_]{1,16}$ (vd v1, h1)');
+    if (kv.timestamp !== undefined && (typeof kv.timestamp !== 'string' || !KV_KEY_RE.test(kv.timestamp) || kv.timestamp === kv.sig)) {
+      return bad('signature.kv.timestamp', 'timestamp là tên khoá ^[A-Za-z0-9_]{1,16}$ khác sig (vd t, ts)');
+    }
+    kvTimestamp = kv.timestamp;
+    signature = { header: sig.header, kv: { sep: kv.sep, sig: kv.sig, ...(kvTimestamp !== undefined ? { timestamp: kvTimestamp } : {}) } };
+  } else {
+    if (!onlyKeys(sig, ['headers', 'prefix'])) return bad('signature', 'signature dạng header chỉ có headers + prefix');
+    const hs = sig.headers;
+    if (
+      !Array.isArray(hs) ||
+      hs.length === 0 ||
+      hs.length > SIGNATURE_HEADERS_MAX ||
+      hs.some((h: unknown) => typeof h !== 'string' || !HEADER_RE.test(h)) ||
+      new Set(hs).size !== hs.length
+    ) {
+      return bad('signature.headers', `headers là 1–${SIGNATURE_HEADERS_MAX} tên header viết thường, không trùng (khớp một là đủ)`);
+    }
+    if (sig.prefix !== undefined && (typeof sig.prefix !== 'string' || sig.prefix.length > PREFIX_MAX)) {
+      return bad('signature.prefix', 'prefix là chuỗi ≤ 32 ký tự (vd "v0=", "sha256=")');
+    }
+    signature = { headers: [...hs], ...(typeof sig.prefix === 'string' && sig.prefix.length > 0 ? { prefix: sig.prefix } : {}) };
+  }
+
+  if (hasTs) {
+    if (kvTimestamp !== undefined && c.timestampHeader !== undefined) return bad('timestampHeader', 'timestamp đã nằm trong signature.kv — bỏ timestampHeader');
+    if (kvTimestamp === undefined && (typeof c.timestampHeader !== 'string' || !HEADER_RE.test(c.timestampHeader))) {
+      return bad('timestampHeader', 'template có {timestamp}: cần timestampHeader (viết thường) hoặc signature.kv.timestamp');
+    }
+    if (c.timestampFormat !== undefined && !TIMESTAMP_FORMATS.includes(c.timestampFormat)) {
+      return bad('timestampFormat', `timestampFormat là ${TIMESTAMP_FORMATS.join(' | ')}`);
+    }
+    const tol = c.toleranceSec;
+    if (typeof tol !== 'number' || !Number.isInteger(tol) || tol < TOLERANCE_MIN_SEC || tol > TOLERANCE_MAX_SEC) {
+      return bad('toleranceSec', `template có {timestamp}: toleranceSec bắt buộc, số nguyên ${TOLERANCE_MIN_SEC}..${TOLERANCE_MAX_SEC} giây`);
+    }
+  } else {
+    if (kvTimestamp !== undefined) return bad('signature.kv.timestamp', 'template không có {timestamp}: bỏ signature.kv.timestamp');
+    for (const f of ['timestampHeader', 'timestampFormat', 'toleranceSec'] as const) {
+      if (c[f] !== undefined) return bad(f, `${f} chỉ dùng khi template có {timestamp}`);
+    }
+  }
+  if (hasId) {
+    if (typeof c.idHeader !== 'string' || !HEADER_RE.test(c.idHeader)) return bad('idHeader', 'template có {id}: idHeader bắt buộc, viết thường ^[a-z0-9-]{1,64}$');
+  } else if (c.idHeader !== undefined) {
+    return bad('idHeader', 'idHeader chỉ dùng khi template có {id}');
+  }
+
+  const tail = parseTail(c, false);
+  if ('bad' in tail) return tail.bad;
+  const config: GenericConfig = { scheme: TEMPLATE_SCHEME, template, algo, encoding, keyEncoding, signature, idempotency: tail.idempotency, eventType: tail.eventType };
+  if (hasTs) {
+    if (kvTimestamp === undefined) config.timestampHeader = c.timestampHeader;
+    config.timestampFormat = c.timestampFormat ?? 'unix';
+    config.toleranceSec = c.toleranceSec;
+  }
+  if (hasId) config.idHeader = c.idHeader;
+  if (tail.mapping) config.mapping = tail.mapping;
   if (c.timezone !== undefined) config.timezone = c.timezone;
   return { ok: true, config };
 }

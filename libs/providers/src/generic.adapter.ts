@@ -4,6 +4,7 @@ import { swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
 import { AdapterContext, Diagnosis, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
 import { GenericConfig, HMAC_ALGOS, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
+import { presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
 import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
 /**
@@ -11,6 +12,8 @@ import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
  * (`hmac` [+ bí danh `hmac-sha256`] | `static-token` | `standard-webhooks`), nơi lấy khoá chống trùng và kiểu sự kiện,
  * lưu ở `sources.verification_config`. Thêm nguồn mới KHÔNG sửa lõi: lõi chỉ chuyển `ctx.verificationConfig` qua.
  * PK2 (ADR-203): `hmac` có tham số algo/encoding/prefix/keyEncoding; `static-token` có location header|basic|query.
+ * PK3 (ADR-204): `signed-template` — HMAC trên template `{timestamp}`/`{body}`/`{id}` (S4: Stripe, Slack, Paddle, Box…).
+ * E2: `ctx.verifyAt` (nếu có) là "bây giờ" khi kiểm độ lệch timestamp — verify bù theo giờ nhận (PK6).
  *
  * Mọi so sánh bí mật dùng timingSafeEqual; HMAC tính trên `rawBody` (bytes gốc), không bao giờ trên JSON đã parse.
  */
@@ -20,7 +23,12 @@ export class GenericAdapter implements ProviderAdapter {
   async verify(req: RawWebhookRequest, secrets: string[], ctx?: AdapterContext): Promise<boolean> {
     const c = configOf(ctx);
     if (!c || secrets.length === 0) return false;
-    if (c.scheme === 'standard-webhooks') return secrets.some((s) => swVerify(s, req.headers, req.rawBody));
+    const nowMs = ctx?.verifyAt ? ctx.verifyAt.getTime() : Date.now();
+    if (c.scheme === 'standard-webhooks') {
+      const opts = { nowSec: Math.floor(nowMs / 1000) };
+      return secrets.some((s) => swVerify(s, req.headers, req.rawBody, opts));
+    }
+    if (isSignedTemplate(c)) return verifySignedTemplate(c, req, secrets, nowMs);
     if (isHmacScheme(c)) return verifyMac(c, req, secrets);
     const presented = presentedToken(c, req);
     if (presented === null) return false;
@@ -48,13 +56,21 @@ export class GenericAdapter implements ProviderAdapter {
 
   /**
    * hmac: chữ ký (không phải bí mật); static-token: CHE (token là bí mật dùng chung — kể cả basic và query, PK2);
-   * standard-webhooks: webhook-signature.
+   * standard-webhooks: webhook-signature; signed-template (PK3): giá trị header chữ ký (kv: cả header `t=…,v1=…`;
+   * nhiều header: header đầu tiên có mặt).
    */
   extractSignature(req: RawWebhookRequest, ctx?: AdapterContext): string | null {
     const c = configOf(ctx);
     if (!c) return null;
     if (isStandardWebhooks(c)) return headerOf(req, swHeaderSet(req.headers).signature); // PK1: webhook-* hoặc svix-*
     if (isStaticToken(c)) return presentedToken(c, req) ? '***' : null;
+    if (isSignedTemplate(c)) {
+      for (const h of templateRequiredHeaders(c).signature) {
+        const v = headerOf(req, h);
+        if (v !== null) return v;
+      }
+      return null;
+    }
     return headerOf(req, c.header!);
   }
 
@@ -159,6 +175,7 @@ export class GenericAdapter implements ProviderAdapter {
       if (!Number.isFinite(ts) || Math.abs(at - ts) > 300) return { ok: false, reason: 'timestamp_out_of_range' };
       return { ok: false, reason: 'signature_mismatch', expectedHeader: set.signature };
     }
+    if (isSignedTemplate(c)) return diagnoseTemplate(c, headers, raw, has, candidates);
     // PK2: query không được lưu (che tuyệt đối) -> chỉ nói TÊN tham số, không phân biệt thiếu hay sai.
     if (isStaticToken(c) && c.location === 'query') return { ok: false, reason: 'token_mismatch', expectedQueryParam: c.param };
     const expected = isStaticToken(c) && c.location === 'basic' ? 'authorization' : c.header!;
@@ -213,10 +230,33 @@ function idempotencyHeader(c: GenericConfig, headers: Record<string, unknown>): 
   const h = (c.idempotency as { header: string }).header;
   return isStandardWebhooks(c) && h === 'webhook-id' ? swHeaderSet(headers).id : h;
 }
+/**
+ * PK3: chẩn đoán `signed-template` theo thứ tự verify: thiếu header chữ ký -> thiếu timestamp -> lệch giờ (so với
+ * `received_at` của dòng, không phải "bây giờ" — dòng cũ không tự thành lệch) -> thiếu id -> sai chữ ký.
+ */
+function diagnoseTemplate(
+  c: GenericConfig,
+  headers: Record<string, unknown>,
+  raw: StoredRawEvent,
+  has: (h: string) => boolean,
+  candidates: (expected: string) => string[],
+): Diagnosis {
+  const req = templateRequiredHeaders(c);
+  if (!req.signature.some(has)) return { ok: false, reason: 'missing_header', expectedHeader: req.signature[0], candidateHeaders: candidates(req.signature[0]) };
+  const presented = presentedSignatures(c, headers);
+  if (c.toleranceSec !== undefined) {
+    if (req.timestamp !== null && !has(req.timestamp)) return { ok: false, reason: 'missing_header', expectedHeader: req.timestamp, candidateHeaders: candidates(req.timestamp) };
+    if (!withinTolerance(c, presented.timestamp, new Date(raw.receivedAt).getTime() / 1000)) return { ok: false, reason: 'timestamp_out_of_range', expectedHeader: req.timestamp ?? req.signature[0] };
+  }
+  if (req.id !== null && !has(req.id)) return { ok: false, reason: 'missing_header', expectedHeader: req.id, candidateHeaders: candidates(req.id) };
+  return { ok: false, reason: 'signature_mismatch', expectedHeader: req.signature[0] };
+}
+
 /** Tên header "trông như" mang bằng chứng xác thực — chỉ để gợi ý trong chẩn đoán, không bao giờ kèm giá trị. */
 const CANDIDATE_HEADER_RE = /sig|token|auth|hmac|key/;
 const isStandardWebhooks = (c: GenericConfig) => c.scheme === 'standard-webhooks';
 const isStaticToken = (c: GenericConfig) => c.scheme === 'static-token';
+const isSignedTemplate = (c: GenericConfig) => c.scheme === 'signed-template';
 
 /**
  * PK2: `sha256=abc` -> ['sha256','abc']; thuật toán ngoài `HMAC_ALGOS` (md5=, sha384=) -> null (trượt, không ném).

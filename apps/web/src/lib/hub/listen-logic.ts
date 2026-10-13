@@ -56,12 +56,17 @@ export function diagnosisParts(d: InspectDiagnosis): { reason: string; name: str
  * Mẫu xác thực mà form tay đưa ra. PK2 (ADR-203): `hmac` có tham số; bí danh cũ `hmac-sha256` chỉ còn cho source đã tạo
  * (server vẫn nhận), form không tạo mới bằng nó.
  */
-export const GENERIC_SCHEMES = ["hmac", "static-token", "standard-webhooks"] as const;
+export const GENERIC_SCHEMES = ["hmac", "signed-template", "static-token", "standard-webhooks"] as const;
 export type GenericScheme = (typeof GENERIC_SCHEMES)[number];
 /** `from-prefix` = chữ ký dạng `<algo>=<sig>` (Bitbucket, Jira, WebSub) -> `prefix: "<algo>="`, không gửi `algo`. */
 export const HMAC_ALGO_CHOICES = ["sha256", "sha512", "sha1", "from-prefix"] as const;
 export const KEY_ENCODING_CHOICES = ["utf8", "hex", "base64"] as const;
 export const TOKEN_LOCATION_CHOICES = ["header", "basic", "query"] as const;
+/** PK3: `signed-template` chỉ sha256 | sha512 (như `TEMPLATE_ALGOS` của server). */
+export const TEMPLATE_ALGO_CHOICES = ["sha256", "sha512"] as const;
+export const SIG_MODE_CHOICES = ["headers", "kv"] as const;
+export const KV_SEP_CHOICES = [",", ";"] as const;
+export const TIMESTAMP_FORMAT_CHOICES = ["unix", "unix-ms", "iso8601"] as const;
 /** Giống `ALGO_IN_PREFIX` của @hub/providers (test so). */
 export const ALGO_IN_PREFIX = "<algo>=";
 
@@ -77,14 +82,49 @@ export interface GenericFormValues {
   idKind: "header" | "field";
   idValue: string;
   eventType: string;
+  // PK3 (SPEC-provider-khac §5, E16, ADR-204): `signed-template`. `header` = tiêu đề chữ ký (kv: tiêu đề khoá=giá trị),
+  // `prefix` = tiền tố chữ ký (chế độ tiêu đề), `algo`/`encoding`/`keyEncoding` dùng chung với hmac.
+  template: string;
+  sigMode: (typeof SIG_MODE_CHOICES)[number];
+  header2: string;
+  kvSep: (typeof KV_SEP_CHOICES)[number];
+  kvSig: string;
+  kvTimestamp: string;
+  timestampHeader: string;
+  timestampFormat: (typeof TIMESTAMP_FORMAT_CHOICES)[number];
+  idHeader: string;
+  /** Chuỗi của ô số (form giữ chuỗi; dựng config thì đổi sang số). */
+  toleranceSec: string;
 }
+
+/** Giá trị mặc định của các ô `signed-template` (trang tạo nguồn dùng làm defaultValues). */
+export const TEMPLATE_FORM_DEFAULTS: Pick<
+  GenericFormValues,
+  "template" | "sigMode" | "header2" | "kvSep" | "kvSig" | "kvTimestamp" | "timestampHeader" | "timestampFormat" | "idHeader" | "toleranceSec"
+> = { template: "", sigMode: "headers", header2: "", kvSep: ",", kvSig: "", kvTimestamp: "", timestampHeader: "", timestampFormat: "unix", idHeader: "", toleranceSec: "300" };
+
+/**
+ * PK3: điền nhanh — CHỈ là giá trị điền sẵn cho các ô ký theo tài liệu công khai của từng bên (không phải danh mục, không
+ * nhận diện, không khoá chống trùng/kiểu sự kiện). Dev vẫn thấy và sửa được mọi ô; server kiểm lại như form tay.
+ */
+export const TEMPLATE_PRESETS = {
+  stripe: { scheme: "signed-template", template: "{timestamp}.{body}", algo: "sha256", encoding: "hex", keyEncoding: "utf8", sigMode: "kv", header: "stripe-signature", header2: "", prefix: "", kvSep: ",", kvSig: "v1", kvTimestamp: "t", timestampHeader: "", timestampFormat: "unix", idHeader: "", toleranceSec: "300" },
+  slack: { scheme: "signed-template", template: "v0:{timestamp}:{body}", algo: "sha256", encoding: "hex", keyEncoding: "utf8", sigMode: "headers", header: "x-slack-signature", header2: "", prefix: "v0=", kvSep: ",", kvSig: "", kvTimestamp: "", timestampHeader: "x-slack-request-timestamp", timestampFormat: "unix", idHeader: "", toleranceSec: "300" },
+  paddle: { scheme: "signed-template", template: "{timestamp}:{body}", algo: "sha256", encoding: "hex", keyEncoding: "utf8", sigMode: "kv", header: "paddle-signature", header2: "", prefix: "", kvSep: ";", kvSig: "h1", kvTimestamp: "ts", timestampHeader: "", timestampFormat: "unix", idHeader: "", toleranceSec: "5" },
+} as const satisfies Record<string, Partial<GenericFormValues>>;
+export type TemplatePreset = keyof typeof TEMPLATE_PRESETS;
+
+/** Template (đã trim) dùng token nào. */
+const templateHas = (v: Pick<GenericFormValues, "template">, token: "timestamp" | "id") => v.template.includes(`{${token}}`);
+/** Timestamp nằm trong header khoá=giá trị (Stripe `t`, Paddle `ts`) thay vì tiêu đề riêng. */
+const kvTimestampOf = (v: Pick<GenericFormValues, "sigMode" | "kvTimestamp">) => (v.sigMode === "kv" ? v.kvTimestamp.trim() : "");
 
 /** Ô "tiêu đề chứa chữ ký / token" có dùng không (standard-webhooks đọc bộ cố định; basic dùng Authorization; query không có). */
 export const needsHeader = (v: Pick<GenericFormValues, "scheme" | "location">): boolean =>
-  v.scheme === "hmac" || (v.scheme === "static-token" && v.location === "header");
-/** Ô tiền tố tĩnh có dùng không. */
-export const needsPrefix = (v: Pick<GenericFormValues, "scheme" | "location" | "algo">): boolean =>
-  needsHeader(v) && !(v.scheme === "hmac" && v.algo === "from-prefix");
+  v.scheme === "hmac" || v.scheme === "signed-template" || (v.scheme === "static-token" && v.location === "header");
+/** Ô tiền tố tĩnh có dùng không (signed-template: chỉ khi chữ ký nằm nguyên trong tiêu đề, không phải khoá=giá trị). */
+export const needsPrefix = (v: Pick<GenericFormValues, "scheme" | "location" | "algo" | "sigMode">): boolean =>
+  needsHeader(v) && !(v.scheme === "hmac" && v.algo === "from-prefix") && !(v.scheme === "signed-template" && v.sigMode === "kv");
 /**
  * Review PK2 T-6: thuật toán đọc từ tiền tố — chọn "Đọc từ tiền tố" HOẶC gõ tay đúng `<algo>=` vào ô tiền tố. Khi đó form ẩn
  * ô thuật toán và KHÔNG gửi `algo` (server từ chối `algo` đi cùng `"<algo>="`).
@@ -106,6 +146,7 @@ export const idKindOf = (v: Pick<GenericFormValues, "scheme" | "idKind">): "head
  */
 export function buildGenericConfig(v: GenericFormValues): Record<string, unknown> {
   const config: Record<string, unknown> = { scheme: v.scheme };
+  if (v.scheme === "signed-template") return buildTemplateConfig(v, config);
   if (needsHeader(v)) config.header = v.header.trim().toLowerCase();
   if (v.scheme === "hmac") {
     // PK2: tham số HMAC. "Đọc từ tiền tố" -> prefix "<algo>=", không có algo.
@@ -120,6 +161,33 @@ export function buildGenericConfig(v: GenericFormValues): Record<string, unknown
   }
   // Tiền tố KHÔNG trim (vd "Bearer " có dấu cách thật); rỗng = không có. `<algo>=` gõ tay đã xử lý ở trên.
   if (needsPrefix(v) && v.prefix !== "" && !algoFromPrefix(v)) config.prefix = v.prefix;
+  const idValue = v.idValue.trim();
+  if (idValue) config.idempotency = idKindOf(v) === "header" ? { header: idValue.toLowerCase() } : { field: idValue };
+  config.eventType = v.eventType.trim();
+  return config;
+}
+
+/** PK3: `signed-template` — chỉ gửi trường timestamp khi template có `{timestamp}`, `idHeader` khi có `{id}` (đúng luật server). */
+function buildTemplateConfig(v: GenericFormValues, config: Record<string, unknown>): Record<string, unknown> {
+  const header = v.header.trim().toLowerCase();
+  config.template = v.template.trim();
+  config.algo = v.algo;
+  config.encoding = v.encoding;
+  config.keyEncoding = v.keyEncoding;
+  const hasTs = templateHas(v, "timestamp");
+  const kvTs = hasTs ? kvTimestampOf(v) : "";
+  if (v.sigMode === "kv") {
+    config.signature = { header, kv: { sep: v.kvSep, sig: v.kvSig.trim(), ...(kvTs ? { timestamp: kvTs } : {}) } };
+  } else {
+    const headers = [header, v.header2.trim().toLowerCase()].filter((h) => h !== "");
+    config.signature = { headers, ...(v.prefix !== "" ? { prefix: v.prefix } : {}) };
+  }
+  if (hasTs) {
+    if (!kvTs) config.timestampHeader = v.timestampHeader.trim().toLowerCase();
+    config.timestampFormat = v.timestampFormat;
+    config.toleranceSec = Number(v.toleranceSec.trim());
+  }
+  if (templateHas(v, "id")) config.idHeader = v.idHeader.trim().toLowerCase();
   const idValue = v.idValue.trim();
   if (idValue) config.idempotency = idKindOf(v) === "header" ? { header: idValue.toLowerCase() } : { field: idValue };
   config.eventType = v.eventType.trim();
@@ -153,6 +221,12 @@ function isCanonicalBase64(s: string): boolean {
   const bin = atob(s.replace(/=+$/, "").padEnd(Math.ceil(s.replace(/=+$/, "").length / 4) * 4, "="));
   return btoa(bin).replace(/=+$/, "") === s.replace(/=+$/, "");
 }
+/** PK3: như `TEMPLATE_RE` / `KV_KEY_RE` / `TOLERANCE_*` của server (test đối chiếu). */
+const TEMPLATE_RE = /^([^{}]|\{(timestamp|body|id)\}){1,128}$/;
+const KV_KEY_RE = /^[A-Za-z0-9_]{1,16}$/;
+const TOLERANCE_RE = /^\d{1,3}$/;
+export const TOLERANCE_MIN_SEC = 5;
+export const TOLERANCE_MAX_SEC = 900;
 /** E15: tiền tố ≤ 32 ký tự (như server). */
 export const PREFIX_MAX = 32;
 
@@ -166,7 +240,14 @@ export type GenericFormIssue =
   | "secret-hex"
   | "secret-base64"
   | "secret-basic"
-  | "secret-query";
+  | "secret-query"
+  | "template-invalid"
+  | "algo-template"
+  | "header2-invalid"
+  | "kv-key-invalid"
+  | "timestamp-header-required"
+  | "tolerance-invalid"
+  | "id-header-required";
 
 /**
  * PK2: kiểm form tay theo CÙNG luật server (`validateGenericConfig` + `secretProblem` của @hub/providers) — test
@@ -184,10 +265,35 @@ export function genericFormIssues(v: GenericFormValues, secret: string): { path:
   if (!EVENT_TYPE_RE.test(eventType) || eventType.length > 128) out.push({ path: "eventType", issue: "event-type-invalid" });
   // Review PK1 T-2: kiểu chuẩn cần ánh xạ trường (PK7 / API) — form tay không có ô mapping, server sẽ 422.
   else if (isReservedType(eventType)) out.push({ path: "eventType", issue: "event-type-reserved" });
-  if (v.scheme === "hmac" && v.keyEncoding === "hex" && !HEX_KEY_RE.test(secret)) out.push({ path: "secret", issue: "secret-hex" });
-  if (v.scheme === "hmac" && v.keyEncoding === "base64" && !isCanonicalBase64(secret)) out.push({ path: "secret", issue: "secret-base64" });
+  if (v.scheme === "signed-template") out.push(...templateIssues(v));
+  const keyed = v.scheme === "hmac" || v.scheme === "signed-template";
+  if (keyed && v.keyEncoding === "hex" && !HEX_KEY_RE.test(secret)) out.push({ path: "secret", issue: "secret-hex" });
+  if (keyed && v.keyEncoding === "base64" && !isCanonicalBase64(secret)) out.push({ path: "secret", issue: "secret-base64" });
   if (v.scheme === "static-token" && v.location === "basic" && !secret.includes(":")) out.push({ path: "secret", issue: "secret-basic" });
   if (v.scheme === "static-token" && v.location === "query" && !QUERY_TOKEN_RE.test(secret)) out.push({ path: "secret", issue: "secret-query" });
+  return out;
+}
+
+/** PK3: luật `signed-template` của server (`validateSignedTemplate`) cho các ô form. */
+function templateIssues(v: GenericFormValues): { path: keyof GenericFormValues; issue: GenericFormIssue }[] {
+  const out: { path: keyof GenericFormValues; issue: GenericFormIssue }[] = [];
+  const template = v.template.trim();
+  if (!TEMPLATE_RE.test(template) || template.split("{body}").length !== 2) out.push({ path: "template", issue: "template-invalid" });
+  if (!(TEMPLATE_ALGO_CHOICES as readonly string[]).includes(v.algo)) out.push({ path: "algo", issue: "algo-template" });
+  const h2 = v.header2.trim().toLowerCase();
+  if (v.sigMode === "headers" && h2 !== "" && (!HEADER_RE.test(h2) || h2 === v.header.trim().toLowerCase())) out.push({ path: "header2", issue: "header2-invalid" });
+  const hasTs = templateHas(v, "timestamp");
+  if (v.sigMode === "kv") {
+    if (!KV_KEY_RE.test(v.kvSig.trim())) out.push({ path: "kvSig", issue: "kv-key-invalid" });
+    const ts = kvTimestampOf(v);
+    if (hasTs && ts !== "" && (!KV_KEY_RE.test(ts) || ts === v.kvSig.trim())) out.push({ path: "kvTimestamp", issue: "kv-key-invalid" });
+  }
+  if (hasTs) {
+    if (kvTimestampOf(v) === "" && !HEADER_RE.test(v.timestampHeader.trim().toLowerCase())) out.push({ path: "timestampHeader", issue: "timestamp-header-required" });
+    const tol = v.toleranceSec.trim();
+    if (!TOLERANCE_RE.test(tol) || Number(tol) < TOLERANCE_MIN_SEC || Number(tol) > TOLERANCE_MAX_SEC) out.push({ path: "toleranceSec", issue: "tolerance-invalid" });
+  }
+  if (templateHas(v, "id") && !HEADER_RE.test(v.idHeader.trim().toLowerCase())) out.push({ path: "idHeader", issue: "id-header-required" });
   return out;
 }
 
