@@ -30,6 +30,8 @@ export interface EventFlowResponse extends EventFlow {
     correlationId: string;
     occurredAt: string;
     receivedAt: string;
+    /** QT7 (§5.1): event đã "Dọn" — không xem lại nội dung, không Replay (server bỏ hành động replay). */
+    trimmedAt?: string | null;
   } | null;
   raw: {
     id: string;

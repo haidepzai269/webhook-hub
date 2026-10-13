@@ -4,6 +4,7 @@ import {
   Cable,
   FlaskConical,
   FolderKanban,
+  HardDrive,
   Inbox,
   KeyRound,
   LayoutDashboard,
@@ -67,6 +68,8 @@ export const sidebarItems: NavGroup[] = [
       // SK1 (SPEC-shop-ket-noi-project §3): tạo project + API key (copy connection string một lần).
       { id: "projects", titleKey: "nav.item.projects", url: "/dashboard/projects", icon: FolderKanban },
       { id: "api-keys", titleKey: "nav.item.api-keys", url: "/dashboard/api-keys", icon: KeyRound },
+      // QT7 (SPEC-han-muc-dung-luong §9): Dung lượng của project đang chọn — ước tính, gợi ý dọn, dọn tự động.
+      { id: "storage", titleKey: "nav.item.storage", url: "/dashboard/storage", icon: HardDrive },
     ],
   },
   {

@@ -194,6 +194,23 @@ export class PrismaService {
     return this.client.project.findMany({ orderBy: { createdAt: 'asc' } });
   }
 
+  /**
+   * QT7 (§9): cột "mức sử dụng" ở danh sách project của OPERATOR — `project_usage` mang tenant_id + RLS nên đọc xuyên project
+   * qua escape hatch CÓ TÊN (systemTx); chỉ ProjectsController gọi sau khi đã kiểm `isOperator`. Chỉ số gộp, không dữ liệu.
+   */
+  public operatorProjectUsage(): Promise<{ tenantId: string; usedBytes: number; level: string }[]> {
+    return this.systemTx('operator: mức sử dụng mọi project', async (tx) => {
+      const rows = await tx.$queryRaw<{ tenantId: string; usedBytes: bigint; level: string }[]>(Prisma.sql`
+        SELECT tenant_id AS "tenantId", used_bytes AS "usedBytes", level FROM hub.project_usage`);
+      return rows.map((r) => ({ tenantId: r.tenantId, usedBytes: Number(r.usedBytes), level: r.level }));
+    });
+  }
+
+  /** QT7 (§2, §9): operator ghi đè hạn mức của MỘT project (`projects` là bảng gốc, không tenant_id). null = về mặc định env. */
+  public setProjectStorageQuota(id: string, storageQuotaMb: number | null, client: PrismaClient | Prisma.TransactionClient = this.client) {
+    return client.project.update({ where: { id }, data: { storageQuotaMb } });
+  }
+
   public findProjectById(id: string) {
     return this.client.project.findUnique({ where: { id } });
   }

@@ -304,7 +304,7 @@ Tổng: 376 mã khai báo · 310 mã có test · 0 mồ côi · 24 mồ côi có
 | `QT:T17` | SPEC-han-muc-dung-luong.md · QT1 | L0,L1 | libs/common/test/storage-level.spec.ts:92<br>libs/database/test/storage-clean-db.spec.ts:150 | chưa chạy |
 | `QT:T18` | SPEC-han-muc-dung-luong.md · QT5 | L0,L1 | apps/hub-api/test/storage-policies.spec.ts:57<br>apps/hub-worker/test/auto-clean.spec.ts:47<br>apps/hub-worker/test/auto-clean.spec.ts:130<br>libs/database/test/storage-auto-clean-db.spec.ts:33 | chưa chạy |
 | `QT:T19` | SPEC-han-muc-dung-luong.md · QT6 | L0 | apps/hub-worker/test/storage-alerts.spec.ts:114<br>libs/providers/test/canonical-contract.spec.ts:83 | chưa chạy |
-| `QT:T20` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/replay-message.spec.ts:54<br>libs/database/test/storage-clean-db.spec.ts:167 | chưa chạy |
+| `QT:T20` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-api/test/replay-message.spec.ts:54<br>apps/hub-api/test/storage-console.spec.ts:25<br>libs/database/test/storage-clean-db.spec.ts:167 | chưa chạy |
 | `QT:T21` | SPEC-han-muc-dung-luong.md · QT4b | L0 | libs/common/test/cleanup-advisor.spec.ts:43 | chưa chạy |
 | `QT:T22` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:56<br>libs/common/test/cleanup-advisor.spec.ts:64 | chưa chạy |
 | `QT:T23` | SPEC-han-muc-dung-luong.md · QT4b | L0 | apps/hub-worker/test/cleanup-suggested.spec.ts:74<br>libs/common/test/cleanup-advisor.spec.ts:98 | chưa chạy |
@@ -314,7 +314,7 @@ Tổng: 376 mã khai báo · 310 mã có test · 0 mồ côi · 24 mồ côi có
 | `QT:T27` | SPEC-han-muc-dung-luong.md · QT9 | L1,L0 | apps/hub-api/test/source-limit-db.spec.ts:35<br>apps/hub-api/test/source-limit.spec.ts:11<br>apps/hub-api/test/source-limit.spec.ts:32 | chưa chạy |
 | `QT:T28` | SPEC-han-muc-dung-luong.md · QT1 | L0 | libs/common/test/storage-level.spec.ts:50 | chưa chạy |
 | `QT:T29` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:147 | chưa chạy |
-| `QT:T30` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:164<br>apps/hub-api/test/storage-policies.spec.ts:42<br>apps/hub-worker/test/auto-clean.spec.ts:95<br>libs/common/test/storage-alerts.spec.ts:92<br>libs/common/test/storage-clean.spec.ts:73<br>libs/common/test/storage-level.spec.ts:77 | chưa chạy |
+| `QT:T30` | SPEC-han-muc-dung-luong.md · QT3 | L0 | apps/hub-api/test/storage-lock.spec.ts:164<br>apps/hub-api/test/storage-policies.spec.ts:42<br>apps/hub-worker/test/auto-clean.spec.ts:95<br>apps/web/src/lib/storage/storage-logic.spec.ts:16<br>libs/common/test/storage-alerts.spec.ts:92<br>libs/common/test/storage-clean.spec.ts:73<br>libs/common/test/storage-level.spec.ts:77 | chưa chạy |
 | `QT:T31` | SPEC-han-muc-dung-luong.md · QT2 | L0,L1 | apps/hub-api/test/storage-bytes.spec.ts:26<br>apps/hub-api/test/storage-bytes.spec.ts:74<br>libs/database/test/storage-measure-db.spec.ts:36 | chưa chạy |
 | `QT:T32` | SPEC-han-muc-dung-luong.md · QT2 | L0,L1 | apps/hub-worker/test/storage-job.spec.ts:95<br>apps/hub-worker/test/storage-job.spec.ts:127<br>apps/hub-worker/test/storage-job.spec.ts:181<br>apps/hub-worker/test/storage-job.spec.ts:223<br>libs/common/test/storage-usage.spec.ts:19<br>libs/database/test/storage-measure-db.spec.ts:45<br>libs/database/test/storage-measure-db.spec.ts:73 | chưa chạy |
 | `QT:T33` | SPEC-han-muc-dung-luong.md · QT4 | L0,L1 | apps/hub-worker/test/auto-clean.spec.ts:141<br>apps/hub-worker/test/storage-clean-runner.spec.ts:92<br>apps/hub-worker/test/storage-job.spec.ts:248<br>libs/database/test/storage-auto-clean-db.spec.ts:47<br>libs/database/test/storage-clean-db.spec.ts:124<br>libs/database/test/storage-orphan-db.spec.ts:46<br>libs/database/test/storage-orphan-db.spec.ts:103 | chưa chạy |
@@ -343,6 +343,6 @@ Tổng: 376 mã khai báo · 310 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
 
-## File test (220 file, 1406 khai báo it/test)
+## File test (222 file, 1413 khai báo it/test)
 
 Test không ứng với dòng spec nào thì không mang mã (§3.1) — vẫn chạy ở L0/L1 và được bánh cóc đếm.

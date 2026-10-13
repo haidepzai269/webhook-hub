@@ -40,6 +40,8 @@ const SERIES: Record<TrafficOutcome, { key: MessageKey; color: string }> = {
   REJECTED: { key: "traffic.outcome.rejected", color: "oklch(0.63 0.22 25)" },
   RATE_LIMITED: { key: "traffic.outcome.rate-limited", color: "oklch(0.75 0.15 75)" },
   BLOCKED: { key: "traffic.outcome.blocked", color: "oklch(0.55 0.2 300)" },
+  // QT7 (E2): request bị 507 vì dự án đầy dung lượng (bytes 0) — xám đậm, khác lỗi chữ ký và vượt trần.
+  STORAGE_FULL: { key: "traffic.outcome.storage-full", color: "oklch(0.45 0.03 260)" },
 };
 
 /**

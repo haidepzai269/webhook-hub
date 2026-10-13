@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Put,
   Body,
   HttpException,
   HttpStatus,
@@ -18,6 +19,8 @@ import { randomUUID } from 'crypto';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 import {
   API_SCOPES,
+  parseStorageLevel,
+  quotaBytesFor,
   PROJECT_SLUG_RE,
   apiKeyPrefix,
   buildConnectionString,
@@ -31,6 +34,7 @@ import { SessionGuard } from '../auth/session.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { createApiKeyWithSource } from './api-key-create';
 import { ProjectScopeGuard } from './project-scope.guard';
+import { OperatorGuard } from './operator.guard';
 import { NoProjectScope, RequireScope } from '../service-api/require-scope.decorator';
 import { RequestWithPrincipal, UserPrincipal } from '../service-api/principal';
 
@@ -112,7 +116,56 @@ export class ProjectsController {
     if (!p.isOperator) return mine.map((m) => ({ id: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role, member: true }));
     // `member` thật (sửa lỗi "stale project"): web mặc định project mình là thành viên, không tự rơi vào project người khác.
     const roles = new Map(mine.map((m) => [m.projectId, m.role]));
-    return (await this.prisma.listProjects()).map((x) => ({ ...x, role: roles.get(x.id) ?? 'owner', member: roles.has(x.id) }));
+    // QT7 (§9): operator thấy cột mức sử dụng (ước tính) + hạn mức ghi đè. Lỗi đọc usage -> danh sách vẫn hiện (không có cột).
+    const usageRows: { tenantId: string; usedBytes: number; level: string }[] = await this.prisma.operatorProjectUsage().catch(() => []);
+    const usage = new Map(usageRows.map((u) => [u.tenantId, u] as const));
+    return (await this.prisma.listProjects()).map((x) => {
+      const u = usage.get(x.id);
+      const quotaMb = (x as { storageQuotaMb?: number | null }).storageQuotaMb ?? null;
+      const quotaBytes = quotaBytesFor(quotaMb);
+      const usedBytes = u?.usedBytes ?? 0;
+      return {
+        ...x,
+        role: roles.get(x.id) ?? 'owner',
+        member: roles.has(x.id),
+        usage: {
+          estimated: true,
+          usedBytes,
+          quotaBytes,
+          usedPct: quotaBytes > 0 ? Math.round((usedBytes / quotaBytes) * 1000) / 10 : 0,
+          level: parseStorageLevel(u?.level),
+          quotaOverrideMb: quotaMb,
+        },
+      };
+    });
+  }
+
+  /**
+   * QT7 (§2, §9): OPERATOR ghi đè hạn mức dung lượng của một project (`storageQuotaMb` 1–102400, null = về mặc định
+   * `PROJECT_STORAGE_QUOTA_MB`). Ghi + `audit_logs` cùng transaction. Nấc tính lại ở lượt 60s kế tiếp của worker.
+   */
+  @Put(':projectId/storage-quota')
+  @UseGuards(OperatorGuard)
+  @NoProjectScope('ghi đè hạn mức — CHỈ operator (OperatorGuard), project bất kỳ')
+  async setStorageQuota(@CurrentUser() actor: string, @Param('projectId') projectId: string, @Body() body: any) {
+    const project = await this.requireProject(projectId);
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    const v = body?.storageQuotaMb;
+    if (!keys || keys.length !== 1 || keys[0] !== 'storageQuotaMb' || !(v === null || (Number.isInteger(v) && v >= 1 && v <= 102_400))) {
+      invalid('storageQuotaMb', 'Body là {"storageQuotaMb": số nguyên 1–102400 | null (về mặc định)}');
+    }
+    const before = (project as { storageQuotaMb?: number | null }).storageQuotaMb ?? null;
+    await this.prisma.tenantTx(projectId, async (tx) => {
+      await this.prisma.setProjectStorageQuota(projectId, v, tx);
+      await this.prisma.forTenant(projectId, tx).createAuditLog({
+        action: 'project.storage_quota_changed',
+        entityType: 'project',
+        entityId: projectId,
+        actor,
+        metadata: { before, after: v },
+      });
+    });
+    return { id: projectId, storageQuotaMb: v, quotaBytes: quotaBytesFor(v) };
   }
 
   /** Người tạo thành owner (membership) trong CÙNG transaction. `live` cần email đã xác minh (§5.6). */

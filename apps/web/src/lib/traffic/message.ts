@@ -7,7 +7,7 @@ import type { MessageKey, TranslateFn } from "../i18n/dictionary";
 import { INTL_LOCALE, type Locale } from "../i18n/locales";
 
 export type TrafficRange = "1h" | "24h" | "7d";
-export const TRAFFIC_OUTCOMES = ["ACCEPTED", "DUPLICATE", "REJECTED", "RATE_LIMITED", "BLOCKED"] as const;
+export const TRAFFIC_OUTCOMES = ["ACCEPTED", "DUPLICATE", "REJECTED", "RATE_LIMITED", "BLOCKED", "STORAGE_FULL"] as const;
 export type TrafficOutcome = (typeof TRAFFIC_OUTCOMES)[number];
 
 export interface TrafficInsightView {

@@ -16,6 +16,7 @@ import {
   parseCleanRequest,
   parseStorageLevel,
   quotaBytesFor,
+  resolveSourceLimitPerProject,
 } from '@hub/common';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
@@ -126,6 +127,8 @@ export interface StorageOverview {
   /** E5: `STORAGE_AUTO_CLEAN_ENABLED` — false = policy đã cài nhưng chưa chạy (người vận hành chưa bật). */
   autoCleanEnabled: boolean;
   recentCleanJobs: CleanJobView[];
+  /** QT7 (§10, Q11): "N/20 source" — source chưa lưu trữ / trần `SOURCE_LIMIT_PER_PROJECT` (operator được miễn khi tạo). */
+  sources: { count: number; limit: number };
 }
 
 /** `GET …/storage` (scope `storage:read`). */
@@ -166,6 +169,10 @@ export async function getStorageOverview(store: StorageStore, projectId: string,
     lockEnabled: flags.lockEnabled,
     autoCleanEnabled: flags.autoCleanEnabled,
     recentCleanJobs: jobs.map(cleanJobView),
+    sources: {
+      count: (sources as { archivedAt?: Date | null }[]).filter((s) => !s.archivedAt).length,
+      limit: resolveSourceLimitPerProject(),
+    },
   };
 }
 

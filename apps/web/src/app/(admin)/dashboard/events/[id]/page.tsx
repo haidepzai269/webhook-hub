@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDateTime } from "@/lib/hub/format";
 import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
@@ -158,6 +159,8 @@ export default function EventJourneyPage() {
               <WandSparkles {...ICON} />
               {t("page.events.detail.create-from")}
             </Button>
+            {/* QT7 (§5.1, §9): event đã Dọn -> KHÔNG có nút Replay (server 409 event_trimmed). */}
+            {!event?.trimmedAt && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button type="button" className="flow-replay-btn inline-flex h-8 items-center gap-1.5 rounded-lg px-3 font-medium text-sm">
@@ -187,8 +190,14 @@ export default function EventJourneyPage() {
                 {branches.length === 0 && <DropdownMenuItem disabled>{t("page.events.detail.no-deliveries")}</DropdownMenuItem>}
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
           </div>
         </div>
+        {event?.trimmedAt && (
+          <p role="note" className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-sm">
+            {t("page.storage.trimmed", { at: formatDateTime(event.trimmedAt, locale) })}
+          </p>
+        )}
       </div>
 
       {/* 2. Ba thẻ thông tin */}

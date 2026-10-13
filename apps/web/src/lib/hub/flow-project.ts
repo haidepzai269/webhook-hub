@@ -24,6 +24,8 @@ export interface ProjectSummary {
   role?: string;
   /** false = operator đang thấy project mình KHÔNG là thành viên (quyền operator). */
   member?: boolean;
+  /** QT7 (§9): chỉ operator nhận — mức sử dụng ước tính + hạn mức ghi đè (null = mặc định env). */
+  usage?: { estimated: true; usedBytes: number; quotaBytes: number; usedPct: number; level: string; quotaOverrideMb: number | null };
 }
 
 /** `GET /api/v1/projects` (console đa service) — trả MẢNG. */

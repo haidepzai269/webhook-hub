@@ -16,18 +16,78 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { HubApiError } from "@/lib/hub/client";
-import { useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
+import { type ProjectSummary, useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
+import { useIsOperator } from "@/lib/hub/me-store";
 import { projectCreateError, slugFromName } from "@/lib/hub/keys-logic";
 import { useCreateProject } from "@/lib/hub/project-queries";
+import { useSetStorageQuota } from "@/lib/hub/storage-queries";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+import { formatBytes, levelSeg, levelTone, parseLevel, parseQuotaInput } from "@/lib/storage/storage-logic";
 
 const ROLE_KEY: Record<string, MessageKey> = { owner: "page.projects.role.owner", member: "page.projects.role.member" };
 const ENV_KEY: Record<string, MessageKey> = { test: "page.projects.env.test", live: "page.projects.env.live" };
 
+/** QT7 (§9): cột mức sử dụng (ước tính) của người vận hành — % + nấc, màu theo nấc. */
+function UsageCell({ usage }: { usage: NonNullable<ProjectSummary["usage"]> }) {
+  const t = useT();
+  const level = parseLevel(usage.level);
+  const color = { ok: "var(--muted-foreground)", warning: "var(--warning)", danger: "var(--danger)" }[levelTone(level)];
+  return (
+    <span className="whitespace-nowrap text-xs tabular-nums" title={t("page.storage.estimated")}>
+      <span style={{ color }} className="font-medium">
+        {usage.usedPct}%
+      </span>{" "}
+      <span className="text-muted-foreground">
+        {formatBytes(usage.usedBytes)} / {formatBytes(usage.quotaBytes)}
+        {level !== "OK" ? ` · ${t(`page.storage.level.${levelSeg(level)}` as MessageKey)}` : ""}
+      </span>
+    </span>
+  );
+}
+
+/** QT7 (§2, §9): ô ghi đè `storage_quota_mb` — trống = mặc định env. Chỉ operator (server: OperatorGuard). */
+function QuotaOverride({ projectId, name, value }: { projectId: string; name: string; value: number | null }) {
+  const t = useT();
+  const save = useSetStorageQuota();
+  const [v, setV] = useState(value === null ? "" : String(value));
+  const parsed = parseQuotaInput(v);
+  const dirty = parsed !== undefined && parsed !== value;
+  return (
+    <form
+      className="flex items-center gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (parsed === undefined) return void toast.error(t("page.storage.quota.invalid"));
+        save.mutate(
+          { projectId, storageQuotaMb: parsed },
+          {
+            onSuccess: () => toast.success(t("page.storage.quota.saved", { name })),
+            onError: (err) => toast.error(err instanceof HubApiError ? err.message : String(err)),
+          },
+        );
+      }}
+    >
+      <Input
+        className="h-8 w-24"
+        inputMode="numeric"
+        placeholder={t("page.storage.quota.default")}
+        value={v}
+        aria-label={t("page.storage.quota.override")}
+        aria-invalid={parsed === undefined}
+        onChange={(e) => setV(e.target.value)}
+      />
+      <Button type="submit" size="sm" variant="outline" disabled={!dirty || save.isPending}>
+        {t("page.storage.quota.save")}
+      </Button>
+    </form>
+  );
+}
+
 /** SK1 (SPEC-shop-ket-noi-project §3): danh sách project của mình + tạo project (tên + slug). */
 export default function ProjectsPage() {
   const t = useT();
+  const operator = useIsOperator();
   const roleLabel = (role: string | undefined) => (role && ROLE_KEY[role] ? t(ROLE_KEY[role]) : (role ?? "—"));
   const { data, isLoading, error } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
@@ -89,13 +149,15 @@ export default function ProjectsPage() {
             <TableHead>{t("page.projects.col.slug")}</TableHead>
             <TableHead>{t("page.projects.col.environment")}</TableHead>
             <TableHead>{t("page.projects.col.role")}</TableHead>
+            {operator && <TableHead>{t("page.storage.col.usage")}</TableHead>}
+            {operator && <TableHead>{t("page.storage.quota.override")}</TableHead>}
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={5}>{t("common.loading")}</TableCell>
+              <TableCell colSpan={operator ? 7 : 5}>{t("common.loading")}</TableCell>
             </TableRow>
           )}
           {(data ?? []).map((p) => (
@@ -108,6 +170,16 @@ export default function ProjectsPage() {
               <TableCell>
                 {p.member === false ? t("page.projects.role.operator") : roleLabel(p.role)}
               </TableCell>
+              {operator && (
+                <TableCell>
+                  {p.usage ? <UsageCell usage={p.usage} /> : "—"}
+                </TableCell>
+              )}
+              {operator && (
+                <TableCell>
+                  <QuotaOverride projectId={p.id} name={p.name} value={p.usage?.quotaOverrideMb ?? null} />
+                </TableCell>
+              )}
               <TableCell className="text-right">
                 {p.id !== projectId ? (
                   <Button size="sm" variant="outline" onClick={() => setProjectId(p.id)}>

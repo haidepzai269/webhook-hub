@@ -120,6 +120,8 @@ export interface Source {
   createdAt: string;
   webhookUrl: string;
   secretVersions?: number;
+  /** QT5/QT7 (E1): cờ "Giữ lâu" do user tự gắn — không gợi ý/không dọn tự động, còn nhận tới 110% khi LOCKED. */
+  keepLonger?: boolean;
 }
 
 export interface HealthDependency {

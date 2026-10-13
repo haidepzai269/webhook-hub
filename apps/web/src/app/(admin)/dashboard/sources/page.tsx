@@ -13,6 +13,7 @@ import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { FormDialog } from "@/components/admin/form-dialog";
 import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { PageHeader } from "@/components/admin/page-header";
+import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -22,10 +23,14 @@ import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
+import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
+import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { sourceCountVars } from "@/lib/storage/storage-logic";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
 import { TrafficSheet } from "./traffic-sheet";
@@ -134,6 +139,13 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
       ),
   },
   {
+    // QT7 (§9, E1): công tắc "Giữ lâu" — câu đánh đổi ở title; đổi cần owner/người vận hành (server kiểm storage:write).
+    id: "keepLonger",
+    header: t("page.storage.keep-longer"),
+    accessorFn: (s) => (s.keepLonger ? "1" : "0"),
+    cell: ({ row }) => <KeepLongerCell source={row.original} />,
+  },
+  {
     // CB6 (SPEC §7, I-silent): "Sự kiện cuối …" so với nhịp của chính nguồn (cùng baseline với luật source.silent).
     id: "insight",
     header: t("insights.col.silent"),
@@ -159,6 +171,37 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     ),
   },
 ];
+
+function KeepLongerCell({ source }: { source: Source }) {
+  const t = useT();
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  const me = useMeStore((s) => s.me);
+  const canWrite = me?.user.isOperator === true || (me?.memberships ?? []).some((m) => m.projectId === projectId && m.role === "owner");
+  const keep = useSetKeepLonger();
+  return (
+    <KeepLongerSwitch
+      checked={source.keepLonger === true}
+      disabled={!canWrite || keep.isPending}
+      onChange={(v) =>
+        keep.mutate(
+          { id: source.id, keepLonger: v },
+          {
+            onSuccess: () => toast.success(t(v ? "page.storage.keep-longer.on" : "page.storage.keep-longer.off", { name: source.name })),
+            onError: (e) => toast.error(e.message),
+          },
+        )
+      }
+    />
+  );
+}
+
+/** QT9/QT7 (§10): "N/20 nguồn" — từ `GET …/storage` (viewer không có storage:read -> không hiện). */
+function SourceCount() {
+  const t = useT();
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  const vars = sourceCountVars(useStorage(projectId).data);
+  return vars ? <span className="self-center text-muted-foreground text-sm tabular-nums">{t("page.storage.sources-count", vars)}</span> : null;
+}
 
 export default function SourcesPage() {
   const t = useT();
@@ -203,6 +246,7 @@ export default function SourcesPage() {
         description={t("page.sources.description")}
         actions={
           <div className="flex gap-2">
+            <SourceCount />
             <Button onClick={() => (setPreset(null), setConnectOpen(true))}>
               <Plug />
               {t("page.sources.connect-provider")}

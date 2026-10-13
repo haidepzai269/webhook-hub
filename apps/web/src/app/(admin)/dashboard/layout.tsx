@@ -13,6 +13,7 @@ import { ThemeSwitcher } from "@/components/admin/theme-switcher";
 import { AlertBanner } from "@/components/alerts/alert-banner";
 import { AlertBell } from "@/components/alerts/alert-bell";
 import { AlertNotifier } from "@/components/alerts/alert-notifier";
+import { StorageBanner } from "@/components/storage/storage-banner";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { createT } from "@/lib/i18n/dictionary";
@@ -75,6 +76,8 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
               {/* CB4: banner critical dính đầu vùng nội dung, sống qua chuyển trang; notifier quyết định banner/toast. */}
               <AlertNotifier />
               <AlertBanner />
+              {/* QT7: banner dung lượng theo nấc của dự án đang chọn (ước tính; LOCKED có 2 nút, không có "Nâng cấp"). */}
+              <StorageBanner />
               {children}
             </div>
           </SidebarInset>

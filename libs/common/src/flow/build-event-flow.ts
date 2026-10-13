@@ -178,6 +178,19 @@ function credentialLabel(provider: string): string {
   return provider === 'api' ? 'API key' : 'Chữ ký';
 }
 
+/**
+ * QT7 (SPEC-han-muc-dung-luong §5.1, §9): event đã "Dọn" (nội dung bỏ, giữ dòng gầy) KHÔNG replay được — server trả 409
+ * `event_trimmed`, nên giao diện không được hứa: bỏ hành động `replay_delivery` khỏi mọi chặng / nhánh. Thuần, không I/O.
+ */
+export function withoutReplayWhenTrimmed<F extends { stages: { actions?: StageAction[] }[]; branches: { stages: { actions?: StageAction[] }[] }[] }>(
+  flow: F,
+  trimmedAt: unknown,
+): F {
+  if (!trimmedAt) return flow;
+  const strip = <S extends { actions?: StageAction[] }>(s: S): S => (s.actions ? { ...s, actions: s.actions.filter((a) => a !== 'replay_delivery') } : s);
+  return { ...flow, stages: flow.stages.map(strip), branches: flow.branches.map((b) => ({ ...b, stages: b.stages.map(strip) })) };
+}
+
 export function providerLabel(p: string): string {
   return PROVIDER_LABELS[p] ?? p;
 }

@@ -23,6 +23,7 @@ export const traffic = defineMessages("traffic", {
     "traffic.outcome.rejected": "Sai chữ ký",
     "traffic.outcome.rate-limited": "Vượt trần",
     "traffic.outcome.blocked": "Bị tạm chặn",
+    "traffic.outcome.storage-full": "Dự án đầy (507)",
     "traffic.insight.empty": "Chưa có request nào trong {range}",
     "traffic.insight.empty-detail":
       "Khi nhà cung cấp gửi webhook vào nguồn này, số liệu sẽ hiện ở đây sau khoảng một phút.",
@@ -65,6 +66,7 @@ export const traffic = defineMessages("traffic", {
     "traffic.outcome.rejected": "Bad signature",
     "traffic.outcome.rate-limited": "Rate limited",
     "traffic.outcome.blocked": "Temporarily blocked",
+    "traffic.outcome.storage-full": "Project full (507)",
     "traffic.insight.empty": "No requests in the {range}",
     "traffic.insight.empty-detail":
       "When the provider sends webhooks to this source, numbers show up here after about a minute.",

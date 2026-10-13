@@ -3,6 +3,7 @@ import { ORPHAN_MIN_AGE_SECONDS, PrismaService } from '@hub/database';
 import { RETRY_TIERS } from '@hub/messaging';
 import {
   buildEventFlow,
+  withoutReplayWhenTrimmed,
   classifySkippedSubscriptions,
   EventFlowInput,
   EXECUTION_STATUSES,
@@ -282,7 +283,9 @@ export class FlowService {
       retryTierTtlsMs: RETRY_TIER_TTLS_MS,
       orphanMinAgeSeconds: ORPHAN_MIN_AGE_SECONDS,
     };
-    const flow = buildEventFlow(input);
+    // QT7 (§5.1): event đã Dọn -> không hứa Replay (server sẽ 409 event_trimmed).
+    const trimmedAt = (event as { trimmedAt?: Date | null } | null)?.trimmedAt ?? null;
+    const flow = withoutReplayWhenTrimmed(buildEventFlow(input), trimmedAt);
 
     return {
       id,
@@ -297,6 +300,8 @@ export class FlowService {
             correlationId: event.correlationId,
             occurredAt: event.occurredAt,
             receivedAt: event.receivedAt,
+            // QT7: "Nội dung đã được dọn ngày X" — null = chưa dọn.
+            trimmedAt,
           }
         : null,
       raw: raw
