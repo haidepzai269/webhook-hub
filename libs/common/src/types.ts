@@ -18,7 +18,19 @@ export interface RawWebhookRequest {
   body: any;
   contentType?: string;
   ip?: string;
+  /**
+   * PK0 / E6 (ADR-201): method HTTP của request vào `/hooks/:provider/:sourceKey`. `IngestController` luôn điền; tuỳ chọn vì request dựng
+   * lại ở worker (normalize/renormalize) và `POST /v1/p/:project/events` không có. Thiếu = 'POST'.
+   */
+  method?: HttpMethod;
+  /**
+   * PK0 / E6: chuỗi query THÔ sau `?` (chưa decode, không có `?`), '' nếu không có. Chỉ để adapter đọc (token ở query —
+   * PK2, `query-echo` — PK4). PK0 KHÔNG lưu vào DB; lưu (bản đã che) là việc của PK2/PK5. Thiếu = ''.
+   */
+  query?: string;
 }
+
+export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
 
 export interface IngestResult {
   accepted: boolean;

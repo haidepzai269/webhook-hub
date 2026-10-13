@@ -24,7 +24,7 @@ describe('QT2 — byte cộng dồn qua bộ gộp lưu lượng', () => {
   });
 
   it('[QT:T31] (phần a) ACCEPTED cộng rawBody.length; DUPLICATE / RATE_LIMITED cộng 0; REJECTED cộng đúng độ dài mẫu đã lưu (≤4KB); publish cũng cộng; sink nhận cột bytes', async () => {
-    const src = { id: 'src-a', tenantId: 'tenant-a', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
+    const src = { id: 'src-a', tenantId: 'tenant-a', provider: 'github', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
     const stored: Buffer[] = [];
     const tx = {
       rawEvent: { create: jest.fn(async ({ data }: any) => (stored.push(Buffer.from(data.bodyRaw)), { id: `raw-${stored.length}` })) },

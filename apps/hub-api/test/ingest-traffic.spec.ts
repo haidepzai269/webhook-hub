@@ -25,7 +25,7 @@ describe('EG4 ingest -> lưu lượng trong bộ nhớ', () => {
   });
 
   it('ACCEPTED / DUPLICATE / REJECTED / RATE_LIMITED / BLOCKED được đếm theo (tenant, source); 404 lạ thì không; sink nhận đúng dòng', async () => {
-    const src = { id: 'src-a', tenantId: 'tenant-a', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
+    const src = { id: 'src-a', tenantId: 'tenant-a', provider: 'github', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'raw-1' }) }, outbox: { create: jest.fn() } };
     const add = jest.fn().mockResolvedValue(1);
     const prisma: any = {

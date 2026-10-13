@@ -21,6 +21,7 @@ describe('IngestService — trace.ingested (S2-2)', () => {
     const source = {
       id: 'src-1',
       tenantId: TENANT,
+      provider: 'github',
       isActive: true,
       secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }],
     };

@@ -18,6 +18,7 @@ describe('IngestService — che header nhạy cảm trước khi lưu', () => {
     const source = {
       id: 'src-sepay',
       tenantId: 't',
+      provider: 'sepay',
       isActive: true,
       secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(KEY, MASTER) }],
     };

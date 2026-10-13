@@ -153,6 +153,102 @@ describe('[ADR-162] body parser limit = MAX_INGEST_PAYLOAD_BYTES, rawBody giữ 
   });
 });
 
+/**
+ * PK0 / E1 (SPEC-provider-khac ĐÍNH CHÍNH, ADR-201): `/hooks/*` giữ bytes gốc với MỌI content-type. Trước PK0 chỉ có parser
+ * json/urlencoded, controller dựng lại body bằng `JSON.stringify(req.body || {})` -> SNS (text/plain), WebSub (XML),
+ * Wix (JWT), Auth0 (JSON lines), Google Drive (body rỗng) đều thành `"{}"`. E6: controller điền `method` + `query` thô.
+ */
+describe('[PK:T33] /hooks giữ rawBody đúng từng byte với mọi content-type', () => {
+  let app: INestApplication;
+  let base = '';
+  beforeAll(async () => ({ app, base } = await start(true)));
+  afterAll(() => app.close());
+  beforeEach(() => (seen.length = 0));
+
+  const send = (path: string, raw: Buffer | null, contentType?: string) =>
+    fetch(`${base}${path}`, { method: 'POST', headers: contentType ? { 'content-type': contentType } : {}, body: raw === null ? undefined : new Uint8Array(raw) });
+
+  const SNS = Buffer.from(JSON.stringify({ Type: 'Notification', MessageId: 'm-1', Message: 'xin chào', Signature: 'abc==' }));
+  const XML = Buffer.from('<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><id>yt:video:1</id></entry></feed>');
+  // JWT giả dựng lúc chạy (không để literal dạng JWT trong source — gitleaks rule `jwt`).
+  const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const JWT = Buffer.from([b64url({ alg: 'RS256' }), b64url({ data: '{"id":1}' }), 'c2lnbmF0dXJl'].join('.'));
+  const JSONL = Buffer.from('{"log_id":"1","type":"s"}\n{"log_id":"2","type":"f"}\n');
+  const BIN = Buffer.from([0x00, 0xff, 0xfe, 0x80, 0x0a, 0x7b, 0xc3, 0x28]); // UTF-8 hỏng: phải giữ nguyên, không decode
+
+  const cases: [string, Buffer, string][] = [
+    ['SNS text/plain', SNS, 'text/plain; charset=UTF-8'],
+    ['WebSub XML', XML, 'application/atom+xml'],
+    ['Wix JWT', JWT, 'text/plain'],
+    ['JWT application/jwt', JWT, 'application/jwt'],
+    ['bytes nhị phân octet-stream', BIN, 'application/octet-stream'],
+    ['content-type lạ', SNS, 'application/x-hoan-toan-la'],
+  ];
+  it.each(cases)('%s -> vào ingest, rawBody đúng từng byte, body không phải Buffer', async (_n, raw, ct) => {
+    const res = await send('/hooks/generic/src_raw', raw, ct);
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(Buffer.isBuffer(seen[0].rawBody)).toBe(true);
+    expect(seen[0].rawBody.equals(raw)).toBe(true);
+    expect(Buffer.isBuffer(seen[0].body)).toBe(false);
+    expect(seen[0].contentType).toBe(ct);
+  });
+
+  it('không có content-type -> vẫn giữ bytes gốc', async () => {
+    const res = await fetch(`${base}/hooks/generic/src_raw`, { method: 'POST', body: new Uint8Array(XML) }); // Uint8Array: fetch không tự gắn content-type
+    expect(res.status).toBe(200);
+    expect(seen[0].rawBody.equals(XML)).toBe(true);
+  });
+
+  it('JSON lines gắn application/json ở /hooks/generic/* -> KHÔNG 400 ở parser: vào ingest, body = null, bytes giữ nguyên', async () => {
+    const res = await send('/hooks/generic/src_raw', JSONL, 'application/json');
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].rawBody.equals(JSONL)).toBe(true);
+    expect(seen[0].body).toBeNull();
+  });
+
+  it('JSON hỏng ở provider native (/hooks/github/*) giữ hợp đồng cũ: 400 ở parser, ingest không chạy', async () => {
+    const res = await send('/hooks/github/src_raw', JSONL, 'application/json');
+    expect(res.status).toBe(400);
+    expect(seen).toHaveLength(0);
+  });
+
+  it('body rỗng (Google Drive) -> rawBody là Buffer rỗng (không còn "{}")', async () => {
+    for (const ct of [undefined, 'application/json', 'text/plain']) {
+      seen.length = 0;
+      const res = await send('/hooks/generic/src_raw', null, ct);
+      expect(res.status).toBe(200);
+      expect(Buffer.isBuffer(seen[0].rawBody)).toBe(true);
+      expect(seen[0].rawBody.length).toBe(0);
+    }
+  });
+
+  it('JSON và form vẫn parse như cũ (đối chứng) và giữ bytes', async () => {
+    const json = Buffer.from('{"a":{"b":1}}');
+    await send('/hooks/generic/src_raw', json, 'application/json');
+    expect(seen[0].body).toEqual({ a: { b: 1 } });
+    expect(seen[0].rawBody.equals(json)).toBe(true);
+    const form = Buffer.from('a%5Bb%5D=1&c=%20x');
+    await send('/hooks/generic/src_raw', form, 'application/x-www-form-urlencoded');
+    expect(seen[1].body).toEqual({ a: { b: '1' }, c: ' x' });
+    expect(seen[1].rawBody.equals(form)).toBe(true);
+  });
+
+  it('content-type lạ quá MAX_INGEST_PAYLOAD_BYTES -> 413 trước ingest (parser raw cùng trần)', async () => {
+    const res = await send('/hooks/generic/src_raw', Buffer.alloc(MAX_INGEST_PAYLOAD_BYTES + 1, 0x61), 'text/plain');
+    expect(res.status).toBe(413);
+    expect(seen).toHaveLength(0);
+  });
+
+  it('E6: RawWebhookRequest mang method và query thô (chuỗi sau `?`, chưa decode; không có thì rỗng)', async () => {
+    await send('/hooks/generic/src_raw?hub.mode=subscribe&hub.challenge=a%20b&x', Buffer.from('{}'), 'application/json');
+    await send('/hooks/generic/src_raw', Buffer.from('{}'), 'application/json');
+    expect([seen[0].method, seen[0].query]).toEqual(['POST', 'hub.mode=subscribe&hub.challenge=a%20b&x']);
+    expect([seen[1].method, seen[1].query]).toEqual(['POST', '']);
+  });
+});
+
 describe('[ADR-162] đối chứng: KHÔNG gọi configureBodyParsers -> mặc định 100KB chặn trước ingest', () => {
   it('JSON ~300KB -> 413, ingest không thấy gì', async () => {
     const { app, base } = await start(false);

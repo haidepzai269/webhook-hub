@@ -67,7 +67,7 @@ export interface MapResult {
   covered: Map<string, TagHit[]>;
 }
 
-export const TAG_RE = /\[(AF|MS|DX|AU|AR|VF|BB|KN|SK|CB|EG|QT|BP):([^\]\s]+)\]/g;
+export const TAG_RE = /\[(AF|MS|DX|AU|AR|VF|BB|KN|SK|CB|EG|QT|BP|PK):([^\]\s]+)\]/g;
 
 /** "U34-U36,U50" → U34,U35,U36,U50 · "1-3" → 1,2,3 · "AU:UA1-UA3" giữ tiền tố namespace. */
 export function expandCodes(spec: string): string[] {

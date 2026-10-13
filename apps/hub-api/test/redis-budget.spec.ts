@@ -121,7 +121,7 @@ async function runIngest() {
   const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
   const prisma: any = {
     findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
-      id: 'src-sepay', tenantId: TENANT, isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
+      id: 'src-sepay', tenantId: TENANT, provider: 'sepay', isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
     }),
     rawEvent: { create: jest.fn() },
     // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
@@ -383,7 +383,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     const raw = JSON.stringify(sepayBody);
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
-        id: 'src-sepay', tenantId: TENANT, isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
+        id: 'src-sepay', tenantId: TENANT, provider: 'sepay', isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
       }),
       // AU6: tenantTx/systemTx đi qua CÙNG mock $transaction (đếm số transaction giữ nguyên nghĩa)
       tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
@@ -402,7 +402,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'rej' }) } };
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
-        id: 'src-sepay', tenantId: TENANT, isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
+        id: 'src-sepay', tenantId: TENANT, provider: 'sepay', isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
       }),
       tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
       $transaction: jest.fn(async (fn: any) => fn(tx)),

@@ -17,7 +17,7 @@ describe('Ingest — đếm bản trùng ở cả hai lớp chống trùng (CB6)
   });
 
   function build(opts: { redisHit: boolean; p2002: boolean }) {
-    const source = { id: 'src-1', tenantId: 'tenant-a', isActive: true, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
+    const source = { id: 'src-1', tenantId: 'tenant-a', provider: 'github', isActive: true, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
     const tx = { rawEvent: { create: jest.fn(async () => ({ id: 'raw-1' })) }, outbox: { create: jest.fn(async () => ({})) } };
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue(source),

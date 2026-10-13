@@ -12,7 +12,7 @@ const SECRET = 'gh-secret-eg';
 const body = JSON.stringify({ ref: 'refs/heads/main', after: 'abc', repository: { name: 'r' } });
 const sign = (s: string) => `sha256=${createHmac('sha256', s).update(body).digest('hex')}`;
 
-type Src = { id: string; tenantId: string; isActive: boolean; archivedAt: Date | null; secrets: { id: string; secretEncrypted: string }[] };
+type Src = { id: string; tenantId: string; provider?: string; isActive: boolean; archivedAt: Date | null; secrets: { id: string; secretEncrypted: string }[] };
 
 function build(sources: Record<string, Src | null>) {
   const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'raw-1' }) }, outbox: { create: jest.fn() } };
@@ -30,7 +30,7 @@ function build(sources: Record<string, Src | null>) {
 }
 
 const src = (id: string, extra: Partial<Src> = {}): Src => ({
-  id, tenantId: `tenant-${id}`, isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }], ...extra,
+  id, tenantId: `tenant-${id}`, provider: 'github', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }], ...extra,
 });
 
 let delivery = 0;

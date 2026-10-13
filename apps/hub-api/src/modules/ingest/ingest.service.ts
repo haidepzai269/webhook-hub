@@ -369,6 +369,14 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       }
       return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
     }
+    // 2 (PK0, ADR-201): adapter chọn theo segment URL, source chọn theo sourceKey — hai giá trị phải khớp. Lệch = URL sai:
+    // 404 CÙNG body với source không tồn tại (ADR-161), không cộng điểm phạt EG2 (URL sai của provider thật không được
+    // khoá IP dùng chung). Đặt TRƯỚC `trace.tenantId`: 404 này không mang tenant, không vào lưu lượng. So hai giá trị,
+    // không phải `if (provider === 'x')`.
+    if (source.provider !== req.provider) {
+      log.warn({ sourceProvider: source.provider }, 'Segment provider của URL không khớp provider của source -> 404');
+      return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
+    }
     trace.tenantId = source.tenantId;
     trace.sourceId = source.id;
 

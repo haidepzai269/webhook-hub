@@ -16,7 +16,7 @@ describe('hub-api metrics (S3-4)', () => {
   }
 
   function svc(sourceFound = true) {
-    const source = { id: 'src', tenantId: 't', isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt('k', MASTER) }] };
+    const source = { id: 'src', tenantId: 't', provider: 'sepay', isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt('k', MASTER) }] };
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'raw-1' }) }, outbox: { create: jest.fn() } };
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue(sourceFound ? source : null),

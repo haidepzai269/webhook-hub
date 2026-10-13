@@ -51,7 +51,9 @@ export function createPenaltyGate(deps: PenaltyGateDeps): (req: GateReq, res: Se
     let hit: HookRouteMatch | null;
     let verdict: PenaltyVerdict;
     try {
-      if (req.method !== 'POST') return next();
+      // PK0 (ADR-201, F11): MỌI method trên /hooks/* đều qua gate, trừ OPTIONS (preflight CORS, không bao giờ tới ingest).
+      // PK4 sẽ mở GET cho bắt tay — gate phải chặn GET TRƯỚC khi GET tồn tại, không thì cửa sau mở đúng ngày merge.
+      if (req.method === 'OPTIONS') return next();
       hit = matchHookRoute(hooksPathOf(req), routes); // app.use ở gốc: req.url = originalUrl
       if (!hit) return next();
       verdict = deps.penalty.checkIp(req.ip, hit.sourceKey);

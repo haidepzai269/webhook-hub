@@ -7,7 +7,7 @@ import { ingestRequests } from './modules/metrics/metrics';
 import { hubError } from './modules/errors/hub-error';
 import { ensureRequestId } from './modules/errors/request-id';
 import { toErrorBody } from './modules/errors/service-exception.filter';
-import { hooksPathOf, pathnameOfUrl } from './modules/ingest/hooks-path';
+import { hooksPathOf, matchHookRoute, pathnameOfUrl } from './modules/ingest/hooks-path';
 
 /**
  * Express CỦA Nest (platform-express ghim express 5) — không dùng bản express gốc của monorepo (khác major, không phải
@@ -44,6 +44,25 @@ function countingOversize(parser: RequestHandler): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) =>
     parser(req, res, (err?: any) => {
       if (err && Number(err.status ?? err.statusCode) === 413) countTooLarge(req);
+      next(err);
+    });
+}
+
+/**
+ * PK0 / E1 (ADR-201): JSON lỗi cú pháp ở RIÊNG `/hooks/generic/*` không trả 400 ở parser — JSON lines (Auth0), body gắn nhầm
+ * `application/json`… vẫn vào ingest với bytes gốc (`keepRawBody` chạy TRƯỚC parse nên `req.rawBody` đã có), `body = null`
+ * ("không parse được"). Provider native giữ 400 như cũ (hợp đồng đã test). Lỗi khác (413, charset…) đi tiếp như cũ.
+ */
+function tolerateGenericJsonError(parser: RequestHandler): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) =>
+    parser(req, res, (err?: any) => {
+      if (err && err.type === 'entity.parse.failed' && Buffer.isBuffer((req as Request & { rawBody?: Buffer }).rawBody)) {
+        const hit = matchHookRoute(pathnameOfUrl(req.originalUrl), ['/hooks']);
+        if (hit?.provider === 'generic') {
+          req.body = null;
+          return next();
+        }
+      }
       next(err);
     });
 }
@@ -86,12 +105,19 @@ export function installHooksPathGuard(app: INestApplication): void {
  * urlencoded `extended:true` (mặc định cũ của Nest) ở mọi route: source generic gửi form lồng (`a[b]=1`) vẫn ra
  * đường trường `a.b`; form GitHub (`payload=<json>`) phẳng nên không ảnh hưởng.
  * Gọi SAU helmet / requestId / enableCors (ngay trước listen) để lỗi 400/413 của parser vẫn mang header CORS + helmet.
+ *
+ * PK0 / E1 (ADR-201): `/hooks/*` thêm parser raw `type: () => true` SAU json/urlencoded — mọi content-type khác (SNS
+ * text/plain, XML, JWT, nhị phân, không có content-type) vẫn có `req.rawBody` đúng từng byte, cùng trần 1MB + đếm
+ * TOO_LARGE. Request đã được json/urlencoded đọc thì raw bỏ qua (body-parser: stream đã xong). Body rỗng: không parser
+ * nào chạy, controller dùng Buffer rỗng.
  */
 export function configureBodyParsers(app: NestExpressApplication): void {
   const hooksJson = nestExpress.json({ limit: MAX_INGEST_PAYLOAD_BYTES, verify: keepRawBody });
   const hooksForm = nestExpress.urlencoded({ limit: MAX_INGEST_PAYLOAD_BYTES, extended: true, verify: keepRawBody });
-  app.use('/hooks', countingOversize(hooksJson));
+  const hooksRaw = nestExpress.raw({ type: () => true, limit: MAX_INGEST_PAYLOAD_BYTES, verify: keepRawBody });
+  app.use('/hooks', countingOversize(tolerateGenericJsonError(hooksJson)));
   app.use('/hooks', countingOversize(hooksForm));
+  app.use('/hooks', countingOversize(hooksRaw));
   app.use(nestExpress.json({ limit: MAX_API_BODY_BYTES, verify: keepRawBody }));
   app.use(nestExpress.urlencoded({ limit: MAX_API_BODY_BYTES, extended: true, verify: keepRawBody }));
 }

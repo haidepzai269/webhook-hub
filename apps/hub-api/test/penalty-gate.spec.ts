@@ -54,12 +54,12 @@ type RawResult = { status: number; headers: Record<string, string | string[] | u
  * POST khai báo `Content-Length: declared` nhưng CHỈ gửi `send` byte rồi chờ phản hồi. Có phản hồi khi body còn thiếu
  * = server không đọc body (body parser sẽ treo chờ đủ byte).
  */
-function rawPost(port: number, path: string, ip: string, declared: number, send: number): Promise<RawResult> {
+function rawPost(port: number, path: string, ip: string, declared: number, send: number, method = 'POST'): Promise<RawResult> {
   return new Promise((resolve, reject) => {
     const req = httpRequest({
       host: '127.0.0.1',
       port,
-      method: 'POST',
+      method,
       path,
       headers: { 'content-type': 'application/json', 'content-length': String(declared), 'x-forwarded-for': ip, 'x-github-event': 'push' },
     });
@@ -149,6 +149,24 @@ describe('[EG:T19] (phần a) D3 gate hộp phạt trước body parser', () => 
     expect(fakePrisma.findSourceBySourceKeyForIngest).not.toHaveBeenCalled();
     expect(await blockedGithub()).toBe(before + 1);
     expect(await penaltyBlockedIp()).toBe(beforeHook + 1);
+  });
+
+  it('[PK:T2] (phần a) IP trong hộp phạt gửi GET (và HEAD/PUT/DELETE/PATCH) /hooks/generic/<key> -> 429 ở gate TRƯỚC body parser, giống hệt POST; OPTIONS đi qua', async () => {
+    const blockedGeneric = () => metric(/hub_ingest_requests_total\{provider="generic",outcome="BLOCKED"\} (\d+)/);
+    const before = await blockedGeneric();
+    for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) {
+      const r = await rawPost(port, '/hooks/generic/src_gate_get', BANNED, 1024 * 1024, 16 * 1024, method); // body chưa gửi đủ
+      expect([method, r.status, r.headers.connection, r.body.error]).toEqual([method, 429, 'close', 'ip_temporarily_blocked']);
+      expect(Number(r.headers['retry-after'])).toBeGreaterThan(0);
+    }
+    const head = await rawPost(port, '/hooks/generic/src_gate_get', BANNED, 0, 0, 'HEAD');
+    expect([head.status, head.headers.connection]).toEqual([429, 'close']);
+    expect(ingestSpy).not.toHaveBeenCalled();
+    expect(fakePrisma.findSourceBySourceKeyForIngest).not.toHaveBeenCalled();
+    expect(await blockedGeneric()).toBe(before + 5);
+    // OPTIONS (preflight CORS) không qua gate — không bị 429
+    const opt = await rawPost(port, '/hooks/generic/src_gate_get', BANNED, 0, 0, 'OPTIONS');
+    expect(opt.status).not.toBe(429);
   });
 
   it('cặp đang bị phạt (luật b) chặn ở gate; lưu lượng BLOCKED ghi cho đúng source như ingest', async () => {
@@ -266,15 +284,18 @@ describe('[EG:T19] (phần a) D3 gate hộp phạt trước body parser', () => 
     expect(at('installPenaltyGate(app)')).toBeLessThan(at('configureBodyParsers(app)'));
   });
 
-  it('gate không gọi tới Redis/DB và GET / route khác đi thẳng qua', () => {
+  it('gate không gọi tới Redis/DB; OPTIONS / route khác đi thẳng qua; [PK:T2] (phần b) GET /hooks/* bị kiểm như POST', () => {
     const penalty = { checkIp: jest.fn(() => ({ blocked: false })), checkPair: jest.fn(() => ({ blocked: false })) } as any;
     const gate = createPenaltyGate({ penalty });
     const next = jest.fn();
-    gate({ method: 'GET', url: '/hooks/github/k', headers: {} } as any, {} as any, next);
+    gate({ method: 'OPTIONS', url: '/hooks/github/k', headers: {} } as any, {} as any, next);
     gate({ method: 'POST', url: '/api/v1/sources', headers: {} } as any, {} as any, next);
+    gate({ method: 'GET', url: '/api/v1/sources', headers: {} } as any, {} as any, next);
+    gate({ method: 'GET', url: '/hooks/generic/k?hub.challenge=1', headers: {}, ip: '203.0.113.8' } as any, {} as any, next);
     gate({ method: 'POST', url: '/hooks/github/k', headers: {}, ip: '203.0.113.9' } as any, {} as any, next);
-    expect(next).toHaveBeenCalledTimes(3);
-    expect(penalty.checkIp).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledTimes(5);
+    expect(penalty.checkIp).toHaveBeenCalledTimes(2);
+    expect(penalty.checkPair).toHaveBeenCalledWith('203.0.113.8', 'k');
     expect(penalty.checkPair).toHaveBeenCalledWith('203.0.113.9', 'k');
     expect(fakeRedis.checkRateLimit).not.toHaveBeenCalled();
   });

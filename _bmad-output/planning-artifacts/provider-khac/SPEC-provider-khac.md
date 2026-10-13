@@ -655,6 +655,11 @@ Mỗi story đi theo VF (RED → PROBED → REVIEWED), review riêng, CI xanh r�
 
 _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng)_
 
+- **PK0 (2026-10-13, Amelia):** `RawWebhookRequest.method` / `.query` khai là **tuỳ chọn** (`method?: HttpMethod`, `query?: string`), không bắt buộc như E6 viết: request dựng lại ở worker (normalize/renormalize, `generic.adapter.ts:156`), `/v1/p/:project/events` và ~40 file test dựng `RawWebhookRequest` không có hai trường này. `IngestController` luôn điền; thiếu = `POST` / `''`. PK2/PK4 đọc thì dùng mặc định đó.
+- **PK0:** test mock source cũ (14 file L0 + `ingest-ratelimit-after-verify-db.spec.ts`) không có `provider` → nay mang `provider` khớp segment, nếu không sẽ 404 ở bước so segment.
+- **PK0:** gate hộp phạt nay chặn cả `HEAD` (mọi method trừ `OPTIONS`); E27 `HEAD` → 405 là việc của PK4 ở tầng route, không đụng gate.
+- **PK0:** `verify/lib/map.ts` `TAG_RE` thêm `PK` — thiếu thì `verify:map` không thấy tag `[PK:Tn]` trong tên test (mồ côi giả).
+
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 
 Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt được. Dòng nào khác với mô tả trong thân spec thì mục ĐÍNH CHÍNH thắng.
@@ -703,7 +708,7 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 
 **Checklist** (đánh `[x]` khi story đã review ĐẠT và CI xanh):
 
-- [ ] **PK0** — segment + cổng phạt mọi method + bytes gốc mọi content-type + `query`/`method`
+- [x] **PK0** — segment + cổng phạt mọi method + bytes gốc mọi content-type + `query`/`method`
 - [ ] **PK1** — generic lên console + Lắng nghe + Svix + "request đầu tiên ✓"
 - [ ] **PK2** — `hmac` mở rộng + `static-token` basic/query
 - [ ] **PK3** — `signed-template`

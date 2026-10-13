@@ -19,7 +19,7 @@ describe('Ingest — bất biến BB-2/BB-3 (thứ tự §3.1)', () => {
 
   function build(txImpl: (fn: any, calls: number) => Promise<any>) {
     const order: string[] = [];
-    const source = { id: 'src-1', tenantId: 'tenant-a', isActive: true, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
+    const source = { id: 'src-1', tenantId: 'tenant-a', provider: 'github', isActive: true, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] };
     const tx = {
       rawEvent: { create: jest.fn(async () => ({ id: `raw-${order.length}` })) },
       outbox: { create: jest.fn(async () => ({})) },

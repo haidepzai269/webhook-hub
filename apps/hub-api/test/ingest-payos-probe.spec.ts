@@ -27,7 +27,7 @@ describe('Ingest — PayOS confirm probe (KQ1)', () => {
   });
 
   function build(txImpl: (fn: any, n: number) => Promise<any>, redisHit = false) {
-    const source = { id: 'src-payos', tenantId: 'tenant-a', isActive: true, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(KEY, MASTER) }] };
+    const source = { id: 'src-payos', tenantId: 'tenant-a', provider: 'payos', isActive: true, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(KEY, MASTER) }] };
     const tx = {
       rawEvent: { create: jest.fn(async ({ data: d }: any) => ({ id: 'raw-1', ...d })) },
       outbox: { create: jest.fn(async () => ({})) },

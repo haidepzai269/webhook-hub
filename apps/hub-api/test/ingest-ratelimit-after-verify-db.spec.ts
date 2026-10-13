@@ -44,7 +44,7 @@ describeDb('EG3 rate limit sau verify (Redis hubv)', () => {
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'raw-eg3' }) }, outbox: { create: jest.fn() } };
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
-        id: sourceId, tenantId: 'tenant-eg3', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(KEY, MASTER) }],
+        id: sourceId, tenantId: 'tenant-eg3', provider: 'payos', isActive: true, archivedAt: null, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(KEY, MASTER) }],
       }),
       tenantTx: jest.fn(async (_t: string, fn: any) => fn(tx)),
     };

@@ -12,7 +12,7 @@ describe('IngestService + GenericAdapter (S8)', () => {
   beforeAll(() => (process.env.MASTER_KEY = MASTER));
 
   function build(verificationConfig: unknown, secret = SECRET) {
-    const source = { id: 'src-g', tenantId: 't', isActive: true, verificationConfig, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(secret, MASTER) }] };
+    const source = { id: 'src-g', tenantId: 't', provider: 'generic', isActive: true, verificationConfig, secrets: [{ id: 's1', secretEncrypted: aesGcmEncrypt(secret, MASTER) }] };
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'raw-1' }) }, outbox: { create: jest.fn() } };
     const prisma: any = {
       findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue(source),
