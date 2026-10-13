@@ -197,6 +197,7 @@ Rollback vì lý do khác (không phải unique) → trả **5xx** để provide
 6. Lỗi **retryable** (`5xx`, `408`, `429`, timeout, lỗi mạng) → tăng `x-attempt` → publish vào tầng retry tương ứng → `ack` message cũ.
 7. Lỗi **non-retryable** (`4xx` trừ 408/429 — lỗi cấu hình, retry vô nghĩa) → `DEAD` ngay, không đốt 5 tầng retry (tổng 6 lần gửi = 1 lần đầu + 5).
 8. Quá tầng cuối → trạng thái `DEAD` trong Postgres (**nguồn sự thật của DLQ**) + một bản sao vào `q.delivery.dlq` để quan sát.
+   - Lỗi của chính hub ở `catch` ngoài cùng (BP1, ADR-195) không bao giờ requeue ngay: lỗi hạ tầng → `q.delivery.retry.10s`, không tăng `attemptCount`; lỗi lạ → `q.delivery.retry.1m`, lần thứ 5 liên tiếp trong một lần thử → bản sao vào `q.delivery.dlq` với header `x-dead-reason: unknown_error` (delivery **không** thành `DEAD`; Postgres giữ nguyên trạng thái, sweeper hồi sinh). Vì vậy `q.delivery.dlq` chứa **hai loại** bản sao: DEAD và lỗi lạ — phân biệt bằng `x-dead-reason`.
 9. Mọi đổi trạng thái → publish Redis pub/sub → Socket.IO đẩy lên dashboard.
 
 ---
@@ -231,6 +232,8 @@ x.hub.delivery (direct, durable)
                                      | quá tầng cuối
                                      v
                        x.hub.delivery.dlx --> q.delivery.dlq  (BẢN SAO để quan sát; nguồn sự thật = deliveries.status='DEAD')
+                       + bản sao lỗi lạ quá 5 lần (x-dead-reason=unknown_error, BP1 — delivery KHÔNG DEAD)
+                       q.delivery.main KHÔNG có DLX: vào DLQ chỉ bằng publish thẳng vào x.hub.delivery.dlx
 
 Cả hai DLQ broker bị chặn trần bằng POLICY `hub-dlq-bounded` (5000, drop-head — ADR-052).
 ```

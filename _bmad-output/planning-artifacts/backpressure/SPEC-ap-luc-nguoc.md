@@ -370,7 +370,7 @@ Mỗi story đi theo VF (RED → PROBED → REVIEWED), review riêng, rồi mớ
 | `[BP:T1]` | BP1 | Prisma P1001 ở bước 0: message vào `retry.10s`, `attemptCount` giữ nguyên, **không** `nack(requeue=true)` |
 | `[BP:T2]` | BP1 | Lỗi `unknown` 5 lần liên tiếp: publish DLX đúng một lần rồi ack, không nack, không vòng lặp (đính chính §2 mục 3); publish DLX ném lỗi thì không ack |
 | `[BP:T3]` | BP1 | Grep: không còn `nack(msg, false, true)` trong `apps/hub-worker/src` |
-| `[BP:T4]` | BP1 | Chaos (local): dừng Postgres 60s khi đang có tải. Số lần gọi Prisma mỗi giây bị chặn trên; log không xả quá N dòng/s |
+| `[BP:T4]` | BP5 | Chaos (local): dừng Postgres 60s khi đang có tải. Số lần gọi Prisma mỗi giây bị chặn trên; log không xả quá N dòng/s. **Đính chính sau review BP1:** BP1 không cho cận trên số lần gọi Prisma (nhánh transient không trần; backlog Q message ≈ Q/10 lần gọi/s khi DB fail nhanh) — cận trên thuộc BP5, nên T4 tính vào BP5. BP1 chỉ chặn log (≤ 1 dòng/30s/tiến trình) và đổi vòng nóng không nhịp thành nhịp 10s/message; số đo trước/sau BP1 vẫn nên ghi lại làm đối chứng |
 | `[BP:T5]` | BP2 | Mọi nơi tạo message (normalize, sweeper, replay) đều có `destinationId` |
 | `[BP:T6]` | BP2 | Circuit OPEN + message có `destinationId`: **0 truy vấn DB**, đúng 1 lệnh Redis |
 | `[BP:T7]` | BP2 | Hoãn 5 lần trong 4 phút: tối đa 2 lần `deferDelivery` |
@@ -413,3 +413,8 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 ## 16. Ghi chú / nợ phát hiện khi code
 
 - **Nợ (BP1, 2026-10-13):** nhánh parse lỗi của `DeliveryConsumer` (`parseDeliveryMessage` ném) vẫn `channel.nack(msg, false, false)` kèm log "chuyển DLQ". Vì `q.delivery.main` không có DLX, message đó bị vứt chứ không vào `q.delivery.dlq`. Không sửa trong BP1 theo quyết định của phòng; cách sửa gợi ý giống BP1: publish bản sao vào `x.hub.delivery.dlx` rồi ack.
+- **BP1 review M3 (2026-10-13):** BP1 **không** đưa ra cận trên cho số lần gọi Prisma mỗi giây khi DB chết. Nhánh transient không có trần, mỗi message 1 truy vấn mỗi 10s; với lỗi fail nhanh (`ECONNREFUSED`) backlog Q message ≈ Q/10 truy vấn/s. Cận trên thuộc BP5 (bộ điều khiển áp lực ngược) → `[BP:T4]` chuyển sang nhóm BP5. Trong BP1 chỉ log được chặn: tối đa 1 dòng `warn` / 30s / tiến trình kèm số lần bị gộp (bộ đếm trong bộ nhớ); metric `hub_delivery_infra_errors_total` vẫn đếm đủ.
+- **Nợ (review BP1 T1):** riêng `deliveryChannel` đóng (lỗi mức channel) mà connection còn sống thì worker thành zombie: còn sống, không consume. `main.ts` chỉ nghe `close` của connection. Gợi ý: `deliveryChannel.on('close', …)` đi cùng đường thoát với connection.
+- **Nợ (review BP1 T5):** probe HALF_OPEN giành được ở bước 1 không được nhả khi lỗi rơi vào `catch` ngoài cùng → đích bị khoá dò tới hết TTL probe (30s). Nợ cũ, BP1 không làm tệ hơn.
+- **Đề xuất cho BP5 (review BP1 T3):** lỗi hạ tầng ngoài bảng bị xếp `unknown` — `PrismaClientUnknownRequestError` 57P01 (Neon cắt kết nối), amqplib "Channel closed". Hệ quả: ~5 phút vào DLX, metric `kind=unknown` lẫn lỗi hạ tầng. BP1 KHÔNG đổi bảng mã (spec giữ nguyên); BP5 xem xét mở rộng `classifyInfraError`.
+- **Nợ (review BP1 T4):** nhánh unknown không để dấu vết trong Postgres (`last_error` không đổi) — console không thấy, chỉ có log và bản sao DLQ broker (drop-head 5000). `x-dead-error` đã bỏ stack, chỉ tên lỗi + message cắt 200 ký tự.

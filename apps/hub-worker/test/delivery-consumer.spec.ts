@@ -122,11 +122,11 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(channel.nack).not.toHaveBeenCalled();
   });
 
-  it('[BB:3] (phần c) gửi xong nhưng GHI KẾT QUẢ lỗi (transaction ném) -> message quay lại (republish có nhịp, BP1/ADR-195), KHÔNG ack trước khi republish (ack trước khi lưu = mất bằng chứng giao, message không quay lại)', async () => {
+  it('[BB:3] (phần c) gửi xong nhưng GHI KẾT QUẢ ném lỗi lạ (Error thường -> nhánh unknown của BP1: retry.1m) -> message quay lại, KHÔNG ack trước khi republish (ack trước khi lưu = mất bằng chứng giao, message không quay lại). Ca P1001 -> retry.10s nằm ở delivery-infra-errors.spec (BP:T1 phần c)', async () => {
     const { prisma } = buildFakePrisma();
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'));
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn().mockResolvedValue({ status: 200, body: 'ok', durationMs: 5 }) } as any);
-    prisma.$transaction = jest.fn().mockRejectedValue(new Error('Postgres mất kết nối giữa transaction'));
+    prisma.$transaction = jest.fn().mockRejectedValue(new Error('lỗi lạ khi ghi kết quả (không thuộc bảng mã hạ tầng)'));
 
     const channel = buildChannel();
     // Ack khi CHƯA có bản republish nào = message không còn đường quay lại.

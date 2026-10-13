@@ -51,6 +51,40 @@ export const UNKNOWN_ERROR_MAX = 5;
 const INFRA_DEFER = retryQueueForDelay(0); // q.delivery.retry.10s
 const UNKNOWN_DEFER = retryQueueForDelay(60_000); // q.delivery.retry.1m
 
+/**
+ * BP1 review M3: lỗi hạ tầng lặp lại cho TỪNG message mỗi 10s tới khi DB về -> không log mỗi lần. Tối đa một dòng
+ * mỗi `intervalMs` mỗi tiến trình, kèm số lần đã gộp. Đếm trong bộ nhớ (0 lệnh Redis); metric vẫn đếm đủ từng lần.
+ */
+export const INFRA_LOG_INTERVAL_MS = 30_000;
+export class LogThrottle {
+  private lastAt = -Infinity;
+  private suppressed = 0;
+  constructor(
+    private readonly intervalMs = INFRA_LOG_INTERVAL_MS,
+    private readonly now: () => number = Date.now,
+  ) {}
+  /** Trả số lần đã gộp từ dòng log trước (>= 0) nếu được log lúc này; null nếu phải im. */
+  take(): number | null {
+    const t = this.now();
+    if (t - this.lastAt < this.intervalMs) {
+      this.suppressed++;
+      return null;
+    }
+    const n = this.suppressed;
+    this.lastAt = t;
+    this.suppressed = 0;
+    return n;
+  }
+}
+
+/** `x-dead-error`: chỉ tên lỗi + message cắt 200 ký tự, không stack (review T4). */
+export function deadErrorHeader(err: unknown): string {
+  const e = err as { name?: unknown; message?: unknown } | null;
+  const name = typeof e?.name === 'string' && e.name ? e.name : 'Error';
+  const message = typeof e?.message === 'string' ? e.message : String(err);
+  return `${name}: ${message}`.slice(0, 200);
+}
+
 export function maxCircuitDeferrals(env: string | undefined = process.env.CIRCUIT_MAX_DEFERRALS): number {
   const n = Number(env ?? 30);
   return Number.isInteger(n) && n > 0 ? n : 30;
@@ -101,6 +135,8 @@ function toNormalizedEvent(row: DeliveryForSend): NormalizedEvent {
 @Injectable()
 export class DeliveryConsumer {
   private redisPub: Redis;
+  /** BP1 review M3: log lỗi hạ tầng theo nhịp, mỗi tiến trình (mỗi instance consumer) một bộ. */
+  readonly infraLogThrottle = new LogThrottle();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -410,7 +446,14 @@ export class DeliveryConsumer {
         channel.sendToQueue(nextQueue, slim(currentAttemptNo), {
           persistent: true,
           // Lần thử mới -> bộ đếm hoãn vì circuit bắt đầu lại từ 0.
-          headers: { ...msg.properties.headers, 'x-attempt': currentAttemptNo, [CIRCUIT_DEFERRALS_HEADER]: 0 },
+          // BP1 review M1: bộ đếm lỗi hạ tầng/lỗi lạ cũng là "liên tiếp trong MỘT lần thử" -> về 0 như bộ đếm circuit.
+          headers: {
+            ...msg.properties.headers,
+            'x-attempt': currentAttemptNo,
+            [CIRCUIT_DEFERRALS_HEADER]: 0,
+            [UNKNOWN_ERRORS_HEADER]: 0,
+            [INFRA_DEFERRALS_HEADER]: 0,
+          },
         });
         channel.ack(msg);
         return;
@@ -437,8 +480,14 @@ export class DeliveryConsumer {
         if (kind === 'transient') {
           // TODO(BP5): báo tín hiệu infra_fail cho bộ điều khiển áp lực ngược.
           const n = (Number(headers[INFRA_DEFERRALS_HEADER]) || 0) + 1;
-          // warn, không error: lỗi hạ tầng sẽ lặp mỗi 10s cho từng message tới khi DB về — log có nhịp, không xả.
-          log.warn({ err: err?.message, queue: INFRA_DEFER.queueName, infraDeferrals: n }, 'Lỗi hạ tầng hub ở delivery -> hoãn 10s, không đốt lượt');
+          // Lỗi hạ tầng lặp mỗi 10s cho TỪNG message tới khi DB về -> tối đa 1 dòng / 30s / tiến trình (review M3).
+          const suppressed = this.infraLogThrottle.take();
+          if (suppressed !== null) {
+            log.warn(
+              { err: err?.message, queue: INFRA_DEFER.queueName, infraDeferrals: n, suppressedSinceLastLog: suppressed },
+              'Lỗi hạ tầng hub ở delivery -> hoãn 10s, không đốt lượt (log gộp tối đa 1 dòng/30s)',
+            );
+          }
           channel.sendToQueue(INFRA_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [INFRA_DEFERRALS_HEADER]: n } });
           channel.ack(msg);
           return;
@@ -451,7 +500,7 @@ export class DeliveryConsumer {
           log.error({ err: err?.message, unknownErrors: n }, `Lỗi lạ ở delivery lần thứ ${n} -> bản sao vào DLQ, ack`);
           channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, slim(), {
             persistent: true,
-            headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n, 'x-dead-reason': 'unknown_error', 'x-dead-error': String(err?.message ?? '').slice(0, 500) },
+            headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n, 'x-dead-reason': 'unknown_error', 'x-dead-error': deadErrorHeader(err) },
           });
           channel.ack(msg);
           return;
@@ -460,7 +509,8 @@ export class DeliveryConsumer {
         channel.sendToQueue(UNKNOWN_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n } });
         channel.ack(msg);
       } catch (e: any) {
-        // Channel đã đóng: không ack được -> RabbitMQ tự giao lại khi channel/kết nối mới lên (không phải vòng lặp nóng).
+        // Channel/kết nối đã đóng: không ack được -> message unacked, RabbitMQ giao lại khi tiến trình nối lại (main.ts thoát
+        // khi CONNECTION đóng). Riêng channel đóng mà connection sống thì worker không dựng lại channel — nợ cũ, SPEC-BP §16.
         log.error({ err: e?.message, cause: err?.message }, 'Không hoãn được message lỗi (channel đóng?) -> để RabbitMQ giao lại');
       }
     }
