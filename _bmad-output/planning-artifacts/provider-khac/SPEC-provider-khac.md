@@ -659,6 +659,12 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
 - **PK0:** test mock source cũ (14 file L0 + `ingest-ratelimit-after-verify-db.spec.ts`) không có `provider` → nay mang `provider` khớp segment, nếu không sẽ 404 ở bước so segment.
 - **PK0:** gate hộp phạt nay chặn cả `HEAD` (mọi method trừ `OPTIONS`); E27 `HEAD` → 405 là việc của PK4 ở tầng route, không đụng gate.
 - **PK0:** `verify/lib/map.ts` `TAG_RE` thêm `PK` — thiếu thì `verify:map` không thấy tag `[PK:Tn]` trong tên test (mồ côi giả).
+- **PK1 (2026-10-14, Amelia):** console chưa có trang chi tiết nguồn → "tab Lắng nghe" làm thành **sheet** mở từ nút trên dòng nguồn generic (cùng kiểu khối Lưu lượng EG5).
+- **PK1:** nhãn tiếng Việt là "**Nhà cung cấp khác**", không phải "Provider khác": `dictionary.spec.ts` cấm từ giao diện tiếng Anh trong bản vi. Bản en là "Other provider".
+- **PK1:** inspect của console dùng scope `read:project` (như GET sources của console), service API giữ `manage:sources`. Ghi ADR-202.
+- **PK1:** khoá chống trùng mặc định `webhook-id` của standard-webhooks đọc theo bộ header đang có → request Svix lấy `svix-id` (ADR-202). Header khoá tự khai khác thì giữ nguyên.
+- **PK1:** Playground thêm nhãn khoá cho `generic` để tsc qua (map `Record<Provider,…>`); Playground chưa ký hộ theo cấu hình nguồn generic.
+- **PK1 (review PK0 T-5/T-6, chưa làm):** body không phải JSON ở generic vẫn lưu `raw_events.body = {}`; `application/*+json` vẫn rơi vào parser raw. Để PK5 (E29).
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

@@ -33,6 +33,7 @@ import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
 import { parseSourceInput } from '../service-api/source-input';
+import { inspectSourceRows } from '../service-api/source-inspect';
 import { consoleDestination } from './destination-view';
 import { badParam, parseEnumParam, parseTextParam, parseTimeRange, parseUuidParam } from './list-params';
 import { AuditListQuery, DeliveryListQuery, listAuditPage, listDeliveryPage } from './console-lists';
@@ -193,6 +194,17 @@ export class ApiController {
     // Không trả ciphertext secret ra trình duyệt.
     const { secrets, ...rest } = source as any;
     return { ...rest, secretVersions: Array.isArray(secrets) ? secrets.length : 0 };
+  }
+
+  /**
+   * PK1 (SPEC-provider-khac §3.2, ADR-202): tab "Lắng nghe" của console — CÙNG hàm, cùng khuôn với
+   * `GET /v1/p/:project/sources/:id/inspect`. Scope như GET sources của console (`read:project`): chỉ tên header/trường
+   * và lý do, không giá trị. Repo scope theo project (BB-5, RLS). UI gọi lại mỗi 2s.
+   */
+  @Get('sources/:id/inspect')
+  @RequireScope('read:project')
+  async inspectSource(@CurrentTenant() tenantId: string, @Param('id') id: string, @Query('since') since?: string) {
+    return inspectSourceRows(this.prisma.forTenant(tenantId), id, since);
   }
 
   /** Chỉ đổi tên / bật-tắt. Không xoá source: raw_events (bằng chứng đã nhận) sẽ mất theo. */

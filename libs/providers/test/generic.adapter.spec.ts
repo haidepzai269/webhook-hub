@@ -66,6 +66,19 @@ describe('GenericAdapter — verify (S8)', () => {
     expect(await a.verify(req(BODY.replace('1', '2'), swHeaders(secret, 'msg_1', BODY)), [secret], c)).toBe(false);
   });
 
+  it('[PK:T3] (phần c) standard-webhooks nhận bộ svix-*: verify qua; khoá chống trùng mặc định = svix-id; extractSignature = svix-signature; trộn bộ -> false', async () => {
+    const c = cfg({ scheme: 'standard-webhooks', eventType: 'user.created' });
+    const secret = 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw';
+    const toSvix = (h: Record<string, string>) => Object.fromEntries(Object.entries(h).map(([k, v]) => [k.replace(/^webhook-/, 'svix-'), v]));
+    const h = toSvix(swHeaders(secret, 'msg_svix_1', BODY));
+    const r = req(BODY, h);
+    expect(await a.verify(r, [secret], c)).toBe(true);
+    expect(a.extractIdempotencyKey(r, c)).toBe('generic:msg_svix_1');
+    expect(a.extractSignature(r, c)).toBe(h['svix-signature']);
+    const mixed = req(BODY, { 'webhook-id': 'msg_svix_1', 'svix-timestamp': h['svix-timestamp'], 'svix-signature': h['svix-signature'] });
+    expect(await a.verify(mixed, [secret], c)).toBe(false);
+  });
+
   it('S8: thiếu cấu hình -> verify false (không bao giờ nhận bừa)', async () => {
     expect(await a.verify(req(BODY, { 'x-signature': hmac(SECRET, BODY) }), [SECRET])).toBe(false);
   });
@@ -189,6 +202,17 @@ describe('GenericAdapter — diagnose (S9, chế độ lắng nghe)', () => {
     expect(a.diagnose(stored({ headers: { 'webhook-id': 'm', 'x-signature': 'v1,abc' } }), sw)).toMatchObject({ ok: false, reason: 'missing_header', expectedHeader: 'webhook-timestamp', candidateHeaders: ['x-signature'] });
     const ts = String(Math.floor(new Date('2026-10-10T00:00:00Z').getTime() / 1000) - 400);
     expect(a.diagnose(stored({ headers: { 'webhook-id': 'm', 'webhook-timestamp': ts, 'webhook-signature': 'v1,x' } }), sw)).toEqual({ ok: false, reason: 'timestamp_out_of_range' });
+  });
+
+  it('[PK:T3] (phần d) diagnose standard-webhooks theo bộ đang có: svix thiếu svix-timestamp -> missing_header svix-timestamp; timestamp lệch đọc svix-timestamp', () => {
+    const sw = cfg({ scheme: 'standard-webhooks', eventType: 'bank.x' });
+    expect(a.diagnose(stored({ headers: { 'svix-id': 'm', 'svix-signature': 'v1,x' } }), sw)).toMatchObject({ ok: false, reason: 'missing_header', expectedHeader: 'svix-timestamp' });
+    const at = Math.floor(new Date('2026-10-10T00:00:00Z').getTime() / 1000);
+    expect(a.diagnose(stored({ headers: { 'svix-id': 'm', 'svix-timestamp': String(at - 400), 'svix-signature': 'v1,x' } }), sw)).toEqual({ ok: false, reason: 'timestamp_out_of_range' });
+    expect(a.diagnose(stored({ headers: { 'svix-id': 'm', 'svix-timestamp': String(at), 'svix-signature': 'v1,x' } }), sw)).toEqual({ ok: false, reason: 'signature_mismatch', expectedHeader: 'svix-signature' });
+    expect(a.diagnose(stored({ signatureValid: true, headers: { 'svix-timestamp': String(at) } }), sw)).toEqual({ ok: false, reason: 'missing_idempotency_key', expectedHeader: 'svix-id' });
+    // không có bộ nào -> báo theo bộ chuẩn webhook-*
+    expect(a.diagnose(stored({ headers: {} }), sw)).toMatchObject({ ok: false, reason: 'missing_header', expectedHeader: 'webhook-id' });
   });
 
   it('[MS:U48] (phần b) ACCEPTED mà body thiếu soTien -> mapping_field_missing field "soTien", không giá trị; "50.000" -> mapping_field_invalid', () => {

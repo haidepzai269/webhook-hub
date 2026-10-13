@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 import { IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parseProviderTime, validateCanonical } from '@hub/common';
-import { swVerify, timingSafeCompare } from '@hub/crypto';
+import { swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
 import { AdapterContext, Diagnosis, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
 import { GenericConfig, MappingValue, paymentTimeKey, validateGenericConfig } from './generic-config';
@@ -36,7 +36,7 @@ export class GenericAdapter implements ProviderAdapter {
     if (!c) throw new IdempotencyKeyMissingError('verificationConfig');
     const id = c.idempotency;
     let v: unknown;
-    if ('header' in id) v = headerOf(req, id.header);
+    if ('header' in id) v = headerOf(req, idempotencyHeader(c, req.headers));
     else v = isObj(req.body) ? req.body[id.field] : undefined;
     if (typeof v === 'number' && Number.isFinite(v)) v = String(v);
     if (typeof v !== 'string' || v.length === 0 || v.length > 200) {
@@ -49,7 +49,7 @@ export class GenericAdapter implements ProviderAdapter {
   extractSignature(req: RawWebhookRequest, ctx?: AdapterContext): string | null {
     const c = configOf(ctx);
     if (!c) return null;
-    if (isStandardWebhooks(c)) return headerOf(req, SW_SIGNATURE_HEADER);
+    if (isStandardWebhooks(c)) return headerOf(req, swHeaderSet(req.headers).signature); // PK1: webhook-* hoặc svix-*
     const v = headerOf(req, c.header!);
     if (v === null) return null;
     return c.scheme === 'static-token' ? '***' : v;
@@ -129,7 +129,7 @@ export class GenericAdapter implements ProviderAdapter {
     if (raw.signatureValid) {
       const id = c.idempotency;
       return 'header' in id
-        ? { ok: false, reason: 'missing_idempotency_key', expectedHeader: id.header }
+        ? { ok: false, reason: 'missing_idempotency_key', expectedHeader: idempotencyHeader(c, headers) }
         : { ok: false, reason: 'missing_idempotency_key', expectedField: id.field };
     }
     const candidates = (expected: string) =>
@@ -138,12 +138,14 @@ export class GenericAdapter implements ProviderAdapter {
         .filter((h) => h !== expected && !h.startsWith('__') && CANDIDATE_HEADER_RE.test(h))
         .sort();
     if (c.scheme === 'standard-webhooks') {
-      const missing = ['webhook-id', 'webhook-timestamp', 'webhook-signature'].find((h) => !has(h));
+      // PK1 (ADR-202): chẩn đoán theo bộ header ĐANG CÓ (webhook-* hoặc svix-*), không trộn.
+      const set = swHeaderSet(headers);
+      const missing = [set.id, set.timestamp, set.signature].find((h) => !has(h));
       if (missing) return { ok: false, reason: 'missing_header', expectedHeader: missing, candidateHeaders: candidates(missing) };
-      const ts = Number(headers['webhook-timestamp']);
+      const ts = Number(headers[set.timestamp]);
       const at = Math.floor(new Date(raw.receivedAt).getTime() / 1000);
       if (!Number.isFinite(ts) || Math.abs(at - ts) > 300) return { ok: false, reason: 'timestamp_out_of_range' };
-      return { ok: false, reason: 'signature_mismatch', expectedHeader: 'webhook-signature' };
+      return { ok: false, reason: 'signature_mismatch', expectedHeader: set.signature };
     }
     const expected = c.header!;
     if (!has(expected)) return { ok: false, reason: 'missing_header', expectedHeader: expected, candidateHeaders: candidates(expected) };
@@ -188,7 +190,14 @@ export function genericAckFix(status: number): string {
   return 'See docs/ERRORS.md and the source listening mode in the console.';
 }
 
-const SW_SIGNATURE_HEADER = 'webhook-signature';
+/**
+ * PK1 (ADR-202): khoá chống trùng mặc định của standard-webhooks là `webhook-id` = "id của bộ header đang dùng" —
+ * request Svix mang `svix-id` (cùng ngữ nghĩa message id). Header khoá tự khai khác thì giữ nguyên.
+ */
+function idempotencyHeader(c: GenericConfig, headers: Record<string, unknown>): string {
+  const h = (c.idempotency as { header: string }).header;
+  return isStandardWebhooks(c) && h === 'webhook-id' ? swHeaderSet(headers).id : h;
+}
 /** Tên header "trông như" mang bằng chứng xác thực — chỉ để gợi ý trong chẩn đoán, không bao giờ kèm giá trị. */
 const CANDIDATE_HEADER_RE = /sig|token|auth|hmac|key/;
 const isStandardWebhooks = (c: GenericConfig) => c.scheme === 'standard-webhooks';

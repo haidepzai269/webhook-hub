@@ -3,8 +3,8 @@
 import { createContext, useContext, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Activity, Link2, Plug, Plus } from "lucide-react";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Activity, Ear, Link2, Plug, Plus } from "lucide-react";
+import { type Control, Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -27,12 +27,15 @@ import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
+import { buildGenericConfig, GENERIC_SCHEMES, type GenericFormValues } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
+import { GenericFields } from "./generic-fields";
+import { ListenSheet } from "./listen-sheet";
 import { TrafficSheet } from "./traffic-sheet";
 
 /** KN2: nút "Kết nối" trên từng dòng mở hộp tình trạng kết nối. */
@@ -71,19 +74,63 @@ function TrafficButton({ id }: { id: string }) {
   );
 }
 
+/** PK1 (ADR-202): nút "Lắng nghe" — chỉ trên dòng nguồn generic ("Provider khác"). */
+const OpenListen = createContext<(id: string) => void>(() => undefined);
+function ListenButton({ id }: { id: string }) {
+  const open = useContext(OpenListen);
+  const t = useT();
+  return (
+    <Button size="sm" variant="ghost" onClick={() => open(id)} title={t("page.sources.listen-button")} aria-label={t("page.sources.listen-button")}>
+      <Ear />
+    </Button>
+  );
+}
+
 const SECRET_HINT: Record<(typeof PROVIDERS)[number], MessageKey> = {
   github: "page.sources.secret-hint.github",
   sepay: "page.sources.secret-hint.sepay",
   payos: "page.sources.secret-hint.payos",
   stripe: "page.sources.secret-hint.stripe",
+  generic: "page.sources.secret-hint.generic",
 };
 
+/** Nhãn nhà cung cấp: `generic` hiện là "Provider khác" (PK1), còn lại giữ tên kỹ thuật. */
+const providerLabel = (t: TranslateFn, p: string) => (p === "generic" ? t("page.sources.provider.generic") : p);
+
+const HEADER_RE = /^[a-z0-9-]{1,64}$/;
+const FIELD_RE = /^[A-Za-z0-9_]{1,64}$/;
+const EVENT_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
+
+/**
+ * PK1 (SPEC-provider-khac §3.1): form tay cho "Provider khác" (generic) — scheme, header, encoding, khoá chống trùng,
+ * eventType. PK7 thay bằng form nhận diện. Kiểm nhẹ ở client; server (`validateGenericConfig`) là trọng tài, 422 có tên trường.
+ */
 const makeSchema = (t: TranslateFn) =>
-  z.object({
-    provider: z.enum(PROVIDERS),
-    name: z.string().trim().min(1, t("page.sources.form.name-required")).max(255),
-    secret: z.string().min(8, t("page.sources.form.secret-min")),
-  });
+  z
+    .object({
+      provider: z.enum(PROVIDERS),
+      name: z.string().trim().min(1, t("page.sources.form.name-required")).max(255),
+      secret: z.string().min(8, t("page.sources.form.secret-min")),
+      scheme: z.enum(GENERIC_SCHEMES),
+      header: z.string(),
+      encoding: z.enum(["hex", "base64"]),
+      idKind: z.enum(["header", "field"]),
+      idValue: z.string(),
+      eventType: z.string(),
+    })
+    .superRefine((v, ctx) => {
+      if (v.provider !== "generic") return;
+      const sw = v.scheme === "standard-webhooks";
+      if (!sw && !HEADER_RE.test(v.header.trim().toLowerCase())) {
+        ctx.addIssue({ code: "custom", path: ["header"], message: t("page.sources.generic.header-required") });
+      }
+      const id = v.idValue.trim();
+      const idOk = v.idKind === "header" ? HEADER_RE.test(id.toLowerCase()) : FIELD_RE.test(id);
+      if ((id || !sw) && !idOk) ctx.addIssue({ code: "custom", path: ["idValue"], message: t("page.sources.generic.id-required") });
+      if (!EVENT_TYPE_RE.test(v.eventType.trim())) {
+        ctx.addIssue({ code: "custom", path: ["eventType"], message: t("page.sources.generic.event-type-invalid") });
+      }
+    });
 type Values = z.infer<ReturnType<typeof makeSchema>>;
 
 const fullUrl = (s: Source) => `${HUB_API_URL}${s.webhookUrl}`;
@@ -100,7 +147,7 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     id: "provider",
     header: t("page.sources.col.provider"),
     accessorFn: (s) => s.provider,
-    cell: ({ row }) => <Badge variant="secondary">{row.original.provider}</Badge>,
+    cell: ({ row }) => <Badge variant="secondary">{providerLabel(t, row.original.provider)}</Badge>,
   },
   {
     id: "webhookUrl",
@@ -165,6 +212,7 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     enableHiding: false,
     cell: ({ row }) => (
       <div className="flex">
+        {row.original.provider === "generic" && <ListenButton id={row.original.id} />}
         {canTraffic && <TrafficButton id={row.original.id} />}
         <ConnectionButton id={row.original.id} />
       </div>
@@ -218,15 +266,19 @@ export default function SourcesPage() {
   const connectionSource = data?.find((s) => s.id === connectionId) ?? null;
   const [trafficId, setTrafficId] = useState<string | null>(null);
   const trafficSource = data?.find((s) => s.id === trafficId) ?? null;
+  const [listenId, setListenId] = useState<string | null>(null);
+  const listenSource = data?.find((s) => s.id === listenId) ?? null;
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { provider: "github", name: "", secret: "" },
+    defaultValues: { provider: "github", name: "", secret: "", scheme: "hmac-sha256", header: "", encoding: "hex", idKind: "field", idValue: "", eventType: "" },
   });
   // useWatch thay vì form.watch: React Compiler memo hoá form.watch → gợi ý không đổi theo provider.
   const provider = useWatch({ control: form.control, name: "provider" });
+  const scheme = useWatch({ control: form.control, name: "scheme" });
 
-  const onSubmit = (values: Values) =>
-    create.mutateAsync(values).then(
+  // PK1: chỉ generic gửi `verificationConfig` (dựng từ các ô tay); provider khác giữ đúng body cũ.
+  const onSubmit = ({ provider: p, name, secret, ...generic }: Values) =>
+    create.mutateAsync({ provider: p, name, secret, ...(p === "generic" ? { verificationConfig: buildGenericConfig(generic) } : {}) }).then(
       (src) => {
         toast.success(t("page.sources.toast.created", { name: src.name }), {
           description: t("page.sources.toast.created-url", {
@@ -270,6 +322,8 @@ export default function SourcesPage() {
         onConnect={(s) => (setPreset({ provider: s.provider, sourceId: s.id }), setConnectOpen(true))}
       />
       <TrafficSheet source={trafficSource} onClose={() => setTrafficId(null)} />
+      <ListenSheet source={listenSource} onClose={() => setListenId(null)} />
+      <OpenListen.Provider value={setListenId}>
       <OpenTraffic.Provider value={setTrafficId}>
         <OpenConnection.Provider value={setConnectionId}>
           <InsightRowsProvider code="I-silent">
@@ -285,6 +339,7 @@ export default function SourcesPage() {
           </InsightRowsProvider>
         </OpenConnection.Provider>
       </OpenTraffic.Provider>
+      </OpenListen.Provider>
 
       <FormDialog
         open={open}
@@ -309,7 +364,7 @@ export default function SourcesPage() {
                     <SelectContent>
                       {PROVIDERS.map((p) => (
                         <SelectItem key={p} value={p}>
-                          {p}
+                          {providerLabel(t, p)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -350,6 +405,7 @@ export default function SourcesPage() {
                 </Field>
               )}
             />
+            {provider === "generic" && <GenericFields control={form.control as unknown as Control<GenericFormValues>} scheme={scheme} />}
           </FieldGroup>
         </form>
       </FormDialog>

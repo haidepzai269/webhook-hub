@@ -31,8 +31,29 @@ function header(headers: Record<string, unknown>, name: string): string | undefi
   return typeof s === 'string' ? s : undefined;
 }
 
+export interface SwHeaderNames {
+  id: string;
+  timestamp: string;
+  signature: string;
+}
+const SW_STANDARD: SwHeaderNames = { id: 'webhook-id', timestamp: 'webhook-timestamp', signature: 'webhook-signature' };
+/** PK1 (ADR-202): Svix (Clerk, Resend…) — cùng thuật toán, cùng secret `whsec_`, chỉ khác tên header. */
+const SW_SVIX: SwHeaderNames = { id: 'svix-id', timestamp: 'svix-timestamp', signature: 'svix-signature' };
+
 /**
- * Thiếu 1 trong 3 header -> false; |now - ts| > tolerance -> false; header chữ ký có thể chứa nhiều chữ ký
+ * PK1 (ADR-202): bộ header ĐANG DÙNG của request. Có bất kỳ header `webhook-*` nào -> bộ chuẩn; không có mà có `svix-*`
+ * -> bộ Svix; không có gì -> bộ chuẩn (chẩn đoán báo theo bộ chuẩn). Ba header luôn lấy từ CÙNG một bộ — trộn
+ * (`webhook-id` + `svix-signature`) thì bộ chuẩn thiếu header -> verify false.
+ */
+export function swHeaderSet(headers: Record<string, unknown>): SwHeaderNames {
+  const has = (n: string) => header(headers, n) !== undefined;
+  if ([SW_STANDARD.id, SW_STANDARD.timestamp, SW_STANDARD.signature].some(has)) return SW_STANDARD;
+  if ([SW_SVIX.id, SW_SVIX.timestamp, SW_SVIX.signature].some(has)) return SW_SVIX;
+  return SW_STANDARD;
+}
+
+/**
+ * Bộ header theo `swHeaderSet` (webhook-* hoặc svix-*, không trộn). Thiếu 1 trong 3 header -> false; |now - ts| > tolerance -> false; header chữ ký có thể chứa nhiều chữ ký
  * cách nhau bằng dấu cách ("v1,a v1,b"), khớp MỘT là đủ, so bằng timingSafeEqual. `rawBody` là BYTES gốc.
  */
 export function swVerify(
@@ -41,9 +62,10 @@ export function swVerify(
   rawBody: string | Buffer,
   opts: { toleranceSec?: number; nowSec?: number } = {},
 ): boolean {
-  const id = header(headers, 'webhook-id');
-  const tsRaw = header(headers, 'webhook-timestamp');
-  const sigs = header(headers, 'webhook-signature');
+  const set = swHeaderSet(headers);
+  const id = header(headers, set.id);
+  const tsRaw = header(headers, set.timestamp);
+  const sigs = header(headers, set.signature);
   if (!id || !tsRaw || !sigs || !/^\d{1,12}$/.test(tsRaw)) return false;
   const ts = Number(tsRaw);
   const now = opts.nowSec ?? Math.floor(Date.now() / 1000);

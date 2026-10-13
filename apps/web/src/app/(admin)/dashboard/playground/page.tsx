@@ -44,6 +44,8 @@ const SECRET_LABEL: Record<Provider, MessageKey> = {
   payos: "page.playground.secret.payos",
   github: "page.playground.secret.sign",
   stripe: "page.playground.secret.sign",
+  // PK1: "Provider khác" (generic) lên console — Playground chưa ký hộ theo cấu hình riêng của nguồn (PK7).
+  generic: "page.playground.secret.sign",
 };
 
 export default function PlaygroundPage() {

@@ -23,6 +23,7 @@ import { longPoll } from './polling';
 import { hubError } from '../errors/hub-error';
 import { assertSourceLimit } from '../console/source-limit';
 import { parseSourceInput } from './source-input';
+import { inspectSourceRows } from './source-inspect';
 import { generateSourceKey } from '../console/source-key';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -415,32 +416,13 @@ export class ServiceResourcesController {
   }
 
   /**
-   * S9 (SPEC §4.8): chế độ lắng nghe — 10 raw_events mới nhất của source (`received_at >= since`), mỗi dòng kèm
-   * chẩn đoán của adapter (không cài `diagnose` -> `{ok: signatureValid}`). KHÔNG BAO GIỜ trả giá trị chữ ký,
-   * token, secret hay body — chỉ tên header/trường. UI gọi lại mỗi 2s.
+   * S9 (SPEC §4.8): chế độ lắng nghe — xem `inspectSourceRows` (PK1: dùng chung với console `/api/v1/sources/:id/inspect`).
+   * KHÔNG BAO GIỜ trả giá trị chữ ký, token, secret hay body — chỉ tên header/trường. UI gọi lại mỗi 2s.
    */
   @Get('sources/:id/inspect')
   @RequireScope('manage:sources')
   async inspectSource(@Req() req: RequestWithPrincipal, @Param('id') id: string, @Query('since') since?: string) {
-    const repo = this.prisma.forTenant(req.tenantId!);
-    const source = UUID_RE.test(id) ? await repo.findSourceById(id) : null;
-    if (!source) throw new NotFoundException(NOT_FOUND);
-    let from = new Date(0);
-    if (since !== undefined) {
-      from = new Date(since);
-      if (!/^\d{4}-\d{2}-\d{2}/.test(since) || Number.isNaN(from.getTime())) {
-        unprocessable({ error: 'validation_failed', field: 'since', message: 'since là thời điểm ISO 8601 (vd 2026-10-10T00:00:00Z)' });
-      }
-    }
-    const adapter = ProviderRegistry.get(source.provider as any);
-    const ctx = { verificationConfig: (source as { verificationConfig?: unknown }).verificationConfig ?? undefined };
-    const rows = await repo.findRecentRawEventsForSource(source.id, from, 10);
-    return rows.map((r) => ({
-      id: r.id,
-      receivedAt: r.receivedAt,
-      status: r.status,
-      diagnosis: adapter.diagnose ? adapter.diagnose(r as any, ctx) : { ok: r.signatureValid },
-    }));
+    return inspectSourceRows(this.prisma.forTenant(req.tenantId!), id, since);
   }
 
   /** Bản công khai kèm `sourceKeys` (map id -> sourceKey trong project, một truy vấn). */

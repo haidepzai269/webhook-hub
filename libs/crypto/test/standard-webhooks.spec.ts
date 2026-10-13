@@ -1,4 +1,4 @@
-import { generateWhsecSecret, swHeaders, swSign, swVerify } from '../src/standard-webhooks';
+import { generateWhsecSecret, swHeaderSet, swHeaders, swSign, swVerify } from '../src/standard-webhooks';
 
 /** S6 (SPEC §4.7): Standard Webhooks — ký/verify dùng chung cho hub, GenericAdapter, SDK, Shop. */
 describe('Standard Webhooks (S6)', () => {
@@ -28,6 +28,32 @@ describe('Standard Webhooks (S6)', () => {
     expect(swVerify(SECRET, hdr(sig), BODY, at(TS - 301))).toBe(false);
     expect(swVerify(SECRET, hdr(sig), BODY, at(TS + 299))).toBe(true);
     expect(swVerify(SECRET, hdr(sig), BODY, at(TS - 299))).toBe(true);
+  });
+
+  // PK1 (SPEC-provider-khac §3.4, E30): Svix (Clerk, Resend…) ký đúng thuật toán Standard Webhooks, chỉ đổi tên header.
+  const svix = (sig: string, ts = TS, id = ID) => ({ 'svix-id': id, 'svix-timestamp': String(ts), 'svix-signature': sig });
+
+  it('[PK:T3] (phần a) bộ svix-* verify qua (vector chuẩn); nhiều chữ ký cách dấu cách khớp một là đủ; sửa 1 byte -> false', () => {
+    const good = swSign(SECRET, ID, TS, BODY);
+    expect(good).toBe('v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=');
+    expect(swVerify(SECRET, svix(good), Buffer.from(BODY), at(TS))).toBe(true);
+    expect(swVerify(SECRET, svix(`v1,AAAA${good.slice(7)} ${good}`), BODY, at(TS))).toBe(true);
+    expect(swVerify(SECRET, svix(good), BODY.replace('2432', '2433'), at(TS))).toBe(false);
+    expect(swVerify(SECRET, svix(good), BODY, at(TS + 301))).toBe(false);
+    expect(swHeaderSet(svix(good))).toEqual({ id: 'svix-id', timestamp: 'svix-timestamp', signature: 'svix-signature' });
+    expect(swHeaderSet(hdr(good))).toEqual({ id: 'webhook-id', timestamp: 'webhook-timestamp', signature: 'webhook-signature' });
+    expect(swHeaderSet({})).toEqual({ id: 'webhook-id', timestamp: 'webhook-timestamp', signature: 'webhook-signature' });
+  });
+
+  it('[PK:T3] (phần b) trộn bộ (webhook-id + svix-timestamp/svix-signature, hoặc ngược lại) -> false', () => {
+    const good = swSign(SECRET, ID, TS, BODY);
+    const mixes = [
+      { 'webhook-id': ID, 'svix-timestamp': String(TS), 'svix-signature': good },
+      { 'webhook-id': ID, 'webhook-timestamp': String(TS), 'svix-signature': good },
+      { 'svix-id': ID, 'svix-timestamp': String(TS), 'webhook-signature': good },
+      { 'svix-id': ID, 'webhook-timestamp': String(TS), 'svix-signature': good },
+    ];
+    for (const h of mixes) expect([h, swVerify(SECRET, h, BODY, at(TS))]).toEqual([h, false]);
   });
 
   it('[MS:U4] header có 2 chữ ký "v1,sai v1,đúng" -> true', () => {
