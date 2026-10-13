@@ -84,6 +84,10 @@
 - R1: gợi ý đúng → đích có throttle vẫn 2 lệnh/delivery; gợi ý lệch → 3 lệnh, là ca ngoại lệ đã biết, có test.
 - Đánh đổi với ADR-042 (ghi ở ADR-196): message mang một mẩu **cấu hình** chứ không chỉ tham chiếu; giá trị thật vẫn đọc từ DB và kiểm lại trước khi gửi; không có bí mật. `syncObserved` không chạy ở lần hoãn trước khi nạp (không có `persistedState`) → DB thấy OPEN→HALF_OPEN trễ một nhịp, chấp nhận.
 
+**C10 — `[BP:T22]` phần b: HALF_OPEN có probe KHÔNG phải ≤ 3 lệnh (review BP2 lượt 2, 2026-10-13).**
+- Đếm như mọi ca khác của R1 (tổng lệnh của delivery, gồm PUBLISH): HALF_OPEN có probe = gate + giành probe + DEL (probe thành công) + PUBLISH delivery = **4 lệnh**, cộng **một PUBLISH `hub:realtime:circuit` mỗi lần đổi trạng thái** (`syncObserved` OPEN→HALF_OPEN, đóng mạch →CLOSED). Bằng đúng trước BP2 (MGET thay cho EVAL). Ca hiếm: một probe mỗi đích mỗi 30s.
+- Muốn ≤ 3 thật thì gộp `tryAcquireProbe` vào `LUA_GATE` — để BP4 (sửa chính script này). `[BP:T22]` (phần b) assert chuỗi lệnh đầy đủ, không lọc PUBLISH.
+
 ## 0. Bối cảnh
 
 Admin đọc dòng 9 của phụ lục `PhuLuc_MoTaYeuCauKyThuat_WebhookHub.docx` ("retry nhiều mức tăng dần + circuit breaker + outbound throttle") và cho rằng retry liên tục là tự tay phá hệ thống. Admin dẫn bài VNJUG tóm tắt Canva *Worker Backpressure Part 1* (Mikalai Barysau, 17/09/2026).
@@ -350,7 +354,7 @@ NORMALIZE_MAX_DEFER_MS=3600000
 ## 11. Story và thứ tự
 
 - [x] **BP1** — Vòng lặp nóng (§2). Nhỏ, độc lập. **Làm trước.**
-- [ ] **BP2** — `destinationId` + gate trước khi nạp + hoãn thưa + trần theo thời gian (§3, §6 phần gate)
+- [x] **BP2** — `destinationId` + gate trước khi nạp + hoãn thưa + trần theo thời gian (§3, §6 phần gate)
 - [ ] **BP3** — OPEN kéo dài dần (§4). Cần BP2.
 - [ ] **BP4** — Slow-start (§5). Cần gate của BP2.
 - [ ] **BP5** — Bộ điều khiển áp lực ngược (§7). Cần `classifyInfraError` của BP1.
@@ -424,3 +428,4 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 - **Nợ (review BP1 T5):** probe HALF_OPEN giành được ở bước 1 không được nhả khi lỗi rơi vào `catch` ngoài cùng → đích bị khoá dò tới hết TTL probe (30s). Nợ cũ, BP1 không làm tệ hơn.
 - **Đề xuất cho BP5 (review BP1 T3):** lỗi hạ tầng ngoài bảng bị xếp `unknown` — `PrismaClientUnknownRequestError` 57P01 (Neon cắt kết nối), amqplib "Channel closed". Hệ quả: ~5 phút vào DLX, metric `kind=unknown` lẫn lỗi hạ tầng. BP1 KHÔNG đổi bảng mã (spec giữ nguyên); BP5 xem xét mở rộng `classifyInfraError`.
 - **Nợ (review BP1 T4):** nhánh unknown không để dấu vết trong Postgres (`last_error` không đổi) — console không thấy, chỉ có log và bản sao DLQ broker (drop-head 5000). `x-dead-error` đã bỏ stack, chỉ tên lỗi + message cắt 200 ký tự.
+- **Cho BP3 (review BP2 lượt 2):** gộp `CIRCUIT_DEFER_ROUND_MS` (`libs/messaging/src/retry-window.ts`, cộng vào cửa sổ retry) và `CIRCUIT_DEFER` (`delivery.consumer.ts`, tầng hoãn thật) về **một nguồn** — BP3 hoãn theo PTTL tới `retry.5m` nên một vòng hoãn thành 5 phút; hai hằng số lệch nhau là cửa sổ dọn của QT sai.

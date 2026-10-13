@@ -445,9 +445,15 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     expect(open).toMatchObject({ state: 'OPEN', failures: 5 });
     expect(open.openPttlMs).toBeGreaterThan(55_000);
     expect(await redis.get(tk)).toBe(before);
-    // HALF_OPEN: hết :open, :failures còn -> giành probe đúng một bên
+    // OPEN mà failures = 0 (vd. :failures đã hết hạn) -> vẫn KHÔNG INCR throttle (bắt đột biến bỏ `not open`)
+    await redis.del(k('failures'));
+    expect(await cb.getState(dest, 1)).toMatchObject({ state: 'OPEN', failures: 0 });
+    expect(await redis.get(tk)).toBe(before);
+    await redis.set(k('failures'), '5');
+    // HALF_OPEN: hết :open, :failures còn (= ngưỡng) -> giành probe đúng một bên; gate KHÔNG INCR throttle (bắt đột biến `<` -> `<=`)
     await redis.del(k('open'));
     expect(await cb.getState(dest, 1)).toEqual({ state: 'HALF_OPEN', failures: 5 });
+    expect(await redis.get(tk)).toBe(before);
     const t1 = await cb.tryAcquireProbe(dest);
     expect(t1).toEqual(expect.any(String));
     expect(await cb.tryAcquireProbe(dest)).toBeNull();

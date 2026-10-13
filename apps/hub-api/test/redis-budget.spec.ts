@@ -190,7 +190,7 @@ async function runDelivery(i: number, rateLimitRps = 0) {
  * BP2 (ADR-196, C9): message mang GỢI Ý `destinationId` + `rateLimitRps` -> gate TRƯỚC khi nạp DB.
  * `real` = cấu hình thật trong row; `hint` = gợi ý trong message (có thể lệch).
  */
-async function runDeliveryHinted(i: number, o: { real: { destinationId?: string; rateLimitRps: number }; hint: { destinationId?: string; rateLimitRps: number }; headers?: Record<string, unknown> }) {
+async function runDeliveryHinted(i: number, o: { real: { destinationId?: string; rateLimitRps: number }; hint: { destinationId?: string; rateLimitRps: number }; headers?: Record<string, unknown>; persistedCircuit?: string; circuitDbWrites?: boolean }) {
   const now = new Date();
   const destId = o.real.destinationId ?? `dest-${i}`;
   const row = {
@@ -198,7 +198,7 @@ async function runDeliveryHinted(i: number, o: { real: { destinationId?: string;
     event: { id: 'evt-1', tenantId: TENANT, type: 'payment.received', source: 'sepay', subject: null, data: {}, normalized: true, occurredAt: now, receivedAt: now, correlationId: 'c', rawEventId: RAW, parentEventId: null, origin: 'webhook', rawEvent: null },
     subscription: {
       id: `sub-${i}`, template: '',
-      destination: { id: destId, type: 'webhook', configEncrypted: aesGcmEncrypt('{"url":"https://x.example.com"}', MASTER), signingSecretEncrypted: null, rateLimitRps: o.real.rateLimitRps, circuitState: 'CLOSED' },
+      destination: { id: destId, type: 'webhook', configEncrypted: aesGcmEncrypt('{"url":"https://x.example.com"}', MASTER), signingSecretEncrypted: null, rateLimitRps: o.real.rateLimitRps, circuitState: o.persistedCircuit ?? 'CLOSED' },
     },
   };
   const tx = {
@@ -213,6 +213,8 @@ async function runDeliveryHinted(i: number, o: { real: { destinationId?: string;
     updateDestinationCircuitState: jest.fn().mockResolvedValue(0),
     deferDelivery: jest.fn().mockResolvedValue(1),
   };
+  // circuitDbWrites: UPDATE circuit_state có điều kiện đổi được dòng -> lộ PUBLISH hub:realtime:circuit thật.
+  if (o.circuitDbWrites) repo.updateDestinationCircuitState = jest.fn().mockResolvedValue(1);
   const prisma: any = {
     forTenant: () => repo,
     processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
@@ -317,13 +319,14 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(repo.deferDelivery).not.toHaveBeenCalled();
   });
 
-  it('[BP:T22] (phần b) HALF_OPEN có probe (gợi ý đúng): ≤ 3 lệnh circuit (gate + giành probe + DEL khi thành công) + PUBLISH realtime', async () => {
-    store.set('circuit:dest-1:failures', '5'); // :open đã hết hạn -> HALF_OPEN
-    const { repo } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
-    const c = take();
+  it('[BP:T22] (phần b) HALF_OPEN có probe (gợi ý đúng, đích hồi phục): chuỗi lệnh ĐẦY ĐỦ, không lọc — 4 lệnh + PUBLISH circuit mỗi lần đổi trạng thái (C10)', async () => {
+    store.set('circuit:dest-1:failures', '5'); // :open đã hết hạn -> HALF_OPEN; DB còn ghi OPEN
+    const { repo } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 }, persistedCircuit: 'OPEN', circuitDbWrites: true });
     expect(repo.findDeliveryForSend).toHaveBeenCalledTimes(1);
-    expect(c).toEqual(['eval', 'eval', 'del', 'publish']);
-    expect(c.filter((x) => x !== 'publish').length).toBeLessThanOrEqual(3); // hiếm (một probe / đích / 30s), ngoài đường nóng R1
+    // gate · giành probe · PUBLISH circuit (syncObserved OPEN->HALF_OPEN) · DEL (probe thành công) · PUBLISH circuit (->CLOSED) · PUBLISH delivery
+    // = 4 lệnh (gate + acquire + DEL + PUBLISH delivery) + 2 PUBLISH circuit — bằng trước BP2 (MGET thay EVAL); ca hiếm
+    // (một probe / đích / 30s). Gộp acquire vào gate: để BP4 (SPEC-BP C10).
+    expect(take()).toEqual(['eval', 'eval', 'publish', 'del', 'publish', 'publish']);
   });
 
   it('R1 (C9): đích CÓ throttle, gợi ý ĐÚNG -> gate trước khi nạp, vẫn 2 lệnh/delivery (EVAL + PUBLISH)', async () => {
