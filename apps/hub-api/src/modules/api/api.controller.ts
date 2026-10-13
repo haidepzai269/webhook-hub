@@ -32,7 +32,7 @@ import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from '../console/so
 import { ProjectScopeGuard } from '../console/project-scope.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
-import { parseSourceInput } from '../service-api/source-input';
+import { parseSourceInput, publicVerificationConfig } from '../service-api/source-input';
 import { inspectSourceRows } from '../service-api/source-inspect';
 import { consoleDestination } from './destination-view';
 import { badParam, parseEnumParam, parseTextParam, parseTimeRange, parseUuidParam } from './list-params';
@@ -147,6 +147,7 @@ export class ApiController {
     const sources = await repo.findSources({ archivedAt: null });
     return sources.map(({ secrets, ...s }) => ({
       ...s,
+      verificationConfig: publicVerificationConfig((s as { verificationConfig?: unknown }).verificationConfig), // PK4: không trả verifyTokenEnc
       secretVersions: secrets.length,
       webhookUrl: `/hooks/${s.provider}/${s.sourceKey}`,
     }));
@@ -193,7 +194,7 @@ export class ApiController {
     });
     // Không trả ciphertext secret ra trình duyệt.
     const { secrets, ...rest } = source as any;
-    return { ...rest, secretVersions: Array.isArray(secrets) ? secrets.length : 0 };
+    return { ...rest, verificationConfig: publicVerificationConfig(rest.verificationConfig), secretVersions: Array.isArray(secrets) ? secrets.length : 0 };
   }
 
   /**

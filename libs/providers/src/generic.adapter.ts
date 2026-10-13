@@ -1,9 +1,9 @@
 import { createHmac } from 'crypto';
-import { IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parseProviderTime, validateCanonical } from '@hub/common';
+import { HttpMethod, IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parseProviderTime, validateCanonical } from '@hub/common';
 import { swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
-import { AdapterContext, Diagnosis, ProviderAdapter, StoredRawEvent } from './provider.interface';
+import { AdapterContext, Diagnosis, HandshakeOutcome, HandshakePhase, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
-import { GenericConfig, HMAC_ALGOS, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
+import { GenericConfig, HMAC_ALGOS, HandshakeConfig, HandshakeKind, HandshakeWhen, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
 import { kvHasKey, presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
 import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
@@ -22,24 +22,67 @@ export class GenericAdapter implements ProviderAdapter {
 
   async verify(req: RawWebhookRequest, secrets: string[], ctx?: AdapterContext): Promise<boolean> {
     const c = configOf(ctx);
-    if (!c || secrets.length === 0) return false;
-    const nowMs = ctx?.verifyAt ? ctx.verifyAt.getTime() : Date.now();
-    // Review PK3 T-2: `verifyAt` không hợp lệ (Invalid Date -> NaN) thì không có "bây giờ" để kiểm độ lệch -> fail-closed.
-    if (!Number.isFinite(nowMs)) return false;
-    if (c.scheme === 'standard-webhooks') {
-      const opts = { nowSec: Math.floor(nowMs / 1000) };
-      return secrets.some((s) => swVerify(s, req.headers, req.rawBody, opts));
+    if (!c) return false;
+    return verifyWith(c, req, secrets, ctx);
+  }
+
+  /**
+   * PK4 (§6.2, E27): POST luôn được. GET CHỈ khi source khai `query-echo` VÀ request mang đúng MỘT tham số `param` — GET là
+   * để bắt tay, không để nhận sự kiện (§15). HEAD và mọi method khác -> false (lõi trả 405, không ghi DB, không phạt).
+   */
+  acceptsMethod(method: HttpMethod, ctx?: AdapterContext, req?: RawWebhookRequest): boolean {
+    if (method === 'POST') return true;
+    if (method !== 'GET') return false;
+    const h = configOf(ctx)?.handshake;
+    return h?.kind === 'query-echo' && queryValues(req?.query, h.param).length === 1;
+  }
+
+  /**
+   * PK4 (§6.1, E3/E9/E13/E27, ADR-205): bắt tay theo `handshake` của source. `before-verify` (2h): query/body/header-echo,
+   * manual-url. `after-verify` (3h, lõi chỉ gọi khi verify QUA): hmac-echo — ký `plainToken` bằng đúng secret đã verify.
+   * Echo chỉ trả `^[\x21-\x7E]{1,256}$` dạng `text/plain; charset=utf-8` (E27: không phản chiếu nội dung tuỳ ý).
+   */
+  handshake(req: RawWebhookRequest, secrets: string[], ctx: AdapterContext | undefined, phase: HandshakePhase): HandshakeOutcome | null {
+    const h = configOf(ctx)?.handshake;
+    if (!h) return null;
+    const method = req.method ?? 'POST';
+    if (phase === 'after-verify') {
+      if (!isMacEcho(h) || method !== 'POST' || !whenMatches(h.when, req)) return null;
+      return hmacEcho(h, req, secrets, ctx);
     }
-    if (isSignedTemplate(c)) return verifySignedTemplate(c, req, secrets, nowMs);
-    if (isHmacScheme(c)) return verifyMac(c, req, secrets);
-    const presented = presentedToken(c, req);
-    if (presented === null) return false;
-    let ok = false;
-    for (const secret of secrets) {
-      // Không dừng sớm: thời gian không lộ secret nào khớp.
-      if (timingSafeCompare(presented, expectedToken(c, secret))) ok = true;
+    if (h.kind === 'query-echo') {
+      if (method !== 'GET') return null;
+      const challenge = queryValues(req.query, h.param);
+      if (challenge.length !== 1) return null;
+      if (h.verifyTokenParam !== undefined) {
+        // E13: token so khớp nằm ở `verifyTokenEnc` (AES-GCM), KHÔNG phải SourceSecret — không bao giờ thành khoá HMAC.
+        const presented = queryValues(req.query, h.verifyTokenParam);
+        const expected = h.verifyTokenEnc && ctx?.openSealed ? ctx.openSealed(h.verifyTokenEnc) : null;
+        if (presented.length !== 1 || !expected || !timingSafeCompare(presented[0], expected)) return { kind: 'reject' };
+      }
+      return echoText(challenge[0], { kind: h.kind });
     }
-    return ok;
+    if (method !== 'POST') return null;
+    if (h.kind === 'header-echo') {
+      const v = headerOf(req, h.header);
+      if (v === null) return null;
+      if (!ECHO_RE.test(v)) return { kind: 'invalid', message: `giá trị header ${h.header} ngoài tập ký tự cho phép (ASCII in được, ≤ 256)` };
+      return { kind: 'respond', status: 200, body: null, headers: { [h.header]: v }, meta: { kind: h.kind } };
+    }
+    if (h.kind === 'body-echo') {
+      if (!whenMatches(h.when, req)) return null;
+      const v = bodyObject(req)?.[h.echo.field];
+      if (typeof v !== 'string') return { kind: 'invalid', message: `body thiếu trường chuỗi ${h.echo.field} để trả lại` };
+      return echoText(v, { kind: h.kind });
+    }
+    if (h.kind === 'manual-url') {
+      if (!whenMatches(h.when, req)) return null;
+      const url = bodyObject(req)?.[h.urlField];
+      // Hub KHÔNG gọi URL lấy từ request (SSRF, §15) — chỉ lưu để console hiện cho dev tự bấm. Chỉ https, ≤ 2048 ký tự.
+      const shown = typeof url === 'string' && url.length <= 2048 && /^https:\/\/[^\s]+$/.test(url) ? url : null;
+      return { kind: 'respond', status: 200, body: null, meta: { kind: h.kind, subscribeUrl: shown } };
+    }
+    return null; // hmac-echo: chỉ sau verify (E3)
   }
 
   extractIdempotencyKey(req: RawWebhookRequest, ctx?: AdapterContext): string {
@@ -86,9 +129,12 @@ export class GenericAdapter implements ProviderAdapter {
    */
   sensitiveHeaders(ctx?: AdapterContext): string[] {
     const c = configOf(ctx);
-    if (!c || !isStaticToken(c)) return [];
-    if (c.location === 'basic') return ['authorization'];
-    return c.header ? [c.header] : [];
+    if (!c) return [];
+    // PK4: header của `header-echo` (Asana X-Hook-Secret) mang bí mật -> che trước khi lưu dòng bắt tay.
+    const echoed = c.handshake?.kind === 'header-echo' ? [c.handshake.header] : [];
+    if (!isStaticToken(c)) return echoed;
+    if (c.location === 'basic') return ['authorization', ...echoed];
+    return [...(c.header ? [c.header] : []), ...echoed];
   }
 
   normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
@@ -204,11 +250,20 @@ export class GenericAdapter implements ProviderAdapter {
     return { ok: false, reason: 'mapping_field_invalid', field: typeof m === 'string' ? m : key };
   }
 
-  buildAck(result: IngestResult): { status: number; body: unknown } {
-    if (result.isDuplicate) return { status: 200, body: { ok: true, duplicate: true } };
+  /**
+   * PK4 §6.3: `successStatus` (200|202|204; 204 không body) và `rejectStatus` (401|403|503) theo `ack` của source.
+   * Lõi vẫn kẹp: từ chối chỉ nhận 401/403/503, không bao giờ 2xx.
+   */
+  buildAck(result: IngestResult, ctx?: AdapterContext): { status: number; body: unknown } {
+    const ack = configOf(ctx)?.ack;
+    if (result.accepted) {
+      const status = ack?.successStatus ?? 200;
+      if (status === 204) return { status, body: null };
+      return { status, body: result.isDuplicate ? { ok: true, duplicate: true } : { ok: true } };
+    }
     // DX1 §2.1 (ngoại lệ duy nhất ở /hooks): người đọc ack của nguồn tuỳ chỉnh là DEV đang cấu hình -> kèm `fix`.
-    if (!result.accepted) return { status: result.status, body: { ok: false, error: result.message ?? 'rejected', fix: genericAckFix(result.status) } };
-    return { status: 200, body: { ok: true } };
+    const status = result.status === 401 ? (ack?.rejectStatus ?? 401) : result.status;
+    return { status, body: { ok: false, error: result.message ?? 'rejected', fix: genericAckFix(result.status) } };
   }
 }
 
@@ -330,6 +385,95 @@ function isObj(v: unknown): v is Record<string, any> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * Verify ĐỒNG BỘ (không I/O) theo config đã kiểm — `verify` bọc lại; hmac-echo (PK4) gọi cho từng secret để ký bằng đúng
+ * secret đã verify request bắt tay.
+ */
+function verifyWith(c: GenericConfig, req: RawWebhookRequest, secrets: string[], ctx?: AdapterContext): boolean {
+  if (secrets.length === 0) return false;
+  const nowMs = ctx?.verifyAt ? ctx.verifyAt.getTime() : Date.now();
+  // Review PK3 T-2: `verifyAt` không hợp lệ (Invalid Date -> NaN) thì không có "bây giờ" để kiểm độ lệch -> fail-closed.
+  if (!Number.isFinite(nowMs)) return false;
+  if (c.scheme === 'standard-webhooks') {
+    const opts = { nowSec: Math.floor(nowMs / 1000) };
+    return secrets.some((s) => swVerify(s, req.headers, req.rawBody, opts));
+  }
+  if (isSignedTemplate(c)) return verifySignedTemplate(c, req, secrets, nowMs);
+  if (isHmacScheme(c)) return verifyMac(c, req, secrets);
+  const presented = presentedToken(c, req);
+  if (presented === null) return false;
+  let ok = false;
+  for (const secret of secrets) {
+    // Không dừng sớm: thời gian không lộ secret nào khớp.
+    if (timingSafeCompare(presented, expectedToken(c, secret))) ok = true;
+  }
+  return ok;
+}
+
+// ───────────────────────── PK4: bắt tay (SPEC-provider-khac §6, ADR-205) ─────────────────────────
+
+/** E27: giá trị echo — ASCII in được, 1–256 ký tự (không khoảng trắng, không CR/LF -> không chèn header); trả text/plain + nosniff. */
+/** E3: kiểu bắt tay duy nhất chạy SAU verify (tách hằng: gate sig-compare cấm so sánh trên dòng nhắc tên thuật toán). */
+const AFTER_VERIFY_KIND: HandshakeKind = 'hmac-echo';
+type MacEcho = Extract<HandshakeConfig, { kind: 'hmac-echo' }>;
+const isMacEcho = (h: HandshakeConfig): h is MacEcho => h.kind === AFTER_VERIFY_KIND;
+const ECHO_RE = /^[\x21-\x7E]{1,256}$/;
+/** E3: plainToken của hmac-echo — không `:`/`{`/`.` nên không bao giờ trùng khuôn chuỗi ký sự kiện (`v0:{ts}:{body}`). */
+export const HMAC_ECHO_TOKEN_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** Mọi giá trị của tham số `name` trong chuỗi query thô (E6). */
+function queryValues(query: string | undefined, name: string): string[] {
+  return new URLSearchParams(query ?? '').getAll(name);
+}
+
+/** Body dạng object: đã parse (JSON/form) hoặc tự parse bytes gốc (SNS gửi JSON với `text/plain`, E1). */
+function bodyObject(req: RawWebhookRequest): Record<string, unknown> | null {
+  if (isObj(req.body)) return req.body;
+  if (req.rawBody.length === 0 || req.rawBody.length > 1024 * 1024 || req.rawBody[0] !== 0x7b) return null;
+  try {
+    const v = JSON.parse(req.rawBody.toString('utf8'));
+    return isObj(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `when` — một cặp hằng (E16): trường cấp một của body hoặc header bằng đúng giá trị khai. Giá trị không bí mật. */
+function whenMatches(w: HandshakeWhen, req: RawWebhookRequest): boolean {
+  const v = 'header' in w ? headerOf(req, w.header) : bodyObject(req)?.[w.field];
+  return typeof v === 'string' && v === w.equals;
+}
+
+function echoText(v: string, meta: Record<string, unknown>): HandshakeOutcome {
+  if (!ECHO_RE.test(v)) return { kind: 'invalid', message: 'giá trị cần trả lại ngoài tập ký tự cho phép (ASCII in được, 1–256 ký tự)' };
+  return {
+    kind: 'respond',
+    status: 200,
+    body: v,
+    contentType: 'text/plain; charset=utf-8',
+    headers: { 'X-Content-Type-Options': 'nosniff' },
+    meta,
+  };
+}
+
+/**
+ * E3: Zoom `endpoint.url_validation`. Lõi chỉ gọi khi request ĐÃ verify qua theo scheme của source, nên kẻ biết sourceKey
+ * không xin được chữ ký. plainToken khoá bằng regex (không `:`/`{`) -> không trùng khuôn chuỗi ký của sự kiện.
+ * Ký bằng secret ĐÃ verify request này (xoay khoá: secret mới và cũ cùng hiệu lực, chọn đúng cái provider đang dùng).
+ */
+function hmacEcho(h: MacEcho, req: RawWebhookRequest, secrets: string[], ctx: AdapterContext | undefined): HandshakeOutcome {
+  const b = bodyObject(req);
+  const holder = h.tokenParent !== undefined ? b?.[h.tokenParent] : b;
+  const token = isObj(holder) ? holder[h.tokenField] : undefined;
+  if (typeof token !== 'string' || !HMAC_ECHO_TOKEN_RE.test(token)) {
+    return { kind: 'invalid', message: `${h.tokenField} phải khớp ^[A-Za-z0-9_-]{1,128}$` };
+  }
+  const c = configOf(ctx)!;
+  const key = secrets.find((s) => verifyWith(c, req, [s], ctx));
+  if (key === undefined) return { kind: 'reject' };
+  const mac = createHmac('sha256', Buffer.from(key, 'utf8')).update(token, 'utf8').digest('hex');
+  return { kind: 'respond', status: 200, body: { [h.tokenField]: token, [h.macField]: mac }, contentType: 'application/json', meta: { kind: h.kind } };
+}
 /** Config đã lưu được kiểm LẠI mỗi lần dùng: dữ liệu DB hỏng không bao giờ làm verify "nhận bừa". */
 function configOf(ctx?: AdapterContext): GenericConfig | null {
   if (!ctx || ctx.verificationConfig === undefined || ctx.verificationConfig === null) return null;

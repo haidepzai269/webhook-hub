@@ -12,7 +12,7 @@
   "confidence": "cao",
   "docs": "https://developers.facebook.com/docs/graph-api/webhooks/getting-started",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "S7: bắt tay GET hub.challenge (query-echo + verify_token) -> chờ PK4"
+  "pendingReason": "PK4 xong (query-echo + verifyTokenParam hub.verify_token). Còn chặn: không có id sự kiện cấp một (entry[].id + time lồng trong mảng) -> chờ khoá chống trùng theo bodyHash."
 }

@@ -7,7 +7,7 @@
   "confidence": "trung bình",
   "docs": "https://developers.intercom.com/docs/references/1.1/webhooks/webhook-models",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "URL phải trả 200 cho HEAD khi kiểm (E27: HEAD hiện 405) -> chờ PK4"
+  "pendingReason": "URL phải trả 200 cho HEAD khi kiểm; E27 chốt HEAD -> 405. Mâu thuẫn với spec: cần phòng quyết (ghi §16)."
 }

@@ -7,7 +7,7 @@
   "confidence": "cao",
   "docs": "https://developer.okta.com/docs/concepts/event-hooks/",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "S7: GET x-okta-verification-challenge (header-echo trả JSON) -> chờ PK4"
+  "pendingReason": "Bắt tay của Okta là GET mang tiêu đề x-okta-verification-challenge, đòi trả JSON {verification} — không thuộc 5 kiểu PK4 (GET chỉ cho query-echo, E27). Cần ADR nếu thêm kiểu."
 }

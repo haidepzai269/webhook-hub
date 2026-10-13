@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService, getMasterKey } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
-import { AdapterContext, IdempotencyKeyMissingError, ProviderRegistry } from '@hub/providers';
+import { AdapterContext, HandshakeOutcome, IdempotencyKeyMissingError, ProviderAdapter, ProviderRegistry } from '@hub/providers';
 import { aesGcmDecrypt } from '@hub/crypto';
 import {
   RawWebhookRequest,
@@ -68,24 +68,40 @@ interface TraceState {
 const TRAFFIC_OUTCOMES = new Set<string>(['ACCEPTED', 'DUPLICATE', 'REJECTED', 'RATE_LIMITED']);
 
 /**
+ * PK4 (§6.3, ADR-205): mã từ chối chữ ký mà adapter được chọn (`ack.rejectStatus`). KHÔNG BAO GIỜ 2xx: 2xx cho request sai
+ * chữ ký là lối vòng qua EG2 (BB-3). Lõi kẹp, không tin adapter.
+ */
+const SIGNATURE_REJECT_STATUSES: ReadonlySet<number> = new Set([401, 403, 503]);
+/** PK4: mã thành công adapter được chọn (`ack.successStatus`). Ngoài tập -> 200. */
+const SUCCESS_STATUSES: ReadonlySet<number> = new Set([200, 202, 204]);
+/** PK4 (E27): trần chuỗi query ở ingest (nginx giữ mặc định). */
+export const MAX_INGEST_QUERY_CHARS = 8 * 1024;
+
+/**
  * ADR-139 (Q1 = a): ack TỪ CHỐI (401 chữ ký / 422 thiếu khoá chống trùng) theo định dạng của CHÍNH provider
- * (`adapter.buildAck`) — GenericAdapter kèm `fix` cho dev đang cấu hình nguồn. STATUS do lõi quyết, adapter chỉ
- * quyết body (không provider nào đổi được 401/422). `message` là hằng của lõi — không bao giờ chứa secret hay body
- * request. Hàm thuần, không I/O: không thêm gì vào đường nóng. buildAck lỗi -> body cũ.
+ * (`adapter.buildAck`) — GenericAdapter kèm `fix` cho dev đang cấu hình nguồn. STATUS do lõi quyết: 422 giữ nguyên; 401
+ * chỉ được adapter đổi thành 403/503 (PK4 `rejectStatus`, ADR-205) — không bao giờ 2xx. `message` là hằng của lõi — không
+ * bao giờ chứa secret hay body request. Hàm thuần, không I/O: không thêm gì vào đường nóng. buildAck lỗi -> body cũ.
  */
 function rejectAck(
-  adapter: { buildAck(r: IngestResult): { status: number; body: unknown } },
+  adapter: { buildAck(r: IngestResult, ctx?: AdapterContext): { status: number; body: unknown } },
   status: 401 | 422,
   message: string,
   log: { warn: (o: unknown, m?: string) => void },
+  ctx?: AdapterContext,
 ): { status: number; body: unknown } {
   try {
-    return { status, body: adapter.buildAck({ accepted: false, status, message }).body };
+    const ack = adapter.buildAck({ accepted: false, status, message }, ctx);
+    const final = status === 401 && SIGNATURE_REJECT_STATUSES.has(ack.status) ? ack.status : status;
+    return { status: final, body: ack.body };
   } catch (err: any) {
     log.warn({ err: err?.message }, 'buildAck lỗi khi dựng ack từ chối -> dùng body mặc định');
     return { status, body: { error: message } };
   }
 }
+
+/** PK4: 405 cho method adapter không nhận (GET ngoài `query-echo`, HEAD — E27). Không ghi DB, không phạt. */
+const METHOD_NOT_ALLOWED: IngestResponse = { status: 405, body: { error: 'method_not_allowed' } };
 
 @Injectable()
 export class IngestService implements OnModuleInit, OnModuleDestroy {
@@ -281,14 +297,17 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 
   /** Kết quả persistAccepted -> ACK đúng định dạng của adapter (provider hoặc API). */
   private ackFor(
-    adapter: { buildAck(r: IngestResult): { status: number; body: unknown } },
+    adapter: { buildAck(r: IngestResult, ctx?: AdapterContext): { status: number; body: unknown } },
     r: PersistResult,
     idempotencyKey: string,
     trace: TraceState,
+    ctx?: AdapterContext,
   ): { status: number; body: unknown } {
+    // PK4: 2xx chỉ SAU COMMIT (BB-3 — hàm này chỉ chạy sau persistAccepted); mã ngoài 200/202/204 -> 200.
+    const ok = (a: { status: number; body: unknown }) => (SUCCESS_STATUSES.has(a.status) ? a : { status: 200, body: a.body });
     if (r.kind === 'duplicate') {
       trace.outcome = 'DUPLICATE';
-      return adapter.buildAck({ accepted: true, status: 200, isDuplicate: true, idempotencyKey });
+      return ok(adapter.buildAck({ accepted: true, status: 200, isDuplicate: true, idempotencyKey }, ctx));
     }
     if (r.kind === 'error') {
       trace.outcome = 'ERROR';
@@ -297,7 +316,59 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     trace.outcome = 'ACCEPTED';
     trace.rawEventId = r.rawEventId;
     trace.bytes = r.bytes; // QT E2: = octet_length(body_raw) vừa COMMIT
-    return adapter.buildAck({ accepted: true, status: 200, rawEventId: r.rawEventId, idempotencyKey, isDuplicate: false });
+    return ok(adapter.buildAck({ accepted: true, status: 200, rawEventId: r.rawEventId, idempotencyKey, isDuplicate: false }, ctx));
+  }
+
+  /** PK4: hỏi adapter có phải bắt tay không. Adapter ném -> coi như không phải (log), request đi tiếp đường thường. */
+  private runHandshake(
+    adapter: ProviderAdapter,
+    req: RawWebhookRequest,
+    secrets: string[],
+    ctx: AdapterContext,
+    phase: 'before-verify' | 'after-verify',
+    log: { warn: (o: object, m: string) => void },
+  ): HandshakeOutcome | null {
+    if (!adapter.handshake) return null;
+    try {
+      return adapter.handshake(req, secrets, ctx, phase);
+    } catch (err: any) {
+      log.warn({ err: err?.message, phase }, 'handshake của adapter lỗi -> coi như không phải bắt tay');
+      return null;
+    }
+  }
+
+  /**
+   * PK4 (§6.1, E8): trả lời bắt tay. `respond` -> ghi MỘT dòng REJECTED `signature_valid=true` + `__hub_meta.reason=
+   * 'handshake'` (đường `storeRejected` sẵn có: ≤4KB, ≤20/phút/source) để tab Lắng nghe hiện "Đã bắt tay ✓"; EG4 outcome
+   * REJECTED (không thêm enum, E8). Không event, không outbox, không SET NX, không EG3. `invalid` -> 400, không ghi DB.
+   */
+  private async answerHandshake(
+    h: Exclude<HandshakeOutcome, { kind: 'reject' }>,
+    source: { id: string; tenantId: string },
+    req: RawWebhookRequest,
+    storedHeaders: Record<string, unknown>,
+    signatureHeader: string | null,
+    trace: TraceState,
+    log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void; info: (o: object, m: string) => void },
+  ): Promise<IngestResponse> {
+    if (h.kind === 'invalid') {
+      log.warn({ message: h.message }, 'Bắt tay không hợp lệ -> 400');
+      return { status: 400, body: { error: 'handshake_invalid', message: h.message } };
+    }
+    // Lõi kẹp: bắt tay là phản hồi thành công của provider — chỉ 200/202/204.
+    const status = SUCCESS_STATUSES.has(h.status) ? h.status : 200;
+    trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, trace.correlationId, log, {
+      reason: 'handshake',
+      handshake: h.meta,
+    });
+    trace.outcome = 'REJECTED';
+    log.info({ kind: h.meta?.kind }, 'Đã trả lời bắt tay của provider');
+    return {
+      status,
+      body: status === 204 ? null : h.body,
+      ...(h.contentType ? { contentType: h.contentType } : {}),
+      ...(h.headers ? { headers: h.headers } : {}),
+    };
   }
 
   /**
@@ -336,6 +407,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     if (req.rawBody.length > MAX_INGEST_PAYLOAD_BYTES) {
       log.warn('Payload vượt quá giới hạn 1MB');
       return { status: 413, body: { error: 'Payload quá lớn (tối đa 1MB)' } };
+    }
+    // 1 (PK4, E27): trần chuỗi query 8KB — GET bắt tay đọc query; query khổng lồ không đi tiếp tới DB/adapter.
+    if ((req.query ?? '').length > MAX_INGEST_QUERY_CHARS) {
+      log.warn('Query vượt quá 8KB');
+      return { status: 414, body: { error: 'Query quá dài (tối đa 8KB)' } };
     }
 
     // Nạp adapter
@@ -377,6 +453,26 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       log.warn({ sourceProvider: source.provider }, 'Segment provider của URL không khớp provider của source -> 404');
       return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
     }
+    // S8: cấu hình riêng của source (GenericAdapter) — lõi chỉ chuyển qua, KHÔNG đọc, không `if (provider)`.
+    // PK4 (E13): `openSealed` mở giá trị adapter cần (token bắt tay mã hoá) — lõi không biết đó là gì.
+    const masterKey = getMasterKey();
+    const ctx: AdapterContext = {
+      verificationConfig: (source as { verificationConfig?: unknown }).verificationConfig ?? undefined,
+      openSealed: (enc) => {
+        try {
+          return aesGcmDecrypt(enc, masterKey);
+        } catch {
+          return null;
+        }
+      },
+    };
+    // 2 (PK4, §6.2, E27): method. Không cài `acceptsMethod` = chỉ POST; HEAD luôn 405. 405 không ghi DB, không phạt, không vào
+    // lưu lượng (đặt TRƯỚC `trace.tenantId`) — URL đúng mà sai method là lỗi cấu hình, không phải dò sourceKey.
+    const method = req.method ?? 'POST';
+    if (method === 'HEAD' || !(adapter.acceptsMethod ? adapter.acceptsMethod(method, ctx, req) : method === 'POST')) {
+      log.warn({ method }, 'Method không được nhận ở source này -> 405');
+      return METHOD_NOT_ALLOWED;
+    }
     trace.tenantId = source.tenantId;
     trace.sourceId = source.id;
 
@@ -396,7 +492,6 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Giải mã danh sách secrets còn hiệu lực
-    const masterKey = getMasterKey();
     const decryptedSecrets = source.secrets.map((s) => {
       try {
         return aesGcmDecrypt(s.secretEncrypted, masterKey);
@@ -406,28 +501,39 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       }
     }).filter(Boolean);
 
-    // S8: cấu hình riêng của source (GenericAdapter) — lõi chỉ chuyển qua, KHÔNG đọc, không `if (provider)`.
-    const ctx: AdapterContext = { verificationConfig: (source as { verificationConfig?: unknown }).verificationConfig ?? undefined };
-
-    // 3. Adapter xác thực chữ ký (verify)
-    const isSignatureValid = await adapter.verify(req, decryptedSecrets, ctx);
-    // ADR-051: verify đã xong -> từ đây chỉ lưu bản headers ĐÃ che (Authorization/Cookie/X-API-Key...), cộng
-    // header bí mật theo cấu hình source mà adapter khai (S8: token static ở header tuỳ chọn).
-    // `req.headers` gốc vẫn còn cho adapter (extractIdempotencyKey/buildAck); bodyRaw giữ nguyên bytes.
+    // ADR-051: chỉ lưu bản headers ĐÃ che (Authorization/Cookie/X-API-Key...), cộng header bí mật theo cấu hình source mà
+    // adapter khai (S8: token static ở header tuỳ chọn). `req.headers` gốc vẫn còn cho adapter (extractIdempotencyKey/
+    // buildAck); bodyRaw giữ nguyên bytes. PK4: tính TRƯỚC bắt tay (dòng `handshake` cũng chỉ lưu bản đã che).
     const storedHeaders = redactHeaders(req.headers as Record<string, unknown>, adapter.sensitiveHeaders?.(ctx) ?? []);
     // S3-1: adapter tự biết chữ ký của mình ở đâu (header GitHub/Stripe, body PayOS, SePay đã che).
     // Lõi không đoán header -> thêm provider không phải sửa dòng này.
     const signatureHeader = adapter.extractSignature(req, ctx);
-    if (!isSignatureValid) {
+    const rejectSignature = async (): Promise<IngestResponse> => {
       log.warn('Chữ ký webhook không hợp lệ! Lưu raw_event với status REJECTED');
       // Lưu MẪU request lỗi để điều tra (§7.1) — có giới hạn (S1-4): tối đa 4KB body và
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
       trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
       trace.outcome = 'REJECTED';
       // EG2 luật (b): phạt theo CẶP (ip, sourceKey) — tenant khác dùng chung IP của provider không bị vạ lây.
+      // PK4 (E21): `rejectStatus: 503` vẫn phạt — mã HTTP đổi, luật phạt thì không.
       this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
-      return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log);
-    }
+      return rejectAck(adapter, 401, 'Chữ ký webhook không hợp lệ (Unauthorized)', log, ctx);
+    };
+
+    // 2h (PK4, E9): bắt tay query/body/header-echo, manual-url — TRƯỚC verify, KHÔNG qua EG3, 0 lệnh Redis, không outbox,
+    // không SET NX. Ghi MỘT dòng REJECTED `signature_valid=true` + `__hub_meta.reason='handshake'` (E8).
+    const before = this.runHandshake(adapter, req, decryptedSecrets, ctx, 'before-verify', log);
+    if (before) return before.kind === 'reject' ? rejectSignature() : this.answerHandshake(before, source, req, storedHeaders, signatureHeader, trace, log);
+    // GET chỉ để bắt tay (§6.2, §15): GET không phải bắt tay thì không bao giờ tới verify / persist.
+    if (method !== 'POST') return METHOD_NOT_ALLOWED;
+
+    // 3. Adapter xác thực chữ ký (verify)
+    const isSignatureValid = await adapter.verify(req, decryptedSecrets, ctx);
+    if (!isSignatureValid) return rejectSignature();
+
+    // 3h (PK4, E3): hmac-echo CHỈ sau verify qua — kẻ biết sourceKey không xin được chữ ký hộ. Vẫn trước EG3, 0 lệnh Redis.
+    const after = this.runHandshake(adapter, req, decryptedSecrets, ctx, 'after-verify', log);
+    if (after) return after.kind === 'reject' ? rejectSignature() : this.answerHandshake(after, source, req, storedHeaders, signatureHeader, trace, log);
 
     // 3c. EG3 (ADR-178): rate limit theo source chạy SAU verify — chỉ request ký đúng mới tiêu hạn mức. Kẻ biết một
     // sourceKey thật bắn chữ ký sai không còn khoá được webhook thật của nạn nhân. Cửa sổ cố định 60s, 1 EVAL INCR+EXPIRE,
@@ -452,14 +558,14 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
       trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log);
       trace.outcome = 'REJECTED';
-      return rejectAck(adapter, 422, 'missing_idempotency_key', log);
+      return rejectAck(adapter, 422, 'missing_idempotency_key', log, ctx);
     }
     const persisted = await this.persistAccepted(source, req, idempotencyKey, correlationId, {
       headers: storedHeaders as Record<string, unknown>,
       signatureHeader,
     });
-    // 8. ACK theo định dạng của provider
-    return this.ackFor(adapter, persisted, idempotencyKey, trace);
+    // 8. ACK theo định dạng của provider (PK4: mã thành công theo `ack.successStatus`)
+    return this.ackFor(adapter, persisted, idempotencyKey, trace, ctx);
   }
 
   /** EG4: cộng một request vào lưu lượng trong bộ nhớ (không I/O). Lỗi -> bỏ qua (số liệu quan sát). */
@@ -553,6 +659,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     signatureValid: boolean,
     correlationId: string,
     log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void },
+    /** PK4 (E8, E29): `reason: 'handshake'` (+ `handshake`) — `countSignatureBySource` loại dòng có reason. */
+    extraMeta?: Record<string, unknown>,
   ): Promise<number> {
     const sourceId = source.id;
     if (!this.rejectedLimiter.tryAcquire(sourceId)) {
@@ -566,7 +674,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
         data: {
           sourceId,
           idempotencyKey: `rejected_${correlationId}`,
-          headers: { ...(storedHeaders as any), [REJECTED_META_KEY]: sample.meta },
+          headers: { ...(storedHeaders as any), [REJECTED_META_KEY]: { ...sample.meta, ...(extraMeta ?? {}) } },
           body: sample.body as any,
           bodyRaw: new Uint8Array(sample.bodyRaw),
           contentType: req.contentType,

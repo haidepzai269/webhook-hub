@@ -7,8 +7,8 @@
   "confidence": "cao",
   "docs": "https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/",
   "blockedBy": [
-    "PK4",
-    "PK5"
+    "PK5",
+    "docs"
   ],
-  "pendingReason": "S6+S7: ký body + URL callback; HEAD khi tạo -> chờ PK4/PK5"
+  "pendingReason": "Ký body + URL callback (S6) -> PK5; khi tạo gửi HEAD đòi 200, E27 chốt HEAD -> 405 (mâu thuẫn, ghi §16)."
 }

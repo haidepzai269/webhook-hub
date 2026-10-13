@@ -2,7 +2,8 @@ import { ERROR_CATALOG, ProviderType, docsUrlFor } from '@hub/common';
 import { ProviderRegistry } from '@hub/providers';
 
 /** Phản hồi của lõi ingest. `headers` chỉ dùng cho 429 của hộp phạt (`Retry-After`). */
-export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string> };
+/** PK4: `contentType` (echo bắt tay `text/plain`), `headers` (Retry-After của hộp phạt; header-echo). */
+export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string>; contentType?: string };
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
 

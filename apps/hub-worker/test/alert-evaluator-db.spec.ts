@@ -201,6 +201,15 @@ describeDb('CB2 AlertEvaluator (Postgres, hub_app)', () => {
     // trong 15 phút: 10 ping hợp lệ + 4 request ký sai
     for (let i = 0; i < 10; i++) await raw(new Date(now.getTime() - (i + 1) * 10_000), true, true);
     for (let i = 0; i < 4; i++) await raw(new Date(now.getTime() - (i + 1) * 15_000), false, null);
+    // PK4 (E8, ADR-205): dòng bắt tay / chưa cấu hình (`__hub_meta.reason`) không vào mẫu số lẫn tử số.
+    for (const reason of ['handshake', 'not_configured']) {
+      await owner.rawEvent.create({
+        data: {
+          sourceId: src.id, idempotencyKey: `cb2h:${run}:${reason}`, headers: { __hub_meta: { reason } }, body: {}, bodyRaw: Buffer.from('{}'),
+          signatureValid: reason === 'handshake', status: 'REJECTED', receivedAt: new Date(now.getTime() - 5_000),
+        },
+      });
+    }
 
     const repo = svc1.forTenant(P4);
     expect(await repo.countSignatureBySource(new Date(now.getTime() - 15 * MIN))).toEqual([{ sourceId: src.id, requests: 4, invalid: 4 }]);

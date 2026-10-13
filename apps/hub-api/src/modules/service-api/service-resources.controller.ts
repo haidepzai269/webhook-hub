@@ -22,7 +22,7 @@ import {
 import { longPoll } from './polling';
 import { hubError } from '../errors/hub-error';
 import { assertSourceLimit } from '../console/source-limit';
-import { parseSourceInput } from './source-input';
+import { parseSourceInput, publicVerificationConfig } from './source-input';
 import { inspectSourceRows } from './source-inspect';
 import { generateSourceKey } from '../console/source-key';
 
@@ -108,7 +108,7 @@ function publicSource(s: any) {
     sourceKey: s.sourceKey,
     webhookUrl: `/hooks/${s.provider}/${s.sourceKey}`,
     isActive: s.isActive,
-    verificationConfig: s.verificationConfig ?? null,
+    verificationConfig: publicVerificationConfig(s.verificationConfig),
     createdAt: s.createdAt,
   };
 }

@@ -13,7 +13,7 @@
   "confidence": "cao",
   "docs": "https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "S7: bắt tay validationToken (query-echo, text/plain) -> chờ PK4"
+  "pendingReason": "Bắt tay là POST ?validationToken (query-echo trên POST, PK4 chỉ cho GET); chữ ký là clientState trong body (value[]) — ngoài khuôn config."
 }

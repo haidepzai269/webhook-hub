@@ -5,7 +5,7 @@ Danh mục là **dữ liệu**. Thêm một provider nghĩa là thêm file JSON 
 | Đường dẫn | Nội dung |
 |---|---|
 | `entries/<id>.json` | Mục đã nạp: fingerprint + handler (`config` / `native` / `unsupported`). Được build. |
-| `entries-pending/<id>.json` | Mục chưa nạp được: `blockedBy` (`PK4`, `PK5`, `docs`) và `pendingReason`. **Không** build. |
+| `entries-pending/<id>.json` | Mục chưa nạp được: `blockedBy` (`PK4`, `PK5`, `PK6`, `docs`) và `pendingReason`. **Không** build. |
 | `fixtures/<id>/*.http` | Request mẫu của mục (cả mục pending nếu có). |
 | `types.ts`, `identify.ts`, `index.ts` | Phía client, thuần, không dùng Node API. Web import qua alias `@hub/providers/catalog`. |
 | `catalog.ts` | Phía server: `CATALOG` được kiểm ngay lúc import. Sai thì hub-api không khởi động. |

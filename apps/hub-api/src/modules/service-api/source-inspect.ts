@@ -16,6 +16,20 @@ export interface InspectRow {
   receivedAt: Date;
   status: string;
   diagnosis: unknown;
+  /**
+   * PK4 (§6.1, ADR-205): dòng bắt tay (`__hub_meta.reason='handshake'`) — `kind`, và với `manual-url` thì `subscribeUrl`
+   * (link SNS cho dev tự bấm; hub KHÔNG gọi ra). Ngoại lệ có chủ đích duy nhất của "không trả giá trị".
+   */
+  handshake?: { kind: string; subscribeUrl?: string | null };
+}
+
+/** PK4: meta bắt tay của dòng REJECTED (`headers.__hub_meta`), không có -> null. */
+function handshakeOf(headers: unknown): InspectRow['handshake'] | null {
+  const meta = headers && typeof headers === 'object' ? (headers as Record<string, any>).__hub_meta : null;
+  if (!meta || meta.reason !== 'handshake') return null;
+  const h = meta.handshake && typeof meta.handshake === 'object' ? meta.handshake : {};
+  const kind = typeof h.kind === 'string' ? h.kind.slice(0, 32) : 'unknown';
+  return kind === 'manual-url' ? { kind, subscribeUrl: typeof h.subscribeUrl === 'string' ? h.subscribeUrl : null } : { kind };
 }
 
 /**
@@ -37,10 +51,15 @@ export async function inspectSourceRows(repo: InspectRepo, id: string, since?: s
   const adapter = ProviderRegistry.get(source.provider as any);
   const ctx = { verificationConfig: source.verificationConfig ?? undefined };
   const rows = await repo.findRecentRawEventsForInspect(source.id, from, 10);
-  return rows.map((r) => ({
-    id: r.id,
-    receivedAt: r.receivedAt,
-    status: r.status,
-    diagnosis: adapter.diagnose ? adapter.diagnose(r, ctx) : { ok: r.signatureValid },
-  }));
+  return rows.map((r) => {
+    // PK4 (E8): dòng bắt tay không phải "thiếu khoá chống trùng" — chẩn đoán `handshake`, kèm meta cho tab Lắng nghe.
+    const handshake = handshakeOf(r.headers);
+    if (handshake) return { id: r.id, receivedAt: r.receivedAt, status: r.status, diagnosis: { ok: true, reason: 'handshake' }, handshake };
+    return {
+      id: r.id,
+      receivedAt: r.receivedAt,
+      status: r.status,
+      diagnosis: adapter.diagnose ? adapter.diagnose(r, ctx) : { ok: r.signatureValid },
+    };
+  });
 }

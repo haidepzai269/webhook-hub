@@ -7,7 +7,7 @@
   "confidence": "cao",
   "docs": "https://docs.dropboxapi.com/dropbox-api/docs/webhooks",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "S7: GET ?challenge (query-echo) -> chờ PK4; dataless"
+  "pendingReason": "PK4 xong (query-echo challenge). Còn chặn: thông báo dataless, không có id sự kiện -> chờ khoá chống trùng theo bodyHash."
 }

@@ -24,6 +24,36 @@ export type SignatureLocation =
   | { headers: string[]; prefix?: string }
   | { header: string; kv: { sep: ';' | ','; sig: string; timestamp?: string } };
 
+/**
+ * PK4 (SPEC-provider-khac §6.1, E3/E13/E16/E20/E27, ADR-205): bắt tay khai báo được. `when` là MỘT cặp hằng (trường cấp
+ * một của body HOẶC header) — không biểu thức.
+ */
+export type HandshakeWhen = { field: string; equals: string } | { header: string; equals: string };
+export type HandshakeKind = 'query-echo' | 'body-echo' | 'header-echo' | 'hmac-echo' | 'manual-url';
+export type HandshakeConfig =
+  /** GET ?<param>=X -> 200 text/plain X (Meta, Dropbox, WebSub). `verifyTokenEnc`: token so khớp, AES-GCM (E13), KHÔNG phải SourceSecret. */
+  | { kind: 'query-echo'; param: string; verifyTokenParam?: string; verifyTokenEnc?: string }
+  /** POST, `when` khớp -> 200 text/plain giá trị body.<echo.field> (Slack url_verification, Twitch). */
+  | { kind: 'body-echo'; when: HandshakeWhen; echo: { field: string } }
+  /** POST có header <header> -> 200, trả lại đúng header đó (Asana X-Hook-Secret). `adoptSecret` chỉ ở chế độ thu (PK6). */
+  | { kind: 'header-echo'; header: string }
+  /** POST, `when` khớp, CHỈ SAU verify qua (E3) -> 200 JSON {<tokenField>: t, <macField>: hex(HMAC-SHA256(secret, t))} (Zoom). */
+  | { kind: 'hmac-echo'; when: HandshakeWhen; tokenField: string; tokenParent?: string; macField: string }
+  /** POST, `when` khớp -> lưu mẫu, console hiện body.<urlField> cho dev tự bấm (SNS SubscribeURL). Hub KHÔNG gọi ra. */
+  | { kind: 'manual-url'; when: HandshakeWhen; urlField: string };
+/** PK4 §6.3: mã HTTP của ack. Từ chối KHÔNG bao giờ là 2xx (BB-3, EG2). */
+export interface AckConfig {
+  successStatus?: 200 | 202 | 204;
+  rejectStatus?: 401 | 403 | 503;
+}
+export const HANDSHAKE_KINDS: readonly HandshakeKind[] = ['query-echo', 'body-echo', 'header-echo', 'hmac-echo', 'manual-url'];
+export const ACK_SUCCESS_STATUSES = [200, 202, 204] as const;
+export const ACK_REJECT_STATUSES = [401, 403, 503] as const;
+/** Giá trị hằng của `when.equals` (vd `url_verification`, `webhook_callback_verification`, `SubscriptionConfirmation`). */
+export const WHEN_EQUALS_RE = /^[\x21-\x7E]{1,128}$/;
+/** Token xác minh của `query-echo` (người dùng tự chọn khi đăng ký tại provider). Chỉ gửi lúc tạo source, server mã hoá. */
+export const VERIFY_TOKEN_RE = /^[\x21-\x7E]{8,256}$/;
+
 export interface GenericConfig {
   scheme: GenericScheme;
   header?: string;
@@ -56,6 +86,10 @@ export interface GenericConfig {
   eventType: string;
   mapping?: Record<string, MappingValue>;
   timezone?: string;
+  /** PK4: bắt tay lúc đăng ký URL. */
+  handshake?: HandshakeConfig;
+  /** PK4: mã HTTP của ack. */
+  ack?: AckConfig;
 }
 
 export type ConfigCheck = { ok: true; config: GenericConfig } | { ok: false; field: string; message: string };
@@ -237,10 +271,21 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if (c.prefix !== undefined) config.prefix = c.prefix;
   if (mapping) config.mapping = mapping;
   if (c.timezone !== undefined) config.timezone = c.timezone;
+  if (tail.handshake) config.handshake = tail.handshake;
+  if (tail.ack) config.ack = tail.ack;
   return { ok: true, config };
 }
 
-type Tail = { ok: true; idempotency: GenericConfig['idempotency']; eventType: string; mapping?: GenericConfig['mapping'] } | { ok: false; bad: ConfigCheck };
+type Tail =
+  | {
+      ok: true;
+      idempotency: GenericConfig['idempotency'];
+      eventType: string;
+      mapping?: GenericConfig['mapping'];
+      handshake?: HandshakeConfig;
+      ack?: AckConfig;
+    }
+  | { ok: false; bad: ConfigCheck };
 
 /** Phần chung mọi scheme: khoá chống trùng, kiểu sự kiện, múi giờ, ánh xạ (tách ra để `signed-template` dùng lại). */
 function parseTail(c: Record<string, any>, sw: boolean): Tail {
@@ -295,8 +340,150 @@ function parseTail(c: Record<string, any>, sw: boolean): Tail {
     mapping = c.mapping as Record<string, MappingValue>;
   }
 
-  return { ok: true, idempotency, eventType, ...(mapping ? { mapping } : {}) };
+  const hs = parseHandshake(c.handshake);
+  if ('bad' in hs) return { ok: false, bad: hs.bad };
+  const ack = parseAck(c.ack);
+  if ('bad' in ack) return { ok: false, bad: ack.bad };
+  return {
+    ok: true,
+    idempotency,
+    eventType,
+    ...(mapping ? { mapping } : {}),
+    ...(hs.value ? { handshake: hs.value } : {}),
+    ...(ack.value ? { ack: ack.value } : {}),
+  };
 }
+
+// ───────────────────────── PK4: handshake + ack (SPEC-provider-khac §6, ADR-205) ─────────────────────────
+
+type Parsed<T> = { value?: T } | { bad: ConfigCheck };
+
+function parseWhen(w: unknown, at: string): Parsed<HandshakeWhen> {
+  // E16: `{field, equals}` HOẶC `{header, equals}` — một cặp hằng, không biểu thức.
+  if (!isObj(w) || Object.keys(w).length !== 2 || !('equals' in w) || ('field' in w) === ('header' in w)) {
+    return { bad: bad(at, 'when là {field, equals} HOẶC {header, equals}') };
+  }
+  if (typeof w.equals !== 'string' || !WHEN_EQUALS_RE.test(w.equals)) return { bad: bad(`${at}.equals`, 'equals là chuỗi ASCII in được, 1–128 ký tự') };
+  if ('field' in w) {
+    if (typeof w.field !== 'string' || !FIELD_RE.test(w.field)) return { bad: bad(`${at}.field`, 'field là trường CẤP MỘT của body ^[A-Za-z0-9_]{1,64}$') };
+    return { value: { field: w.field, equals: w.equals } };
+  }
+  if (typeof w.header !== 'string' || !HEADER_RE.test(w.header)) return { bad: bad(`${at}.header`, 'header viết thường ^[a-z0-9-]{1,64}$') };
+  return { value: { header: w.header, equals: w.equals } };
+}
+
+/**
+ * PK4: kiểm `handshake`. Khoá lạ -> 422 (không im lặng bỏ: cấu hình bắt tay sai = provider không lưu được URL).
+ * `verifyToken` (rõ) KHÔNG bao giờ nằm trong config đã lưu — `parseSourceInput` đổi nó thành `verifyTokenEnc` (E13).
+ */
+function parseHandshake(h: unknown): Parsed<HandshakeConfig> {
+  if (h === undefined) return {};
+  const fail = (field: string, message: string): Parsed<HandshakeConfig> => ({ bad: bad(`handshake.${field}`, message) });
+  if (!isObj(h)) return { bad: bad('handshake', 'handshake là object {kind, …}') };
+  if (!HANDSHAKE_KINDS.includes(h.kind)) return fail('kind', `kind là một trong ${HANDSHAKE_KINDS.join(', ')}`);
+  const only = (allowed: string[]) => Object.keys(h).find((k) => k !== 'kind' && !allowed.includes(k));
+  const field = (k: string, v: unknown): Parsed<HandshakeConfig> | null =>
+    typeof v === 'string' && FIELD_RE.test(v) ? null : fail(k, `${k} là trường CẤP MỘT ^[A-Za-z0-9_]{1,64}$`);
+  switch (h.kind as HandshakeKind) {
+    case 'query-echo': {
+      const extra = only(['param', 'verifyTokenParam', 'verifyTokenEnc']);
+      if (extra) {
+        return fail(extra, extra === 'verifyToken' ? 'verifyToken chỉ gửi lúc tạo source (server mã hoá thành verifyTokenEnc)' : `query-echo không có ${extra}`);
+      }
+      if (typeof h.param !== 'string' || !PARAM_RE.test(h.param)) return fail('param', 'param (tên tham số query mang challenge) ^[A-Za-z0-9_.-]{1,64}$');
+      if (
+        h.verifyTokenParam !== undefined &&
+        (typeof h.verifyTokenParam !== 'string' || !PARAM_RE.test(h.verifyTokenParam) || h.verifyTokenParam === h.param)
+      ) {
+        return fail('verifyTokenParam', 'verifyTokenParam ^[A-Za-z0-9_.-]{1,64}$, khác param');
+      }
+      if (
+        h.verifyTokenEnc !== undefined &&
+        (typeof h.verifyTokenEnc !== 'string' || h.verifyTokenEnc.length === 0 || h.verifyTokenEnc.length > 2048 || h.verifyTokenParam === undefined)
+      ) {
+        return fail('verifyTokenEnc', 'verifyTokenEnc chỉ đi kèm verifyTokenParam (server ghi)');
+      }
+      return {
+        value: {
+          kind: 'query-echo',
+          param: h.param,
+          ...(h.verifyTokenParam !== undefined ? { verifyTokenParam: h.verifyTokenParam } : {}),
+          ...(h.verifyTokenEnc !== undefined ? { verifyTokenEnc: h.verifyTokenEnc } : {}),
+        },
+      };
+    }
+    case 'body-echo': {
+      const extra = only(['when', 'echo']);
+      if (extra) return fail(extra, `body-echo không có ${extra}`);
+      const w = parseWhen(h.when, 'handshake.when');
+      if ('bad' in w) return w;
+      if (!isObj(h.echo) || Object.keys(h.echo).length !== 1) return fail('echo', 'echo là {field}');
+      const e = field('echo.field', h.echo.field);
+      if (e) return e;
+      return { value: { kind: 'body-echo', when: w.value!, echo: { field: h.echo.field } } };
+    }
+    case 'header-echo': {
+      // E20 + PK4: adoptSecret chỉ có nghĩa ở chế độ thu (PK6 — secret nhận được ở trạng thái chờ, dev xác nhận). Source PK4
+      // luôn có secret -> nhận secret từ request là cho kẻ biết sourceKey cấy khoá -> 422.
+      if (h.adoptSecret !== undefined) {
+        return fail('adoptSecret', 'adoptSecret chỉ dùng ở chế độ thu (source chưa có secret, PK6); source đã có secret không nhận secret từ request');
+      }
+      const extra = only(['header']);
+      if (extra) return fail(extra, `header-echo không có ${extra}`);
+      if (typeof h.header !== 'string' || !HEADER_RE.test(h.header)) return fail('header', 'header viết thường ^[a-z0-9-]{1,64}$ (vd x-hook-secret)');
+      return { value: { kind: 'header-echo', header: h.header } };
+    }
+    case 'hmac-echo': {
+      const extra = only(['when', 'tokenField', 'tokenParent', 'macField']);
+      if (extra) return fail(extra, `hmac-echo không có ${extra}`);
+      const w = parseWhen(h.when, 'handshake.when');
+      if ('bad' in w) return w;
+      const e =
+        field('tokenField', h.tokenField) ?? (h.tokenParent !== undefined ? field('tokenParent', h.tokenParent) : null) ?? field('macField', h.macField);
+      if (e) return e;
+      if (h.macField === h.tokenField) return fail('macField', 'macField khác tokenField');
+      return {
+        value: {
+          kind: 'hmac-echo',
+          when: w.value!,
+          tokenField: h.tokenField,
+          ...(h.tokenParent !== undefined ? { tokenParent: h.tokenParent } : {}),
+          macField: h.macField,
+        },
+      };
+    }
+    case 'manual-url': {
+      const extra = only(['when', 'urlField']);
+      if (extra) return fail(extra, `manual-url không có ${extra}`);
+      const w = parseWhen(h.when, 'handshake.when');
+      if ('bad' in w) return w;
+      const e = field('urlField', h.urlField);
+      if (e) return e;
+      return { value: { kind: 'manual-url', when: w.value!, urlField: h.urlField } };
+    }
+  }
+}
+
+/** PK4 §6.3: `ack` — successStatus 200|202|204, rejectStatus 401|403|503. 2xx khi từ chối = lối vòng qua EG2 -> 422. */
+function parseAck(a: unknown): Parsed<AckConfig> {
+  if (a === undefined) return {};
+  if (!isObj(a)) return { bad: bad('ack', 'ack là {successStatus?, rejectStatus?}') };
+  const extra = Object.keys(a).find((k) => k !== 'successStatus' && k !== 'rejectStatus');
+  if (extra) return { bad: bad(`ack.${extra}`, `ack không có ${extra}`) };
+  if (a.successStatus !== undefined && !(ACK_SUCCESS_STATUSES as readonly unknown[]).includes(a.successStatus)) {
+    return { bad: bad('ack.successStatus', 'successStatus là 200 | 202 | 204') };
+  }
+  if (a.rejectStatus !== undefined && !(ACK_REJECT_STATUSES as readonly unknown[]).includes(a.rejectStatus)) {
+    return {
+      bad: bad('ack.rejectStatus', 'rejectStatus là 401 | 403 | 503 — KHÔNG BAO GIỜ 2xx (2xx cho request sai chữ ký là lối vòng qua hộp phạt EG2, BB-3)'),
+    };
+  }
+  const value: AckConfig = {};
+  if (a.successStatus !== undefined) value.successStatus = a.successStatus;
+  if (a.rejectStatus !== undefined) value.rejectStatus = a.rejectStatus;
+  return { value };
+}
+
 
 // ───────────────────────── PK3: signed-template (SPEC-provider-khac §5, E16, ADR-204) ─────────────────────────
 
@@ -430,5 +617,7 @@ function validateSignedTemplate(c: Record<string, any>): ConfigCheck {
   if (hasId) config.idHeader = c.idHeader;
   if (tail.mapping) config.mapping = tail.mapping;
   if (c.timezone !== undefined) config.timezone = c.timezone;
+  if (tail.handshake) config.handshake = tail.handshake;
+  if (tail.ack) config.ack = tail.ack;
   return { ok: true, config };
 }

@@ -1,22 +1,36 @@
 import { createHash } from "crypto";
 
 import { RESERVED_NAMESPACES as COMMON_RESERVED, isReservedType as commonIsReserved } from "@hub/common";
-import { ALGO_IN_PREFIX as SERVER_ALGO_IN_PREFIX, type GenericConfig, secretProblem, validateGenericConfig } from "@hub/providers";
+import {
+  ACK_REJECT_STATUSES,
+  ACK_SUCCESS_STATUSES,
+  ALGO_IN_PREFIX as SERVER_ALGO_IN_PREFIX,
+  type GenericConfig,
+  HANDSHAKE_KINDS,
+  secretProblem,
+  validateGenericConfig,
+} from "@hub/providers";
 
 import {
+  ACK_REJECT_CHOICES,
+  ACK_SUCCESS_CHOICES,
   ALGO_IN_PREFIX,
   buildGenericConfig,
   connectionState,
   diagnosisParts,
   type GenericFormValues,
   genericFormIssues,
+  HANDSHAKE_CHOICES,
+  HANDSHAKE_FORM_DEFAULTS,
   HMAC_ALGO_CHOICES,
   idKindOf,
   type InspectRow,
   isReservedType,
+  isSnsSubscribeUrl,
   KEY_ENCODING_CHOICES,
   LISTEN_REFRESH_MS,
   listenRefetchInterval,
+  pendingSubscribeUrl,
   playgroundSources,
   RESERVED_NAMESPACES,
   SECRET_MAX,
@@ -51,13 +65,13 @@ describe("[PK:T5] trạng thái kết nối: chờ -> ✓ khi có ACCEPTED đầ
     const failing = [row("r1", "REJECTED", { ok: false, reason: "signature_mismatch", expectedHeader: "x-signature" })];
     expect(connectionState(failing).kind).toBe("failing");
     const after = [row("r2", "ACCEPTED", { ok: true, reason: "ok" }, "2026-10-13T10:00:05Z"), ...failing];
-    expect(connectionState(after)).toEqual({ kind: "connected", lastFailure: null });
+    expect(connectionState(after)).toEqual({ kind: "connected", lastFailure: null, handshake: null });
   });
 
   it("đã ✓ mà request mới nhất trượt -> vẫn ✓, kèm lần trượt gần nhất để dev thấy", () => {
     const d = { ok: false, reason: "token_mismatch", expectedHeader: "x-token" } as const;
     const rows = [row("r3", "REJECTED", d, "2026-10-13T10:00:09Z"), row("r2", "ACCEPTED", { ok: true, reason: "ok" }, "2026-10-13T10:00:05Z")];
-    expect(connectionState(rows)).toEqual({ kind: "connected", lastFailure: d });
+    expect(connectionState(rows)).toEqual({ kind: "connected", lastFailure: d, handshake: null });
   });
 
   it("DUPLICATE không phải bằng chứng nối được; ACCEPTED có lỗi ánh xạ vẫn là ✓ (request đã vào)", () => {
@@ -92,7 +106,106 @@ const FORM: GenericFormValues = {
   idValue: "transId",
   eventType: "acme.invoice.paid",
   ...TEMPLATE_FORM_DEFAULTS,
+  ...HANDSHAKE_FORM_DEFAULTS,
 };
+
+describe("[PK:T10] (phần d) PK4 console: Lắng nghe hiện \"Đã bắt tay ✓\", SubscribeURL chỉ là link cho dev bấm", () => {
+  const hs = (id: string, handshake: InspectRow["handshake"], at: string): InspectRow => ({ ...row(id, "REJECTED", { ok: true, reason: "handshake" }, at), handshake });
+
+  it("chỉ có dòng bắt tay -> handshaken (không phải trượt); trượt mới hơn bắt tay -> failing; ACCEPTED -> connected kèm bắt tay", () => {
+    const h = hs("h1", { kind: "query-echo" }, "2026-10-13T10:00:01Z");
+    expect(connectionState([h])).toEqual({ kind: "handshaken", handshake: { kind: "query-echo" } });
+    const bad = row("r2", "REJECTED", { ok: false, reason: "signature_mismatch", expectedHeader: "x-sig" }, "2026-10-13T10:00:02Z");
+    expect(connectionState([bad, h]).kind).toBe("failing");
+    const acc = row("a3", "ACCEPTED", { ok: true, reason: "ok" }, "2026-10-13T10:00:03Z");
+    expect(connectionState([acc, bad, h])).toEqual({ kind: "connected", lastFailure: null, handshake: { kind: "query-echo" } });
+    // Dòng mới nhất là bắt tay lặp lại (Zoom 72 giờ) -> không phải "request mới nhất trượt".
+    expect(connectionState([hs("h4", { kind: "hmac-echo" }, "2026-10-13T10:00:04Z"), acc])).toMatchObject({ kind: "connected", lastFailure: null });
+  });
+
+  it("pendingSubscribeUrl + isSnsSubscribeUrl: chỉ https sns.<vùng>.amazonaws.com mới là link SNS thật", () => {
+    const url = "https://sns.us-west-2.amazonaws.com/?Action=ConfirmSubscription&Token=t";
+    expect(pendingSubscribeUrl([hs("h", { kind: "manual-url", subscribeUrl: url }, "2026-10-13T10:00:01Z")])).toBe(url);
+    expect(pendingSubscribeUrl([hs("h", { kind: "manual-url", subscribeUrl: null }, "2026-10-13T10:00:01Z")])).toBeNull();
+    expect(isSnsSubscribeUrl(url)).toBe(true);
+    expect(isSnsSubscribeUrl("https://sns.cn-north-1.amazonaws.com.cn/?Action=ConfirmSubscription")).toBe(true);
+    for (const u of [
+      "http://sns.us-west-2.amazonaws.com/?x",
+      "https://sns.us-west-2.amazonaws.com.evil.example/?x",
+      "https://evil.example/sns.us-west-2.amazonaws.com",
+      "https://user:pw@sns.us-west-2.amazonaws.com/",
+      "https://sns.us-west-2.amazonaws.com:8443/",
+      "https://s3.amazonaws.com/x",
+      "javascript:alert(1)",
+      "không phải url",
+    ]) {
+      expect([u, isSnsSubscribeUrl(u)]).toEqual([u, false]);
+    }
+  });
+});
+
+describe("PK4 form tay: khối Bắt tay + Phản hồi dựng đúng khuôn server (validateGenericConfig + parseSourceInput)", () => {
+  it("lựa chọn của form = tập của server (kiểu bắt tay, mã ack)", () => {
+    expect(HANDSHAKE_CHOICES.filter((k) => k !== "none")).toEqual([...HANDSHAKE_KINDS]);
+    expect(ACK_SUCCESS_CHOICES.map(Number)).toEqual([...ACK_SUCCESS_STATUSES]);
+    expect(ACK_REJECT_CHOICES.map(Number)).toEqual([...ACK_REJECT_STATUSES]);
+  });
+
+  it("mỗi kiểu bắt tay + ack khác mặc định -> server nhận, round-trip không lệch (verifyToken server tự đổi thành verifyTokenEnc)", () => {
+    const forms: GenericFormValues[] = [
+      { ...FORM, hsKind: "query-echo", hsParam: "hub.challenge", hsVerifyTokenParam: "hub.verify_token", hsVerifyToken: "my-verify-token", ackReject: "403" },
+      { ...FORM, hsKind: "query-echo", hsParam: "challenge" },
+      { ...FORM, hsKind: "body-echo", hsWhenName: "type", hsWhenEquals: "url_verification", hsEchoField: "challenge" },
+      { ...FORM, hsKind: "body-echo", hsWhenKind: "header", hsWhenName: "Twitch-Eventsub-Message-Type", hsWhenEquals: "webhook_callback_verification", hsEchoField: "challenge" },
+      { ...FORM, hsKind: "header-echo", hsHeader: "X-Hook-Secret", ackSuccess: "204" },
+      { ...FORM, hsKind: "hmac-echo", hsWhenName: "event", hsWhenEquals: "endpoint.url_validation", hsTokenParent: "payload", hsTokenField: "plainToken", hsMacField: "encryptedToken" },
+      { ...FORM, hsKind: "manual-url", hsWhenName: "Type", hsWhenEquals: "SubscriptionConfirmation", hsUrlField: "SubscribeURL", ackSuccess: "202", ackReject: "503" },
+    ];
+    for (const f of forms) {
+      expect(genericFormIssues(f, "secret-123456")).toEqual([]);
+      const built = buildGenericConfig(f) as Record<string, any>;
+      const { verifyToken, ...hsServer } = (built.handshake ?? {}) as Record<string, unknown>;
+      if (f.hsVerifyTokenParam) expect(verifyToken).toBe(f.hsVerifyToken);
+      const r = validateGenericConfig({ ...built, handshake: { ...hsServer, ...(verifyToken ? { verifyTokenEnc: "enc" } : {}) } });
+      expect([f.hsKind, r.ok]).toEqual([f.hsKind, true]);
+      const c = (r as { config: GenericConfig }).config;
+      expect(c.handshake?.kind).toBe(f.hsKind);
+      expect(c.ack ?? {}).toEqual({
+        ...(f.ackSuccess !== "200" ? { successStatus: Number(f.ackSuccess) } : {}),
+        ...(f.ackReject !== "401" ? { rejectStatus: Number(f.ackReject) } : {}),
+      });
+    }
+    // Mặc định (không bắt tay, 200/401) -> không thêm trường nào (source cũ không đổi khuôn).
+    const plain = buildGenericConfig(FORM);
+    expect(plain.handshake).toBeUndefined();
+    expect(plain.ack).toBeUndefined();
+  });
+
+  it("ô sai -> lỗi theo ô, và server cũng từ chối đúng trường đó", () => {
+    const cases: [Partial<GenericFormValues>, keyof GenericFormValues, string][] = [
+      [{ hsKind: "query-echo", hsParam: "" }, "hsParam", "handshake.param"],
+      [{ hsKind: "query-echo", hsParam: "a", hsVerifyTokenParam: "a" }, "hsVerifyTokenParam", "handshake.verifyTokenParam"],
+      [{ hsKind: "body-echo", hsWhenName: "a.b", hsWhenEquals: "x", hsEchoField: "c" }, "hsWhenName", "handshake.when.field"],
+      [{ hsKind: "body-echo", hsWhenName: "type", hsWhenEquals: "a b", hsEchoField: "c" }, "hsWhenEquals", "handshake.when.equals"],
+      [{ hsKind: "body-echo", hsWhenName: "type", hsWhenEquals: "v", hsEchoField: "" }, "hsEchoField", "handshake.echo.field"],
+      [{ hsKind: "header-echo", hsHeader: "x y" }, "hsHeader", "handshake.header"],
+      [{ hsKind: "hmac-echo", hsWhenName: "event", hsWhenEquals: "v", hsTokenField: "t", hsMacField: "t" }, "hsMacField", "handshake.macField"],
+      [{ hsKind: "manual-url", hsWhenName: "Type", hsWhenEquals: "v", hsUrlField: "" }, "hsUrlField", "handshake.urlField"],
+    ];
+    for (const [patch, path, serverField] of cases) {
+      const f = { ...FORM, ...patch };
+      expect(genericFormIssues(f, "secret-123456").map((i) => i.path)).toContain(path);
+      // parseSourceInput tách verifyToken (rõ) trước validateGenericConfig — làm y hệt.
+      const built = buildGenericConfig(f) as Record<string, any>;
+      if (built.handshake) delete built.handshake.verifyToken;
+      expect((validateGenericConfig(built) as { field?: string }).field).toBe(serverField);
+    }
+    // Token xác minh: client chặn cùng luật parseSourceInput (8–256, ASCII in được, không dấu cách).
+    const vt = { ...FORM, hsKind: "query-echo" as const, hsParam: "hub.challenge", hsVerifyTokenParam: "hub.verify_token" };
+    for (const bad of ["short", "has space here", "x".repeat(257)]) expect(genericFormIssues({ ...vt, hsVerifyToken: bad }, "secret-123456").map((i) => i.path)).toContain("hsVerifyToken");
+    expect(genericFormIssues({ ...vt, hsVerifyToken: "good-token-1" }, "secret-123456")).toEqual([]);
+  });
+});
 
 describe("PK1: form tay \"Nhà cung cấp khác\" dựng verificationConfig đúng khuôn validateGenericConfig", () => {
   it("hmac: header + encoding + khoá chống trùng theo trường", () => {

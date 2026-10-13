@@ -28,10 +28,14 @@ import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
 import {
+  ACK_REJECT_CHOICES,
+  ACK_SUCCESS_CHOICES,
   buildGenericConfig,
   GENERIC_SCHEMES,
   type GenericFormIssue,
   genericFormIssues,
+  HANDSHAKE_CHOICES,
+  HANDSHAKE_FORM_DEFAULTS,
   HMAC_ALGO_CHOICES,
   KEY_ENCODING_CHOICES,
   KV_SEP_CHOICES,
@@ -43,6 +47,7 @@ import {
   type TemplatePreset,
   TIMESTAMP_FORMAT_CHOICES,
   TOKEN_LOCATION_CHOICES,
+  WHEN_KIND_CHOICES,
 } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
@@ -131,6 +136,11 @@ const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
   "timestamp-header-required": "page.sources.generic.timestamp-header-required",
   "tolerance-invalid": "page.sources.generic.tolerance-invalid",
   "id-header-required": "page.sources.generic.id-header-required",
+  "hs-param-invalid": "page.sources.generic.hs.param-invalid",
+  "hs-verify-token-invalid": "page.sources.generic.hs.verify-token-invalid",
+  "hs-when-invalid": "page.sources.generic.hs.when-invalid",
+  "hs-field-invalid": "page.sources.generic.hs.field-invalid",
+  "hs-header-invalid": "page.sources.generic.hs.header-invalid",
 };
 
 /**
@@ -166,6 +176,22 @@ const makeSchema = (t: TranslateFn) =>
       timestampFormat: z.enum(TIMESTAMP_FORMAT_CHOICES),
       idHeader: z.string(),
       toleranceSec: z.string(),
+      // PK4 (ADR-205): bắt tay + phản hồi.
+      hsKind: z.enum(HANDSHAKE_CHOICES),
+      hsParam: z.string(),
+      hsVerifyTokenParam: z.string(),
+      hsVerifyToken: z.string(),
+      hsWhenKind: z.enum(WHEN_KIND_CHOICES),
+      hsWhenName: z.string(),
+      hsWhenEquals: z.string(),
+      hsEchoField: z.string(),
+      hsHeader: z.string(),
+      hsTokenParent: z.string(),
+      hsTokenField: z.string(),
+      hsMacField: z.string(),
+      hsUrlField: z.string(),
+      ackSuccess: z.enum(ACK_SUCCESS_CHOICES),
+      ackReject: z.enum(ACK_REJECT_CHOICES),
     })
     .superRefine(({ provider, name: _n, secret, ...v }, ctx) => {
       if (provider !== "generic") return;
@@ -335,6 +361,7 @@ export default function SourcesPage() {
       idValue: "",
       eventType: "",
       ...TEMPLATE_FORM_DEFAULTS,
+      ...HANDSHAKE_FORM_DEFAULTS,
     },
   });
   // useWatch thay vì form.watch: React Compiler memo hoá form.watch → gợi ý không đổi theo provider.

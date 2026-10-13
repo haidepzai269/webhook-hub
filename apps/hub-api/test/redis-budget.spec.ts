@@ -420,6 +420,36 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(take()).toEqual(['eval', 'get', 'set']);
   });
 
+  it('[PK:T10] (phần b) PK4 bắt tay (E9: không qua EG3, không GET/SET NX idem): 0 lệnh Redis — query-echo, body-echo, hmac-echo sau verify', async () => {
+    const SECRET = `zoom-${process.pid}`;
+    const sign = (body: string) => {
+      const ts = String(Math.floor(Date.now() / 1000));
+      return { 'x-zm-request-timestamp': ts, 'x-zm-signature': 'v0=' + require('crypto').createHmac('sha256', SECRET).update(`v0:${ts}:${body}`).digest('hex') };
+    };
+    const cases: Array<[unknown, any]> = [
+      [{ scheme: 'hmac', header: 'x-sig', idempotency: { header: 'x-id' }, eventType: 'acme.x', handshake: { kind: 'query-echo', param: 'challenge' } }, { method: 'GET', query: 'challenge=abc', headers: {}, body: '' }],
+      [{ scheme: 'hmac', header: 'x-sig', idempotency: { header: 'x-id' }, eventType: 'acme.x', handshake: { kind: 'body-echo', when: { field: 'type', equals: 'url_verification' }, echo: { field: 'challenge' } } }, { method: 'POST', query: '', headers: {}, body: '{"type":"url_verification","challenge":"c1"}' }],
+      [
+        { scheme: 'signed-template', template: 'v0:{timestamp}:{body}', signature: { headers: ['x-zm-signature'], prefix: 'v0=' }, timestampHeader: 'x-zm-request-timestamp', toleranceSec: 300, idempotency: { header: 'x-id' }, eventType: 'zoom.x', handshake: { kind: 'hmac-echo', when: { field: 'event', equals: 'endpoint.url_validation' }, tokenParent: 'payload', tokenField: 'plainToken', macField: 'encryptedToken' } },
+        { method: 'POST', query: '', headers: null, body: '{"event":"endpoint.url_validation","payload":{"plainToken":"tok_1"}}' },
+      ],
+    ];
+    for (const [verificationConfig, r] of cases) {
+      const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: 'hs' }) }, outbox: { create: jest.fn() } };
+      const prisma: any = {
+        findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({ id: 'src-g', tenantId: TENANT, provider: 'generic', isActive: true, verificationConfig, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(SECRET, MASTER) }] }),
+        tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+        $transaction: jest.fn(async (fn: any) => fn(tx)),
+      };
+      const res = await new IngestService(prisma, new RedisService()).ingestWebhook({
+        provider: 'generic', sourceKey: 'src_generic_hs', headers: r.headers ?? sign(r.body), rawBody: Buffer.from(r.body), body: r.body ? JSON.parse(r.body) : undefined, method: r.method, query: r.query,
+      });
+      expect(res.status).toBe(200);
+      expect(take()).toEqual([]);
+      expect(tx.outbox.create).not.toHaveBeenCalled();
+    }
+  });
+
   it('X9: POST /v1/p/:project/events đi qua persistAccepted -> ĐÚNG số lệnh như /hooks (EVAL + GET + SET); ApiKeyGuard 0 lệnh', async () => {
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
     const prisma: any = {

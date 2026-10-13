@@ -10,7 +10,7 @@
   "confidence": "trung bình",
   "docs": "https://developers.google.com/youtube/v3/guides/push_notifications",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "S7: GET hub.challenge (query-echo), lease phải gia hạn -> chờ PK4"
+  "pendingReason": "PK4 xong (query-echo hub.challenge). Còn chặn: độ tin cậy trung bình (W3C 403 khi đọc), chữ ký chỉ khi có hub.secret, khoá chống trùng nằm trong Atom XML."
 }

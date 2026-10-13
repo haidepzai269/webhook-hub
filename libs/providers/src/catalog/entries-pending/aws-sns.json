@@ -10,8 +10,7 @@
   "confidence": "cao",
   "docs": "https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html",
   "blockedBy": [
-    "PK5",
-    "PK4"
+    "PK5"
   ],
-  "pendingReason": "S8+S7: RSA chứng chỉ tải qua mạng; xác nhận đăng ký đòi gọi SubscribeURL ra ngoài (§15 không làm)"
+  "pendingReason": "PK4 xong (manual-url: lưu SubscribeURL, console hiện link, hub không gọi ra). Còn chặn: chữ ký RSA với chứng chỉ tải qua mạng -> unverified (PK5)."
 }

@@ -771,6 +771,94 @@ export const CATALOG_DATA: CatalogEntry[] = [
     ]
   },
   {
+    "id": "slack",
+    "name": "Slack (Events API)",
+    "aliases": [
+      "slack",
+      "slack events"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-slack-signature",
+          "x-slack-request-timestamp"
+        ],
+        "optional": [
+          "x-slack-retry-num",
+          "x-slack-retry-reason"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "type"
+        ],
+        "optional": [
+          "token",
+          "team_id",
+          "api_app_id",
+          "event",
+          "event_id",
+          "event_time",
+          "challenge",
+          "authorizations"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "signed-template",
+        "template": "v0:{timestamp}:{body}",
+        "signature": {
+          "headers": [
+            "x-slack-signature"
+          ],
+          "prefix": "v0="
+        },
+        "timestampHeader": "x-slack-request-timestamp",
+        "timestampFormat": "unix",
+        "toleranceSec": 300,
+        "idempotency": {
+          "field": "event_id"
+        },
+        "eventType": "slack.event",
+        "handshake": {
+          "kind": "body-echo",
+          "when": {
+            "field": "type",
+            "equals": "url_verification"
+          },
+          "echo": {
+            "field": "challenge"
+          }
+        }
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Signing Secret của app Slack (api.slack.com/apps → Basic Information → App Credentials)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
+    "docsVersion": "Chỉ Events API (JSON). Interactivity / slash command gửi form không có event_id -> 422. Bắt tay url_verification: trả challenge dạng text/plain (tài liệu nhận plaintext, form hoặc JSON). event_id \"globally unique\"; tài liệu chưa nói rõ giữ nguyên khi gửi lại (cùng rủi ro như typeform).",
+    "confidence": "cao",
+    "sources": [
+      "https://docs.slack.dev/authentication/verifying-requests-from-slack",
+      "https://docs.slack.dev/apis/events-api/",
+      "https://docs.slack.dev/reference/events/url_verification"
+    ]
+  },
+  {
     "id": "stripe",
     "name": "Stripe",
     "aliases": [
@@ -933,6 +1021,91 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "confidence": "cao",
     "sources": [
       "https://core.telegram.org/bots/api#setwebhook"
+    ]
+  },
+  {
+    "id": "twitch",
+    "name": "Twitch EventSub",
+    "aliases": [
+      "twitch",
+      "eventsub"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "twitch-eventsub-message-id",
+          "twitch-eventsub-message-timestamp",
+          "twitch-eventsub-message-signature",
+          "twitch-eventsub-message-type"
+        ],
+        "optional": [
+          "twitch-eventsub-message-retry",
+          "twitch-eventsub-subscription-type",
+          "twitch-eventsub-subscription-version"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "subscription"
+        ],
+        "optional": [
+          "event",
+          "challenge"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "signed-template",
+        "template": "{id}{timestamp}{body}",
+        "signature": {
+          "headers": [
+            "twitch-eventsub-message-signature"
+          ],
+          "prefix": "sha256="
+        },
+        "timestampHeader": "twitch-eventsub-message-timestamp",
+        "timestampFormat": "iso8601",
+        "idHeader": "twitch-eventsub-message-id",
+        "toleranceSec": 300,
+        "idempotency": {
+          "header": "twitch-eventsub-message-id"
+        },
+        "eventType": "twitch.eventsub",
+        "handshake": {
+          "kind": "body-echo",
+          "when": {
+            "header": "twitch-eventsub-message-type",
+            "equals": "webhook_callback_verification"
+          },
+          "echo": {
+            "field": "challenge"
+          }
+        }
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret khai khi tạo subscription EventSub (transport.secret, 10–100 ký tự ASCII)",
+        "secret": true
+      }
+    ],
+    "secretSource": "hub",
+    "docs": "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",
+    "docsVersion": "Tài liệu không nêu cửa sổ thời gian -> toleranceSec 300 (mặc định của hub). Gửi lại giữ nguyên message id (trang EventSub, mục xử lý bản trùng). Bắt tay webhook_callback_verification: 200 text/plain, challenge thô.",
+    "confidence": "cao",
+    "sources": [
+      "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",
+      "https://dev.twitch.tv/docs/eventsub/"
     ]
   },
   {

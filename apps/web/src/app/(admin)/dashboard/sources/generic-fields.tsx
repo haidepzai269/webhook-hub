@@ -7,9 +7,12 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  ACK_REJECT_CHOICES,
+  ACK_SUCCESS_CHOICES,
   ALGO_IN_PREFIX,
   GENERIC_SCHEMES,
   type GenericFormValues,
+  HANDSHAKE_CHOICES,
   HMAC_ALGO_CHOICES,
   KEY_ENCODING_CHOICES,
   KV_SEP_CHOICES,
@@ -21,6 +24,7 @@ import {
   type TemplatePreset,
   TIMESTAMP_FORMAT_CHOICES,
   TOKEN_LOCATION_CHOICES,
+  WHEN_KIND_CHOICES,
 } from "@/lib/hub/listen-logic";
 import type { Provider } from "@/lib/hub/types";
 import type { MessageKey } from "@/lib/i18n/dictionary";
@@ -64,6 +68,19 @@ const PRESET_KEY: Record<TemplatePreset, MessageKey> = {
   paddle: "page.sources.generic.preset.paddle",
 };
 
+const HANDSHAKE_KEY: Record<GenericFormValues["hsKind"], MessageKey> = {
+  none: "page.sources.generic.hs.kind.none",
+  "query-echo": "page.sources.generic.hs.kind.query-echo",
+  "body-echo": "page.sources.generic.hs.kind.body-echo",
+  "header-echo": "page.sources.generic.hs.kind.header-echo",
+  "hmac-echo": "page.sources.generic.hs.kind.hmac-echo",
+  "manual-url": "page.sources.generic.hs.kind.manual-url",
+};
+const WHEN_KIND_KEY: Record<GenericFormValues["hsWhenKind"], MessageKey> = {
+  field: "page.sources.generic.hs.when-kind.field",
+  header: "page.sources.generic.hs.when-kind.header",
+};
+
 const LOCATION_KEY: Record<GenericFormValues["location"], MessageKey> = {
   header: "page.sources.generic.location.header",
   basic: "page.sources.generic.location.basic",
@@ -79,7 +96,7 @@ function SelectField({
   hint,
 }: {
   control: Control<SourceFormValues>;
-  name: "scheme" | "algo" | "encoding" | "keyEncoding" | "location" | "idKind" | "sigMode" | "kvSep" | "timestampFormat";
+  name: "scheme" | "algo" | "encoding" | "keyEncoding" | "location" | "idKind" | "sigMode" | "kvSep" | "timestampFormat" | "hsKind" | "hsWhenKind" | "ackSuccess" | "ackReject";
   label: string;
   options: readonly { value: string; label: string }[];
   hint?: string;
@@ -120,7 +137,30 @@ function TextField({
   hint,
 }: {
   control: Control<SourceFormValues>;
-  name: "header" | "prefix" | "param" | "idValue" | "eventType" | "template" | "header2" | "kvSig" | "kvTimestamp" | "timestampHeader" | "idHeader" | "toleranceSec";
+  name:
+    | "header"
+    | "prefix"
+    | "param"
+    | "idValue"
+    | "eventType"
+    | "template"
+    | "header2"
+    | "kvSig"
+    | "kvTimestamp"
+    | "timestampHeader"
+    | "idHeader"
+    | "toleranceSec"
+    | "hsParam"
+    | "hsVerifyTokenParam"
+    | "hsVerifyToken"
+    | "hsWhenName"
+    | "hsWhenEquals"
+    | "hsEchoField"
+    | "hsHeader"
+    | "hsTokenParent"
+    | "hsTokenField"
+    | "hsMacField"
+    | "hsUrlField";
   id: string;
   label: string;
   placeholder: string;
@@ -399,6 +439,107 @@ export function GenericFields({
         placeholder="acme.invoice.paid"
         hint={t("page.sources.generic.event-type-hint")}
       />
+      <HandshakeFields control={control} />
+      <AckFields control={control} />
     </>
+  );
+}
+
+/**
+ * PK4 (SPEC-provider-khac §6.1, ADR-205): khối "Bắt tay" — kiểu + tham số của đúng kiểu đó. Hub không bao giờ tự gọi URL
+ * lấy từ request (SNS: console chỉ hiện link). Token xác minh gửi một lần, server mã hoá (E13).
+ */
+function HandshakeFields({ control }: { control: Control<SourceFormValues> }) {
+  const t = useT();
+  const kind = useWatch({ control, name: "hsKind" });
+  const vtp = useWatch({ control, name: "hsVerifyTokenParam" });
+  const usesWhen = kind === "body-echo" || kind === "hmac-echo" || kind === "manual-url";
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-md border p-3">
+      <legend className="px-1 text-sm font-medium">{t("page.sources.generic.hs.title")}</legend>
+      <SelectField
+        control={control}
+        name="hsKind"
+        label={t("page.sources.generic.hs.kind")}
+        options={HANDSHAKE_CHOICES.map((k) => ({ value: k, label: t(HANDSHAKE_KEY[k]) }))}
+        hint={t("page.sources.generic.hs.kind-hint")}
+      />
+      {kind === "query-echo" && (
+        <>
+          <TextField control={control} name="hsParam" id="src-hs-param" label={t("page.sources.generic.hs.param")} placeholder="hub.challenge" hint={t("page.sources.generic.hs.param-hint")} />
+          <TextField
+            control={control}
+            name="hsVerifyTokenParam"
+            id="src-hs-vtp"
+            label={t("page.sources.generic.hs.verify-token-param")}
+            placeholder="hub.verify_token"
+            hint={t("page.sources.generic.hs.verify-token-param-hint")}
+          />
+          {vtp.trim() !== "" && (
+            <TextField control={control} name="hsVerifyToken" id="src-hs-vt" label={t("page.sources.generic.hs.verify-token")} placeholder="" hint={t("page.sources.generic.hs.verify-token-hint")} />
+          )}
+        </>
+      )}
+      {usesWhen && (
+        <>
+          <SelectField
+            control={control}
+            name="hsWhenKind"
+            label={t("page.sources.generic.hs.when-kind")}
+            options={WHEN_KIND_CHOICES.map((k) => ({ value: k, label: t(WHEN_KIND_KEY[k]) }))}
+          />
+          <TextField control={control} name="hsWhenName" id="src-hs-when-name" label={t("page.sources.generic.hs.when-name")} placeholder="type" hint={t("page.sources.generic.hs.when-name-hint")} />
+          <TextField
+            control={control}
+            name="hsWhenEquals"
+            id="src-hs-when-equals"
+            label={t("page.sources.generic.hs.when-equals")}
+            placeholder="url_verification"
+            hint={t("page.sources.generic.hs.when-equals-hint")}
+          />
+        </>
+      )}
+      {kind === "body-echo" && (
+        <TextField control={control} name="hsEchoField" id="src-hs-echo" label={t("page.sources.generic.hs.echo-field")} placeholder="challenge" hint={t("page.sources.generic.hs.echo-field-hint")} />
+      )}
+      {kind === "header-echo" && (
+        <TextField control={control} name="hsHeader" id="src-hs-header" label={t("page.sources.generic.hs.header")} placeholder="x-hook-secret" hint={t("page.sources.generic.hs.header-hint")} />
+      )}
+      {kind === "hmac-echo" && (
+        <>
+          <TextField control={control} name="hsTokenParent" id="src-hs-parent" label={t("page.sources.generic.hs.token-parent")} placeholder="payload" hint={t("page.sources.generic.hs.token-parent-hint")} />
+          <TextField control={control} name="hsTokenField" id="src-hs-token" label={t("page.sources.generic.hs.token-field")} placeholder="plainToken" hint={t("page.sources.generic.hs.token-field-hint")} />
+          <TextField control={control} name="hsMacField" id="src-hs-mac" label={t("page.sources.generic.hs.mac-field")} placeholder="encryptedToken" hint={t("page.sources.generic.hs.mac-field-hint")} />
+        </>
+      )}
+      {kind === "manual-url" && (
+        <TextField control={control} name="hsUrlField" id="src-hs-url" label={t("page.sources.generic.hs.url-field")} placeholder="SubscribeURL" hint={t("page.sources.generic.hs.url-field-hint")} />
+      )}
+    </fieldset>
+  );
+}
+
+/** PK4 §6.3: khối "Phản hồi" — mã khi nhận / khi từ chối. Từ chối không có 2xx; 503 kèm câu nhắc hộp phạt (E21). */
+function AckFields({ control }: { control: Control<SourceFormValues> }) {
+  const t = useT();
+  const reject = useWatch({ control, name: "ackReject" });
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-md border p-3">
+      <legend className="px-1 text-sm font-medium">{t("page.sources.generic.ack.title")}</legend>
+      <SelectField
+        control={control}
+        name="ackSuccess"
+        label={t("page.sources.generic.ack.success")}
+        options={ACK_SUCCESS_CHOICES.map((c) => ({ value: c, label: c }))}
+        hint={t("page.sources.generic.ack.success-hint")}
+      />
+      <SelectField
+        control={control}
+        name="ackReject"
+        label={t("page.sources.generic.ack.reject")}
+        options={ACK_REJECT_CHOICES.map((c) => ({ value: c, label: c }))}
+        hint={t(reject === "503" ? "page.sources.generic.ack.reject-503-hint" : "page.sources.generic.ack.reject-hint")}
+      />
+    </fieldset>
   );
 }

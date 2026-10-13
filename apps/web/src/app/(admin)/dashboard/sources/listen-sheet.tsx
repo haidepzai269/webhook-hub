@@ -6,7 +6,7 @@ import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/hub/format";
-import { connectionState, diagnosisParts, type InspectDiagnosis } from "@/lib/hub/listen-logic";
+import { connectionState, diagnosisParts, type InspectDiagnosis, isSnsSubscribeUrl, pendingSubscribeUrl } from "@/lib/hub/listen-logic";
 import { useSourceInspect } from "@/lib/hub/queries";
 import type { Source } from "@/lib/hub/types";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
@@ -23,6 +23,7 @@ const REASON_KEY: Record<string, MessageKey> = {
   mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
   mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",
   config_invalid: "page.sources.listen.reason.config-invalid",
+  handshake: "page.sources.listen.reason.handshake",
 };
 
 /** Câu chẩn đoán — chỉ TÊN header/trường (API không bao giờ trả giá trị). */
@@ -70,6 +71,7 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
       {errorLine}
       <div role="status" aria-live="polite" className="rounded-md border p-3 text-sm">
         {state.kind === "waiting" && <span className="text-muted-foreground">{t("page.sources.listen.waiting")}</span>}
+        {state.kind === "handshaken" && <span className="font-medium text-emerald-600">{t("page.sources.listen.handshaken")}</span>}
         {state.kind === "connected" && (
           <>
             <span className="font-medium text-emerald-600">{t("page.sources.listen.connected")}</span>
@@ -82,6 +84,7 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
           <span className="text-destructive">{t("page.sources.listen.failing", { reason: reasonText(t, state.diagnosis) })}</span>
         )}
       </div>
+      <SubscribeUrlNotice url={pendingSubscribeUrl(data)} />
       {data && data.length > 0 && (
         <Table>
           <TableHeader>
@@ -96,7 +99,9 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
               <TableRow key={r.id}>
                 <TableCell className="whitespace-nowrap text-xs">{formatDateTime(r.receivedAt, locale)}</TableCell>
                 <TableCell>
-                  <Badge variant={r.status === "ACCEPTED" ? "outline" : r.status === "REJECTED" ? "destructive" : "secondary"}>{r.status}</Badge>
+                  <Badge variant={r.status === "ACCEPTED" || r.diagnosis?.reason === "handshake" ? "outline" : r.status === "REJECTED" ? "destructive" : "secondary"}>
+                    {r.status}
+                  </Badge>
                 </TableCell>
                 <TableCell className="whitespace-normal text-xs">{reasonText(t, r.diagnosis)}</TableCell>
               </TableRow>
@@ -104,6 +109,31 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
           </TableBody>
         </Table>
       )}
+    </div>
+  );
+}
+
+/**
+ * PK4 (§6.1, §15, ADR-205): SNS `SubscriptionConfirmation` — hub KHÔNG gọi SubscribeURL (SSRF). Console chỉ hiện link để dev tự
+ * bấm, kèm cảnh báo; tên miền không phải `sns.<vùng>.amazonaws.com` thì không làm link (chỉ hiện chữ + cảnh báo đỏ).
+ */
+function SubscribeUrlNotice({ url }: { url: string | null }) {
+  const t = useT();
+  if (!url) return null;
+  const trusted = isSnsSubscribeUrl(url);
+  return (
+    <div className="rounded-md border border-amber-500/50 p-3 text-sm">
+      <p className="font-medium">{t("page.sources.listen.subscribe-url.title")}</p>
+      {trusted ? (
+        <a href={url} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-primary underline">
+          {url}
+        </a>
+      ) : (
+        <code className="break-all">{url}</code>
+      )}
+      <p className={trusted ? "mt-1 text-muted-foreground" : "mt-1 text-destructive"}>
+        {t(trusted ? "page.sources.listen.subscribe-url.warning" : "page.sources.listen.subscribe-url.untrusted")}
+      </p>
     </div>
   );
 }

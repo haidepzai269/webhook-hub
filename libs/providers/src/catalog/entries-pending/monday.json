@@ -8,7 +8,8 @@
   "confidence": "cao",
   "docs": "https://developer.monday.com/api-reference/reference/webhooks",
   "blockedBy": [
-    "PK4"
+    "PK5",
+    "docs"
   ],
-  "pendingReason": "S7: bắt tay body-echo challenge; phần lớn webhook không ký -> chờ PK4/PK5"
+  "pendingReason": "Bắt tay đòi phản hồi JSON chứa challenge (theo nghiên cứu; chưa đối chiếu lại tài liệu) — echo của PK4 là text/plain (E27); phần lớn webhook không ký -> PK5."
 }

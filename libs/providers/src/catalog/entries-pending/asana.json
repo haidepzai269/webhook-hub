@@ -7,7 +7,7 @@
   "confidence": "cao",
   "docs": "https://developers.asana.com/docs/webhooks-guide",
   "blockedBy": [
-    "PK4"
+    "PK6"
   ],
-  "pendingReason": "S7: bắt tay header-echo X-Hook-Secret, secret đến trong request đầu -> chờ PK4/PK6"
+  "pendingReason": "X-Hook-Secret đến trong request bắt tay và là khoá ký -> header-echo + adoptSecret ở chế độ thu (E20, PK6). PK4 đã có header-echo nhưng 422 adoptSecret khi source có secret."
 }

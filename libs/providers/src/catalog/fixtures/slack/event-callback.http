@@ -1,0 +1,7 @@
+# origin: constructed; source: https://docs.slack.dev/apis/events-api/
+POST /slack/events HTTP/1.1
+Content-Type: application/json
+X-Slack-Request-Timestamp: 1531420618
+X-Slack-Signature: v0=0000000000000000000000000000000000000000000000000000000000000000
+
+{"type":"event_callback","token":"XXYYZZ","team_id":"T123ABC456","api_app_id":"A123ABC456","event":{"type":"name_of_event","event_ts":"1234567890.123456","user":"U123ABC456"},"event_context":"EC123ABC456","event_id":"Ev123ABC456","event_time":1234567890,"authorizations":[{"enterprise_id":"E123ABC456","team_id":"T123ABC456","user_id":"U123ABC456","is_bot":false,"is_enterprise_install":false}],"is_ext_shared_channel":false,"context_team_id":"T123ABC456","context_enterprise_id":null}

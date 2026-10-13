@@ -1,4 +1,4 @@
-import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType } from '@hub/common';
+import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, HttpMethod } from '@hub/common';
 
 /**
  * S8 (SPEC §4.8): cấu hình RIÊNG của source (`sources.verification_config`) mà lõi chuyển cho adapter, không đọc.
@@ -11,7 +11,36 @@ export interface AdapterContext {
    * (= `Date.now()`); verify bù của chế độ thu (PK6) truyền `received_at` của dòng thu (DB đặt, không giả được).
    */
   verifyAt?: Date;
+  /**
+   * PK4 (E13): mở một giá trị đã mã hoá AES-GCM bằng master key (vd `handshake.verifyTokenEnc`). Lõi cài, KHÔNG đọc config —
+   * adapter tự biết giá trị nào cần mở. Lỗi giải mã -> null (fail-closed). Không có (renormalize, inspect) -> adapter từ chối.
+   */
+  openSealed?: (enc: string) => string | null;
 }
+
+/**
+ * PK4 (SPEC-provider-khac §6, E3/E8/E9, ADR-205): kết quả bắt tay của adapter. Lõi chỉ thực thi, không đọc config:
+ * - `respond`: trả đúng phản hồi này (2xx), ghi MỘT dòng REJECTED `signature_valid=true` + `__hub_meta.reason='handshake'`;
+ *   không event, không outbox, không SET NX, không EG3, 0 lệnh Redis.
+ * - `reject`: như chữ ký sai (rejectStatus + `recordBadSignature`) — vd `query-echo` sai verify token.
+ * - `invalid`: 400, không ghi DB, không phạt (giá trị echo ngoài tập ký tự E27, plainToken sai khuôn E3).
+ */
+export type HandshakeOutcome =
+  | {
+      kind: 'respond';
+      status: 200 | 202 | 204;
+      /** Chuỗi -> gửi nguyên văn (`contentType`); object -> JSON; null -> body rỗng. */
+      body: string | Record<string, unknown> | null;
+      contentType?: string;
+      headers?: Record<string, string>;
+      /** Ghi vào `__hub_meta.handshake` của dòng REJECTED (vd `{kind, subscribeUrl}`) — chỉ thứ console cần hiện. */
+      meta: Record<string, unknown>;
+    }
+  | { kind: 'reject' }
+  | { kind: 'invalid'; message: string };
+
+/** PK4 (E9): 2h = trước verify (query/body/header-echo, manual-url); 3h = sau verify qua (hmac-echo, E3). */
+export type HandshakePhase = 'before-verify' | 'after-verify';
 
 /**
  * S9: raw_event ĐÃ LƯU (header đã che, body REJECTED là mẫu ≤4KB) — đầu vào của `diagnose`. `bodyRaw` vắng khi inspect
@@ -43,7 +72,9 @@ export interface Diagnosis {
     | 'missing_idempotency_key'
     | 'mapping_field_missing'
     | 'mapping_field_invalid'
-    | 'config_invalid';
+    | 'config_invalid'
+    /** PK4: dòng bắt tay (inspect gắn, không phải adapter). */
+    | 'handshake';
   expectedHeader?: string;
   expectedField?: string;
   candidateHeaders?: string[];
@@ -171,7 +202,18 @@ export interface ProviderAdapter {
   /**
    * Phản hồi HTTP status và body đúng định dạng provider mong đợi.
    */
-  buildAck(result: IngestResult): { status: number; body: unknown };
+  buildAck(result: IngestResult, ctx?: AdapterContext): { status: number; body: unknown };
+
+  /**
+   * PK4 (§6.2, E27): method nào được vào ingest. Không cài -> chỉ POST. `HEAD` luôn 405 (lõi chặn trước khi hỏi).
+   */
+  acceptsMethod?(method: HttpMethod, ctx?: AdapterContext, req?: RawWebhookRequest): boolean;
+
+  /**
+   * PK4: request này có phải bắt tay của provider không (theo cấu hình source). null = không phải, đi tiếp như thường.
+   * `secrets` đã giải mã — chỉ `after-verify` (hmac-echo) dùng, để ký bằng ĐÚNG secret đã verify.
+   */
+  handshake?(req: RawWebhookRequest, secrets: string[], ctx: AdapterContext | undefined, phase: HandshakePhase): HandshakeOutcome | null;
 
   /** KN2: hub tự đăng ký URL ingest tại provider. Không có -> 422 `connector_unsupported` (dán URL tay). */
   readonly connector?: ProviderConnector;

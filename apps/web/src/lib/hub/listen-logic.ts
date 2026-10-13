@@ -15,34 +15,70 @@ export interface InspectDiagnosis {
   expectedKvKey?: string;
 }
 
+/** PK4 (ADR-205): dòng bắt tay — `kind`, và với `manual-url` thì `subscribeUrl` (link SNS cho dev tự bấm). */
+export interface InspectHandshake {
+  kind: string;
+  subscribeUrl?: string | null;
+}
+
 /** Một dòng của `GET /api/v1/sources/:id/inspect` (cùng khuôn `GET /v1/p/:project/sources/:id/inspect`). */
 export interface InspectRow {
   id: string;
   receivedAt: string;
   status: string;
   diagnosis: InspectDiagnosis;
+  /** PK4: chỉ có ở dòng bắt tay (REJECTED + `diagnosis.reason = "handshake"`). */
+  handshake?: InspectHandshake;
 }
 
 export type ConnectionState =
   | { kind: "waiting" }
-  | { kind: "connected"; lastFailure: InspectDiagnosis | null }
+  | { kind: "handshaken"; handshake: InspectHandshake }
+  | { kind: "connected"; lastFailure: InspectDiagnosis | null; handshake: InspectHandshake | null }
   | { kind: "failing"; diagnosis: InspectDiagnosis };
+
+/** PK4: dòng REJECTED của bắt tay KHÔNG phải trượt (E8) — nó là "đã bắt tay". */
+const isHandshakeRow = (r: InspectRow) => r.diagnosis?.reason === "handshake";
 
 /**
  * Dòng trạng thái kết nối (SPEC §3.3). `rows` mới nhất trước (như API trả).
  * - Có ACCEPTED nào -> "Đã nhận request đầu tiên ✓" (request thật đã vào; lỗi ánh xạ sau đó vẫn là đã nối được).
  *   Request mới nhất mà trượt thì kèm `lastFailure` để dev thấy.
- * - Không ACCEPTED, có REJECTED -> "Trượt: …" theo REJECTED gần nhất.
+ * - PK4: chưa ACCEPTED, request REJECTED mới nhất là bắt tay -> "Đã bắt tay với nhà cung cấp ✓" (kèm SubscribeURL nếu có).
+ * - Không ACCEPTED, có REJECTED (không phải bắt tay) mới hơn -> "Trượt: …" theo REJECTED gần nhất.
  * - Còn lại (rỗng, chỉ DUPLICATE) -> chờ.
  */
 export function connectionState(rows: InspectRow[] | undefined): ConnectionState {
   const list = rows ?? [];
-  const rejected = list.find((r) => r.status === "REJECTED");
+  const hsRow = list.find(isHandshakeRow);
+  const handshake = hsRow ? (hsRow.handshake ?? { kind: "unknown" }) : null;
   if (list.some((r) => r.status === "ACCEPTED")) {
-    return { kind: "connected", lastFailure: list[0]?.status === "REJECTED" ? list[0].diagnosis : null };
+    const latest = list[0];
+    return { kind: "connected", lastFailure: latest?.status === "REJECTED" && !isHandshakeRow(latest) ? latest.diagnosis : null, handshake };
   }
+  const rejected = list.find((r) => r.status === "REJECTED");
+  if (rejected && isHandshakeRow(rejected)) return { kind: "handshaken", handshake: handshake! };
   if (rejected) return { kind: "failing", diagnosis: rejected.diagnosis };
   return { kind: "waiting" };
+}
+
+/** PK4: dòng bắt tay `manual-url` gần nhất còn link SubscribeURL (null nếu không có). */
+export function pendingSubscribeUrl(rows: InspectRow[] | undefined): string | null {
+  const r = (rows ?? []).find((x) => x.handshake?.kind === "manual-url" && typeof x.handshake.subscribeUrl === "string");
+  return r?.handshake?.subscribeUrl ?? null;
+}
+
+/**
+ * PK4 (§6.1, §15): hub KHÔNG gọi SubscribeURL (SSRF) — console chỉ hiện link cho dev tự bấm. Chỉ coi là link SNS thật khi
+ * https và tên miền `sns.<vùng>.amazonaws.com` (hoặc `.amazonaws.com.cn`); ngoài ra console cảnh báo, không làm link.
+ */
+export function isSnsSubscribeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/.test(u.hostname) && u.port === "" && u.username === "" && u.password === "";
+  } catch {
+    return false;
+  }
 }
 
 /** Tách chẩn đoán thành lý do + tên header/trường để dựng câu i18n. Không có lý do -> "unknown". */
@@ -74,6 +110,13 @@ export const TIMESTAMP_FORMAT_CHOICES = ["unix", "unix-ms", "iso8601"] as const;
 /** Giống `ALGO_IN_PREFIX` của @hub/providers (test so). */
 export const ALGO_IN_PREFIX = "<algo>=";
 
+/** PK4 (§6.1, ADR-205): kiểu bắt tay — `none` = không khai. Cùng tập `HANDSHAKE_KINDS` của server (test đối chiếu). */
+export const HANDSHAKE_CHOICES = ["none", "query-echo", "body-echo", "header-echo", "hmac-echo", "manual-url"] as const;
+export const WHEN_KIND_CHOICES = ["field", "header"] as const;
+/** PK4 §6.3: mã HTTP của ack (chuỗi trong form). Từ chối KHÔNG có 2xx. */
+export const ACK_SUCCESS_CHOICES = ["200", "202", "204"] as const;
+export const ACK_REJECT_CHOICES = ["401", "403", "503"] as const;
+
 export interface GenericFormValues {
   scheme: GenericScheme;
   header: string;
@@ -99,7 +142,66 @@ export interface GenericFormValues {
   idHeader: string;
   /** Chuỗi của ô số (form giữ chuỗi; dựng config thì đổi sang số). */
   toleranceSec: string;
+  // PK4 (§6, ADR-205): bắt tay + phản hồi.
+  hsKind: (typeof HANDSHAKE_CHOICES)[number];
+  /** query-echo: tham số mang challenge (`hub.challenge`, `challenge`). */
+  hsParam: string;
+  /** query-echo: tham số mang token xác minh (tuỳ chọn, `hub.verify_token`). */
+  hsVerifyTokenParam: string;
+  /** query-echo: token xác minh bạn khai ở nhà cung cấp — server mã hoá, không bao giờ trả lại. */
+  hsVerifyToken: string;
+  hsWhenKind: (typeof WHEN_KIND_CHOICES)[number];
+  hsWhenName: string;
+  hsWhenEquals: string;
+  /** body-echo: trường trả lại. */
+  hsEchoField: string;
+  /** header-echo: tiêu đề trả lại. */
+  hsHeader: string;
+  /** hmac-echo: trường chứa token (+ trường cha, một cấp) và tên trường chứa HMAC trả về. */
+  hsTokenParent: string;
+  hsTokenField: string;
+  hsMacField: string;
+  /** manual-url: trường chứa link xác nhận (SNS `SubscribeURL`). */
+  hsUrlField: string;
+  ackSuccess: (typeof ACK_SUCCESS_CHOICES)[number];
+  ackReject: (typeof ACK_REJECT_CHOICES)[number];
 }
+
+/** PK4: giá trị mặc định của các ô bắt tay / phản hồi (không bắt tay; 200 / 401 như trước PK4). */
+export const HANDSHAKE_FORM_DEFAULTS: Pick<
+  GenericFormValues,
+  | "hsKind"
+  | "hsParam"
+  | "hsVerifyTokenParam"
+  | "hsVerifyToken"
+  | "hsWhenKind"
+  | "hsWhenName"
+  | "hsWhenEquals"
+  | "hsEchoField"
+  | "hsHeader"
+  | "hsTokenParent"
+  | "hsTokenField"
+  | "hsMacField"
+  | "hsUrlField"
+  | "ackSuccess"
+  | "ackReject"
+> = {
+  hsKind: "none",
+  hsParam: "",
+  hsVerifyTokenParam: "",
+  hsVerifyToken: "",
+  hsWhenKind: "field",
+  hsWhenName: "",
+  hsWhenEquals: "",
+  hsEchoField: "",
+  hsHeader: "",
+  hsTokenParent: "",
+  hsTokenField: "",
+  hsMacField: "",
+  hsUrlField: "",
+  ackSuccess: "200",
+  ackReject: "401",
+};
 
 /** Giá trị mặc định của các ô `signed-template` (trang tạo nguồn dùng làm defaultValues). */
 export const TEMPLATE_FORM_DEFAULTS: Pick<
@@ -150,7 +252,7 @@ export const idKindOf = (v: Pick<GenericFormValues, "scheme" | "idKind">): "head
  */
 export function buildGenericConfig(v: GenericFormValues): Record<string, unknown> {
   const config: Record<string, unknown> = { scheme: v.scheme };
-  if (v.scheme === "signed-template") return buildTemplateConfig(v, config);
+  if (v.scheme === "signed-template") return withHandshakeAck(v, buildTemplateConfig(v, config));
   if (needsHeader(v)) config.header = v.header.trim().toLowerCase();
   if (v.scheme === "hmac") {
     // PK2: tham số HMAC. "Đọc từ tiền tố" -> prefix "<algo>=", không có algo.
@@ -168,6 +270,43 @@ export function buildGenericConfig(v: GenericFormValues): Record<string, unknown
   const idValue = v.idValue.trim();
   if (idValue) config.idempotency = idKindOf(v) === "header" ? { header: idValue.toLowerCase() } : { field: idValue };
   config.eventType = v.eventType.trim();
+  return withHandshakeAck(v, config);
+}
+
+/**
+ * PK4 (§6.1/§6.3, ADR-205): `handshake` theo kiểu đã chọn + `ack` khi khác mặc định (200 / 401). `verifyToken` gửi RÕ một lần
+ * lúc tạo — server mã hoá thành `verifyTokenEnc` (E13), không bao giờ trả lại.
+ */
+export function buildHandshake(v: GenericFormValues): Record<string, unknown> | null {
+  const when = () =>
+    v.hsWhenKind === "header" ? { header: v.hsWhenName.trim().toLowerCase(), equals: v.hsWhenEquals.trim() } : { field: v.hsWhenName.trim(), equals: v.hsWhenEquals.trim() };
+  switch (v.hsKind) {
+    case "query-echo": {
+      const vtp = v.hsVerifyTokenParam.trim();
+      return { kind: v.hsKind, param: v.hsParam.trim(), ...(vtp ? { verifyTokenParam: vtp, verifyToken: v.hsVerifyToken } : {}) };
+    }
+    case "body-echo":
+      return { kind: v.hsKind, when: when(), echo: { field: v.hsEchoField.trim() } };
+    case "header-echo":
+      return { kind: v.hsKind, header: v.hsHeader.trim().toLowerCase() };
+    case "hmac-echo": {
+      const parent = v.hsTokenParent.trim();
+      return { kind: v.hsKind, when: when(), ...(parent ? { tokenParent: parent } : {}), tokenField: v.hsTokenField.trim(), macField: v.hsMacField.trim() };
+    }
+    case "manual-url":
+      return { kind: v.hsKind, when: when(), urlField: v.hsUrlField.trim() };
+    default:
+      return null;
+  }
+}
+
+function withHandshakeAck(v: GenericFormValues, config: Record<string, unknown>): Record<string, unknown> {
+  const hs = buildHandshake(v);
+  if (hs) config.handshake = hs;
+  const ack: Record<string, number> = {};
+  if (v.ackSuccess !== "200") ack.successStatus = Number(v.ackSuccess);
+  if (v.ackReject !== "401") ack.rejectStatus = Number(v.ackReject);
+  if (Object.keys(ack).length > 0) config.ack = ack;
   return config;
 }
 
@@ -251,7 +390,16 @@ export type GenericFormIssue =
   | "kv-key-invalid"
   | "timestamp-header-required"
   | "tolerance-invalid"
-  | "id-header-required";
+  | "id-header-required"
+  | "hs-param-invalid"
+  | "hs-verify-token-invalid"
+  | "hs-when-invalid"
+  | "hs-field-invalid"
+  | "hs-header-invalid";
+
+/** PK4: như `WHEN_EQUALS_RE` / `VERIFY_TOKEN_RE` / echo của server (test đối chiếu). */
+const WHEN_EQUALS_RE = /^[\x21-\x7E]{1,128}$/;
+const VERIFY_TOKEN_RE = /^[\x21-\x7E]{8,256}$/;
 
 /**
  * PK2: kiểm form tay theo CÙNG luật server (`validateGenericConfig` + `secretProblem` của @hub/providers) — test
@@ -275,6 +423,42 @@ export function genericFormIssues(v: GenericFormValues, secret: string): { path:
   if (keyed && v.keyEncoding === "base64" && !isCanonicalBase64(secret)) out.push({ path: "secret", issue: "secret-base64" });
   if (v.scheme === "static-token" && v.location === "basic" && !secret.includes(":")) out.push({ path: "secret", issue: "secret-basic" });
   if (v.scheme === "static-token" && v.location === "query" && !QUERY_TOKEN_RE.test(secret)) out.push({ path: "secret", issue: "secret-query" });
+  out.push(...handshakeIssues(v));
+  return out;
+}
+
+/** PK4: luật `handshake` của server (`parseHandshake` + `parseSourceInput`) cho các ô form. */
+function handshakeIssues(v: GenericFormValues): { path: keyof GenericFormValues; issue: GenericFormIssue }[] {
+  const out: { path: keyof GenericFormValues; issue: GenericFormIssue }[] = [];
+  const field = (path: keyof GenericFormValues, value: string) => {
+    if (!FIELD_RE.test(value.trim())) out.push({ path, issue: "hs-field-invalid" });
+  };
+  const when = () => {
+    const name = v.hsWhenName.trim();
+    if (!(v.hsWhenKind === "header" ? HEADER_RE.test(name.toLowerCase()) : FIELD_RE.test(name))) out.push({ path: "hsWhenName", issue: "hs-when-invalid" });
+    if (!WHEN_EQUALS_RE.test(v.hsWhenEquals.trim())) out.push({ path: "hsWhenEquals", issue: "hs-when-invalid" });
+  };
+  if (v.hsKind === "query-echo") {
+    const param = v.hsParam.trim();
+    const vtp = v.hsVerifyTokenParam.trim();
+    if (!PARAM_RE.test(param)) out.push({ path: "hsParam", issue: "hs-param-invalid" });
+    if (vtp !== "" && (!PARAM_RE.test(vtp) || vtp === param)) out.push({ path: "hsVerifyTokenParam", issue: "hs-param-invalid" });
+    if (vtp !== "" && !VERIFY_TOKEN_RE.test(v.hsVerifyToken)) out.push({ path: "hsVerifyToken", issue: "hs-verify-token-invalid" });
+  } else if (v.hsKind === "body-echo") {
+    when();
+    field("hsEchoField", v.hsEchoField);
+  } else if (v.hsKind === "header-echo") {
+    if (!HEADER_RE.test(v.hsHeader.trim().toLowerCase())) out.push({ path: "hsHeader", issue: "hs-header-invalid" });
+  } else if (v.hsKind === "hmac-echo") {
+    when();
+    if (v.hsTokenParent.trim() !== "") field("hsTokenParent", v.hsTokenParent);
+    field("hsTokenField", v.hsTokenField);
+    field("hsMacField", v.hsMacField);
+    if (v.hsMacField.trim() !== "" && v.hsMacField.trim() === v.hsTokenField.trim()) out.push({ path: "hsMacField", issue: "hs-field-invalid" });
+  } else if (v.hsKind === "manual-url") {
+    when();
+    field("hsUrlField", v.hsUrlField);
+  }
   return out;
 }
 

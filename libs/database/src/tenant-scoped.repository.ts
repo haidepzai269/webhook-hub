@@ -1347,6 +1347,7 @@ export class TenantScopedRepository {
    * Request tới từng source từ `since` (KHÔNG tính probe: raw có event `probe=true` — PayOS confirm ADR-159, GitHub ping
    * ADR-162; request ký sai không có event nên luôn tính) và số ký sai. Index `raw_events(received_at DESC)`; scope tenant
    * qua `sources.tenant_id` (raw_events không có cột tenant).
+   * PK4 (E8, ADR-205): dòng bắt tay / chưa cấu hình (`headers.__hub_meta.reason`) không tính — chúng không nói gì về chữ ký.
    */
   async countSignatureBySource(since: Date, limit = ALERT_INPUT_LIMIT): Promise<{ sourceId: string; requests: number; invalid: number }[]> {
     const rows = await this.prisma.$queryRaw<{ sourceId: string; requests: bigint; invalid: bigint }[]>(Prisma.sql`
@@ -1355,6 +1356,7 @@ export class TenantScopedRepository {
       JOIN hub.sources s ON s.id = r.source_id
       LEFT JOIN hub.events e ON e.raw_event_id = r.id
       WHERE s.tenant_id = ${this.tenantId}::uuid AND r.received_at >= ${since} AND e.probe IS NOT TRUE
+        AND COALESCE(r.headers->'__hub_meta'->>'reason', '') NOT IN (${SIGNATURE_UNCOUNTED_REASONS[0]}, ${SIGNATURE_UNCOUNTED_REASONS[1]})
       GROUP BY 1
       LIMIT ${limit}`);
     return rows.map((r) => ({ sourceId: r.sourceId, requests: Number(r.requests), invalid: Number(r.invalid) }));
@@ -2194,6 +2196,8 @@ export interface AlertUpsertInput {
 /** CB2: trần dòng đầu vào của evaluator (đích/source mỗi project; dòng attempt mỗi truy vấn). */
 export const ALERT_INPUT_LIMIT = 1000;
 export const ALERT_ATTEMPT_ROWS_LIMIT = 20_000;
+/** PK4 (E8, E29): `__hub_meta.reason` của dòng REJECTED không phải chữ ký sai — `countSignatureBySource` không đếm. */
+export const SIGNATURE_UNCOUNTED_REASONS = ['handshake', 'not_configured'] as const;
 
 /** Mảng uuid cho `= ANY(...)` / `unnest(...)` (rỗng vẫn đúng kiểu). */
 function uuidArray(ids: string[]): Prisma.Sql {

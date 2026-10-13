@@ -743,6 +743,25 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
   - **T-R2-1:** gate `server-lib-subpath` quét cả file (`import(` / `require(` xuống dòng), thêm `require.resolve(` và template literal. Vẫn chỉ chuỗi tĩnh.
   - **T-R2-2:** gate mới `web-no-provider-barrel` (src `apps/web`, không phải spec, cấm barrel `@hub/providers`).
   - **T-R2-3:** `typeform.docsVersion` ghi rõ `event_id` chưa có tài liệu cam kết giữ nguyên khi gửi lại.
+- **PK4 (2026-10-14, Amelia):**
+  - **Zoom (E3) đối chiếu:** developers.zoom.us/docs/api/webhooks (2026-10-14) — ví dụ request `endpoint.url_validation` có `x-zm-request-timestamp` + `x-zm-signature`; tài liệu không nói rõ "phải verify request bắt tay" (mã mẫu không verify) nhưng request được ký → làm `hmac-echo` CHỈ sau verify. Zoom vẫn pending: không có id sự kiện được tài liệu cam kết (body chỉ `event`, `event_ts`, `payload`; `x-zm-request-id` không mô tả mục đích).
+  - **Khuôn `hmac-echo`:** `{when, tokenField, tokenParent?, macField}` — `tokenParent` (đúng một cấp) cần vì Zoom để token ở `payload.plainToken`; vẫn không JSONPath. HMAC cố định SHA-256 hex, khoá = secret (utf8) đã verify request — đúng Zoom, bên khác cần thêm tham số thì ADR.
+  - **Khuôn `manual-url`:** `{when, urlField}`; `body-echo`: `{when, echo:{field}}`; `header-echo`: `{header}`; `query-echo`: `{param, verifyTokenParam?, verifyTokenEnc?}`. Khoá lạ trong `handshake`/`ack` → 422 (khác phần thân config: khoá lạ cấp một vẫn bị bỏ qua như cũ).
+  - **`verifyToken` (E13):** client gửi `handshake.verifyToken` (rõ, 8–256 ASCII in được) lúc tạo; `parseSourceInput` mã hoá thành `verifyTokenEnc`. Client gửi `verifyTokenEnc` → 422. Có `verifyTokenParam` mà thiếu token → 422. Response nguồn (console + service API) thay `verifyTokenEnc` bằng `verifyTokenSet: true`. Ingest mở bằng `AdapterContext.openSealed` (lõi cài closure master key — lõi không đọc config).
+  - **`adoptSecret` (E20):** ở PK4 mọi source đều có secret → `adoptSecret` luôn 422 (`verificationConfig.handshake.adoptSecret`). Nhánh chế độ thu của `validateGenericConfig` (PK6) mở lại. `[PK:T13]` ở PK4 = 422 + header-echo không bao giờ ghi SourceSecret, secret nhận qua header không verify được; phần "trạng thái chờ / xác nhận" thuộc PK6.
+  - **Header của `header-echo` được che** khi lưu dòng bắt tay (`sensitiveHeaders` thêm header đó) — giá trị X-Hook-Secret là bí mật, review ban đầu của test bắt được bản lưu rõ.
+  - **Thứ tự (E9) cụ thể trong `ingest.service.ts`:** 0 checkIp → 1 413 → 1 query > 8KB = 414 → 2 nạp source + PK0 → **2 method (405, trước `trace.tenantId`)** → 2q QT3 → 2a checkPair → giải mã secret → **2h bắt tay** → chốt GET (không phải bắt tay → 405) → 3 verify → **3h hmac-echo** → 3c EG3 → 4–7. Bắt tay `invalid` = 400 không ghi DB, không phạt, không vào lưu lượng.
+  - **Lõi kẹp mã:** từ chối chữ ký chỉ nhận 401/403/503 từ `buildAck` (adapter trả 2xx → 401); thành công chỉ 200/202/204; 422 giữ nguyên. Bắt tay luôn 200 (Meta/Dropbox/Twitch/Graph đòi 200) — `successStatus` không áp cho echo.
+  - **Đột biến đã thử (đỏ đúng chỗ):** lõi gọi `after-verify` trước verify + adapter ký bằng secret đầu không verify → `[PK:T35]` đỏ; lõi nhận 200 khi từ chối → `[PK:T12]` đỏ; validator nhận `rejectStatus: 200` → đỏ; adapter nhận mọi GET + bỏ chốt GET của lõi → `[PK:T11]` đỏ. HEAD có ba lớp (lõi `method === 'HEAD'`, `acceptsMethod`, chốt GET) — gỡ một lớp vẫn 405.
+  - **Danh mục:** slack, twitch sang `entries/` (23 mục / 68 pending). Không chuyển (lý do ghi ở `pendingReason`):
+    - meta, dropbox, zoom: hết vướng PK4, còn vướng khoá chống trùng (không có id sự kiện cấp một / được cam kết) → `docs` (chờ `idempotency: {bodyHash}`);
+    - websub: độ tin cậy trung bình + khoá trong XML;
+    - okta: GET + tiêu đề `x-okta-verification-challenge`, trả JSON — ngoài 5 kiểu (GET chỉ cho query-echo);
+    - microsoft-graph: `validationToken` đến bằng **POST** (query-echo của PK4 chỉ GET) + chữ ký là `clientState` trong body;
+    - monday: echo phải là JSON (theo nghiên cứu) — E27 chốt text/plain; phần lớn không ký → PK5;
+    - **intercom, trello: đòi HEAD 200 khi tạo — mâu thuẫn E27 (HEAD → 405). Cần phòng quyết** (mở HEAD = 200 rỗng cho source khai `acceptHead`?);
+    - asana, notion: cần `adoptSecret` → PK6; aws-sns: còn RSA → PK5.
+  - **Chưa làm (ngoài phạm vi PK4):** nhãn EG5 "bị từ chối / chưa cấu hình" (E8, đi với `not_configured` ở PK6); `docs/ERRORS.md` thêm `method_not_allowed`, `handshake_invalid` (PK8 §11.3); lệnh `countSignatureBySource` đã loại reason nhưng test DB (`alert-evaluator-db.spec.ts`) chưa chạy được ở máy này (không docker) — CI chạy.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

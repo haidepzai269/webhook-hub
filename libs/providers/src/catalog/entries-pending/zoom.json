@@ -7,7 +7,7 @@
   "confidence": "cao",
   "docs": "https://developers.zoom.us/docs/api/webhooks/",
   "blockedBy": [
-    "PK4"
+    "docs"
   ],
-  "pendingReason": "S7: endpoint.url_validation cần hmac-echo (E3) -> chờ PK4"
+  "pendingReason": "PK4 xong (hmac-echo sau verify, E3; tài liệu Zoom: request endpoint.url_validation mang x-zm-signature). Còn chặn: không có id sự kiện được tài liệu cam kết (event + event_ts; x-zm-request-id không mô tả)."
 }

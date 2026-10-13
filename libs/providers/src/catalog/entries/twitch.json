@@ -1,0 +1,85 @@
+{
+  "id": "twitch",
+  "name": "Twitch EventSub",
+  "aliases": [
+    "twitch",
+    "eventsub"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "twitch-eventsub-message-id",
+        "twitch-eventsub-message-timestamp",
+        "twitch-eventsub-message-signature",
+        "twitch-eventsub-message-type"
+      ],
+      "optional": [
+        "twitch-eventsub-message-retry",
+        "twitch-eventsub-subscription-type",
+        "twitch-eventsub-subscription-version"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "subscription"
+      ],
+      "optional": [
+        "event",
+        "challenge"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "signed-template",
+      "template": "{id}{timestamp}{body}",
+      "signature": {
+        "headers": [
+          "twitch-eventsub-message-signature"
+        ],
+        "prefix": "sha256="
+      },
+      "timestampHeader": "twitch-eventsub-message-timestamp",
+      "timestampFormat": "iso8601",
+      "idHeader": "twitch-eventsub-message-id",
+      "toleranceSec": 300,
+      "idempotency": {
+        "header": "twitch-eventsub-message-id"
+      },
+      "eventType": "twitch.eventsub",
+      "handshake": {
+        "kind": "body-echo",
+        "when": {
+          "header": "twitch-eventsub-message-type",
+          "equals": "webhook_callback_verification"
+        },
+        "echo": {
+          "field": "challenge"
+        }
+      }
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret khai khi tạo subscription EventSub (transport.secret, 10–100 ký tự ASCII)",
+      "secret": true
+    }
+  ],
+  "secretSource": "hub",
+  "docs": "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",
+  "docsVersion": "Tài liệu không nêu cửa sổ thời gian -> toleranceSec 300 (mặc định của hub). Gửi lại giữ nguyên message id (trang EventSub, mục xử lý bản trùng). Bắt tay webhook_callback_verification: 200 text/plain, challenge thô.",
+  "confidence": "cao",
+  "sources": [
+    "https://dev.twitch.tv/docs/eventsub/handling-webhook-events/",
+    "https://dev.twitch.tv/docs/eventsub/"
+  ]
+}
