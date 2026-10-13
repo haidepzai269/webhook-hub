@@ -20,8 +20,8 @@ describe('BP2 — gợi ý destinationId/rateLimitRps trong message giao hàng',
     const sql = buildSweepSql(10 * 60_000).strings.join('?');
     expect(sql).toMatch(/'destinationId', sub\.destination_id::text/);
     expect(sql).toMatch(/'rateLimitRps', dst\.rate_limit_rps/);
-    expect(sql).toMatch(/JOIN hub\.subscriptions sub ON sub\.id = s\.subscription_id/);
-    expect(sql).toMatch(/JOIN hub\.destinations dst ON dst\.id = sub\.destination_id/);
+    expect(sql).toMatch(/JOIN hub\.subscriptions sub ON sub\.id = s\.subscription_id AND sub\.tenant_id = s\.tenant_id/);
+    expect(sql).toMatch(/JOIN hub\.destinations dst ON dst\.id = sub\.destination_id AND dst\.tenant_id = sub\.tenant_id/);
   });
 
   it('[BP:T5] (phần d) build/parse giữ gợi ý; slim() khi republish giữ gợi ý; không có khoá lạ', async () => {

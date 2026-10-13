@@ -1,4 +1,4 @@
-import { NORMALIZE_RETRY_TTL_MS, RETRY_TIERS } from './topology';
+import { NORMALIZE_RETRY_TTL_MS, RETRY_TIERS, retryQueueForDelay } from './topology';
 
 /**
  * Cửa sổ "còn có thể retry" của một message trong hệ thống — NGUỒN DUY NHẤT (trước ở cleanup.job.ts của hub-worker; QT4
@@ -15,6 +15,14 @@ export const NORMALIZE_MAX_RETRIES = 5;
  * hub-worker (trần) lẫn cửa sổ retry bên dưới (hub-api + worker dùng làm sàn dọn).
  */
 export const CIRCUIT_MAX_DEFER_MS = 1_800_000;
+/** Kẹp dưới của `CIRCUIT_MAX_DEFER_MS` khi đặt qua env: không ngắn hơn một vòng hoãn (tầng 1m). */
+export const CIRCUIT_MAX_DEFER_MIN_MS = 60_000;
+/**
+ * TTL của tầng hoãn vì circuit (BP2: tầng ngắn nhất có TTL ≥ OPEN 60s = `retry.1m`). Trần hoãn chỉ được kiểm mỗi vòng,
+ * nên một lần thử có thể hoãn tới `max + 1 vòng` (review BP2 TH-5) — cửa sổ retry cộng thêm một vòng cho mỗi lần thử.
+ * BP3 (OPEN tới 300s, hoãn vào `retry.5m`) PHẢI nâng giá trị này theo tầng hoãn dài nhất.
+ */
+export const CIRCUIT_DEFER_ROUND_MS = retryQueueForDelay(60_000).ttlMs;
 
 /**
  * Đọc `CIRCUIT_MAX_DEFER_MS` từ env — CHỈ được kẹp THẤP HƠN mặc định (C2): đặt cao hơn mà `TOTAL_RETRY_WINDOW_MS` không đổi
@@ -23,18 +31,20 @@ export const CIRCUIT_MAX_DEFER_MS = 1_800_000;
 export function circuitMaxDeferMs(env: string | undefined = process.env.CIRCUIT_MAX_DEFER_MS): number {
   const n = Number(env);
   if (env === undefined || env === '' || !Number.isFinite(n) || n <= 0) return CIRCUIT_MAX_DEFER_MS;
-  return Math.min(Math.floor(n), CIRCUIT_MAX_DEFER_MS);
+  // Review BP2 TH-2: kẹp dưới ≥ 1 vòng hoãn (60s) — '0.5'/'1' không được biến mỗi lần OPEN thành một lượt thử đốt ngay.
+  return Math.max(CIRCUIT_MAX_DEFER_MIN_MS, Math.min(Math.floor(n), CIRCUIT_MAX_DEFER_MS));
 }
 
 /**
  * Tổng thời gian một message có thể còn "sống" trong hệ thống retry: 5 tầng delivery (10s+1m+5m+30m+2h) + 5 lần normalize
  * 30s + (BP2, C2) tối đa `CIRCUIT_MAX_DEFER_MS` hoãn vì circuit cho MỖI lần thử (6 lần: 1 lần đầu + 5 tầng).
- * processed_messages/outbox phải sống LÂU HƠN thế; dữ liệu mới hơn mốc này không được dọn/xoá (QT §5.2). ≈ 5h38m40s.
+ * + một vòng hoãn mỗi lần thử (trần kiểm theo vòng). processed_messages/outbox phải sống LÂU HƠN thế; dữ liệu mới hơn mốc
+ * này không được dọn/xoá (QT §5.2). ≈ 5h44m40s.
  */
 export const TOTAL_RETRY_WINDOW_MS =
   RETRY_TIERS.reduce((sum, t) => sum + t.ttlMs, 0) +
   NORMALIZE_RETRY_TTL_MS * NORMALIZE_MAX_RETRIES +
-  (RETRY_TIERS.length + 1) * CIRCUIT_MAX_DEFER_MS;
+  (RETRY_TIERS.length + 1) * (CIRCUIT_MAX_DEFER_MS + CIRCUIT_DEFER_ROUND_MS);
 
 /** Mốc thời gian MỚI NHẤT được phép dọn/xoá: dữ liệu nhận SAU mốc này có thể còn đang retry. */
 export function retryWindowFloor(now: number = Date.now()): Date {

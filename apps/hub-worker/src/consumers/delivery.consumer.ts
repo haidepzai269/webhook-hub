@@ -260,6 +260,11 @@ export class DeliveryConsumer {
     // khi message nhận vào là kiểu cũ còn secret, bản sao gửi tiếp sẽ không còn secret nữa.
     const slim = (count = attemptCount) => Buffer.from(JSON.stringify(buildDeliveryMessage({ ...deliveryMsg, attemptCount: count })));
 
+    // Probe HALF_OPEN đang giữ (và đích của nó) — khai báo NGOÀI try để `catch` ngoài cùng nhả được (review BP2 TH-1).
+    let probeToken: string | null = null;
+    /** Đích mà `probeToken` thuộc về (gợi ý có thể lệch đích thật). */
+    let probeFor: string | null = null;
+
     try {
       // BP2 §3.2 (ADR-196): message có GỢI Ý đích + rps -> GATE TRƯỚC khi nạp DB (1 lệnh Redis). Mạch OPEN / HALF_OPEN không
       // giành được probe -> hoãn với 0 truy vấn đọc; vượt throttle -> retry.10s, 0 truy vấn DB. Message cũ (thiếu gợi ý) đi đường
@@ -269,9 +274,6 @@ export class DeliveryConsumer {
           ? { destinationId: deliveryMsg.destinationId, rateLimitRps: deliveryMsg.rateLimitRps }
           : null;
       let view: CircuitView | null = null;
-      let probeToken: string | null = null;
-      /** Đích mà `probeToken` thuộc về (gợi ý có thể lệch đích thật). */
-      let probeFor: string | null = null;
       if (hint) {
         view = await this.circuitBreaker.getState(hint.destinationId, hint.rateLimitRps);
         if (view.state === 'HALF_OPEN') {
@@ -588,6 +590,8 @@ export class DeliveryConsumer {
     } catch (err: any) {
       // BP1 (ADR-195): KHÔNG requeue ngay — hoãn có nhịp. attemptCount giữ nguyên: lần này chưa hề gọi tới đích
       // (hoặc đã gọi nhưng chưa ghi được kết quả — lần sau idempotency/lease xử lý), đốt lượt vì lỗi của hub là sai.
+      // Review BP2 TH-1: nhả probe đang giữ (theo token — đã bị thay/xoá thì là no-op), không khoá dò đích 30s vì lỗi của hub.
+      if (probeToken && probeFor) await this.circuitBreaker.releaseProbe(probeFor, probeToken).catch(() => {});
       const kind = classifyInfraError(err);
       deliveryInfraErrors.inc({ kind });
       const headers = msg.properties.headers ?? {};

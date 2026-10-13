@@ -416,6 +416,53 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     expect(await redis.exists(tk0)).toBe(0);
   });
 
+  it('BP2 §6 LUA_GATE trên Redis THẬT: CLOSED (không trần -> không khoá throttle), throttle, OPEN (+PTTL), HALF_OPEN giành/không giành probe — mỗi gate đúng 1 lệnh', async () => {
+    while (Date.now() % 1000 > 600) await new Promise((r) => setTimeout(r, 20));
+    await redis.del(k('failures'), k('open'), k('probe'));
+    const sec = Math.floor(Date.now() / 1000);
+    const tk = `throttle:destination:${dest}:${sec}`;
+    await redis.del(tk);
+    // CLOSED, rps 0 -> không INCR
+    expect(await cb.getState(dest, 0)).toEqual({ state: 'CLOSED', failures: 0 });
+    expect(await redis.exists(tk)).toBe(0);
+    // CLOSED, rps 1 -> INCR; lần 2 vượt
+    expect(await cb.getState(dest, 1)).toEqual({ state: 'CLOSED', failures: 0, throttleAllowed: true, throttleCount: 1 });
+    expect(await cb.getState(dest, 1)).toMatchObject({ throttleAllowed: false, throttleCount: 2 });
+    // TTL cửa sổ throttle = ARGV[3] = 2s (bắt lỗi đảo thứ tự ARGV rps/TTL: khi đó TTL = rps = 1s)
+    expect(await redis.pttl(tk)).toBeGreaterThan(1000);
+    // recheckThrottle với rps thật lớn hơn: so lại bộ đếm, KHÔNG INCR thêm
+    const v = await cb.getState(dest, 1); // count 3
+    expect(await cb.recheckThrottle(dest, v, 10)).toMatchObject({ throttleAllowed: true, throttleCount: 3 });
+    expect(await redis.get(tk)).toBe('3');
+    // ngưỡng lỗi chưa đủ nhưng có failures -> vẫn CLOSED, failures đọc đúng
+    await redis.set(k('failures'), '2');
+    expect(await cb.getState(dest, 0)).toEqual({ state: 'CLOSED', failures: 2 });
+    // OPEN: PTTL thật, không INCR throttle
+    await redis.set(k('failures'), '5');
+    await redis.set(k('open'), 'OPEN', 'EX', 60);
+    const before = await redis.get(tk);
+    const open = await cb.getState(dest, 1);
+    expect(open).toMatchObject({ state: 'OPEN', failures: 5 });
+    expect(open.openPttlMs).toBeGreaterThan(55_000);
+    expect(await redis.get(tk)).toBe(before);
+    // HALF_OPEN: hết :open, :failures còn -> giành probe đúng một bên
+    await redis.del(k('open'));
+    expect(await cb.getState(dest, 1)).toEqual({ state: 'HALF_OPEN', failures: 5 });
+    const t1 = await cb.tryAcquireProbe(dest);
+    expect(t1).toEqual(expect.any(String));
+    expect(await cb.tryAcquireProbe(dest)).toBeNull();
+    await cb.releaseProbe(dest, t1);
+    await redis.del(k('failures'), k('open'), k('probe'), tk);
+  });
+
+  it('BP2 §6 LUA_GATE: Redis LỖI (cổng chết) -> fail-open CLOSED degraded, không ném', async () => {
+    const dead = new Redis('redis://127.0.0.1:1', { lazyConnect: true, maxRetriesPerRequest: 0, enableOfflineQueue: false, retryStrategy: () => null });
+    dead.on('error', () => {});
+    const cbDead = new CircuitBreakerService(fakePrisma().prisma, dead);
+    expect(await cbDead.getState(dest, 5)).toEqual({ state: 'CLOSED', failures: 0, degraded: true });
+    dead.disconnect();
+  });
+
   it('throttle dùng cùng script INCR+EXPIRE', async () => {
     // tránh rơi đúng ranh giới giây (cửa sổ cố định 1s)
     while (Date.now() % 1000 > 600) await new Promise((r) => setTimeout(r, 20));

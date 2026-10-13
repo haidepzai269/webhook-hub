@@ -13,7 +13,7 @@ import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
 
 /** QT4 (SPEC-han-muc-dung-luong §5.1–§5.5, ADR-184): hợp đồng thuần của lệnh dọn. */
 const NOW = Date.parse('2026-10-12T12:00:00Z');
-// Sàn thật (BP2 C2: ≈ 5h38m40s) — import, không viết cứng, để test luôn phản ánh cửa sổ retry hiện hành.
+// Sàn thật (BP2 C2: ≈ 5h44m40s) — import, không viết cứng, để test luôn phản ánh cửa sổ retry hiện hành.
 const FLOOR = TOTAL_RETRY_WINDOW_MS;
 
 describe('QT4: lệnh dọn — kiểm request (thuần)', () => {
@@ -23,7 +23,7 @@ describe('QT4: lệnh dọn — kiểm request (thuần)', () => {
     expect(tooNew).toMatchObject({ field: 'olderThan' });
     const iso = parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: new Date(NOW - 3_600_000).toISOString() }, FLOOR, NOW);
     expect(iso).toMatchObject({ field: 'olderThan' });
-    // '3h' từng hợp lệ (sàn 2h38m); sau BP2 sàn ≈ 5h38m40s -> bị từ chối.
+    // '3h' từng hợp lệ (sàn 2h38m); sau BP2 sàn ≈ 5h44m40s -> bị từ chối.
     expect(parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '3h' }, FLOOR, NOW)).toMatchObject({ field: 'olderThan' });
     const ok = parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '6h' }, FLOOR, NOW);
     expect(isCleanRequestError(ok)).toBe(false);

@@ -10,6 +10,8 @@ import { CIRCUIT_DEFERRED_SINCE_HEADER, DeliveryConsumer } from '../src/consumer
 import { SenderRegistry } from '../src/senders/sender.registry';
 import { CIRCUIT_MAX_DEFER_MS } from '@hub/messaging';
 import { buildChannel, buildDeliveryRow, buildFakeCircuitBreaker, buildSlimMsg } from './delivery-fixtures';
+import { CircuitBreakerService } from '../src/circuit/circuit-breaker.service';
+import { describeDb } from '../../../libs/database/test/support/test-db';
 
 /**
  * BP2 §3.2 (ADR-196, C9): gate TRƯỚC khi nạp DB theo gợi ý `destinationId` + `rateLimitRps`; gợi ý luôn kiểm lại với row thật.
@@ -128,6 +130,27 @@ describe('BP2 §3.2 — gate trước khi nạp DB', () => {
     expect(ch.ack).toHaveBeenCalledTimes(1);
   });
 
+  it('[BP:T11] (phần d) gợi ý lệch đích: probe giành theo đích GỢI Ý (HALF_OPEN) được NHẢ đúng chủ trước khi gate lại đích thật (review BP2 TB-1)', async () => {
+    const { consumer, cb, send } = setup({ 'dest-stale': 'HALF_OPEN', 'dest-1': 'CLOSED' }, { probe: true });
+    const ch = buildChannel();
+    await consumer.handleMessage(amqp(hinted('dest-stale', 0)), ch);
+    expect(cb.tryAcquireProbe).toHaveBeenCalledWith('dest-stale');
+    expect(cb.releaseProbe).toHaveBeenCalledWith('dest-stale', 'probe-token');
+    expect(cb.releaseProbe.mock.invocationCallOrder[0]).toBeLessThan(cb.getState.mock.invocationCallOrder[1]);
+    expect(cb.getState.mock.calls.map((c: any[]) => c[0])).toEqual(['dest-stale', 'dest-1']);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('(review BP2 TH-1) lỗi ở bước nạp row khi đang giữ probe theo gợi ý -> catch ngoài cùng NHẢ probe, rồi hoãn có nhịp (BP1)', async () => {
+    const { consumer, cb, repo } = setup({ 'dest-1': 'HALF_OPEN' }, { probe: true });
+    repo.findDeliveryForSend.mockRejectedValueOnce(Object.assign(new Error('db down'), { code: 'ECONNREFUSED' }));
+    const ch = buildChannel();
+    await consumer.handleMessage(amqp(hinted('dest-1', 0)), ch);
+    expect(cb.releaseProbe).toHaveBeenCalledWith('dest-1', 'probe-token');
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
+    expect(ch.ack).toHaveBeenCalledTimes(1);
+  });
+
   it('[BP:T10] (phần b) message thiếu gợi ý (hoặc chỉ có destinationId, không rps) -> đường cũ: nạp row rồi mới gate', async () => {
     for (const body of [buildSlimMsg(), buildSlimMsg({ destinationId: 'dest-1' })]) {
       const { consumer, repo, cb, send } = setup({});
@@ -137,3 +160,75 @@ describe('BP2 §3.2 — gate trước khi nạp DB', () => {
     }
   });
 });
+
+/**
+ * Review BP2 TB-2: gate thật (LUA_GATE trên Redis THẬT, RUN_DB_TESTS=1 + REDIS_URL) qua consumer — `ioredis` thật, không mock.
+ * Đếm lệnh bằng spy `sendCommand` của client circuit.
+ */
+const describeRedis = describeDb;
+describeRedis('BP2 — gate trước khi nạp DB trên Redis THẬT', () => {
+  // jest.mock('ioredis') ở đầu file chỉ áp cho client pub của consumer; client circuit dùng bản thật.
+  const RealRedis = jest.requireActual('ioredis');
+  const redis = new RealRedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: 1 });
+  const dest = `gate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const k = (x: string) => `circuit:${dest}:${x}`;
+  afterAll(async () => {
+    await redis.del(k('failures'), k('open'), k('probe'));
+    await redis.quit();
+  });
+
+  function realSetup() {
+    const row = buildDeliveryRow();
+    (row.subscription.destination as any).id = dest;
+    const repo = {
+      findDeliveryForSend: jest.fn().mockResolvedValue(row),
+      claimForSend: jest.fn().mockResolvedValue(1),
+      deferDelivery: jest.fn().mockResolvedValue(1),
+      getDeliveryLeaseState: jest.fn(),
+      updateDestinationCircuitState: jest.fn().mockResolvedValue(0),
+    };
+    const tx = {
+      deliveryAttempt: { create: jest.fn().mockResolvedValue({}) },
+      delivery: { findFirst: jest.fn().mockResolvedValue({ id: 'x' }), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      processedMessage: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma: any = {
+      forTenant: jest.fn().mockReturnValue(repo),
+      processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
+      tenantTx: (_t: any, fn: any) => fn(tx),
+    };
+    const send = jest.fn().mockResolvedValue({ status: 200, body: 'ok', durationMs: 2 });
+    jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send } as any);
+    const cmd = jest.spyOn(redis, 'sendCommand');
+    return { consumer: new DeliveryConsumer(prisma, new CircuitBreakerService(prisma, redis)), repo, send, cmd };
+  }
+  afterEach(() => jest.restoreAllMocks());
+
+  it('[BP:T6] (phần d) Redis thật: OPEN + gợi ý -> đúng 1 lệnh Redis, 0 truy vấn đọc, hoãn retry.1m; CLOSED -> gửi; HALF_OPEN -> probe giành + nhả sau khi thành công', async () => {
+    await redis.set(k('failures'), '5');
+    await redis.set(k('open'), 'OPEN', 'EX', 60);
+    let s1 = realSetup();
+    let ch = buildChannel();
+    await s1.consumer.handleMessage(amqp(hinted(dest, 0)), ch);
+    expect(s1.cmd).toHaveBeenCalledTimes(1);
+    expect(s1.repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(ch.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+    jest.restoreAllMocks();
+
+    // HALF_OPEN: :open hết -> giành probe thật, gửi thành công -> recordSuccess xoá khoá
+    await redis.del(k('open'));
+    s1 = realSetup();
+    ch = buildChannel();
+    await s1.consumer.handleMessage(amqp(hinted(dest, 0)), ch);
+    expect(s1.send).toHaveBeenCalledTimes(1);
+    expect(await redis.exists(k('failures'), k('probe'))).toBe(0);
+    jest.restoreAllMocks();
+
+    // CLOSED, không trần -> 1 lệnh gate, gửi
+    s1 = realSetup();
+    await s1.consumer.handleMessage(amqp(hinted(dest, 0)), buildChannel());
+    expect(s1.send).toHaveBeenCalledTimes(1);
+    expect(s1.cmd).toHaveBeenCalledTimes(1);
+  });
+});
+

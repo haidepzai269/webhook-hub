@@ -547,6 +547,11 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(circuitMaxDeferMs('600000')).toBe(600_000);
     expect(circuitMaxDeferMs('99999999')).toBe(CIRCUIT_MAX_DEFER_MS); // cao hơn -> kẹp (sàn dọn QT không theo kịp)
     expect(circuitMaxDeferMs('0')).toBe(CIRCUIT_MAX_DEFER_MS);
+    // review BP2 TH-2: dương nhưng quá nhỏ -> kẹp dưới 60s (một vòng hoãn), không đốt lượt ngay mỗi lần OPEN
+    expect(circuitMaxDeferMs('0.5')).toBe(60_000);
+    expect(circuitMaxDeferMs('1')).toBe(60_000);
+    expect(circuitMaxDeferMs('59999')).toBe(60_000);
+    expect(circuitMaxDeferMs('60000')).toBe(60_000);
     expect(circuitMaxDeferMs('abc')).toBe(CIRCUIT_MAX_DEFER_MS);
   });
 

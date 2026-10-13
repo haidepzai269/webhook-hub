@@ -40,6 +40,13 @@ function fakeRedis() {
         }
         return [store.get(open) ? 1 : 0, store.get(failures) ?? '', store.get(open) ? 60_000 : -2, t];
       }
+      if (/EXISTS/.test(script)) {
+        // LUA_ACQUIRE_PROBE: KEYS open, failures, probe; ARGV token, TTL, ngưỡng
+        const [open, failures, probe] = rest.slice(0, n);
+        if (store.get(open) || Number(store.get(failures) ?? 0) < Number(rest[n + 2]) || store.get(probe)) return 0;
+        store.set(probe, String(rest[n]));
+        return 1;
+      }
       if (/INCR/.test(script)) {
         const n = Number(store.get(key) ?? 0) + 1;
         store.set(key, String(n));
@@ -308,6 +315,15 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
     expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
     expect(repo.deferDelivery).not.toHaveBeenCalled();
+  });
+
+  it('[BP:T22] (phần b) HALF_OPEN có probe (gợi ý đúng): ≤ 3 lệnh circuit (gate + giành probe + DEL khi thành công) + PUBLISH realtime', async () => {
+    store.set('circuit:dest-1:failures', '5'); // :open đã hết hạn -> HALF_OPEN
+    const { repo } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    const c = take();
+    expect(repo.findDeliveryForSend).toHaveBeenCalledTimes(1);
+    expect(c).toEqual(['eval', 'eval', 'del', 'publish']);
+    expect(c.filter((x) => x !== 'publish').length).toBeLessThanOrEqual(3); // hiếm (một probe / đích / 30s), ngoài đường nóng R1
   });
 
   it('R1 (C9): đích CÓ throttle, gợi ý ĐÚNG -> gate trước khi nạp, vẫn 2 lệnh/delivery (EVAL + PUBLISH)', async () => {

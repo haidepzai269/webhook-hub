@@ -78,8 +78,8 @@ export function buildSweepSql(sweepAfterMs: number, batch = SWEEP_BATCH, retryGr
              'destinationId', sub.destination_id::text,
              'rateLimitRps', dst.rate_limit_rps)
     FROM stuck s
-    JOIN hub.subscriptions sub ON sub.id = s.subscription_id
-    JOIN hub.destinations dst ON dst.id = sub.destination_id`;
+    JOIN hub.subscriptions sub ON sub.id = s.subscription_id AND sub.tenant_id = s.tenant_id
+    JOIN hub.destinations dst ON dst.id = sub.destination_id AND dst.tenant_id = sub.tenant_id`;
 }
 
 @Injectable()
