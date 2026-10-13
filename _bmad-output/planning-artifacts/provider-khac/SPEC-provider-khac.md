@@ -780,7 +780,7 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 - [x] **PK1** — generic lên console + Lắng nghe + Svix + "request đầu tiên ✓"
 - [x] **PK2** — `hmac` mở rộng + `static-token` basic/query
 - [x] **PK3** — `signed-template`
-- [ ] **PK9** — danh mục + `identify` (client)
+- [x] **PK9** — danh mục + `identify` (client)
 - [ ] **PK4** — bắt tay + GET bắt tay + ack/rejectStatus
 - [ ] **PK5** — `unverified` (bốn khoá + E4/E5/E7)
 - [ ] **PK6** — chế độ thu + kích hoạt
