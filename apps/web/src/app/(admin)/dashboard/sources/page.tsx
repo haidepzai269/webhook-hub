@@ -27,7 +27,16 @@ import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
-import { buildGenericConfig, GENERIC_SCHEMES, type GenericFormValues, idKindOf, isReservedType } from "@/lib/hub/listen-logic";
+import {
+  buildGenericConfig,
+  GENERIC_SCHEMES,
+  type GenericFormIssue,
+  type GenericFormValues,
+  genericFormIssues,
+  HMAC_ALGO_CHOICES,
+  KEY_ENCODING_CHOICES,
+  TOKEN_LOCATION_CHOICES,
+} from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
@@ -97,13 +106,22 @@ const SECRET_HINT: Record<(typeof PROVIDERS)[number], MessageKey> = {
 /** Nhãn nhà cung cấp: `generic` hiện là "Nhà cung cấp khác" (PK1), còn lại giữ tên kỹ thuật. */
 const providerLabel = (t: TranslateFn, p: string) => (p === "generic" ? t("page.sources.provider.generic") : p);
 
-const HEADER_RE = /^[a-z0-9-]{1,64}$/;
-const FIELD_RE = /^[A-Za-z0-9_]{1,64}$/;
-const EVENT_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
+const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
+  "header-required": "page.sources.generic.header-required",
+  "prefix-too-long": "page.sources.generic.prefix-too-long",
+  "param-required": "page.sources.generic.param-required",
+  "id-required": "page.sources.generic.id-required",
+  "event-type-invalid": "page.sources.generic.event-type-invalid",
+  "event-type-reserved": "page.sources.generic.event-type-reserved",
+  "secret-hex": "page.sources.generic.secret-hex",
+  "secret-base64": "page.sources.generic.secret-base64",
+  "secret-basic": "page.sources.generic.secret-basic",
+};
 
 /**
- * PK1 (SPEC-provider-khac §3.1): form tay cho "Nhà cung cấp khác" (generic) — scheme, header, encoding, khoá chống trùng,
- * eventType. PK7 thay bằng form nhận diện. Kiểm nhẹ ở client; server (`validateGenericConfig`) là trọng tài, 422 có tên trường.
+ * PK1 (SPEC-provider-khac §3.1) + PK2 (§4, ADR-203): form tay cho "Nhà cung cấp khác" (generic) — scheme, tham số HMAC
+ * (algo, mã hoá, tiền tố, cách đọc khoá), vị trí token (tiêu đề / Basic / query), khoá chống trùng, eventType. PK7 thay
+ * bằng form nhận diện. Kiểm ở client theo cùng luật server (`genericFormIssues`); server vẫn là trọng tài, 422 có tên trường.
  */
 const makeSchema = (t: TranslateFn) =>
   z
@@ -114,25 +132,19 @@ const makeSchema = (t: TranslateFn) =>
       scheme: z.enum(GENERIC_SCHEMES),
       header: z.string(),
       encoding: z.enum(["hex", "base64"]),
+      algo: z.enum(HMAC_ALGO_CHOICES),
+      prefix: z.string(),
+      keyEncoding: z.enum(KEY_ENCODING_CHOICES),
+      location: z.enum(TOKEN_LOCATION_CHOICES),
+      param: z.string(),
       idKind: z.enum(["header", "field"]),
       idValue: z.string(),
       eventType: z.string(),
     })
-    .superRefine((v, ctx) => {
-      if (v.provider !== "generic") return;
-      const sw = v.scheme === "standard-webhooks";
-      if (!sw && !HEADER_RE.test(v.header.trim().toLowerCase())) {
-        ctx.addIssue({ code: "custom", path: ["header"], message: t("page.sources.generic.header-required") });
-      }
-      const id = v.idValue.trim();
-      const idOk = idKindOf(v) === "header" ? HEADER_RE.test(id.toLowerCase()) : FIELD_RE.test(id);
-      if ((id || !sw) && !idOk) ctx.addIssue({ code: "custom", path: ["idValue"], message: t("page.sources.generic.id-required") });
-      const eventType = v.eventType.trim();
-      if (!EVENT_TYPE_RE.test(eventType) || eventType.length > 128) {
-        ctx.addIssue({ code: "custom", path: ["eventType"], message: t("page.sources.generic.event-type-invalid") });
-      } else if (isReservedType(eventType)) {
-        // Review PK1 T-2: kiểu chuẩn cần ánh xạ trường (PK7 / API) — form tay không có ô mapping, server sẽ 422.
-        ctx.addIssue({ code: "custom", path: ["eventType"], message: t("page.sources.generic.event-type-reserved") });
+    .superRefine(({ provider, name: _n, secret, ...v }, ctx) => {
+      if (provider !== "generic") return;
+      for (const { path, issue } of genericFormIssues(v, secret)) {
+        ctx.addIssue({ code: "custom", path: [path], message: t(ISSUE_KEY[issue]) });
       }
     });
 type Values = z.infer<ReturnType<typeof makeSchema>>;
@@ -274,7 +286,22 @@ export default function SourcesPage() {
   const listenSource = data?.find((s) => s.id === listenId) ?? null;
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { provider: "github", name: "", secret: "", scheme: "hmac-sha256", header: "", encoding: "hex", idKind: "field", idValue: "", eventType: "" },
+    defaultValues: {
+      provider: "github",
+      name: "",
+      secret: "",
+      scheme: "hmac",
+      header: "",
+      encoding: "hex",
+      algo: "sha256",
+      prefix: "",
+      keyEncoding: "utf8",
+      location: "header",
+      param: "",
+      idKind: "field",
+      idValue: "",
+      eventType: "",
+    },
   });
   // useWatch thay vì form.watch: React Compiler memo hoá form.watch → gợi ý không đổi theo provider.
   const provider = useWatch({ control: form.control, name: "provider" });

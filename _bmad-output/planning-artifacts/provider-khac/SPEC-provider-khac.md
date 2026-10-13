@@ -670,6 +670,12 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
   - **T-2:** web chưa alias `@hub/common` → `listen-logic.ts` giữ **bản sao** `RESERVED_NAMESPACES`/`isReservedType`; `listen-logic.spec.ts` so với bản gốc (lệch là đỏ). Client cũng chặn `eventType` > 128.
   - **T-4: làm.** Inspect thật sự không cần `body_raw` (`diagnose` chỉ đọc headers/body/status; nhánh mapping chỉ đọc `body`) → repo thêm `findRecentRawEventsForInspect` (`select` bỏ `bodyRaw`), `StoredRawEvent.bodyRaw` thành tuỳ chọn. `findRecentRawEventsForSource` giữ nguyên cho đối chiếu secret (KN, cần bytes gốc).
   - **T-7 (rủi ro còn lại, ghi theo review):** "✓" chưa bảo đảm nội dung với body không phải JSON — nguồn generic không mapping nhận `text/plain`/XML/`+json` vẫn ACCEPTED với `body = {}` tới khi xong **PK5 (E29)**. PK5 không được trượt.
+- **PK2 (2026-10-14, Amelia):**
+  - Giá trị "thuật toán trong tiền tố" là đúng chuỗi `"<algo>="` (hằng `ALGO_IN_PREFIX`); khi đó config **không** lưu `algo`. Bí danh `hmac-sha256` **không** hiểu chuỗi này (trước PK2 nó là tiền tố tĩnh thường) và từ chối `algo`/`keyEncoding`; khuôn lưu của bí danh không thêm trường — "đọc ra `{algo:"sha256"}`" làm bằng `hmacParams`, không ghi vào DB.
+  - §4.2 "sha1 chỉ khi có ghi chú lý do trong mục danh mục": danh mục chưa có (PK9) → validator nhận sha1 cho mọi config; form gắn nhãn "chỉ khi nhà cung cấp quy định". Ràng buộc "phải có lý do" chuyển sang luật của mục danh mục ở PK9 (ADR-203).
+  - Token ở query: lõi không lưu query ở đâu cả nên **không** cần `__hub_meta.query` (E6 "nếu cần lưu"); `diagnose` của location query chỉ trả `expectedQueryParam` (trường mới của `Diagnosis`), không phân biệt thiếu/sai.
+  - Thêm (ngoài spec): `secretProblem` lúc tạo source — keyEncoding hex/base64 không giải mã được, basic thiếu `:` → 422 `secret`.
+  - Form console chỉ tạo `hmac` (không còn lựa chọn `hmac-sha256`); kiểm client `genericFormIssues` đối chiếu từng ca với `validateGenericConfig` + `secretProblem` trong `listen-logic.spec.ts`.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

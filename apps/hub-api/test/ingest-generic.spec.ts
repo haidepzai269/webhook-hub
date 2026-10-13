@@ -1,5 +1,7 @@
 import { createHmac } from 'crypto';
 import { aesGcmEncrypt } from '@hub/crypto';
+import { logger } from '@hub/common';
+import { GenericAdapter } from '@hub/providers';
 import { IngestService } from '../src/modules/ingest/ingest.service';
 
 /**
@@ -66,5 +68,55 @@ describe('IngestService + GenericAdapter (S8)', () => {
     const data = tx.rawEvent.create.mock.calls[0][0].data;
     expect(JSON.stringify(data.headers) + data.signatureHeader).not.toContain(TOKEN);
     expect(data.headers['x-token']).toBe('***');
+  });
+
+  /** Ghi lại MỌI dòng log (kể cả bindings của child) trong lúc chạy `fn`. */
+  async function captureLogs<T>(fn: () => Promise<T>): Promise<{ out: T; logs: string }> {
+    const seen: string[] = [];
+    const record = (...a: unknown[]) => void seen.push(JSON.stringify(a));
+    const fake: any = { info: record, warn: record, error: record, debug: record, child: (b: unknown) => (record(b), fake) };
+    const spies = [
+      jest.spyOn(logger, 'child').mockImplementation(((b: unknown) => (record(b), fake)) as any),
+      ...(['info', 'warn', 'error', 'debug'] as const).map((m) => jest.spyOn(logger, m).mockImplementation(record as any)),
+    ];
+    try {
+      return { out: await fn(), logs: seen.join(' | ') };
+    } finally {
+      spies.forEach((sp) => sp.mockRestore());
+    }
+  }
+
+  it('[PK:T7] token ở query (static-token location query) không xuất hiện trong raw_events.headers, signature_header, log, diagnose — cả khi đúng lẫn khi sai', async () => {
+    const TOKEN = `qtok_${'leak'.repeat(5)}`;
+    const WRONG = `qtok_${'miss'.repeat(5)}`;
+    const CFG = { scheme: 'static-token', location: 'query', param: 'token', idempotency: { field: 'transactionId' }, eventType: 'bank.x' };
+    const b = '{"transactionId":"TXQ"}';
+    const withQuery = (q: string) => ({ ...req(b, { 'content-type': 'application/json' }), query: q, method: 'POST' as const });
+
+    const ok = build(CFG, TOKEN);
+    const r1 = await captureLogs(() => ok.svc.ingestWebhook(withQuery(`x=1&token=${encodeURIComponent(TOKEN)}`)));
+    expect(r1.out.status).toBe(200);
+    const accepted = ok.tx.rawEvent.create.mock.calls[0][0].data;
+    expect(accepted.status).toBe('ACCEPTED');
+    expect(accepted.signatureHeader).toBe('***');
+
+    const ko = build(CFG, TOKEN);
+    const r2 = await captureLogs(() => ko.svc.ingestWebhook(withQuery(`token=${WRONG}`)));
+    expect(r2.out.status).toBe(401);
+    const rejected = ko.tx.rawEvent.create.mock.calls[0][0].data;
+    expect(rejected).toMatchObject({ status: 'REJECTED', signatureValid: false });
+
+    // Token xuất hiện 2 lần trong query -> không đoán bản nào thật -> 401.
+    const dup = build(CFG, TOKEN);
+    expect((await dup.svc.ingestWebhook(withQuery(`token=${TOKEN}&token=${TOKEN}`))).status).toBe(401);
+
+    const diag = new GenericAdapter().diagnose({ ...rejected, bodyRaw: undefined, receivedAt: new Date() }, { verificationConfig: CFG });
+    expect(diag).toEqual({ ok: false, reason: 'token_mismatch', expectedQueryParam: 'token' });
+
+    const everything = [JSON.stringify(accepted), JSON.stringify(rejected), r1.logs, r2.logs, JSON.stringify(diag)].join(' | ');
+    expect(r1.logs.length + r2.logs.length).toBeGreaterThan(0); // có log thật để soi
+    expect(everything).not.toContain(TOKEN);
+    expect(everything).not.toContain(WRONG);
+    expect(everything).not.toMatch(/qtok_/);
   });
 });

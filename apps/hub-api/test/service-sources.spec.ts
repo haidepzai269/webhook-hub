@@ -76,6 +76,24 @@ describe('POST/GET /v1/p/:project/sources (S8)', () => {
   it('S8: parseSourceInput dùng chung console — sepay không cần config', () => {
     expect(parseSourceInput({ provider: 'sepay', name: 'SePay', secret: 'apikey_123456' })).toEqual({ provider: 'sepay', name: 'SePay', secret: 'apikey_123456', verificationConfig: undefined });
   });
+
+  it('PK2: secret không dùng được với config -> 422 field secret (keyEncoding hex sai khuôn, basic thiếu "user:pass"); đúng thì qua', () => {
+    const cfg = { idempotency: { field: 'id' }, eventType: 'acme.x' };
+    const hex = { ...cfg, scheme: 'hmac', header: 'x-s', keyEncoding: 'hex' };
+    const basic = { ...cfg, scheme: 'static-token', location: 'basic' };
+    const fieldOf = (b: any) => {
+      try {
+        parseSourceInput(b);
+        return 'ok';
+      } catch (e: any) {
+        return `${e.getStatus()} ${e.getResponse().field}`;
+      }
+    };
+    expect(fieldOf({ provider: 'generic', name: 'x', secret: 'khong-phai-hex', verificationConfig: hex })).toBe('422 secret');
+    expect(fieldOf({ provider: 'generic', name: 'x', secret: 'onlyuser1', verificationConfig: basic })).toBe('422 secret');
+    expect(parseSourceInput({ provider: 'generic', name: 'x', secret: Buffer.from('pk2-hex-key').toString('hex'), verificationConfig: hex }).verificationConfig).toMatchObject({ keyEncoding: 'hex', algo: 'sha256' });
+    expect(parseSourceInput({ provider: 'generic', name: 'x', secret: 'hub:pass-123', verificationConfig: basic }).verificationConfig).toMatchObject({ location: 'basic' });
+  });
 });
 
 describe('GET /v1/p/:project/sources/:id/inspect (S9)', () => {

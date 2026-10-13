@@ -1,18 +1,25 @@
+import { createHash } from "crypto";
+
 import { RESERVED_NAMESPACES as COMMON_RESERVED, isReservedType as commonIsReserved } from "@hub/common";
-import { validateGenericConfig } from "@hub/providers";
+import { ALGO_IN_PREFIX as SERVER_ALGO_IN_PREFIX, type GenericConfig, secretProblem, validateGenericConfig } from "@hub/providers";
 
 import {
+  ALGO_IN_PREFIX,
   buildGenericConfig,
   connectionState,
   diagnosisParts,
   type GenericFormValues,
+  genericFormIssues,
+  HMAC_ALGO_CHOICES,
   idKindOf,
   type InspectRow,
   isReservedType,
+  KEY_ENCODING_CHOICES,
   LISTEN_REFRESH_MS,
   listenRefetchInterval,
   playgroundSources,
   RESERVED_NAMESPACES,
+  TOKEN_LOCATION_CHOICES,
 } from "./listen-logic";
 
 /**
@@ -64,19 +71,36 @@ describe("[PK:T5] trạng thái kết nối: chờ -> ✓ khi có ACCEPTED đầ
   });
 });
 
+/** Giá trị form mặc định (như `defaultValues` của trang Nguồn) — từng test đè phần cần. */
+const FORM: GenericFormValues = {
+  scheme: "hmac",
+  header: "x-sig",
+  encoding: "hex",
+  algo: "sha256",
+  prefix: "",
+  keyEncoding: "utf8",
+  location: "header",
+  param: "",
+  idKind: "field",
+  idValue: "transId",
+  eventType: "acme.invoice.paid",
+};
+
 describe("PK1: form tay \"Nhà cung cấp khác\" dựng verificationConfig đúng khuôn validateGenericConfig", () => {
-  it("hmac-sha256: header + encoding + khoá chống trùng theo trường", () => {
-    expect(buildGenericConfig({ scheme: "hmac-sha256", header: " X-Acme-Signature ", encoding: "base64", idKind: "field", idValue: "transId", eventType: "acme.invoice.paid" })).toEqual({
-      scheme: "hmac-sha256",
+  it("hmac: header + encoding + khoá chống trùng theo trường", () => {
+    expect(buildGenericConfig({ ...FORM, header: " X-Acme-Signature ", encoding: "base64" })).toEqual({
+      scheme: "hmac",
       header: "x-acme-signature",
       encoding: "base64",
+      keyEncoding: "utf8",
+      algo: "sha256",
       idempotency: { field: "transId" },
       eventType: "acme.invoice.paid",
     });
   });
 
   it("static-token: không có encoding; khoá theo header viết thường", () => {
-    expect(buildGenericConfig({ scheme: "static-token", header: "X-Token", encoding: "hex", idKind: "header", idValue: "X-Event-Id", eventType: "acme.x" })).toEqual({
+    expect(buildGenericConfig({ ...FORM, scheme: "static-token", header: "X-Token", idKind: "header", idValue: "X-Event-Id", eventType: "acme.x" })).toEqual({
       scheme: "static-token",
       header: "x-token",
       idempotency: { header: "x-event-id" },
@@ -85,7 +109,7 @@ describe("PK1: form tay \"Nhà cung cấp khác\" dựng verificationConfig đú
   });
 
   it("standard-webhooks (cả Svix): không header/encoding; khoá chống trùng bỏ trống = id của bộ header", () => {
-    expect(buildGenericConfig({ scheme: "standard-webhooks", header: "x", encoding: "hex", idKind: "header", idValue: "", eventType: "user.created" })).toEqual({
+    expect(buildGenericConfig({ ...FORM, scheme: "standard-webhooks", header: "x", idKind: "header", idValue: "", eventType: "user.created" })).toEqual({
       scheme: "standard-webhooks",
       eventType: "user.created",
     });
@@ -93,7 +117,7 @@ describe("PK1: form tay \"Nhà cung cấp khác\" dựng verificationConfig đú
 });
 
 describe("review PK1: form tay, Lắng nghe, Playground", () => {
-  const base: GenericFormValues = { scheme: "hmac-sha256", header: "x-sig", encoding: "hex", idKind: "field", idValue: "transId", eventType: "acme.invoice.paid" };
+  const base = FORM;
 
   it("T-6: buildGenericConfig đi qua validateGenericConfig (server) cho mọi scheme — round-trip không lệch khuôn", () => {
     const forms: GenericFormValues[] = [
@@ -114,7 +138,7 @@ describe("review PK1: form tay, Lắng nghe, Playground", () => {
 
   it("T-1: standard-webhooks luôn lấy khoá từ tiêu đề (ẩn lựa chọn trường body) -> svix-id/webhook-id thành {header}", () => {
     expect(idKindOf({ scheme: "standard-webhooks", idKind: "field" })).toBe("header");
-    expect(idKindOf({ scheme: "hmac-sha256", idKind: "field" })).toBe("field");
+    expect(idKindOf({ scheme: "hmac", idKind: "field" })).toBe("field");
     expect(buildGenericConfig({ ...base, scheme: "standard-webhooks", idKind: "field", idValue: "Webhook-Id" })).toMatchObject({ idempotency: { header: "webhook-id" } });
   });
 
@@ -138,5 +162,74 @@ describe("review PK1: form tay, Lắng nghe, Playground", () => {
     const list = [{ id: "a", provider: "github" }, { id: "b", provider: "generic" }, { id: "c", provider: "payos" }];
     expect(playgroundSources(list)).toEqual({ usable: [list[0], list[2]], hiddenGeneric: 1 });
     expect(playgroundSources(undefined)).toEqual({ usable: [], hiddenGeneric: 0 });
+  });
+});
+
+describe("PK2: form tay — tham số hmac + vị trí token, cùng luật server", () => {
+  const KEY = createHash("sha256").update("pk2-web-form").digest();
+  const serverIssues = (f: GenericFormValues, secret: string): string[] => {
+    const r = validateGenericConfig(buildGenericConfig(f));
+    if (!r.ok) return [`config:${(r as { field: string }).field}`];
+    const p = secretProblem((r as { config: GenericConfig }).config, secret);
+    return p ? ["secret"] : [];
+  };
+
+  it("ALGO_IN_PREFIX của web = của server", () => expect(ALGO_IN_PREFIX).toBe(SERVER_ALGO_IN_PREFIX));
+
+  it("round-trip: mọi tổ hợp algo × encoding × keyEncoding × prefix, mọi location -> server nhận đúng điều form gửi", () => {
+    const forms: GenericFormValues[] = [];
+    for (const algo of HMAC_ALGO_CHOICES) {
+      for (const encoding of ["hex", "base64"] as const) {
+        for (const keyEncoding of KEY_ENCODING_CHOICES) {
+          for (const prefix of ["", "v1=", "x".repeat(32)]) forms.push({ ...FORM, algo, encoding, keyEncoding, prefix });
+        }
+      }
+    }
+    for (const location of TOKEN_LOCATION_CHOICES) forms.push({ ...FORM, scheme: "static-token", location, param: "api_key", prefix: "Bearer " });
+    for (const f of forms) {
+      const built = buildGenericConfig(f);
+      const r = validateGenericConfig(built);
+      expect({ f, ok: r.ok }).toEqual({ f, ok: true });
+      expect((r as unknown as { config: Record<string, unknown> }).config).toMatchObject(built);
+    }
+    expect(buildGenericConfig({ ...FORM, algo: "from-prefix", prefix: "bỏ qua" })).toEqual(expect.objectContaining({ prefix: "<algo>=" }));
+    expect(buildGenericConfig({ ...FORM, algo: "from-prefix" })).not.toHaveProperty("algo");
+    expect(buildGenericConfig({ ...FORM, scheme: "static-token", location: "basic", header: "x-t", prefix: "Bearer " })).toEqual({
+      scheme: "static-token",
+      location: "basic",
+      idempotency: { field: "transId" },
+      eventType: "acme.invoice.paid",
+    });
+    expect(buildGenericConfig({ ...FORM, scheme: "static-token", location: "query", param: " token " })).toMatchObject({ location: "query", param: "token" });
+    expect(buildGenericConfig({ ...FORM, scheme: "static-token", prefix: "Bearer " })).toMatchObject({ prefix: "Bearer " }); // không trim
+  });
+
+  it("genericFormIssues lỗi đúng khi và chỉ khi server lỗi (config hoặc secret)", () => {
+    const cases: [GenericFormValues, string][] = [
+      [FORM, "utf8-secret-123"],
+      [{ ...FORM, header: "" }, "utf8-secret-123"],
+      [{ ...FORM, prefix: "x".repeat(33) }, "utf8-secret-123"],
+      [{ ...FORM, algo: "from-prefix", prefix: "x".repeat(40) }, "utf8-secret-123"], // tiền tố bị bỏ qua khi đọc từ chữ ký
+      [{ ...FORM, keyEncoding: "hex" }, KEY.toString("hex")],
+      [{ ...FORM, keyEncoding: "hex" }, "not-hex-secret"],
+      [{ ...FORM, keyEncoding: "hex" }, `${KEY.toString("hex")}a`],
+      [{ ...FORM, keyEncoding: "base64" }, KEY.toString("base64")],
+      [{ ...FORM, keyEncoding: "base64" }, "not base64 !!"],
+      [{ ...FORM, scheme: "static-token", location: "basic" }, "hub:pass-123"],
+      [{ ...FORM, scheme: "static-token", location: "basic" }, "onlyuser1"],
+      [{ ...FORM, scheme: "static-token", location: "query", param: "" }, "tok-123456"],
+      [{ ...FORM, scheme: "static-token", location: "query", param: "a b" }, "tok-123456"],
+      [{ ...FORM, scheme: "static-token", location: "query", param: "hub.verify_token" }, "tok-123456"],
+      [{ ...FORM, eventType: "payment.received" }, "utf8-secret-123"],
+    ];
+    for (const [f, secret] of cases) {
+      const client = genericFormIssues(f, secret).length > 0;
+      const server = serverIssues(f, secret).length > 0;
+      expect({ f, secret, client }).toEqual({ f, secret, client: server });
+    }
+  });
+
+  it("diagnosisParts: tham số query hiện là ?tên (không giá trị)", () => {
+    expect(diagnosisParts({ ok: false, reason: "token_mismatch", expectedQueryParam: "token" })).toEqual({ reason: "token_mismatch", name: "?token", candidates: [] });
   });
 });

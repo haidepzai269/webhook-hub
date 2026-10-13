@@ -41,6 +41,8 @@ export interface Diagnosis {
   expectedField?: string;
   candidateHeaders?: string[];
   field?: string;
+  /** PK2: TÊN tham số query chứa token (static-token location query). Giá trị không bao giờ được lưu. */
+  expectedQueryParam?: string;
 }
 
 /**

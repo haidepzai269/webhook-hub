@@ -3,13 +3,14 @@ import { IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parsePr
 import { swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
 import { AdapterContext, Diagnosis, ProviderAdapter, StoredRawEvent } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
-import { GenericConfig, MappingValue, paymentTimeKey, validateGenericConfig } from './generic-config';
+import { GenericConfig, HMAC_ALGOS, HmacAlgo, MappingValue, decodeHmacKey, hmacParams, isHmacScheme, paymentTimeKey, validateGenericConfig } from './generic-config';
 import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
 /**
  * S8 (SPEC §4.8, ADR-041 bậc 2): nguồn bên thứ ba mà hub CHƯA có adapter — service tự khai cách xác thực
- * (`hmac-sha256` | `static-token` | `standard-webhooks`), nơi lấy khoá chống trùng và kiểu sự kiện, lưu ở
- * `sources.verification_config`. Thêm nguồn mới KHÔNG sửa lõi: lõi chỉ chuyển `ctx.verificationConfig` qua.
+ * (`hmac` [+ bí danh `hmac-sha256`] | `static-token` | `standard-webhooks`), nơi lấy khoá chống trùng và kiểu sự kiện,
+ * lưu ở `sources.verification_config`. Thêm nguồn mới KHÔNG sửa lõi: lõi chỉ chuyển `ctx.verificationConfig` qua.
+ * PK2 (ADR-203): `hmac` có tham số algo/encoding/prefix/keyEncoding; `static-token` có location header|basic|query.
  *
  * Mọi so sánh bí mật dùng timingSafeEqual; HMAC tính trên `rawBody` (bytes gốc), không bao giờ trên JSON đã parse.
  */
@@ -20,13 +21,13 @@ export class GenericAdapter implements ProviderAdapter {
     const c = configOf(ctx);
     if (!c || secrets.length === 0) return false;
     if (c.scheme === 'standard-webhooks') return secrets.some((s) => swVerify(s, req.headers, req.rawBody));
-    const presented = stripPrefix(headerOf(req, c.header!), c.prefix);
+    if (isHmacScheme(c)) return verifyMac(c, req, secrets);
+    const presented = presentedToken(c, req);
     if (presented === null) return false;
     let ok = false;
     for (const secret of secrets) {
-      const expected = expectedCredential(c, secret, req.rawBody);
       // Không dừng sớm: thời gian không lộ secret nào khớp.
-      if (timingSafeCompare(presented, expected)) ok = true;
+      if (timingSafeCompare(presented, expectedToken(c, secret))) ok = true;
     }
     return ok;
   }
@@ -45,20 +46,28 @@ export class GenericAdapter implements ProviderAdapter {
     return `generic:${v}`;
   }
 
-  /** hmac: chữ ký (không phải bí mật); static-token: CHE (token là bí mật dùng chung); standard-webhooks: webhook-signature. */
+  /**
+   * hmac: chữ ký (không phải bí mật); static-token: CHE (token là bí mật dùng chung — kể cả basic và query, PK2);
+   * standard-webhooks: webhook-signature.
+   */
   extractSignature(req: RawWebhookRequest, ctx?: AdapterContext): string | null {
     const c = configOf(ctx);
     if (!c) return null;
     if (isStandardWebhooks(c)) return headerOf(req, swHeaderSet(req.headers).signature); // PK1: webhook-* hoặc svix-*
-    const v = headerOf(req, c.header!);
-    if (v === null) return null;
-    return c.scheme === 'static-token' ? '***' : v;
+    if (isStaticToken(c)) return presentedToken(c, req) ? '***' : null;
+    return headerOf(req, c.header!);
   }
 
-  /** Header chứa token static phải được che TRƯỚC khi lưu raw_events (redactHeaders chỉ biết danh sách cố định). */
+  /**
+   * Header chứa token static phải được che TRƯỚC khi lưu raw_events (redactHeaders chỉ biết danh sách cố định).
+   * PK2: basic -> `authorization` (đã có trong danh sách cố định, khai lại cho rõ). Token ở query KHÔNG nằm trong header:
+   * lõi không lưu query ở đâu cả (raw_events chỉ có headers + body), log không in URL (E6, `[PK:T7]`).
+   */
   sensitiveHeaders(ctx?: AdapterContext): string[] {
     const c = configOf(ctx);
-    return c?.scheme === 'static-token' && c.header ? [c.header] : [];
+    if (!c || !isStaticToken(c)) return [];
+    if (c.location === 'basic') return ['authorization'];
+    return c.header ? [c.header] : [];
   }
 
   normalize(req: RawWebhookRequest, context: NormalizeContext): NormalizedEvent[] {
@@ -147,7 +156,9 @@ export class GenericAdapter implements ProviderAdapter {
       if (!Number.isFinite(ts) || Math.abs(at - ts) > 300) return { ok: false, reason: 'timestamp_out_of_range' };
       return { ok: false, reason: 'signature_mismatch', expectedHeader: set.signature };
     }
-    const expected = c.header!;
+    // PK2: query không được lưu (che tuyệt đối) -> chỉ nói TÊN tham số, không phân biệt thiếu hay sai.
+    if (isStaticToken(c) && c.location === 'query') return { ok: false, reason: 'token_mismatch', expectedQueryParam: c.param };
+    const expected = isStaticToken(c) && c.location === 'basic' ? 'authorization' : c.header!;
     if (!has(expected)) return { ok: false, reason: 'missing_header', expectedHeader: expected, candidateHeaders: candidates(expected) };
     const reason = isStaticToken(c) ? 'token_mismatch' : 'signature_mismatch';
     return { ok: false, reason, expectedHeader: expected };
@@ -204,14 +215,64 @@ const CANDIDATE_HEADER_RE = /sig|token|auth|hmac|key/;
 const isStandardWebhooks = (c: GenericConfig) => c.scheme === 'standard-webhooks';
 const isStaticToken = (c: GenericConfig) => c.scheme === 'static-token';
 
-/** Giá trị ĐÚNG mà request phải trình: HMAC của bytes gốc (hmac-sha256) hoặc chính token (static-token). */
-function expectedCredential(c: GenericConfig, secret: string, rawBody: Buffer): string {
-  switch (c.scheme) {
-    case 'hmac-sha256':
-      return createHmac('sha256', secret).update(rawBody).digest(c.encoding ?? 'hex');
-    default:
-      return secret;
+/** PK2: `sha256=abc` -> ['sha256','abc']; thuật toán ngoài `HMAC_ALGOS` (md5=, sha384=) -> null (trượt, không ném). */
+const ALGO_PREFIX_RE = /^([a-z0-9]{1,16})=([\s\S]*)$/;
+function splitAlgoPrefix(v: string): { algo: HmacAlgo; presented: string } | null {
+  const m = ALGO_PREFIX_RE.exec(v);
+  if (!m || !HMAC_ALGOS.includes(m[1] as HmacAlgo)) return null;
+  return { algo: m[1] as HmacAlgo, presented: m[2] };
+}
+
+/**
+ * PK2 (ADR-203): HMAC(algo, key(secret, keyEncoding), rawBody) mã hoá `encoding`, so bằng timingSafeEqual với phần sau
+ * tiền tố. sha1 vẫn so constant-time. Secret giải mã hỏng -> bỏ qua secret đó (không nhận bừa, không ném).
+ */
+function verifyMac(c: GenericConfig, req: RawWebhookRequest, secrets: string[]): boolean {
+  const p = hmacParams(c);
+  const raw = headerOf(req, c.header!);
+  if (raw === null) return false;
+  let algo: HmacAlgo;
+  let presented: string | null;
+  if (p.algo) {
+    algo = p.algo;
+    presented = stripPrefix(raw, p.prefix);
+  } else {
+    const split = splitAlgoPrefix(raw);
+    if (!split) return false;
+    ({ algo, presented } = split);
   }
+  if (presented === null) return false;
+  let ok = false;
+  for (const secret of secrets) {
+    const key = decodeHmacKey(secret, p.keyEncoding);
+    if (!key) continue;
+    const expected = createHmac(algo, key).update(req.rawBody).digest(p.encoding);
+    // Không dừng sớm: thời gian không lộ secret nào khớp.
+    if (timingSafeCompare(presented, expected)) ok = true;
+  }
+  return ok;
+}
+
+/**
+ * PK2: token request trình ra, theo `location`. header: giá trị header (bỏ prefix). basic: phần sau `Basic ` của
+ * Authorization (so với base64 của "user:pass" — so chuỗi đã mã hoá, không giải mã lỏng). query: tham số `param` của
+ * chuỗi query thô (E6, URLSearchParams); xuất hiện khác đúng 1 lần -> null (không đoán bản nào là thật).
+ */
+function presentedToken(c: GenericConfig, req: RawWebhookRequest): string | null {
+  if (c.location === 'query') {
+    const all = new URLSearchParams(req.query ?? '').getAll(c.param!);
+    return all.length === 1 && all[0].length > 0 ? all[0] : null;
+  }
+  if (c.location === 'basic') {
+    const m = /^Basic +([A-Za-z0-9+/=]+)$/i.exec(headerOf(req, 'authorization') ?? '');
+    return m ? m[1] : null;
+  }
+  return stripPrefix(headerOf(req, c.header!), c.prefix);
+}
+
+/** Giá trị ĐÚNG của token: chính secret, hoặc base64("user:pass") với basic. */
+function expectedToken(c: GenericConfig, secret: string): string {
+  return c.location === 'basic' ? Buffer.from(secret, 'utf8').toString('base64') : secret;
 }
 
 function isObj(v: unknown): v is Record<string, any> {

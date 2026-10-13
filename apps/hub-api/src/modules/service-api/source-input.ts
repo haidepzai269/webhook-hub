@@ -1,5 +1,5 @@
 import { ProviderType } from '@hub/common';
-import { GenericConfig, validateGenericConfig } from '@hub/providers';
+import { GenericConfig, secretProblem, validateGenericConfig } from '@hub/providers';
 import { unprocessable } from './service-api.controller';
 
 /** Provider mà người dùng được TẠO source. `api` do hub tạo kèm key (S4) — không tạo tay. */
@@ -35,6 +35,9 @@ export function parseSourceInput(body: any): SourceInput {
       unprocessable({ error: 'validation_failed', field: field === 'verificationConfig' ? field : `verificationConfig.${field}`, message });
     }
     verificationConfig = (r as { config: GenericConfig }).config;
+    // PK2 (ADR-203): secret phải dùng được với config (keyEncoding hex/base64, basic "user:pass") — 422 bây giờ thay vì 401 mãi.
+    const problem = secretProblem(verificationConfig, body.secret);
+    if (problem) unprocessable({ error: 'validation_failed', field: 'secret', message: problem });
   } else if (body?.verificationConfig !== undefined && body?.verificationConfig !== null) {
     unprocessable({ error: 'validation_failed', field: 'verificationConfig', message: 'chỉ provider generic có verificationConfig' });
   }

@@ -3,15 +3,31 @@ import { PAYMENT_TYPE_KEYS, isReservedType } from '@hub/common';
 /**
  * Cấu hình GenericAdapter (`sources.verification_config`, SPEC §4.8 + §4.14.4). Kiểm lúc TẠO source — sai trả
  * 422 kèm tên trường. Không JSONPath, không dấu chấm: chỉ trường CẤP MỘT của body (John) — đọc được, bảo vệ được.
+ *
+ * PK2 (SPEC-provider-khac §4, ADR-203): `hmac` là THAM SỐ của cùng một thuật toán HMAC trên bytes body — `algo`,
+ * `encoding`, `prefix` (tĩnh, hoặc `"<algo>="` = thuật toán đọc từ tiền tố), `keyEncoding`. Không biểu thức, không
+ * vòng lặp. `hmac-sha256` là bí danh cũ, đọc ra `{algo:"sha256", keyEncoding:"utf8"}` qua `hmacParams` — khuôn lưu
+ * của source cũ KHÔNG đổi, hành vi không đổi. `static-token` thêm `location`: header | basic | query.
  */
-export type GenericScheme = 'hmac-sha256' | 'static-token' | 'standard-webhooks';
+export type GenericScheme = 'hmac' | 'hmac-sha256' | 'static-token' | 'standard-webhooks';
 export type MappingValue = string | { const: string | number };
+export type HmacAlgo = 'sha1' | 'sha256' | 'sha512';
+export type KeyEncoding = 'utf8' | 'hex' | 'base64';
+export type TokenLocation = 'header' | 'basic' | 'query';
 
 export interface GenericConfig {
   scheme: GenericScheme;
   header?: string;
   encoding?: 'hex' | 'base64';
   prefix?: string;
+  /** PK2: chỉ scheme `hmac` (bí danh cũ luôn sha256). Vắng khi `prefix` là `"<algo>="`. */
+  algo?: HmacAlgo;
+  /** PK2: chỉ scheme `hmac` — secret giải mã thế nào trước khi làm khoá HMAC. */
+  keyEncoding?: KeyEncoding;
+  /** PK2: chỉ `static-token`; vắng = header (khuôn cũ). */
+  location?: Exclude<TokenLocation, 'header'>;
+  /** PK2: tên tham số query khi `location: "query"`. */
+  param?: string;
   idempotency: { header: string } | { field: string };
   eventType: string;
   mapping?: Record<string, MappingValue>;
@@ -20,12 +36,26 @@ export interface GenericConfig {
 
 export type ConfigCheck = { ok: true; config: GenericConfig } | { ok: false; field: string; message: string };
 
-const SCHEMES: GenericScheme[] = ['hmac-sha256', 'static-token', 'standard-webhooks'];
-/** Mẫu duy nhất có `encoding` (tách hằng: gate sig-compare cấm so sánh trên dòng nhắc tới hmac). */
-const SCHEME_WITH_ENCODING: GenericScheme = 'hmac-sha256';
+const SCHEMES: GenericScheme[] = ['hmac', 'hmac-sha256', 'static-token', 'standard-webhooks'];
+/**
+ * Hai mẫu có `encoding` (tách hằng: gate sig-compare cấm `===`/`!==` trên dòng nhắc tới hmac). `LEGACY_SCHEME` là bí
+ * danh cũ — giữ nguyên hành vi (sha256, khoá utf8, prefix tĩnh).
+ */
+const PARAM_SCHEME: GenericScheme = 'hmac';
+const LEGACY_SCHEME: GenericScheme = 'hmac-sha256';
+const SCHEMES_WITH_ENCODING: readonly GenericScheme[] = [PARAM_SCHEME, LEGACY_SCHEME];
 const ENCODINGS = ['hex', 'base64'];
+/** PK2: tập thuật toán. sha1 là ngoại lệ có chủ đích (provider quy định: Vercel, Intercom, Trello, WebSub), ADR-203. */
+export const HMAC_ALGOS: readonly HmacAlgo[] = ['sha1', 'sha256', 'sha512'];
+export const KEY_ENCODINGS: readonly KeyEncoding[] = ['utf8', 'hex', 'base64'];
+export const TOKEN_LOCATIONS: readonly TokenLocation[] = ['header', 'basic', 'query'];
+/** PK2: giá trị `prefix` đặc biệt — chữ ký dạng `<algo>=<sig>` (Bitbucket, Jira, WebSub), thuật toán chỉ nhận trong `HMAC_ALGOS`. */
+export const ALGO_IN_PREFIX = '<algo>=';
+export const PREFIX_MAX = 32; // E15: giữ 32 như trước (thân spec ghi 16 là sai)
 const HEADER_RE = /^[a-z0-9-]{1,64}$/;
 export const FIELD_RE = /^[A-Za-z0-9_]{1,64}$/;
+/** PK2: tên tham số query chứa token (vd `token`, `api_key`, `hub.verify`). */
+export const PARAM_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const EVENT_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
 const OFFSET_RE = /^[+-]\d{2}:\d{2}$/;
 
@@ -37,6 +67,59 @@ export function paymentTimeKey(eventType: string): string | null {
   return PAYMENT_TYPE_KEYS[eventType]?.[0] ?? null;
 }
 
+/** Tham số HMAC đã chuẩn hoá. `algo: null` = đọc từ tiền tố chữ ký (`"<algo>="`). */
+export interface HmacParams {
+  algo: HmacAlgo | null;
+  encoding: 'hex' | 'base64';
+  keyEncoding: KeyEncoding;
+  /** Tiền tố tĩnh (không có khi đọc thuật toán từ tiền tố). */
+  prefix?: string;
+}
+
+/** Config là một mẫu HMAC (`hmac` hoặc bí danh cũ `hmac-sha256`). */
+export const isHmacScheme = (c: Pick<GenericConfig, 'scheme'>): boolean => SCHEMES_WITH_ENCODING.includes(c.scheme);
+
+/**
+ * PK2: đọc tham số HMAC của config ĐÃ KIỂM. Bí danh cũ -> `{algo:"sha256", keyEncoding:"utf8"}`, prefix luôn tĩnh (kể cả
+ * chuỗi `"<algo>="`: trước PK2 nó là chữ thường, không đổi nghĩa của source cũ).
+ */
+export function hmacParams(c: GenericConfig): HmacParams {
+  const encoding = c.encoding ?? 'hex';
+  if (c.scheme === LEGACY_SCHEME) return { algo: 'sha256', encoding, keyEncoding: 'utf8', ...(c.prefix !== undefined ? { prefix: c.prefix } : {}) };
+  if (c.prefix === ALGO_IN_PREFIX) return { algo: null, encoding, keyEncoding: c.keyEncoding ?? 'utf8' };
+  return { algo: c.algo ?? 'sha256', encoding, keyEncoding: c.keyEncoding ?? 'utf8', ...(c.prefix !== undefined ? { prefix: c.prefix } : {}) };
+}
+
+const HEX_KEY_RE = /^(?:[0-9a-fA-F]{2})+$/;
+const B64_KEY_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2,3})?$/;
+
+/**
+ * PK2: khoá HMAC từ secret theo `keyEncoding`. Sai khuôn (hex lẻ / ký tự lạ, base64 hỏng) -> null: KHÔNG giải mã
+ * "lỏng" (Buffer.from bỏ qua ký tự lạ — hai secret khác nhau thành cùng một khoá). Rỗng -> null.
+ */
+export function decodeHmacKey(secret: string, keyEncoding: KeyEncoding): Buffer | null {
+  if (typeof secret !== 'string' || secret.length === 0) return null;
+  if (keyEncoding === 'utf8') return Buffer.from(secret, 'utf8');
+  if (keyEncoding === 'hex') return HEX_KEY_RE.test(secret) ? Buffer.from(secret, 'hex') : null;
+  if (!B64_KEY_RE.test(secret)) return null;
+  const key = Buffer.from(secret, 'base64');
+  return key.length > 0 ? key : null;
+}
+
+/**
+ * PK2: secret có dùng được với config không (kiểm lúc tạo source -> 422 `secret` thay vì 401 mãi về sau).
+ * null = được; chuỗi = lý do.
+ */
+export function secretProblem(c: GenericConfig, secret: string): string | null {
+  if (isHmacScheme(c) && decodeHmacKey(secret, hmacParams(c).keyEncoding) === null) {
+    return `secret phải là chuỗi ${hmacParams(c).keyEncoding} hợp lệ (keyEncoding)`;
+  }
+  if (c.scheme === 'static-token' && c.location === 'basic' && !secret.includes(':')) {
+    return 'basic: secret là "user:pass" (có dấu hai chấm)';
+  }
+  return null;
+}
+
 const bad = (field: string, message: string): ConfigCheck => ({ ok: false, field, message });
 const isObj = (v: unknown): v is Record<string, any> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -46,18 +129,44 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if (!SCHEMES.includes(c.scheme)) return bad('scheme', `scheme là một trong ${SCHEMES.join(', ')}`);
   const scheme = c.scheme as GenericScheme;
   const sw = scheme === 'standard-webhooks';
+  const withEncoding = SCHEMES_WITH_ENCODING.includes(scheme);
+  const isParam = scheme === PARAM_SCHEME;
+  const isToken = scheme === 'static-token';
 
-  if (sw) {
-    if (c.header !== undefined) return bad('header', 'standard-webhooks không có header (dùng webhook-id/timestamp/signature)');
-    if (c.encoding !== undefined) return bad('encoding', 'standard-webhooks không có encoding');
+  // PK2: location chỉ cho static-token; vắng = header (khuôn cũ).
+  if (c.location !== undefined && (!isToken || !TOKEN_LOCATIONS.includes(c.location))) {
+    return bad('location', 'location chỉ cho static-token: header | basic | query');
+  }
+  const location: TokenLocation = isToken ? (c.location ?? 'header') : 'header';
+  const headerless = sw || location !== 'header';
+  if (location === 'query') {
+    if (typeof c.param !== 'string' || !PARAM_RE.test(c.param)) return bad('param', 'param (tên tham số query) bắt buộc, ^[A-Za-z0-9_.-]{1,64}$');
+  } else if (c.param !== undefined) {
+    return bad('param', 'param chỉ dùng với static-token location "query"');
+  }
+
+  if (headerless) {
+    if (c.header !== undefined) {
+      return bad('header', sw ? 'standard-webhooks không có header (dùng webhook-id/timestamp/signature)' : `location "${location}" không có header`);
+    }
+    if (c.encoding !== undefined) return bad('encoding', sw ? 'standard-webhooks không có encoding' : 'encoding chỉ cho hmac');
   } else if (typeof c.header !== 'string' || !HEADER_RE.test(c.header)) {
     return bad('header', 'header bắt buộc, viết thường, ^[a-z0-9-]{1,64}$ (vd x-signature)');
   }
-  if (c.encoding !== undefined && (scheme !== SCHEME_WITH_ENCODING || !ENCODINGS.includes(c.encoding))) {
-    return bad('encoding', 'encoding chỉ cho hmac-sha256: hex | base64');
+  if (c.encoding !== undefined && (!withEncoding || !ENCODINGS.includes(c.encoding))) {
+    return bad('encoding', 'encoding chỉ cho hmac / hmac-sha256: hex | base64');
   }
-  if (c.prefix !== undefined && (sw || typeof c.prefix !== 'string' || c.prefix.length > 32)) {
-    return bad('prefix', 'prefix là chuỗi ≤ 32 ký tự (vd "sha256=", "Bearer "), không dùng với standard-webhooks');
+  if (c.prefix !== undefined && (headerless || typeof c.prefix !== 'string' || c.prefix.length > PREFIX_MAX)) {
+    return bad('prefix', 'prefix là chuỗi ≤ 32 ký tự (vd "sha256=", "Bearer ", hoặc "<algo>=" với hmac), không dùng với standard-webhooks / basic / query');
+  }
+  // PK2: algo/keyEncoding chỉ cho `hmac`; bí danh cũ giữ đúng sha256 + khoá utf8 (đổi thì dùng scheme hmac).
+  if (c.algo !== undefined) {
+    if (!isParam) return bad('algo', 'algo chỉ cho scheme hmac (hmac-sha256 luôn là sha256)');
+    if (c.prefix === ALGO_IN_PREFIX) return bad('algo', 'prefix "<algo>=" đọc thuật toán từ chữ ký — bỏ trường algo');
+    if (!HMAC_ALGOS.includes(c.algo)) return bad('algo', `algo là một trong ${HMAC_ALGOS.join(', ')}`);
+  }
+  if (c.keyEncoding !== undefined && (!isParam || !KEY_ENCODINGS.includes(c.keyEncoding))) {
+    return bad('keyEncoding', 'keyEncoding chỉ cho scheme hmac: utf8 | hex | base64');
   }
 
   let idempotency: GenericConfig['idempotency'];
@@ -111,8 +220,14 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   }
 
   const config: GenericConfig = { scheme, idempotency, eventType };
-  if (!sw) config.header = c.header;
-  if (scheme === SCHEME_WITH_ENCODING) config.encoding = c.encoding ?? 'hex';
+  if (!headerless) config.header = c.header;
+  if (withEncoding) config.encoding = c.encoding ?? 'hex';
+  if (isParam) {
+    if (c.prefix !== ALGO_IN_PREFIX) config.algo = c.algo ?? 'sha256';
+    config.keyEncoding = c.keyEncoding ?? 'utf8';
+  }
+  if (location !== 'header') config.location = location;
+  if (location === 'query') config.param = c.param;
   if (c.prefix !== undefined) config.prefix = c.prefix;
   if (mapping) config.mapping = mapping;
   if (c.timezone !== undefined) config.timezone = c.timezone;
