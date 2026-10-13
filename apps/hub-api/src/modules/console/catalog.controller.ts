@@ -1,5 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { CATALOG } from '@hub/providers/catalog/catalog';
+import { CATALOG } from '@hub/providers';
 import { SessionGuard } from '../auth/session.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { ProjectScopeGuard } from './project-scope.guard';

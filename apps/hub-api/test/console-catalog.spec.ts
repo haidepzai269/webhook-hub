@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
-import { CATALOG } from '@hub/providers/catalog/catalog';
+import { CATALOG } from '@hub/providers';
 import { CatalogController } from '../src/modules/console/catalog.controller';
 import { hubApiControllers } from '../src/app.module';
 import { REQUIRE_SCOPE_KEY } from '../src/modules/service-api/require-scope.decorator';

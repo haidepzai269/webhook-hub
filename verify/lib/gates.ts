@@ -318,6 +318,16 @@ export const GATES: Gate[] = [
     ],
   },
   {
+    id: 'server-lib-subpath',
+    rule: 'Src phía server (apps/* trừ web, libs/*): chỉ import barrel `@hub/<lib>`, không subpath `@hub/<lib>/…`',
+    // tsconfig paths + jest moduleNameMapper resolve subpath, Node lúc chạy thì không: node_modules/@hub/<lib> trỏ gốc
+    // package (không phải dist/), package không khai `exports` → MODULE_NOT_FOUND, hub-api không lên (CI e2e đỏ fa1874c).
+    // apps/web dùng alias Next riêng (`@hub/providers/catalog`, E28) nên ngoài phạm vi.
+    source: 'ADR-210',
+    include: (f) => isSrc(f) && !f.startsWith('apps/web/'),
+    check: grepLines(new RegExp(`(\\bfrom\\s+|\\brequire\\(\\s*|\\bimport\\s*\\(?\\s*)['"]${'@h' + 'ub'}/[\\w-]+/`), { skipComments: true }),
+  },
+  {
     id: 'shop-size',
     rule: 'Tổng apps/shop/src/**/*.ts ≤ 600 dòng',
     source: 'CLAUDE.md, ADR-141, ADR-156',

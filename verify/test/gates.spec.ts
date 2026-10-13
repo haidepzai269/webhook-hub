@@ -190,4 +190,23 @@ const r = new Base(p, t);`,
     const ok = files({ 'apps/shop/src/main.ts': 'x\n'.repeat(300), 'apps/shop/src/settings.ts': 'x\n'.repeat(300) });
     expect(runGates([byId('shop-size')], ok.list, ok.read)[0].violations).toHaveLength(0);
   });
+  it('ADR-210 (PK9 hotfix): import subpath `@hub/<lib>/…` trong src phía server → đỏ (Node không resolve, package không khai exports); barrel `@hub/<lib>` và apps/web (alias Next) thì xanh', () => {
+    const H = '@h' + 'ub/';
+    const f = files({
+      'apps/hub-api/src/a.ts': `import { CATALOG } from '${H}providers/catalog/catalog';
+import { X } from '${H}providers';`,
+      'apps/hub-worker/src/b.ts': `const c = require('${H}common/x');
+const d = await import('${H}crypto/y');`,
+      'libs/database/src/c.ts': `export * from '${H}common/z';`,
+      'apps/web/src/lib/hub/catalog.ts': `import { identify } from '${H}providers/catalog';`,
+      'apps/hub-api/test/x.spec.ts': `import { CATALOG } from '${H}providers/catalog/catalog';`,
+    });
+    const r = runGates([byId('server-lib-subpath')], f.list, f.read);
+    expect(r[0].violations.map((v) => v.file + ':' + v.line)).toEqual([
+      'apps/hub-api/src/a.ts:1',
+      'apps/hub-worker/src/b.ts:1',
+      'apps/hub-worker/src/b.ts:2',
+      'libs/database/src/c.ts:1',
+    ]);
+  });
 });
