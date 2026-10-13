@@ -1,4 +1,19 @@
-import { buildGenericConfig, connectionState, diagnosisParts, type InspectRow } from "./listen-logic";
+import { RESERVED_NAMESPACES as COMMON_RESERVED, isReservedType as commonIsReserved } from "@hub/common";
+import { validateGenericConfig } from "@hub/providers";
+
+import {
+  buildGenericConfig,
+  connectionState,
+  diagnosisParts,
+  type GenericFormValues,
+  idKindOf,
+  type InspectRow,
+  isReservedType,
+  LISTEN_REFRESH_MS,
+  listenRefetchInterval,
+  playgroundSources,
+  RESERVED_NAMESPACES,
+} from "./listen-logic";
 
 /**
  * PK1 (SPEC-provider-khac §3.3, ADR-202): dòng trạng thái kết nối của tab "Lắng nghe" lấy từ raw_events gần nhất
@@ -49,7 +64,7 @@ describe("[PK:T5] trạng thái kết nối: chờ -> ✓ khi có ACCEPTED đầ
   });
 });
 
-describe("PK1: form tay \"Provider khác\" dựng verificationConfig đúng khuôn validateGenericConfig", () => {
+describe("PK1: form tay \"Nhà cung cấp khác\" dựng verificationConfig đúng khuôn validateGenericConfig", () => {
   it("hmac-sha256: header + encoding + khoá chống trùng theo trường", () => {
     expect(buildGenericConfig({ scheme: "hmac-sha256", header: " X-Acme-Signature ", encoding: "base64", idKind: "field", idValue: "transId", eventType: "acme.invoice.paid" })).toEqual({
       scheme: "hmac-sha256",
@@ -74,5 +89,54 @@ describe("PK1: form tay \"Provider khác\" dựng verificationConfig đúng khu�
       scheme: "standard-webhooks",
       eventType: "user.created",
     });
+  });
+});
+
+describe("review PK1: form tay, Lắng nghe, Playground", () => {
+  const base: GenericFormValues = { scheme: "hmac-sha256", header: "x-sig", encoding: "hex", idKind: "field", idValue: "transId", eventType: "acme.invoice.paid" };
+
+  it("T-6: buildGenericConfig đi qua validateGenericConfig (server) cho mọi scheme — round-trip không lệch khuôn", () => {
+    const forms: GenericFormValues[] = [
+      base,
+      { ...base, encoding: "base64", idKind: "header", idValue: "X-Event-Id" },
+      { ...base, scheme: "static-token", header: "X-Token" },
+      { ...base, scheme: "standard-webhooks", idValue: "" },
+      { ...base, scheme: "standard-webhooks", idKind: "field", idValue: "webhook-id" },
+    ];
+    for (const f of forms) {
+      const built = buildGenericConfig(f);
+      const r = validateGenericConfig(built);
+      expect({ f, ok: r.ok }).toEqual({ f, ok: true });
+      // Server không thêm/bớt gì ngoài mặc định (encoding hex, khoá webhook-id) -> form gửi đúng điều dev thấy.
+      expect((r as unknown as { config: Record<string, unknown> }).config).toMatchObject(built);
+    }
+  });
+
+  it("T-1: standard-webhooks luôn lấy khoá từ tiêu đề (ẩn lựa chọn trường body) -> svix-id/webhook-id thành {header}", () => {
+    expect(idKindOf({ scheme: "standard-webhooks", idKind: "field" })).toBe("header");
+    expect(idKindOf({ scheme: "hmac-sha256", idKind: "field" })).toBe("field");
+    expect(buildGenericConfig({ ...base, scheme: "standard-webhooks", idKind: "field", idValue: "Webhook-Id" })).toMatchObject({ idempotency: { header: "webhook-id" } });
+  });
+
+  it("T-2: bản sao RESERVED_NAMESPACES/isReservedType khớp bản gốc @hub/common (E24) — payment/repo/hub bị chặn ở client", () => {
+    expect([...RESERVED_NAMESPACES]).toEqual([...COMMON_RESERVED]);
+    for (const t of ["payment.received", "repo.push", "hub.project.storage", "payment", "bank.transaction.received", "payments.x", "acme.repo"]) {
+      expect({ t, r: isReservedType(t) }).toEqual({ t, r: commonIsReserved(t) });
+    }
+    expect(isReservedType("payment.received")).toBe(true);
+    expect(isReservedType("bank.transaction.received")).toBe(false);
+  });
+
+  it("T-5: 404 -> dừng poll; lỗi tạm (mạng, 500) hoặc không lỗi -> poll tiếp 2s", () => {
+    expect(listenRefetchInterval({ status: 404, message: "not_found" })).toBe(false);
+    expect(listenRefetchInterval({ status: 500 })).toBe(LISTEN_REFRESH_MS);
+    expect(listenRefetchInterval(new TypeError("Failed to fetch"))).toBe(LISTEN_REFRESH_MS);
+    expect(listenRefetchInterval(null)).toBe(LISTEN_REFRESH_MS);
+  });
+
+  it("TB-1: Playground lọc nguồn generic (chưa ký theo cấu hình riêng) và đếm số đã ẩn", () => {
+    const list = [{ id: "a", provider: "github" }, { id: "b", provider: "generic" }, { id: "c", provider: "payos" }];
+    expect(playgroundSources(list)).toEqual({ usable: [list[0], list[2]], hiddenGeneric: 1 });
+    expect(playgroundSources(undefined)).toEqual({ usable: [], hiddenGeneric: 0 });
   });
 });

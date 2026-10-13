@@ -22,7 +22,7 @@ describe('[PK:T4] GET /api/v1/sources/:id/inspect (console) = khuôn service API
     const tenants: string[] = [];
     const repo = {
       findSourceById: jest.fn(async (id: string) => sources[id] ?? null),
-      findRecentRawEventsForSource: jest.fn(async () => raws),
+      findRecentRawEventsForInspect: jest.fn(async () => raws),
     };
     const prisma: any = { forTenant: (t: string) => (tenants.push(t), repo) };
     return {
@@ -49,6 +49,26 @@ describe('[PK:T4] GET /api/v1/sources/:id/inspect (console) = khuôn service API
     ]);
     expect(JSON.stringify(fromConsole)).not.toMatch(/SIGVAL|TOKVAL|BODYVAL|bodyRaw|headers/);
     expect(Reflect.getMetadata(REQUIRE_SCOPE_KEY, ApiController.prototype.inspectSource)).toBe('read:project');
+  });
+
+  it('review PK1 T-4: inspect gọi repo KHÔNG nạp body_raw; nguồn có mapping vẫn chẩn đoán ACCEPTED được khi dòng không có bodyRaw', async () => {
+    const MAPPED = {
+      scheme: 'hmac-sha256', header: 'x-signature', idempotency: { field: 'maGD' }, eventType: 'payment.received',
+      mapping: { amount: 'soTien', currency: { const: 'VND' }, method: { const: 'bank_transfer' }, providerTxnId: 'maGD', paidAt: 'thoiGian' },
+    };
+    const repo = {
+      findSourceById: jest.fn(async () => ({ id: SG, tenantId: PA, provider: 'generic', verificationConfig: MAPPED })),
+      findRecentRawEventsForInspect: jest.fn(async () => [
+        { id: 'a1', status: 'ACCEPTED', signatureValid: true, headers: {}, body: { maGD: 'GD1', thoiGian: '2026-10-10 09:00:00' }, receivedAt: new Date('2026-10-10T00:00:05Z') },
+        { id: 'a2', status: 'ACCEPTED', signatureValid: true, headers: {}, body: { maGD: 'GD2', soTien: 5000, thoiGian: '2026-10-10 09:00:00' }, receivedAt: new Date('2026-10-10T00:00:04Z') },
+      ]),
+      findRecentRawEventsForSource: jest.fn(),
+    };
+    const api = new ApiController({ forTenant: () => repo } as any);
+    const rows: any[] = await api.inspectSource(PA, SG, undefined);
+    expect(repo.findRecentRawEventsForInspect).toHaveBeenCalledWith(SG, new Date(0), 10);
+    expect(repo.findRecentRawEventsForSource).not.toHaveBeenCalled();
+    expect(rows.map((r) => r.diagnosis)).toEqual([{ ok: false, reason: 'mapping_field_missing', field: 'soTien' }, { ok: true, reason: 'ok' }]);
   });
 
   it('id lạ / không thuộc project -> 404; since sai -> 422 (giống service API)', async () => {

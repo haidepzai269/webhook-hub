@@ -27,7 +27,7 @@ import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
-import { buildGenericConfig, GENERIC_SCHEMES, type GenericFormValues } from "@/lib/hub/listen-logic";
+import { buildGenericConfig, GENERIC_SCHEMES, type GenericFormValues, idKindOf, isReservedType } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
@@ -74,7 +74,7 @@ function TrafficButton({ id }: { id: string }) {
   );
 }
 
-/** PK1 (ADR-202): nút "Lắng nghe" — chỉ trên dòng nguồn generic ("Provider khác"). */
+/** PK1 (ADR-202): nút "Lắng nghe" — chỉ trên dòng nguồn generic ("Nhà cung cấp khác"). */
 const OpenListen = createContext<(id: string) => void>(() => undefined);
 function ListenButton({ id }: { id: string }) {
   const open = useContext(OpenListen);
@@ -94,7 +94,7 @@ const SECRET_HINT: Record<(typeof PROVIDERS)[number], MessageKey> = {
   generic: "page.sources.secret-hint.generic",
 };
 
-/** Nhãn nhà cung cấp: `generic` hiện là "Provider khác" (PK1), còn lại giữ tên kỹ thuật. */
+/** Nhãn nhà cung cấp: `generic` hiện là "Nhà cung cấp khác" (PK1), còn lại giữ tên kỹ thuật. */
 const providerLabel = (t: TranslateFn, p: string) => (p === "generic" ? t("page.sources.provider.generic") : p);
 
 const HEADER_RE = /^[a-z0-9-]{1,64}$/;
@@ -102,7 +102,7 @@ const FIELD_RE = /^[A-Za-z0-9_]{1,64}$/;
 const EVENT_TYPE_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)+$/;
 
 /**
- * PK1 (SPEC-provider-khac §3.1): form tay cho "Provider khác" (generic) — scheme, header, encoding, khoá chống trùng,
+ * PK1 (SPEC-provider-khac §3.1): form tay cho "Nhà cung cấp khác" (generic) — scheme, header, encoding, khoá chống trùng,
  * eventType. PK7 thay bằng form nhận diện. Kiểm nhẹ ở client; server (`validateGenericConfig`) là trọng tài, 422 có tên trường.
  */
 const makeSchema = (t: TranslateFn) =>
@@ -125,10 +125,14 @@ const makeSchema = (t: TranslateFn) =>
         ctx.addIssue({ code: "custom", path: ["header"], message: t("page.sources.generic.header-required") });
       }
       const id = v.idValue.trim();
-      const idOk = v.idKind === "header" ? HEADER_RE.test(id.toLowerCase()) : FIELD_RE.test(id);
+      const idOk = idKindOf(v) === "header" ? HEADER_RE.test(id.toLowerCase()) : FIELD_RE.test(id);
       if ((id || !sw) && !idOk) ctx.addIssue({ code: "custom", path: ["idValue"], message: t("page.sources.generic.id-required") });
-      if (!EVENT_TYPE_RE.test(v.eventType.trim())) {
+      const eventType = v.eventType.trim();
+      if (!EVENT_TYPE_RE.test(eventType) || eventType.length > 128) {
         ctx.addIssue({ code: "custom", path: ["eventType"], message: t("page.sources.generic.event-type-invalid") });
+      } else if (isReservedType(eventType)) {
+        // Review PK1 T-2: kiểu chuẩn cần ánh xạ trường (PK7 / API) — form tay không có ô mapping, server sẽ 422.
+        ctx.addIssue({ code: "custom", path: ["eventType"], message: t("page.sources.generic.event-type-reserved") });
       }
     });
 type Values = z.infer<ReturnType<typeof makeSchema>>;
@@ -287,6 +291,8 @@ export default function SourcesPage() {
         });
         form.reset();
         setOpen(false);
+        // Review PK1 T-3: thước đo là "request đầu tiên ✓" — mở ngay Lắng nghe của nguồn generic vừa tạo.
+        if (src.provider === "generic") setListenId(src.id);
       },
       (e: Error) => toast.error(t("page.sources.toast.create-failed", { message: e.message })),
     );

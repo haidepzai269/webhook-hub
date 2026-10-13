@@ -60,10 +60,13 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
   const locale = useLocale();
   const { data, isLoading, error } = useSourceInspect(sourceId);
   if (isLoading) return <Skeleton className="m-4 h-24" />;
-  if (error) return <p className="p-4 text-destructive text-sm">{t("page.sources.listen.error", { message: error.message })}</p>;
+  const errorLine = error && <p className="text-destructive text-sm">{t("page.sources.listen.error", { message: error.message })}</p>;
+  // Review PK1 T-5: chưa có dữ liệu thì chỉ báo lỗi; đã có thì lỗi là băng-rôn phía trên, bảng cũ giữ nguyên.
+  if (!data) return <div className="p-4">{errorLine}</div>;
   const state = connectionState(data);
   return (
     <div className="flex flex-col gap-4 p-4">
+      {errorLine}
       <div role="status" aria-live="polite" className="rounded-md border p-3 text-sm">
         {state.kind === "waiting" && <span className="text-muted-foreground">{t("page.sources.listen.waiting")}</span>}
         {state.kind === "connected" && (

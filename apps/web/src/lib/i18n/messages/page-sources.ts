@@ -77,7 +77,7 @@ export const pageSources = defineMessages("page.sources", {
       "Ngắt kết nối? Hub sẽ gỡ cấu hình ở nhà cung cấp nếu nhà cung cấp cho phép.",
     "page.sources.connection.delete-credentials": "Xoá thông tin xác thực",
     "page.sources.connection.delete-credentials-confirm": "Xoá thông tin xác thực đã lưu? Nguồn và kết nối giữ nguyên.",
-    // PK1 (SPEC-provider-khac §3, ADR-202): "Provider khác" (generic) + tab Lắng nghe (listen-sheet.tsx)
+    // PK1 (SPEC-provider-khac §3, ADR-202): "Nhà cung cấp khác" (generic) + tab Lắng nghe (listen-sheet.tsx)
     "page.sources.provider.generic": "Nhà cung cấp khác",
     "page.sources.secret-hint.generic":
       "Khoá bí mật dùng chung với nhà cung cấp: khoá HMAC, token tĩnh, hoặc khoá whsec_… (Standard Webhooks / Svix).",
@@ -95,6 +95,10 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.id-value": "Tên tiêu đề / trường",
     "page.sources.generic.id-value-hint": "Giá trị duy nhất cho mỗi sự kiện. Standard Webhooks bỏ trống = webhook-id / svix-id.",
     "page.sources.generic.id-required": "Nhập tên tiêu đề hoặc trường làm khoá chống trùng.",
+    "page.sources.generic.id-value-hint-sw":
+      "Bỏ trống = `webhook-id` (Svix: `svix-id`) — giá trị nằm trong phần được ký. Chỉ nhập khi nhà cung cấp dùng tiêu đề khác.",
+    "page.sources.generic.event-type-reserved":
+      "`payment.*`, `repo.*`, `hub.*` là kiểu chuẩn, cần ánh xạ trường (chưa có ở form này). Tạm dùng tên riêng, VD `bank.transaction.received`.",
     "page.sources.generic.event-type": "Kiểu sự kiện",
     "page.sources.generic.event-type-hint": "VD: acme.invoice.paid (chữ thường, có dấu chấm).",
     "page.sources.generic.event-type-invalid": "Kiểu sự kiện dạng a.b (chữ thường, số, _).",
@@ -215,6 +219,10 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.id-value": "Header / field name",
     "page.sources.generic.id-value-hint": "Unique per event. Standard Webhooks: leave empty = webhook-id / svix-id.",
     "page.sources.generic.id-required": "Enter the header or field used as the idempotency key.",
+    "page.sources.generic.id-value-hint-sw":
+      "Leave empty = `webhook-id` (Svix: `svix-id`), a signed value. Only fill in when the provider uses a different header.",
+    "page.sources.generic.event-type-reserved":
+      "`payment.*`, `repo.*`, `hub.*` are canonical types and need a field mapping (not in this form yet). Use your own name for now, e.g. `bank.transaction.received`.",
     "page.sources.generic.event-type": "Event type",
     "page.sources.generic.event-type-hint": "E.g. acme.invoice.paid (lowercase, dotted).",
     "page.sources.generic.event-type-invalid": "Event type looks like a.b (lowercase, digits, _).",

@@ -7,7 +7,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** Repo đã scope theo tenant (`prisma.forTenant(tenantId)`, BB-5) — chỉ hai hàm cần dùng. */
 export interface InspectRepo {
   findSourceById(id: string): Promise<unknown>;
-  findRecentRawEventsForSource(sourceId: string, since: Date, limit: number): Promise<any[]>;
+  /** Không nạp `body_raw` (review PK1 T-4). */
+  findRecentRawEventsForInspect(sourceId: string, since: Date, limit: number): Promise<any[]>;
 }
 
 export interface InspectRow {
@@ -35,7 +36,7 @@ export async function inspectSourceRows(repo: InspectRepo, id: string, since?: s
   }
   const adapter = ProviderRegistry.get(source.provider as any);
   const ctx = { verificationConfig: source.verificationConfig ?? undefined };
-  const rows = await repo.findRecentRawEventsForSource(source.id, from, 10);
+  const rows = await repo.findRecentRawEventsForInspect(source.id, from, 10);
   return rows.map((r) => ({
     id: r.id,
     receivedAt: r.receivedAt,

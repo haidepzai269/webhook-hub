@@ -155,7 +155,8 @@ export class GenericAdapter implements ProviderAdapter {
 
   /** ACCEPTED có mapping: chạy lại ánh xạ + validator trên body đã lưu; báo TÊN trường body (không giá trị). */
   private diagnoseMapping(raw: StoredRawEvent, c: GenericConfig): Diagnosis {
-    const req = { provider: this.provider, sourceKey: '', headers: {}, rawBody: Buffer.from(raw.bodyRaw), body: raw.body } as RawWebhookRequest;
+    // Nhánh có mapping chỉ đọc `body` đã parse — inspect không nạp `body_raw` (review PK1 T-4) -> Buffer rỗng là đủ.
+    const req = { provider: this.provider, sourceKey: '', headers: {}, rawBody: Buffer.from(raw.bodyRaw ?? []), body: raw.body } as RawWebhookRequest;
     let data: unknown;
     try {
       data = this.normalize(req, { tenantId: '', sourceId: '', correlationId: '', rawEventId: '', verificationConfig: c })[0].data;

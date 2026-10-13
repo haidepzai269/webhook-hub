@@ -3,7 +3,7 @@
 export const DELIVERY_STATUSES = ["PENDING", "DELIVERING", "RETRYING", "SUCCEEDED", "DEAD"] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
-// PK1 (ADR-202): `generic` = "Provider khác" — nguồn tự khai cách xác thực (GenericAdapter, S8).
+// PK1 (ADR-202): `generic` = "Nhà cung cấp khác" — nguồn tự khai cách xác thực (GenericAdapter, S8).
 export const PROVIDERS = ["github", "sepay", "payos", "stripe", "generic"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 

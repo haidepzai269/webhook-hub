@@ -52,6 +52,8 @@ describe('Standard Webhooks (S6)', () => {
       { 'webhook-id': ID, 'webhook-timestamp': String(TS), 'svix-signature': good },
       { 'svix-id': ID, 'svix-timestamp': String(TS), 'webhook-signature': good },
       { 'svix-id': ID, 'webhook-timestamp': String(TS), 'svix-signature': good },
+      // review PK1 T-6: `webhook-id` chen vào bộ svix-* ĐỦ ba header -> chọn bộ chuẩn, thiếu timestamp/signature -> false
+      { 'webhook-id': ID, 'svix-id': ID, 'svix-timestamp': String(TS), 'svix-signature': good },
     ];
     for (const h of mixes) expect([h, swVerify(SECRET, h, BODY, at(TS))]).toEqual([h, false]);
   });

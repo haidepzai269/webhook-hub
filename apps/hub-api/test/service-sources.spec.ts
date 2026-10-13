@@ -94,7 +94,7 @@ describe('GET /v1/p/:project/sources/:id/inspect (S9)', () => {
     ];
     const repo = {
       findSourceById: jest.fn(async (id: string) => sources[id] ?? null),
-      findRecentRawEventsForSource: jest.fn(async () => raws),
+      findRecentRawEventsForInspect: jest.fn(async () => raws),
     };
     const prisma: any = { forTenant: () => repo };
     const req: any = { tenantId: PA, apiKey: { id: 'k1', tenantId: PA } };
@@ -104,7 +104,7 @@ describe('GET /v1/p/:project/sources/:id/inspect (S9)', () => {
   it('[MS:T9] (phần e) 10 raw mới nhất kèm chẩn đoán; KHÔNG có giá trị chữ ký; source khác project -> 404; since sai -> 422', async () => {
     const { ctrl, req, repo } = build();
     const r: any[] = await ctrl.inspectSource(req, SG, '2026-10-10T00:00:00Z');
-    expect(repo.findRecentRawEventsForSource).toHaveBeenCalledWith(SG, new Date('2026-10-10T00:00:00Z'), 10);
+    expect(repo.findRecentRawEventsForInspect).toHaveBeenCalledWith(SG, new Date('2026-10-10T00:00:00Z'), 10);
     expect(r).toEqual([
       { id: 'r1', receivedAt: new Date('2026-10-10T00:00:03Z'), status: 'ACCEPTED', diagnosis: { ok: true, reason: 'ok' } },
       { id: 'r2', receivedAt: new Date('2026-10-10T00:00:02Z'), status: 'REJECTED', diagnosis: { ok: false, reason: 'missing_header', expectedHeader: 'x-signature', candidateHeaders: ['x-sig'] } },

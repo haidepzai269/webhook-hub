@@ -13,6 +13,8 @@ export const pagePlayground = defineMessages("page.playground", {
     "page.playground.no-sources.before": "Chưa có nguồn —",
     "page.playground.no-sources.link": "tạo một nguồn",
     "page.playground.no-sources.after": "trước.",
+    "page.playground.generic-hidden":
+      "Ẩn {count} nguồn \"Nhà cung cấp khác\": trang này chưa ký theo cấu hình riêng của nguồn. Gửi thử từ nhà cung cấp (hoặc tự ký rồi gửi bằng `curl`), rồi xem kết quả ở nút Lắng nghe trên trang Nguồn.",
     "page.playground.secret.sepay": "Khoá API",
     "page.playground.secret.payos": "Khoá kiểm tổng",
     "page.playground.secret.sign": "Khoá bí mật để ký",
@@ -47,6 +49,8 @@ export const pagePlayground = defineMessages("page.playground", {
     "page.playground.no-sources.before": "No sources yet —",
     "page.playground.no-sources.link": "create a source",
     "page.playground.no-sources.after": "first.",
+    "page.playground.generic-hidden":
+      "Hiding {count} \"Other provider\" source(s): this page does not sign with a source's own configuration yet. Send a test from the provider (or sign it yourself and send with `curl`), then check the Listen button on the Sources page.",
     "page.playground.secret.sepay": "API key",
     "page.playground.secret.payos": "Checksum key",
     "page.playground.secret.sign": "Signing secret",

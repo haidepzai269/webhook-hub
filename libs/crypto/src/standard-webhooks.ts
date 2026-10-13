@@ -1,8 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 /**
- * Standard Webhooks (https://www.standardwebhooks.com, SPEC §4.7, ADR-040) — MỘT bản dùng chung cho hub
- * (WebhookSender, challenge), GenericAdapter (S8), SDK (S11) và Shop.
+ * Standard Webhooks (https://www.standardwebhooks.com, SPEC §4.7, ADR-040) — bản của hub: WebhookSender, challenge và
+ * GenericAdapter (S8). SDK (`libs/hub-sdk/src/webhook.ts`) và Shop có bản RIÊNG, chỉ đọc `webhook-*`: bộ `svix-*` (PK1,
+ * ADR-202) chỉ mở ở phía NHẬN của hub (nguồn generic), phía nhận push của service không nới thêm (review PK1 T-8).
  *
  *   sign = "v1," + base64( HMAC_SHA256(secretBytes, `${msgId}.${ts}.${body}`) )
  *   secretBytes = secret bắt đầu "whsec_" ? base64decode(phần sau) : utf8(secret)   // tương thích secret cũ

@@ -8,13 +8,16 @@ export interface AdapterContext {
   verificationConfig?: unknown;
 }
 
-/** S9: raw_event ĐÃ LƯU (header đã che, body REJECTED là mẫu ≤4KB) — đầu vào của `diagnose`. */
+/**
+ * S9: raw_event ĐÃ LƯU (header đã che, body REJECTED là mẫu ≤4KB) — đầu vào của `diagnose`. `bodyRaw` vắng khi inspect
+ * (review PK1 T-4: poll 2s không kéo `body_raw` từ DB) — `diagnose` không được cần bytes gốc.
+ */
 export interface StoredRawEvent {
   status: string;
   signatureValid: boolean;
   headers: unknown;
   body: unknown;
-  bodyRaw: Buffer | Uint8Array;
+  bodyRaw?: Buffer | Uint8Array;
   receivedAt: Date;
 }
 

@@ -665,6 +665,11 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
 - **PK1:** khoá chống trùng mặc định `webhook-id` của standard-webhooks đọc theo bộ header đang có → request Svix lấy `svix-id` (ADR-202). Header khoá tự khai khác thì giữ nguyên.
 - **PK1:** Playground thêm nhãn khoá cho `generic` để tsc qua (map `Record<Provider,…>`); Playground chưa ký hộ theo cấu hình nguồn generic.
 - **PK1 (review PK0 T-5/T-6, chưa làm):** body không phải JSON ở generic vẫn lưu `raw_events.body = {}`; `application/*+json` vẫn rơi vào parser raw. Để PK5 (E29).
+- **Sửa review PK1 (2026-10-14, Amelia):**
+  - **TB-1:** chọn cách ít rủi ro — **lọc nguồn generic khỏi Playground** (`playgroundSources`), kèm một dòng "Ẩn N nguồn Nhà cung cấp khác… gửi thử từ nhà cung cấp, xem ở nút Lắng nghe". Không ký phía client theo `verificationConfig`: PK2 thêm algo/keyEncoding/basic/query, ký trong trình duyệt phải theo kịp từng tham số — chép thêm một bản thuật toán ký nữa ở web, lệch là "401 mà cấu hình đúng". Tới PK7 xét lại.
+  - **T-2:** web chưa alias `@hub/common` → `listen-logic.ts` giữ **bản sao** `RESERVED_NAMESPACES`/`isReservedType`; `listen-logic.spec.ts` so với bản gốc (lệch là đỏ). Client cũng chặn `eventType` > 128.
+  - **T-4: làm.** Inspect thật sự không cần `body_raw` (`diagnose` chỉ đọc headers/body/status; nhánh mapping chỉ đọc `body`) → repo thêm `findRecentRawEventsForInspect` (`select` bỏ `bodyRaw`), `StoredRawEvent.bodyRaw` thành tuỳ chọn. `findRecentRawEventsForSource` giữ nguyên cho đối chiếu secret (KN, cần bytes gốc).
+  - **T-7 (rủi ro còn lại, ghi theo review):** "✓" chưa bảo đảm nội dung với body không phải JSON — nguồn generic không mapping nhận `text/plain`/XML/`+json` vẫn ACCEPTED với `body = {}` tới khi xong **PK5 (E29)**. PK5 không được trượt.
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

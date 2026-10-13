@@ -16,7 +16,7 @@ const SCHEME_KEY: Record<GenericFormValues["scheme"], MessageKey> = {
 };
 
 /**
- * PK1 (SPEC-provider-khac §3.1, ADR-202): các ô tay của "Provider khác" (generic) — scheme, header, encoding, khoá chống
+ * PK1 (SPEC-provider-khac §3.1, ADR-202): các ô tay của "Nhà cung cấp khác" (generic) — scheme, header, encoding, khoá chống
  * trùng, eventType. PK7 thay bằng form nhận diện. Header ẩn với standard-webhooks (đọc webhook-* / svix-*), encoding chỉ
  * cho hmac-sha256 — đúng luật của `validateGenericConfig`.
  */
@@ -80,6 +80,8 @@ export function GenericFields({ control, scheme }: { control: Control<GenericFor
           )}
         />
       )}
+      {/* Review PK1 T-1: standard-webhooks lấy khoá từ tiêu đề (id của bộ đang dùng) — không có lựa chọn "trường body". */}
+      {!sw && (
       <Controller
         control={control}
         name="idKind"
@@ -98,14 +100,15 @@ export function GenericFields({ control, scheme }: { control: Control<GenericFor
           </Field>
         )}
       />
+      )}
       <Controller
         control={control}
         name="idValue"
         render={({ field, fieldState }) => (
           <Field className="gap-1.5" data-invalid={fieldState.invalid}>
             <FieldLabel htmlFor="src-id">{t("page.sources.generic.id-value")}</FieldLabel>
-            <Input {...field} id="src-id" placeholder={sw ? "svix-id" : "transId"} aria-invalid={fieldState.invalid} />
-            <FieldDescription>{t("page.sources.generic.id-value-hint")}</FieldDescription>
+            <Input {...field} id="src-id" placeholder={sw ? "" : "transId"} aria-invalid={fieldState.invalid} />
+            <FieldDescription>{t(sw ? "page.sources.generic.id-value-hint-sw" : "page.sources.generic.id-value-hint")}</FieldDescription>
             {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
           </Field>
         )}

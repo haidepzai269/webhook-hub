@@ -24,7 +24,7 @@ import type {
   TimeseriesRange,
 } from "./types";
 import { withProject } from "./flow-project";
-import type { InspectRow } from "./listen-logic";
+import { listenRefetchInterval, type InspectRow } from "./listen-logic";
 import { keysAfterAudited } from "./ui-logic";
 
 // Event Flow (SPEC-event-flow-ui): query ở file riêng để giảm xung đột merge, vẫn xuất qua queries.ts.
@@ -210,21 +210,24 @@ export function useAuditFacets() {
 export function useCreateSource() {
   const qc = useQueryClient();
   return useMutation({
-    // PK1: `verificationConfig` chỉ cho provider generic ("Provider khác") — server kiểm lại (422 có tên trường).
+    // PK1: `verificationConfig` chỉ cho provider generic ("Nhà cung cấp khác") — server kiểm lại (422 có tên trường).
     mutationFn: (body: { provider: string; name: string; secret: string; verificationConfig?: Record<string, unknown> }) =>
       hubFetch<Source>("/api/v1/sources", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => invalidateAudited(qc, hubKeys.sources),
   });
 }
 
-/** PK1 (SPEC-provider-khac §3.2): tab "Lắng nghe" — 10 request gần nhất kèm chẩn đoán, gọi lại mỗi 2s khi đang mở. */
-export const LISTEN_REFRESH_MS = 2_000;
+/**
+ * PK1 (SPEC-provider-khac §3.2): tab "Lắng nghe" — 10 request gần nhất kèm chẩn đoán, gọi lại mỗi 2s khi đang mở.
+ * Review PK1 T-5: 404 thì dừng poll (`listenRefetchInterval`); lỗi tạm thì poll tiếp, `data` cũ giữ nguyên.
+ */
+export { LISTEN_REFRESH_MS } from "./listen-logic";
 export function useSourceInspect(sourceId: string | null) {
   return useQuery({
     queryKey: ["source-inspect", sourceId] as const,
     enabled: !!sourceId,
     queryFn: () => hubFetch<InspectRow[]>(`/api/v1/sources/${encodeURIComponent(sourceId ?? "")}/inspect`),
-    refetchInterval: LISTEN_REFRESH_MS,
+    refetchInterval: (q) => listenRefetchInterval(q.state.error),
     refetchIntervalInBackground: false,
   });
 }

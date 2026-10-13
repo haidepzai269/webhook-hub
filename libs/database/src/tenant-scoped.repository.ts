@@ -951,6 +951,19 @@ export class TenantScopedRepository {
   }
 
   /**
+   * Review PK1 T-4: như `findRecentRawEventsForSource` nhưng KHÔNG nạp `body_raw` — tab Lắng nghe poll 2s, mỗi lượt 10 dòng
+   * (tới 1MB/dòng) là phí truyền Neon vô ích: `diagnose` chỉ cần status/signature_valid/headers/body/received_at.
+   */
+  async findRecentRawEventsForInspect(sourceId: string, since: Date, limit: number) {
+    return this.prisma.rawEvent.findMany({
+      where: { sourceId, receivedAt: { gte: since }, source: { tenantId: this.tenantId } },
+      orderBy: { receivedAt: 'desc' },
+      take: limit,
+      select: { id: true, status: true, signatureValid: true, headers: true, body: true, receivedAt: true },
+    });
+  }
+
+  /**
    * Raw event "mồ côi" (S1-3): ACCEPTED, quá `olderThanSeconds`, chưa sinh event nào và chưa
    * được normalize xong (không có `processed_messages(normalize, id)` — loại trừ raw event mà
    * adapter cố ý chuẩn hoá ra 0 event). Postgres là trọng tài; DLQ broker chỉ là bản sao.

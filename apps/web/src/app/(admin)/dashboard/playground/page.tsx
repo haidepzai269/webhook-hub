@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DEMO_SIMULATE, HUB_API_URL } from "@/lib/env";
+import { playgroundSources } from "@/lib/hub/listen-logic";
 import { useSources } from "@/lib/hub/queries";
 import type { Provider } from "@/lib/hub/types";
 import type { MessageKey } from "@/lib/i18n/dictionary";
@@ -44,7 +45,7 @@ const SECRET_LABEL: Record<Provider, MessageKey> = {
   payos: "page.playground.secret.payos",
   github: "page.playground.secret.sign",
   stripe: "page.playground.secret.sign",
-  // PK1: "Provider khác" (generic) lên console — Playground chưa ký hộ theo cấu hình riêng của nguồn (PK7).
+  // Review PK1 TB-1: nguồn generic bị lọc khỏi Playground (`playgroundSources`) — khoá này chỉ để đủ kiểu, không hiện.
   generic: "page.playground.secret.sign",
 };
 
@@ -59,7 +60,9 @@ export default function PlaygroundPage() {
   const [result, setResult] = useState<SendResult | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
-  const source = useMemo(() => sources.data?.find((s) => s.id === sourceId), [sources.data, sourceId]);
+  // Review PK1 TB-1: bỏ nguồn generic — Playground chưa ký theo cấu hình riêng của nguồn (luôn 401, dev tưởng cấu hình sai).
+  const { usable, hiddenGeneric } = useMemo(() => playgroundSources(sources.data), [sources.data]);
+  const source = useMemo(() => usable.find((s) => s.id === sourceId), [usable, sourceId]);
 
   // "Tạo từ event này" (V1 Hành trình): điền sẵn source + body của event gốc — một lần.
   const prefill = useRef<PlaygroundPrefill | null>(null);
@@ -71,10 +74,10 @@ export default function PlaygroundPage() {
     }
   }, []);
 
-  // Chọn sẵn nguồn đầu tiên khi danh sách về.
+  // Chọn sẵn nguồn đầu tiên khi danh sách về (cả khi id điền sẵn là nguồn generic đã bị lọc).
   useEffect(() => {
-    if (!sourceId && sources.data?.length) setSourceId(sources.data[0].id);
-  }, [sources.data, sourceId]);
+    if (!source && usable.length) setSourceId(usable[0].id);
+  }, [usable, source]);
 
   // Đổi nguồn → nạp payload mẫu của provider đó.
   useEffect(() => {
@@ -149,14 +152,15 @@ export default function PlaygroundPage() {
                     <SelectValue placeholder={sources.isLoading ? t("common.loading") : t("page.playground.field.source-placeholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {(sources.data ?? []).map((s) => (
+                    {usable.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name} · {s.provider}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {!sources.isLoading && !sources.data?.length && (
+                {hiddenGeneric > 0 && <FieldDescription>{t("page.playground.generic-hidden", { count: hiddenGeneric })}</FieldDescription>}
+                {!sources.isLoading && !usable.length && !hiddenGeneric && (
                   <FieldDescription>
                     {t("page.playground.no-sources.before")}{" "}
                     <Link href="/dashboard/sources" className="underline">
