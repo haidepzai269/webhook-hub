@@ -385,7 +385,7 @@ NORMALIZE_MAX_DEFER_MS=3600000
 - [x] **BP3** — OPEN kéo dài dần (§4). Cần BP2.
 - [x] **BP4** — Slow-start (§5). Cần gate của BP2.
 - [x] **BP5** — Bộ điều khiển áp lực ngược (§7). Cần `classifyInfraError` của BP1.
-- [x] **BP6** — Đồng bộ giấy (§8). Phần phụ lục chờ Q1.
+- [x] **BP6** — Đồng bộ giấy (§8). Q1 đã chốt (C13).
 
 Mỗi story đi theo VF (RED → PROBED → REVIEWED), review riêng, rồi mới commit.
 

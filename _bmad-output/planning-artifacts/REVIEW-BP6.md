@@ -102,3 +102,62 @@ Không hứa điều nào mà code không làm.
 - **TH-3** (ARCHITECTURE.md:161, §5.4e): nói rõ "một factor, mỗi consumer một semaphore (20); chế độ dò 1 message / 5s **mỗi lane**" để đoạn văn khớp với bảng và code sau review BP5 lượt 1.
 - **TH-4** (ADR-192): bổ sung `FlowScopedRepository` (lớp con của repo, ADR-100) và một câu về các escape hatch trong `PrismaService`. Mở rộng mẫu grep thêm `this.db.`.
 - **TH-5** (`56fa384`): message không phải JSON được giữ nguyên byte khi đưa vào DLQ. Một message kiểu cũ bị cắt cụt (JSON hỏng) có thể còn chuỗi secret trong đó. Ca này rất hiếm; muốn chặt thì thay byte thô bằng `{"unparsable": true, "bytes": n}`.
+
+---
+
+# Lượt 2 — `b44304b..9d13fce`
+
+## Kết luận lượt 2: **ĐẠT** — BP6 xong
+
+- HEAD = origin/feat/bp = `9d13fce`, nhánh `feat/bp`.
+- Mục này chưa commit (theo yêu cầu).
+
+## Đã chạy
+
+- `jest delivery-infra-errors + bp-docs-sync`: 12 test qua.
+- `tsc` hub-worker: sạch.
+- `verify:map`: 0 mồ côi, 0 ma, 0 trùng. Đã checkout lại `TEST-MAP.md`.
+- `verify:gates`: 0 vi phạm.
+
+## Từng mục
+
+**TH-1 — Đóng.**
+- CLAUDE.md giờ ghi "≤ 1 lệnh, **0 truy vấn đọc** (… hoãn vẫn ghi `next_attempt_at` thưa ≤ 1 lần/2 phút)".
+- T23 khớp chuỗi mới.
+- Tính từ `3777547`, CLAUDE.md vẫn chỉ đổi đúng 2 dòng.
+
+**TH-2 — Đóng.** Tôi tự tính lại cho một lần thử:
+
+| Thành phần | Số lệnh |
+|---|---|
+| ~7 vòng 5m trong trần 30 phút | 7 EVAL |
+| Vòng 1m rơi vào các khoảng HALF_OPEN | 1–2 EVAL (+1 khi giành được probe) |
+| Lần quá trần | 1 EVAL + 1 PUBLISH |
+| **Tổng một lần thử** | **≈ 9–11** |
+
+- 6 lần thử ≈ **55–65 lệnh / delivery**.
+- 1.000 delivery ≈ 55k–65k lệnh ≈ **11–13%** quota 500k/tháng.
+- DEPLOYMENT.md:366 ghi đúng các con số này và kết luận "giảm khoảng 3 lần" (so với 180).
+
+**TH-3 — Đóng.** §5.4e (ARCHITECTURE.md:377) đã ghi:
+- một factor, mỗi consumer một semaphore (MAX 20);
+- dò 1 message / 5s **mỗi lane**, tức ≤ 2 lần gọi DB / 5s / tiến trình.
+
+Đoạn văn giờ khớp bảng ngay dưới và khớp code.
+
+**TH-4 — Đóng.** ADR-192 đã:
+- thêm `this.db.` vào mẫu grep;
+- thêm mục `FlowScopedRepository` (lớp con hợp lệ, ADR-100);
+- thêm một câu về các escape hatch có tên trong `PrismaService`.
+
+Đã bỏ chữ "CHÍNH XÁC" và giữ cảnh báo "số dòng sẽ trôi".
+
+**TH-5 — Đóng.** `unparsablePlaceholder` (delivery.consumer.ts:119-121) **không** đưa byte thô vào DLQ.
+- Ca không phải JSON, hoặc JSON không phải object, thì nội dung gửi đi chỉ còn `{unparsable: true, bytes, sha256}`.
+- sha256 của toàn thân message không lộ secret có ý nghĩa: đầu vào dài, entropy cao, không đảo ngược được.
+- Test dùng thân bị cắt cụt `{"deliveryId":"d","signingSecret":"s3cr3t-cut`. Test kiểm placeholder đúng nguyên văn (cả sha256), kiểm nội dung **không** khớp `/s3cr3t/`, và kiểm `x-dead-reason = parse_error`.
+- JSON object hỏng vẫn đi nhánh cũ (bỏ `config`, `signingSecret`, `event`), như lượt 1.
+
+**Tick `[x] BP6` — Hợp lệ.**
+- SPEC §11:388 đã đánh dấu; `verify:map` sạch; T23 có test.
+- Thấp (chữ): dòng tick vẫn còn "Phần phụ lục chờ Q1", trong khi C13 đã chốt Q1 (phụ lục đã nộp, không sửa). Nên đổi thành "Q1 đã chốt (C13)".
