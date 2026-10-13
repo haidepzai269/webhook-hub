@@ -271,6 +271,23 @@
         }
       },
       "note": "SPEC-han-muc-dung-luong §12 + mục ĐÍNH CHÍNH (T28–T34; ADR-182..187, 189). Chặng 1 = QT1, QT2, QT3, QT9; chặng 2 = QT4, QT4b, QT5; chặng 3 = QT6 (ADR-190), QT7, QT8 (feat/qt). L0 + L1 (describeDb trên hubv)."
+    },
+    {
+      "ns": "BP",
+      "file": "_bmad-output/planning-artifacts/backpressure/SPEC-ap-luc-nguoc.md",
+      "pattern": "^\\|\\s*`\\[BP:(T\\d+)\\]`\\s*\\|",
+      "done": {
+        "checklist": "\\[x\\] \\*\\*(BP\\d+)\\*\\*",
+        "groups": {
+          "BP1": "T1-T4",
+          "BP2": "T5-T11",
+          "BP3": "T12,T13",
+          "BP4": "T14-T16",
+          "BP5": "T17-T21,T24",
+          "BP6": "T23"
+        }
+      },
+      "note": "SPEC-ap-luc-nguoc §13 + mục ĐÍNH CHÍNH SAU QT (ADR-195..200). L0/L1; T4, T16, T21 là chaos LOCAL (docker-compose, C8). [BP:T24] khai báo ở C5 (không nằm trong bảng §13) -> khai báo inline. [BP:T22] không thuộc story nào: bắt buộc khi mọi BP đã [x]."
     }
   ],
   "inline": [
@@ -297,6 +314,12 @@
       "codes": "HA1-HA4",
       "requireTest": true,
       "note": "Chế độ hub-all (ADR-129): HA1 con chết -> dừng hết, exit≠0 · HA2 SIGTERM drain cả hai, exit 0, log gắn proc · HA3 SIGKILL sau hạn · HA4 e2e hubv image thật."
+    },
+    {
+      "ns": "BP",
+      "codes": "T24",
+      "requireTest": true,
+      "note": "SPEC-ap-luc-nguoc ĐÍNH CHÍNH C5 (BP5): giữ 5 message chờ permit rồi SIGTERM — shutdown < 25s, không ack/nack/republish."
     }
   ],
   "doneOverrides": [
@@ -333,6 +356,7 @@
     "DX:TX2": "Đo bằng đồng hồ với người test chưa đọc code (thời gian từ connection string tới event đầu tiên) — bản chất là phép đo thủ công, không tự động hoá được; chưa có kết quả ở §9.",
     "DX:TX3": "E2E làm tay: hub listen + examples/quickstart-node + SePay mock trên stack dev (PASS 2026-10-11 ở §9). Phần lõi phủ tự động ở L0 [DX:UX9], [DX:UX10], [DX:UX12]-[DX:UX14] (webhook-body.spec, listen.spec).",
     "DX:TX4": "E2E làm tay: đếm hub.deliveries trước/sau TX3 trên stack dev (PASS 2026-10-11 ở §9). listen chỉ đọc vì đi qua polling A (GET), không tạo delivery.",
-    "DX:TX5": "E2E làm tay: npx hub trigger + listen trên stack (SPEC-dev-experience §6.2), chưa ghi kết quả ở §9. Phần lõi phủ tự động ở L0 [DX:UX16] (libs/hub-sdk/test/trigger.spec.ts: body qua validateCanonical)."
+    "DX:TX5": "E2E làm tay: npx hub trigger + listen trên stack (SPEC-dev-experience §6.2), chưa ghi kết quả ở §9. Phần lõi phủ tự động ở L0 [DX:UX16] (libs/hub-sdk/test/trigger.spec.ts: body qua validateCanonical).",
+    "BP:T4": "Chaos LOCAL (dừng Postgres 60s dưới tải, docker-compose) — chưa chạy ở phiên dev BP1 (C8: chỉ chạy khi máy không có agent nặng khác; phiên dev không tự dựng stack). Logic phủ ở L0 [BP:T1]/[BP:T2]/[BP:T3]."
   }
 }

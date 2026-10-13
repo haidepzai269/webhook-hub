@@ -59,6 +59,17 @@ export const outboxLag = new Gauge({
   registers: [workerRegistry],
 });
 
+/**
+ * BP1 (ADR-195): lỗi hạ tầng/lỗi lạ ở delivery consumer bị bắt ở `catch` ngoài cùng — `kind` = transient | unknown.
+ * Mỗi lần đếm là một lần hoãn có nhịp (retry.10s / retry.1m), không bao giờ requeue ngay.
+ */
+export const deliveryInfraErrors = new Counter({
+  name: 'hub_delivery_infra_errors_total',
+  help: 'Số lần delivery consumer gặp lỗi hạ tầng (transient) hoặc lỗi lạ (unknown) và hoãn message',
+  labelNames: ['kind'] as const,
+  registers: [workerRegistry],
+});
+
 /** Lỗi tạm ở normalize được đẩy vào q.normalize.retry.30s (ADR-044). */
 export const normalizeRetries = new Counter({
   name: 'hub_normalize_retries_total',

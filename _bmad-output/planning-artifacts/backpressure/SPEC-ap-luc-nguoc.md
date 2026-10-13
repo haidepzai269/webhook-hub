@@ -128,6 +128,7 @@ Không bao giờ lấy lỗi của đích làm tín hiệu giảm tốc cả wor
    - **Không requeue ngay.** Republish message gọn (`slim()`) vào `q.delivery.retry.10s`, header `x-infra-deferrals` + 1, **không tăng `attemptCount`**, rồi `ack`.
    - Báo tín hiệu `infra_fail` cho bộ điều khiển BP5 (trước khi có BP5 thì chỉ đếm metric).
 3. Lỗi `unknown` (bug, dữ liệu lạ): republish vào `q.delivery.retry.1m`, header `x-unknown-errors` + 1. Tới lần thứ 5 thì `nack(requeue=false)`, để bản sao vào DLQ broker, và log `error` một lần.
+   - **Đính chính khi code BP1 (2026-10-13, ADR-195):** `q.delivery.main` **không có DLX** (`libs/messaging/src/topology.ts`, chỉ `{ durable: true }`), nên `nack(requeue=false)` là vứt message chứ không vào `q.delivery.dlq`. Phòng chọn: lần thứ 5 `channel.publish(x.hub.delivery.dlx, dead, slim())` (header `x-dead-reason: unknown_error` + `x-unknown-errors`), publish xong mới `ack`; publish ném lỗi thì không ack. `[BP:T2]` kiểm "publish DLX đúng một lần rồi ack, không nack".
    - Postgres vẫn là nguồn sự thật. Nếu delivery còn PENDING/RETRYING thì sweeper sẽ hồi sinh nó, tối đa một lần mỗi 10 phút. Có giới hạn, không thành vòng lặp nóng.
 4. **Lease:** nếu lỗi xảy ra sau `claimForSend`, delivery đang DELIVERING. Lần sau message quay lại sẽ thua lease 60s và đi nhánh hoãn 1 phút sẵn có. Không cần thêm gì.
 5. Metric: `hub_delivery_infra_errors_total{kind}`.
@@ -367,7 +368,7 @@ Mỗi story đi theo VF (RED → PROBED → REVIEWED), review riêng, rồi mớ
 | Mã | Story | Kiểm cái gì |
 |---|---|---|
 | `[BP:T1]` | BP1 | Prisma P1001 ở bước 0: message vào `retry.10s`, `attemptCount` giữ nguyên, **không** `nack(requeue=true)` |
-| `[BP:T2]` | BP1 | Lỗi `unknown` 5 lần liên tiếp: `nack(false)` đúng một lần, không vòng lặp |
+| `[BP:T2]` | BP1 | Lỗi `unknown` 5 lần liên tiếp: publish DLX đúng một lần rồi ack, không nack, không vòng lặp (đính chính §2 mục 3); publish DLX ném lỗi thì không ack |
 | `[BP:T3]` | BP1 | Grep: không còn `nack(msg, false, true)` trong `apps/hub-worker/src` |
 | `[BP:T4]` | BP1 | Chaos (local): dừng Postgres 60s khi đang có tải. Số lần gọi Prisma mỗi giây bị chặn trên; log không xả quá N dòng/s |
 | `[BP:T5]` | BP2 | Mọi nơi tạo message (normalize, sweeper, replay) đều có `destinationId` |
@@ -408,3 +409,7 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 - **Q1.** Phụ lục đã nộp cho thầy chưa? Chưa nộp thì BP6 sửa dòng 9, 28, 29. Nộp rồi thì giữ nguyên file và chuẩn bị câu trả lời "jitter ở đâu" cho buổi bảo vệ.
 - **Q2.** OPEN tối đa 5 phút (đích hồi phục thì chờ tối đa khoảng 5 phút) có chấp nhận được không? Sally muốn 2 phút, nhưng không có tầng TTL 2m. Muốn có thì phải thêm queue, tức sửa `topology.ts`.
 - **Q3.** BP5 có làm ngay, hay để sau BP1–BP4? BP5 lớn nhất và nhiều chữ nhất, nhưng cũng là phần giống Canva nhất, nên dễ ghi điểm "hiểu bản chất".
+
+## 16. Ghi chú / nợ phát hiện khi code
+
+- **Nợ (BP1, 2026-10-13):** nhánh parse lỗi của `DeliveryConsumer` (`parseDeliveryMessage` ném) vẫn `channel.nack(msg, false, false)` kèm log "chuyển DLQ". Vì `q.delivery.main` không có DLX, message đó bị vứt chứ không vào `q.delivery.dlq`. Không sửa trong BP1 theo quyết định của phòng; cách sửa gợi ý giống BP1: publish bản sao vào `x.hub.delivery.dlx` rồi ack.

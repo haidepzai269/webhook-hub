@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { deliveriesTotal, deliveryDuration, deliveryHandleDuration } from '../metrics';
+import { deliveriesTotal, deliveryDuration, deliveryHandleDuration, deliveryInfraErrors } from '../metrics';
+import { classifyInfraError } from './infra-errors';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
 import { Prisma } from '@prisma/client';
 import { CIRCUIT_OPEN_MS, CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
@@ -37,6 +38,19 @@ const THROTTLE_DEFER = retryQueueForDelay(0);
  * lỗi retryable, cuối cùng thành DEAD. Mặc định 30 lần ≈ 30 phút (tầng 1m).
  */
 export const CIRCUIT_DEFERRALS_HEADER = 'x-circuit-deferrals';
+/**
+ * BP1 (ADR-195): lỗi bắt ở `catch` ngoài cùng KHÔNG BAO GIỜ requeue (RabbitMQ giao lại ngay -> vòng lặp nóng
+ * đập vào DB đang hỏng). Lỗi hạ tầng (transient) hoãn vào tầng ngắn nhất (10s), KHÔNG tăng attemptCount (chưa gọi đích);
+ * lỗi lạ (unknown) hoãn 1 phút, tới lần thứ UNKNOWN_ERROR_MAX thì publish bản sao vào DELIVERY_DLX rồi ack (q.delivery.main không có
+ * DLX nên nack(false) sẽ vứt message). Postgres vẫn là trọng tài:
+ * sweeper hồi sinh delivery còn PENDING/RETRYING, tối đa một lần mỗi 10 phút.
+ */
+export const INFRA_DEFERRALS_HEADER = 'x-infra-deferrals';
+export const UNKNOWN_ERRORS_HEADER = 'x-unknown-errors';
+export const UNKNOWN_ERROR_MAX = 5;
+const INFRA_DEFER = retryQueueForDelay(0); // q.delivery.retry.10s
+const UNKNOWN_DEFER = retryQueueForDelay(60_000); // q.delivery.retry.1m
+
 export function maxCircuitDeferrals(env: string | undefined = process.env.CIRCUIT_MAX_DEFERRALS): number {
   const n = Number(env ?? 30);
   return Number.isInteger(n) && n > 0 ? n : 30;
@@ -414,8 +428,41 @@ export class DeliveryConsumer {
       channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, slim(currentAttemptNo), { persistent: true });
       channel.ack(msg);
     } catch (err: any) {
-      log.error({ err: err.message }, 'Ngoại lệ khi thực thi DeliveryConsumer');
-      channel.nack(msg, false, true); // requeue nếu gặp lỗi unhandled bất thường
+      // BP1 (ADR-195): KHÔNG requeue ngay — hoãn có nhịp. attemptCount giữ nguyên: lần này chưa hề gọi tới đích
+      // (hoặc đã gọi nhưng chưa ghi được kết quả — lần sau idempotency/lease xử lý), đốt lượt vì lỗi của hub là sai.
+      const kind = classifyInfraError(err);
+      deliveryInfraErrors.inc({ kind });
+      const headers = msg.properties.headers ?? {};
+      try {
+        if (kind === 'transient') {
+          // TODO(BP5): báo tín hiệu infra_fail cho bộ điều khiển áp lực ngược.
+          const n = (Number(headers[INFRA_DEFERRALS_HEADER]) || 0) + 1;
+          // warn, không error: lỗi hạ tầng sẽ lặp mỗi 10s cho từng message tới khi DB về — log có nhịp, không xả.
+          log.warn({ err: err?.message, queue: INFRA_DEFER.queueName, infraDeferrals: n }, 'Lỗi hạ tầng hub ở delivery -> hoãn 10s, không đốt lượt');
+          channel.sendToQueue(INFRA_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [INFRA_DEFERRALS_HEADER]: n } });
+          channel.ack(msg);
+          return;
+        }
+        const n = (Number(headers[UNKNOWN_ERRORS_HEADER]) || 0) + 1;
+        if (n >= UNKNOWN_ERROR_MAX) {
+          // Có thể là poison message (bug cố định). q.delivery.main KHÔNG có DLX (topology.ts) -> nack(false) là vứt message;
+          // muốn có bản sao trong q.delivery.dlq thì publish thẳng vào DELIVERY_DLX như nhánh DEAD, publish xong mới ack.
+          // DLQ broker chỉ là bản sao để quan sát; Postgres vẫn là nguồn sự thật (sweeper hồi sinh delivery kẹt).
+          log.error({ err: err?.message, unknownErrors: n }, `Lỗi lạ ở delivery lần thứ ${n} -> bản sao vào DLQ, ack`);
+          channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, slim(), {
+            persistent: true,
+            headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n, 'x-dead-reason': 'unknown_error', 'x-dead-error': String(err?.message ?? '').slice(0, 500) },
+          });
+          channel.ack(msg);
+          return;
+        }
+        log.warn({ err: err?.message, queue: UNKNOWN_DEFER.queueName, unknownErrors: n }, 'Lỗi lạ ở delivery -> hoãn 1 phút');
+        channel.sendToQueue(UNKNOWN_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n } });
+        channel.ack(msg);
+      } catch (e: any) {
+        // Channel đã đóng: không ack được -> RabbitMQ tự giao lại khi channel/kết nối mới lên (không phải vòng lặp nóng).
+        log.error({ err: e?.message, cause: err?.message }, 'Không hoãn được message lỗi (channel đóng?) -> để RabbitMQ giao lại');
+      }
     }
   }
 }

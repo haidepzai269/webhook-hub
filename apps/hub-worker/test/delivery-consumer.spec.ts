@@ -122,16 +122,26 @@ describe('DeliveryConsumer (§3.3, §5.4, S1-1, S1-2)', () => {
     expect(channel.nack).not.toHaveBeenCalled();
   });
 
-  it('[BB:3] (phần c) gửi xong nhưng GHI KẾT QUẢ lỗi (transaction ném) -> nack requeue, KHÔNG ack (ack trước khi lưu = mất bằng chứng giao, message không quay lại)', async () => {
+  it('[BB:3] (phần c) gửi xong nhưng GHI KẾT QUẢ lỗi (transaction ném) -> message quay lại (republish có nhịp, BP1/ADR-195), KHÔNG ack trước khi republish (ack trước khi lưu = mất bằng chứng giao, message không quay lại)', async () => {
     const { prisma } = buildFakePrisma();
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'));
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn().mockResolvedValue({ status: 200, body: 'ok', durationMs: 5 }) } as any);
     prisma.$transaction = jest.fn().mockRejectedValue(new Error('Postgres mất kết nối giữa transaction'));
 
     const channel = buildChannel();
+    // Ack khi CHƯA có bản republish nào = message không còn đường quay lại.
+    const ackBeforeRepublish = jest.fn();
+    channel.ack.mockImplementation(() => {
+      if (channel.sendToQueue.mock.calls.length === 0) ackBeforeRepublish();
+    });
     await consumer.handleMessage(toAmqpMsg(buildSlimMsg()), channel);
-    expect(channel.ack).not.toHaveBeenCalled();
-    expect(channel.nack).toHaveBeenCalledWith(expect.anything(), false, true);
+    expect(ackBeforeRepublish).not.toHaveBeenCalled();
+    // BP1: không còn requeue ngay; lỗi lạ -> retry.1m, attemptCount giữ nguyên (lần sau idempotency/lease quyết định).
+    expect(channel.nack).not.toHaveBeenCalled();
+    expect(channel.sendToQueue).toHaveBeenCalledTimes(1);
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+    expect(JSON.parse(channel.sendToQueue.mock.calls[0][1].toString()).attemptCount).toBe(0);
+    expect(channel.ack).toHaveBeenCalledTimes(1);
   });
 
   it('vẫn gửi lại ở tầng retry kế tiếp trong cùng generation (message_id khác), message retry GỌN', async () => {
