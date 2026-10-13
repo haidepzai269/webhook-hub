@@ -378,6 +378,11 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
       expect(await cb.getState(DEST, 0)).toMatchObject({ state: 'CLOSED', rampCap: 4, throttleCount: 1, throttleAllowed: true });
       now = t0 + 55_000;
       expect((await cb.getState(DEST, 0)).rampCap).toBe(64);
+      // review BP4 TH-1: mốc :ramp ở TƯƠNG LAI (đồng hồ worker lệch) -> kẹp đã trôi về 0, cap = start (không phải 1 rps)
+      redis.store.set(K('ramp'), String(t0 + 30_000));
+      now = t0 + 2_000;
+      expect((await cb.getState(DEST, 0)).rampCap).toBe(2);
+      redis.store.set(K('ramp'), String(t0));
       // gợi ý rps 100 nhưng rps thật 1: cap = min(1, ramp) — lần 2 trong giây bị chặn, không INCR thêm
       now = t0 + 21_000;
       await cb.getState(DEST, 100);
@@ -660,6 +665,9 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     } finally {
       Date.now = real;
     }
+    // review BP4 TH-1 (Redis thật): mốc :ramp ở tương lai 30s (lệch đồng hồ giữa worker) -> cap = start (2), không phải 1
+    await redis.set(k('ramp'), String(Date.now() + 30_000), 'EX', 60);
+    expect((await cb.getState(dest, 0)).rampCap).toBe(2);
     await redis.del(k('ramp'));
     expect(await cb.getState(dest, 0)).toEqual({ state: 'CLOSED', failures: 0 }); // không trần -> không INCR, gửi bình thường
   });

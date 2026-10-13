@@ -59,6 +59,7 @@ if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
     local el = tonumber(ARGV[3]) - (tonumber(rs) or 0)
     if el < 0 then el = 0 end
     local steps = math.floor(el / (tonumber(ARGV[5]) * 1000))
+    -- phòng thủ: env đã kẹp (ramp ≤ 60s, bước ≥ 1s) nên steps ≤ 60 và 2^60 không tràn double; kẹp 20 chỉ giữ cap hữu hạn nếu ai nới kẹp env
     if steps > 20 then steps = 20 end
     cap = tonumber(ARGV[4]) * (2 ^ steps)
   end

@@ -95,6 +95,8 @@
 - **Không gộp `tryAcquireProbe` vào gate** (C10 để ngỏ cho BP4): dù gộp, HALF_OPEN có probe vẫn > 3 lệnh vì PUBLISH circuit; gộp đổi ngữ nghĩa `getState` (mọi lần gate ở HALF_OPEN tự giành probe, mọi nhánh bỏ ngang phải nhả) — rủi ro hơn lợi cho ca hiếm. `[BP:T22]` phần b giữ chuỗi lệnh đầy đủ.
 - Cửa sổ retry cộng `6 × (DELIVERY_RAMP_SECONDS + 10s)` (message có thể bị ramp hoãn tới hết ramp mỗi lần thử) ≈ 6h15m40s; `DELIVERY_RAMP_SECONDS` chỉ được thấp hơn 60. Throttle `rate_limit_rps` do khách đặt vẫn không có trần thời gian (như trước BP).
 - `[BP:T16]` phần a: mô phỏng trên Redis thật (500 message, 60 giây giả lập). Kịch bản chaos LOCAL (đích chết 10 phút thật) chưa chạy (C8).
+- **Ngoại lệ của "mạch tự về CLOSED = chưa từng OPEN" (review BP4 TH-3):** mạch có thể đi OPEN 300s → HALF_OPEN (`:failures` sống thêm 120s) mà không message nào quay về kịp để làm probe; khi đó hàng ở `retry.5m` quay về sau khi khoá hết hạn, KHÔNG có ramp. Hệ quả nhỏ: hàng tồn tự rải ra trong ~240s (theo thời điểm từng message vào `retry.5m`); đích còn chết thì lỗi lại đủ ngưỡng và trip lại. Chấp nhận.
+- Mốc `:ramp` ở tương lai (lệch đồng hồ worker) bị kẹp về 0 → cap = start; không đổi sang `TIME` của Redis (Upstash chưa xác nhận) — review BP4 TH-1.
 
 ## 0. Bối cảnh
 
@@ -364,7 +366,7 @@ NORMALIZE_MAX_DEFER_MS=3600000
 - [x] **BP1** — Vòng lặp nóng (§2). Nhỏ, độc lập. **Làm trước.**
 - [x] **BP2** — `destinationId` + gate trước khi nạp + hoãn thưa + trần theo thời gian (§3, §6 phần gate)
 - [x] **BP3** — OPEN kéo dài dần (§4). Cần BP2.
-- [ ] **BP4** — Slow-start (§5). Cần gate của BP2.
+- [x] **BP4** — Slow-start (§5). Cần gate của BP2.
 - [ ] **BP5** — Bộ điều khiển áp lực ngược (§7). Cần `classifyInfraError` của BP1.
 - [ ] **BP6** — Đồng bộ giấy (§8). Phần phụ lục chờ Q1.
 
