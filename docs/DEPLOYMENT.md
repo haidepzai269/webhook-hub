@@ -579,7 +579,7 @@ DELIVERY_RAMP_STEP_SECONDS=10 # mỗi bước nhân đôi trần
 DELIVERY_RAMP_SECONDS=60     # thời lượng ramp; 0 = tắt; chỉ đặt THẤP hơn 60
 BACKPRESSURE_SET_POINT=0.05  # hub-worker: áp lực ngược cho DB (BP5, ADR-200) — tỷ lệ lỗi hạ tầng để bắt đầu lùi
 BACKPRESSURE_PROBE_INTERVAL_MS=5000 # chế độ dò: 1 message / khoảng này khi lùi hẳn
-BACKPRESSURE_HOLD_MAX_MS=60000 # giữ message chờ permit tối đa (phải < consumer_timeout của RabbitMQ), quá thì hoãn không đốt lượt
+BACKPRESSURE_HOLD_MAX_MS=60000 # giữ message chờ permit tối đa (phải < consumer_timeout của RabbitMQ), quá thì hoãn không đốt lượt; chỉ đặt THẤP hơn 60000
 NORMALIZE_MAX_DEFER_MS=3600000 # normalize hoãn không đốt lượt khi DB ốm; chỉ đặt THẤP hơn mặc định
 # BP5 (ADR-200): channel consumer RabbitMQ đóng bất thường -> hub-worker THOÁT (log kèm mã/lý do lỗi channel). Ở chế độ hub-all
 # supervisor dừng cả hub-api, Render dựng lại container: ingest gián đoạn tới khi lên lại; provider tự retry (BB-3) nên không

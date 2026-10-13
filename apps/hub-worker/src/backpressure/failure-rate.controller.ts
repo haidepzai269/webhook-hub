@@ -1,4 +1,5 @@
 import { backpressureFactor } from '../metrics';
+import { BACKPRESSURE_HOLD_MAX_MS, backpressureHoldMaxMs } from '@hub/messaging';
 
 /**
  * BP5 (SPEC-ap-luc-nguoc §7, ADR-200): áp lực ngược kiểu Canva cho HẠ TẦNG CỦA CHÍNH HUB (hiện chỉ `db` = Postgres).
@@ -44,7 +45,7 @@ export const BACKPRESSURE_DEFAULTS = {
   maxPermits: 20,
   setPoint: 0.05,
   probeIntervalMs: 5_000,
-  holdMaxMs: 60_000,
+  holdMaxMs: BACKPRESSURE_HOLD_MAX_MS,
   windowSeconds: 30,
   minSamples: 10,
 } as const;
@@ -58,7 +59,8 @@ export function backpressureOptionsFromEnv(env: Record<string, string | undefine
   return {
     setPoint: num(env.BACKPRESSURE_SET_POINT, (n) => n > 0 && n < 1, BACKPRESSURE_DEFAULTS.setPoint),
     probeIntervalMs: num(env.BACKPRESSURE_PROBE_INTERVAL_MS, (n) => n >= 100, BACKPRESSURE_DEFAULTS.probeIntervalMs),
-    holdMaxMs: num(env.BACKPRESSURE_HOLD_MAX_MS, (n) => n >= 1_000, BACKPRESSURE_DEFAULTS.holdMaxMs),
+    // nguồn + kẹp ở @hub/messaging (cửa sổ retry cộng theo mặc định -> chỉ được THẤP hơn)
+    holdMaxMs: backpressureHoldMaxMs(env.BACKPRESSURE_HOLD_MAX_MS),
   };
 }
 

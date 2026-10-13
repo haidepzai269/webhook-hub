@@ -88,6 +88,10 @@ describe('BP5 — FailureRateController', () => {
       probeIntervalMs: 5000,
       holdMaxMs: 60000,
     });
+    // review BP5 lượt 2: BACKPRESSURE_HOLD_MAX_MS chỉ được THẤP hơn mặc định (cửa sổ retry cộng 6 × 60s)
+    expect(backpressureOptionsFromEnv({ BACKPRESSURE_HOLD_MAX_MS: '600000' }).holdMaxMs).toBe(60_000);
+    expect(backpressureOptionsFromEnv({ BACKPRESSURE_HOLD_MAX_MS: '30000' }).holdMaxMs).toBe(30_000);
+    expect(backpressureOptionsFromEnv({ BACKPRESSURE_HOLD_MAX_MS: '10' }).holdMaxMs).toBe(1_000);
   });
 
   it('[BP:T18] 5xx / timeout của ĐÍCH không làm factor đổi (tín hiệu `ok`); lỗi hạ tầng của hub thì có', async () => {
@@ -390,51 +394,77 @@ describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
     return { due, channel };
   }
 
-  it('[BP:T4] (phần a) DB chết 60s dưới tải (200 delivery): số lần gọi Prisma mỗi giây bị chặn trên (≤ 20 = MAX permit; chế độ dò ≤ 1 / 5s); log warn ≤ 1 dòng / 30s', async () => {
+  it('[BP:T4] (phần a) DB chết 60s dưới tải (200 delivery + 100 normalize): Prisma bị gọi ≤ 20/s/lane vài giây đầu, rồi chế độ dò ≤ 2 lần / 5s / tiến trình (nhịp dò tính theo LANE); log warn gộp', async () => {
     jest.useFakeTimers();
     const warn = jest.spyOn(logger, 'child');
     try {
       let dbDown = true;
-      const calls: number[] = [];
+      const calls: { at: number; lane: string }[] = [];
       const c = new FailureRateController({ dependency: 'db' });
       c.start();
       const repo = {
         findDeliveryForSend: jest.fn(async () => {
-          calls.push(Date.now());
+          calls.push({ at: Date.now(), lane: 'delivery' });
           if (dbDown) throw p1001();
           return null; // DB về: delivery không còn -> ack
         }),
       };
-      const prisma: any = { forTenant: () => repo };
-      const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'), c);
-      const warnLines: number[] = [];
-      warn.mockImplementation(() => ({ warn: () => warnLines.push(Date.now()), error: jest.fn(), info: jest.fn(), debug: jest.fn() }) as any);
-      const { due, channel } = broker(10_000);
+      const delivery = new DeliveryConsumer({ forTenant: () => repo } as any, buildFakeCircuitBreaker('CLOSED'), c);
+      const normalize = new NormalizeConsumer(
+        {
+          processedMessage: {
+            findUnique: jest.fn(async () => {
+              calls.push({ at: Date.now(), lane: 'normalize' });
+              if (dbDown) throw p1001();
+              return { consumer: 'normalize', messageId: 'x' }; // DB về: đã xử lý -> ack
+            }),
+          },
+        } as any,
+        c,
+      );
+      const warnLines: { at: number; lane: string }[] = [];
+      warn.mockImplementation(
+        (b: any) => ({ warn: () => warnLines.push({ at: Date.now(), lane: b?.deliveryId ? 'delivery' : 'normalize' }), error: jest.fn(), info: jest.fn(), debug: jest.fn() }) as any,
+      );
+      const lanes = [
+        { name: 'delivery' as const, consumer: delivery, ...broker(10_000) },
+        { name: 'normalize' as const, consumer: normalize, ...broker(30_000) },
+      ];
       const inFlight = new InFlightTracker();
       const t0 = Date.now();
-      for (let i = 0; i < 200; i++) due.push({ at: t0, msg: amqp(buildSlimMsg({ deliveryId: `d-${i}` })) });
-      for (let s = 0; s < 90; s++) {
+      for (let i = 0; i < 200; i++) lanes[0].due.push({ at: t0, msg: amqp(buildSlimMsg({ deliveryId: `d-${i}` })) });
+      for (let i = 0; i < 100; i++) lanes[1].due.push({ at: t0, msg: amqp({ rawEventId: `r-${i}`, tenantId: 't', sourceId: 's', provider: 'github' }) });
+      for (let s = 0; s < 120; s++) {
         if (s === 60) dbDown = false;
-        const ready = due.filter((d) => d.at <= Date.now());
-        for (const r of ready) due.splice(due.indexOf(r), 1);
-        // prefetch 20: chỉ 20 message được giao vào tiến trình cùng lúc
-        for (const r of ready.slice(0, 20)) void runGated(c, 'delivery', consumer, r.msg, channel, inFlight);
-        for (const r of ready.slice(20)) due.push({ at: Date.now() + 100, msg: r.msg });
+        for (const l of lanes) {
+          const ready = l.due.filter((d) => d.at <= Date.now());
+          for (const r of ready) l.due.splice(l.due.indexOf(r), 1);
+          // prefetch 20 mỗi consumer: chỉ 20 message được giao vào tiến trình cùng lúc
+          for (const r of ready.slice(0, 20)) void runGated(c, l.name, l.consumer, r.msg, l.channel, inFlight);
+          for (const r of ready.slice(20)) l.due.push({ at: Date.now() + 100, msg: r.msg });
+        }
         await jest.advanceTimersByTimeAsync(1_000);
       }
-      const perSecond = new Map<number, number>();
-      for (const t of calls.filter((x) => x - t0 < 60_000)) perSecond.set(Math.floor((t - t0) / 1000), (perSecond.get(Math.floor((t - t0) / 1000)) ?? 0) + 1);
-      // Trong lúc DB chết: mỗi giây ≤ 20 (MAX permit / prefetch) ở vài giây đầu, rồi chế độ dò
-      expect(Math.max(...perSecond.values())).toBeLessThanOrEqual(20);
-      expect([...perSecond.entries()].filter(([sec]) => sec >= 5).every(([, n]) => n <= 1)).toBe(true);
-      const probing = calls.filter((t) => t - t0 >= 15_000 && t - t0 < 60_000);
-      expect(probing.length).toBeLessThanOrEqual(Math.ceil(45_000 / 5_000) + 1);
-      // Không có BP5: ~200 message × mỗi 10s = 20 lần gọi/giây suốt 60s
-      const firstWindow = warnLines.filter((t) => t - t0 < 60_000);
-      expect(firstWindow.length).toBeLessThanOrEqual(2 + 1); // log gộp 30s (BP1)
+      const during = calls.filter((x) => x.at - t0 < 60_000);
+      const perSecLane = new Map<string, number>();
+      for (const x of during) {
+        const k = `${x.lane}:${Math.floor((x.at - t0) / 1000)}`;
+        perSecLane.set(k, (perSecLane.get(k) ?? 0) + 1);
+      }
+      // vài giây đầu: ≤ 20 / giây / lane (MAX permit = prefetch)
+      expect(Math.max(...perSecLane.values())).toBeLessThanOrEqual(20);
+      // chế độ dò (từ giây 5, DB còn chết): mọi cửa sổ 5s có ≤ 2 lần gọi Prisma cho cả tiến trình (1 / lane)
+      for (let w = 5_000; w + 5_000 <= 60_000; w += 1_000) {
+        expect(during.filter((x) => x.at - t0 >= w && x.at - t0 < w + 5_000).length).toBeLessThanOrEqual(2);
+      }
+      // Không có BP5: ~300 message × mỗi 10–30s ≈ 25 lần gọi/giây suốt 60s
+      const firstWindow = warnLines.filter((x) => x.at - t0 < 60_000);
+      expect(firstWindow.filter((x) => x.lane === 'delivery').length).toBeLessThanOrEqual(2 + 1); // delivery: log gộp 30s (BP1)
+      // normalize: warn mỗi message chỉ khi factor = 0 (giây đầu, hành vi cũ); DB đã biết ốm (factor > 0) -> debug
+      expect(firstWindow.filter((x) => x.lane === 'normalize' && x.at - t0 >= 5_000)).toEqual([]);
       // DB về: probe thành công, lỗi cũ trôi khỏi cửa sổ 30s -> factor hồi -> hàng đang giữ được xử lý hết
       expect(c.waiting()).toBe(0);
-      expect(calls.filter((t) => t - t0 >= 60_000).length).toBeGreaterThanOrEqual(150);
+      expect(calls.filter((x) => x.at - t0 >= 60_000 && x.lane === 'delivery').length).toBeGreaterThanOrEqual(150);
       c.stop();
     } finally {
       warn.mockRestore();
