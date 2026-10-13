@@ -66,7 +66,7 @@
 **C6 — Admin đã trả lời §15.**
 - **Q2:** giữ OPEN tối đa **5 phút** (60s → 300s). Không thêm tầng 2m, không sửa `topology.ts`.
 - **Q3:** làm BP5 **trong đợt này**, theo thứ tự BP1 → BP2 → BP3 → BP4 → BP5 → BP6.
-- **Q1** (phụ lục đã nộp chưa): **chờ Admin**. BP6 làm trước phần trong repo (`ARCHITECTURE.md`, `DEPLOYMENT.md`, `docs/adr/README.md`, `CLAUDE.md`, `[BP:T23]`). Phụ lục `.docx` để sau, khi có Q1.
+- **Q1** (phụ lục đã nộp chưa): **ĐÃ CHỐT (C13): phụ lục ĐÃ NỘP, không sửa `.docx`**; câu trả lời "jitter ở đâu" ở `TRA-LOI-JITTER.md`. (Ghi cũ: chờ Admin.) BP6 làm trước phần trong repo (`ARCHITECTURE.md`, `DEPLOYMENT.md`, `docs/adr/README.md`, `CLAUDE.md`, `[BP:T23]`). Phụ lục `.docx` để sau, khi có Q1.
 
 **C7 — Số ADR.** Phòng đã grep lại ngày 2026-10-13:
 - master `docs` có số lớn nhất là ADR-188;
@@ -107,6 +107,13 @@
 - **Một factor, hai semaphore (review BP5 TB-1):** §7.1 "một controller cho mỗi dependency" giữ nguyên (một tín hiệu, một factor), nhưng normalize và delivery mỗi bên một semaphore MAX = prefetch 20. Một semaphore chung làm 20 delivery treo HTTP ở đích chậm chiếm hết permit, normalize của mọi tenant xếp hàng sau — lỗi đích làm chậm tenant khác (§0). Lúc khoẻ thông lượng như trước BP5 (40 đồng thời / tiến trình). Chế độ dò: **nhịp dò tính theo lane** — 1 message / 5s cho MỖI lane, tức ≤ 2 lần gọi Prisma / 5s / tiến trình (`[BP:T4]` phần a bơm cả hai lane).
 - **Spill có trần (review BP5 TH-1):** spill normalize gắn/giữ `x-normalize-deferred-since`, dùng chung `NORMALIZE_MAX_DEFER_MS`; quá trần thì đốt lượt rồi DLQ. Cửa sổ retry cộng thêm một vòng 30s và (review lượt 2) `6 × BACKPRESSURE_HOLD_MAX_MS` (giữ chờ permit 60s mỗi lần thử; mặc định export từ `retry-window.ts`, env chỉ kẹp thấp hơn) ≈ 7h22m10s. Spill delivery không cần trần (Postgres giữ delivery đang chờ; QT/retention chừa chúng — ADR-199).
 - `gracefulStop` tách khỏi `main.ts` (`src/shutdown.ts`) để test thứ tự C5.
+
+**C13 — BP6 lúc làm (2026-10-13).**
+- **Q1 đã chốt:** phụ lục `.docx` ĐÃ NỘP — không sửa file; chỉ sửa tài liệu trong repo. Câu trả lời hội đồng: `TRA-LOI-JITTER.md` (cùng thư mục).
+- **`[BP:T23]` phạm vi:** "không còn `jitter ±20%`" kiểm trên tài liệu sống (`ARCHITECTURE.md`, `DEPLOYMENT.md`, `CLAUDE.md`, `ROADMAP-14D.md`) và mã (`apps/`, `libs/`). **Không** kiểm `docs/adr/README.md` (append-only: ADR cũ ghi "Thêm jitter ±20%" là lịch sử, đã bị ADR-198 và các ADR về sau thay) và `_bmad-output/` (spec/bản review trích nguyên văn phụ lục).
+- **Đối chiếu code của agent vẽ sơ đồ** — đã kiểm lại từng chỗ bằng code rồi mới sửa ARCHITECTURE: `provider_enum` (6 giá trị), số bảng mang `tenant_id` (17) và có RLS (17, khác tập), Grafana 10 panel, 13 luật cảnh báo, nhánh 400 khi không có adapter ở §3.1, trần Shop ~600 dòng; CLAUDE.md polling theo `events.poll_seq` + `cursor`.
+- **ADR-192:** liệt kê chính xác các chỗ truy vấn không qua `TenantScopedRepository` (chỉ `outbox`/`processed_messages` là ngoại lệ mới; `tx.rawEvent`/`tx.deliveryAttempt` trong `tenantTx` đã có ADR-108). Không tìm thấy chỗ nào chạm bảng nghiệp vụ mà không scope.
+- **Nợ parse lỗi delivery (BP1 §16) đã đóng:** commit `fix(delivery)` riêng — bản sao vào `q.delivery.dlq` (`x-dead-reason: parse_error`) rồi ack.
 
 ## 0. Bối cảnh
 
@@ -442,7 +449,7 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 
 ## 16. Ghi chú / nợ phát hiện khi code
 
-- **Nợ (BP1, 2026-10-13):** nhánh parse lỗi của `DeliveryConsumer` (`parseDeliveryMessage` ném) vẫn `channel.nack(msg, false, false)` kèm log "chuyển DLQ". Vì `q.delivery.main` không có DLX, message đó bị vứt chứ không vào `q.delivery.dlq`. Không sửa trong BP1 theo quyết định của phòng; cách sửa gợi ý giống BP1: publish bản sao vào `x.hub.delivery.dlx` rồi ack.
+- **~~Nợ~~ ĐÃ ĐÓNG ở BP6 (commit `fix(delivery)`, bản sao DLX + ack):** ~~**Nợ (BP1, 2026-10-13):**~~ nhánh parse lỗi của `DeliveryConsumer` (`parseDeliveryMessage` ném) vẫn `channel.nack(msg, false, false)` kèm log "chuyển DLQ". Vì `q.delivery.main` không có DLX, message đó bị vứt chứ không vào `q.delivery.dlq`. Không sửa trong BP1 theo quyết định của phòng; cách sửa gợi ý giống BP1: publish bản sao vào `x.hub.delivery.dlx` rồi ack.
 - **BP1 review M3 (2026-10-13):** BP1 **không** đưa ra cận trên cho số lần gọi Prisma mỗi giây khi DB chết. Nhánh transient không có trần, mỗi message 1 truy vấn mỗi 10s; với lỗi fail nhanh (`ECONNREFUSED`) backlog Q message ≈ Q/10 truy vấn/s. Cận trên thuộc BP5 (bộ điều khiển áp lực ngược) → `[BP:T4]` chuyển sang nhóm BP5. Trong BP1 chỉ log được chặn: tối đa 1 dòng `warn` / 30s / tiến trình kèm số lần bị gộp (bộ đếm trong bộ nhớ); metric `hub_delivery_infra_errors_total` vẫn đếm đủ.
 - **Nợ (review BP1 T1):** riêng `deliveryChannel` đóng (lỗi mức channel) mà connection còn sống thì worker thành zombie: còn sống, không consume. `main.ts` chỉ nghe `close` của connection. Gợi ý: `deliveryChannel.on('close', …)` đi cùng đường thoát với connection.
 - **Nợ (review BP1 T5):** probe HALF_OPEN giành được ở bước 1 không được nhả khi lỗi rơi vào `catch` ngoài cùng → đích bị khoá dò tới hết TTL probe (30s). Nợ cũ, BP1 không làm tệ hơn.

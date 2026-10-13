@@ -59,7 +59,7 @@ NestJS monorepo (`apps/hub-api` · `apps/hub-worker` · `apps/shop` · `apps/web
 Ràng buộc deployed phải nhớ khi code:
 - `SHUTDOWN_TIMEOUT_MS=25000` — **25s, không phải 30s** (Render SIGKILL sau ~30s)
 - `metrics.tick` **5s**, đếm trong bộ nhớ, **không** chạm Redis mỗi tick (quota Upstash)
-- Ngân sách Redis **≤ 4 lệnh cố định / sự kiện (ingest + normalize) + ≤ 2 lệnh / delivery** (R1, ADR-062) — đếm bằng `apps/hub-api/test/redis-budget.spec.ts`; thêm lệnh vào đường nóng là test đỏ
+- Ngân sách Redis **≤ 4 lệnh cố định / sự kiện (ingest + normalize) + ≤ 2 lệnh / delivery** (R1, ADR-062); đường hoãn/throttle/ramp **≤ 1 lệnh, 0 truy vấn DB** (gate trước khi nạp, ADR-196/198) — đếm bằng `apps/hub-api/test/redis-budget.spec.ts`; thêm lệnh vào đường nóng là test đỏ
 - Prisma cần **hai** connection string: `DATABASE_URL` (pooled) + `DIRECT_URL` (migrate)
 - Nghe biến `PORT` của Render, không hardcode
 - **Một AMQP connection / tiến trình, nhiều channel** (giới hạn connection CloudAMQP)
@@ -69,6 +69,6 @@ Ràng buộc deployed phải nhớ khi code:
 
 - **2026-09-17** — chốt kiến trúc + triển khai, viết `docs/`. Chưa có code.
 - **2026-09-18** — Ngày 1.
-- **2026-10-11** — Đa service (S1–S12, ADR-071..082): Project + API key + connection string, `/v1/p/:project/*` (publish, polling A theo `seq`, endpoint có challenge, subscription `sourceIds`, source GenericAdapter + chế độ lắng nghe), push ký Standard Webhooks (bỏ `X-Hub-*`), `@hub/sdk`, Shop tự đăng ký endpoint, demo `cafe`/`bookstore` (`docs/DEMO-MULTI-PROJECT.md`).
+- **2026-10-11** — Đa service (S1–S12, ADR-071..082): Project + API key + connection string, `/v1/p/:project/*` (publish, polling A theo `events.poll_seq` (thứ tự COMMIT, trả `cursor` dạng chuỗi — không phải `events.seq`, ADR-095/099), endpoint có challenge, subscription `sourceIds`, source GenericAdapter + chế độ lắng nghe), push ký Standard Webhooks (bỏ `X-Hub-*`), `@hub/sdk`, Shop tự đăng ký endpoint, demo `cafe`/`bookstore` (`docs/DEMO-MULTI-PROJECT.md`).
 - **2026-10-11** — Kết nối hai đầu (SPEC-ket-noi KN1–KN3, ADR-138/142/146): console tạo endpoint (hub sinh `whsec_` + challenge + subscription cùng tx); "Kết nối PayOS" — hub tự `confirm-webhook` sau khi source COMMIT; credentials provider lưu mã hoá theo project (`source_connections`, RLS).
 - **2026-10-11** — Trải nghiệm dev phương án A (ADR-133/134/136): `hub listen`/`hub trigger` (polling A + ký phía client, `toWebhookBody` dùng chung với WebhookSender, `after=latest`), khuôn lỗi `{error, message, fix, docsUrl, requestId}` + `x-request-id` (`docs/ERRORS.md`), `docs/QUICKSTART.md` + `examples/quickstart-node`.

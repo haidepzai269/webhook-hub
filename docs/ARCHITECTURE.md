@@ -62,7 +62,7 @@ Hai domain tách bạch, giao tiếp **chỉ** qua outbound webhook có ký HMAC
 |                                                               |
 |   shop-api       orders · khớp mã đơn · đối soát PayOS        |
 |   DB schema: `shop`   <- Hub KHÔNG BAO GIỜ chạm vào           |
-|   Trần cứng: 1 bảng · 3 endpoint · 1 cron · ~300 dòng         |
+|   Trần cứng: ~600 dòng `apps/shop/src` (ADR-141, ADR-156)     |
 +---------------------------------------------------------------+
 
    web (Next.js) --> hub-api   (dashboard quản trị)
@@ -100,7 +100,7 @@ Tách ra mua được ba thứ:
 2. **Shop trở thành bằng chứng sống** rằng hub là nhà cung cấp webhook thật (có ký, chống replay, idempotency phía nhận) — không phải đồ trang trí.
 3. **Đối soát PayOS về đúng chỗ** — câu hỏi *"đơn này trả tiền chưa?"* là câu hỏi của Shop, không phải của Hub.
 
-**Giá phải trả:** ~300 dòng. Chấp nhận.
+**Giá phải trả:** ~600 dòng (`apps/shop/src`, gate `shop-size`; ban đầu ~300, nới ở ADR-141 link PayOS thật và ADR-156 trang Cài đặt kết nối). Chấp nhận.
 
 ### Chống phình Shop (trần cứng)
 
@@ -113,7 +113,7 @@ Tách ra mua được ba thứ:
 
 **KHÔNG có:** giỏ hàng · đăng nhập · kho · khuyến mãi · trang admin · tìm kiếm.
 
-> Vượt 300 dòng = đang lạc đề. Dừng lại.
+> Vượt ~600 dòng (`apps/shop/src`, ADR-141/156) = đang lạc đề. Dừng lại.
 
 ---
 
@@ -142,7 +142,8 @@ Tách ra mua được ba thứ:
     `hooksPathOf` = parseurl như router, khớp `/hooks/:provider/:sourceKey` không lọc provider -> checkIp + checkPair;
     chặn -> 429 + Connection: close, KHÔNG đọc body) rồi ingest kiểm lại sau body parser (gate lỗi -> cho qua,
     fail-open). Chấm điểm chỉ ở ingest.
-1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB
+1.  Giữ nguyên raw bytes (rawBody middleware) · chặn payload > 1MB -> 413 -> DỪNG
+1b. Nạp adapter `ProviderRegistry.get(provider)` — provider không có adapter -> 400 -> DỪNG (trước khi chạm Postgres)
 2.  Nạp source + secrets (Postgres, escape hatch duy nhất không scope tenant) + nấc dung lượng của project
     (LEFT JOIN project_usage trong CÙNG câu nạp source — +0 lượt DB, QT3/ADR-182)
        không tìm thấy -> 404 (+1 điểm phạt cho IP) -> DỪNG · tắt / đã lưu trữ -> 404 (không tính điểm) -> DỪNG
@@ -184,12 +185,12 @@ Rollback vì lý do khác (không phải unique) → trả **5xx** để provide
 4. Kiểu thuộc không gian dành riêng (`payment.*`, `repo.*`) mà `data` sai khuôn → **lỗi vĩnh viễn**, không ghi gì (metric `hub_normalize_schema_errors_total`).
 5. **Một transaction:** INSERT `events` · tìm `subscriptions` khớp `event.type` (khớp chính xác hoặc mẫu `payment.*`/`*`, S3-3 — truy vấn Postgres, không cache) · INSERT `deliveries` · INSERT `outbox(topic='delivery.requested')` cho từng delivery · INSERT `processed_messages`. Rồi `ack`.
 6. **Không publish thẳng** lên `x.hub.delivery`: relay đọc outbox `delivery.requested` và publish (S1-2, ADR-043). Một PUBLISH Redis `hub:realtime:events` sau COMMIT (best-effort).
-7. Lỗi **tạm** (Prisma P1001/P1002/P1008/P1017/P2024/P2028/P2034, lỗi mạng) → `q.normalize.retry.30s`, tối đa 5 lần; lỗi **vĩnh viễn** hoặc hết lượt → `nack(requeue=false)` → `q.normalize.dlq` (ADR-044). Phát lại dựa trên Postgres: `GET /api/v1/raw-events/orphans` + `POST /raw-events/renormalize`.
+7. Lỗi **tạm** (Prisma P1001/P1002/P1008/P1017/P2024/P2028/P2034, Postgres cắt kết nối 57P0x/lớp 08 (BP5), lỗi mạng) → `q.normalize.retry.30s`, tối đa 5 lần — khi bộ điều khiển áp lực ngược đã biết DB ốm (factor > 0, §5.4e) thì hoãn **không đốt lượt** tối đa 60 phút (`x-normalize-deferred-since`, BP5 ADR-200); lỗi **vĩnh viễn** hoặc hết lượt → `nack(requeue=false)` → `q.normalize.dlq` (ADR-044). Phát lại dựa trên Postgres: `GET /api/v1/raw-events/orphans` + `POST /raw-events/renormalize`.
 
 ### 3.3. Deliver
 
 0. Message chỉ mang tham chiếu (ADR-042) + **gợi ý** `destinationId`/`rateLimitRps` (BP2, ADR-196). Có gợi ý → **gate trước khi nạp** (bước 1 chạy trước): OPEN / HALF_OPEN không giành probe → hoãn, vượt throttle → `retry.10s`, cả hai **0 truy vấn đọc**; sau khi nạp, gợi ý lệch row thì gate lại với giá trị thật. Nạp delivery + event + subscription + destination bằng **một** truy vấn đã scope tenant, giải mã cấu hình đích lúc gửi. Giành **lease** `claimForSend` (ADR-043).
-1. Kiểm **circuit breaker** — **gate**: LUÔN một `EVAL` (`LUA_GATE`: circuit + throttle khi có `rate_limit_rps` + PTTL của `:open`; BP2 §6, ADR-196, thay `MGET`/ADR-064). `OPEN`, hoặc `HALF_OPEN` mà không giành được probe → hoãn vào `q.delivery.retry.1m`, không tăng `attemptCount`, có trần **thời gian** `CIRCUIT_MAX_DEFER_MS` (mặc định 30 phút, header `x-circuit-deferred-since`; ADR-048/054, BP2 ADR-196); `next_attempt_at` ghi thưa ≤ 1 lần/2 phút (sweeper vẫn dựa vào nó).
+1. Kiểm **circuit breaker** — **gate**: LUÔN một `EVAL` (`LUA_GATE`: circuit + throttle khi có `rate_limit_rps` + PTTL của `:open`; BP2 §6, ADR-196, thay `MGET`/ADR-064). `OPEN` → hoãn **tới hết OPEN** theo PTTL thật của `:open` (`q.delivery.retry.1m` hoặc `retry.5m`, BP3 ADR-197); `HALF_OPEN` mà không giành được probe → `q.delivery.retry.1m`; không tăng `attemptCount`, có trần **thời gian** `CIRCUIT_MAX_DEFER_MS` (mặc định 30 phút, header `x-circuit-deferred-since`; ADR-048/054, BP2 ADR-196); `next_attempt_at` ghi thưa ≤ 1 lần/2 phút (sweeper vẫn dựa vào nó).
 2. Áp **outbound throttle** (cửa sổ cố định 1 giây, khi circuit CLOSED và có trần: `rate_limit_rps > 0` hoặc đích đang **slow-start** sau hồi phục — trần = min(rps, ramp), BP4 ADR-198; bộ đếm đã tăng trong lệnh ở bước 1). Vượt → `q.delivery.retry.10s`, `ack`, không ghi DB. *(§5.4b)*
 3. Render template → gọi HTTP, timeout tổng mặc định 5s (`AbortSignal.timeout`), cấu hình `DELIVERY_TIMEOUT_MS` kẹp 1–10s (ADR-078), đọc phản hồi ≤ 64KB, **không follow redirect**, qua SSRF guard (§7.3).
 4. INSERT `delivery_attempts` (status code, duration_ms, response body cắt 2KB, error).
@@ -246,7 +247,7 @@ Cả hai DLQ broker bị chặn trần bằng POLICY `hub-dlq-bounded` (5000, dr
 | ack | **manual** | Worker chết → RabbitMQ trả message về queue |
 | publisher confirms | **bật** | Relay chỉ đánh dấu `published_at` sau khi broker xác nhận |
 | `x-attempt` | header | Đếm số lần thử |
-| jitter | **không có ở tầng retry** (xem §5.9 "Cố tình không làm") · relay ±100ms, sweeper ±10s, cleanup ±10% | TTL của queue không cho jitter theo từng message |
+| jitter | **không có ở tầng retry**: mỗi tầng một queue TTL **cố định** (xem §5.4c "Cố tình không làm"); chống dội vào đích vừa hồi phục = **slow-start** theo đích (§5.4b, BP4 ADR-198) · độ lệch nhịp nền: relay ±100ms, sweeper ±10s, cleanup ±10% | TTL của queue không cho jitter theo từng message (head-of-line blocking) |
 | durable | queue + message | Broker restart không mất |
 
 ---
@@ -336,13 +337,14 @@ Bộ đếm throttle nằm trong `LUA_GATE` (một `EVAL` cùng circuit, BP2 ADR
 
 **Slow-start sau hồi phục (BP4, ADR-198).** Probe HALF_OPEN thành công → MỘT lệnh xoá `failures/open/probe/trips` + `SET circuit:{id}:ramp = nowMs EX DELIVERY_RAMP_SECONDS` (60). Trong ramp, gate tính `rampCap = DELIVERY_RAMP_START_RPS × 2^floor((now − rampStart)/DELIVERY_RAMP_STEP_SECONDS)` (2 → 4 → … → 64 rps) và dùng chung cửa sổ 1 giây với `rate_limit_rps`: trần = min(rps nếu > 0, rampCap). Vượt → `retry.10s` như throttle. Lỗi đủ ngưỡng trong ramp → OPEN và xoá `:ramp`. Mạch tự về CLOSED (khoá hết hạn) thì không ramp. Mất `:ramp` (Redis) → gửi bình thường; Redis lỗi → fail-open. Đây là câu trả lời thay cho jitter: hàng hoãn chảy về đích theo nhịp tăng dần, không dồn thành một cục.
 
-**Áp lực ngược cho hạ tầng của CHÍNH hub (BP5, ADR-200).** Một bộ điều khiển `FailureRateController` cho phụ thuộc `db` mỗi tiến trình worker, dùng chung normalize + delivery, đếm trong bộ nhớ (0 lệnh Redis). Tín hiệu chỉ là lỗi hạ tầng của hub (`classifyInfraError === 'transient'`); **lỗi của đích không bao giờ là tín hiệu** (một đích chết của tenant này không làm chậm tenant khác). Cửa sổ 30s, mỗi 1s: tỷ lệ lỗi > 5% → factor +0.25, ngược lại −0.1; permits = max(1, ceil(20 × (1 − factor))); factor = 1 → chế độ dò (1 message / 5s). Message chờ permit trong tiến trình (unacked, prefetch giữ 20); quá 60s → republish không đốt lượt. Khi DB ốm (factor > 0), normalize hoãn lỗi tạm vào `retry.30s` **không đốt lượt** tối đa 60 phút. Tắt máy: message đang chờ permit không xử lý/không ack (C5).
-
 ### 5.4c. Cố tình không làm (và vì sao)
 
 | Không làm | Vì sao | Bù lại |
 |---|---|---|
-| **Jitter ở tầng retry delivery** | Retry dùng TTL của **queue** (mỗi tầng một queue, §4) — RabbitMQ không cho TTL ngẫu nhiên theo từng message mà không quay về head-of-line blocking | Relay ±100ms, sweeper ±10s, cleanup ±10%; circuit breaker chặn retry storm vào đích chết |
+| **Jitter ở tầng retry delivery** | Retry dùng TTL **cố định** của **queue** (mỗi tầng một queue, §4) — RabbitMQ không cho TTL ngẫu nhiên theo từng message mà không quay về head-of-line blocking; kể cả làm được, ±20% của 1 phút chỉ rải hàng ra ~24 giây | **Slow-start** sau khi probe thành công (§5.4b, BP4 ADR-198) chặn thẳng *tốc độ* vào đích vừa hồi phục; circuit breaker chặn retry storm vào đích chết |
+| **Áp lực ngược cả worker theo lỗi của ĐÍCH** | Một đích chết của tenant `cafe` sẽ làm chậm `bookstore` — noisy neighbor theo chiều ngược (§0 của SPEC-BP) | Lỗi đích chỉ làm chậm chính đích đó (circuit + throttle + slow-start theo destination); áp lực ngược cả worker CHỈ theo lỗi hạ tầng của hub (§5.4e) |
+| **Tách queue theo đích** | Bùng nổ topology (mỗi đích một bộ queue), phá luật "topology khai báo một chỗ", đổi tham số queue đang có = `PRECONDITION_FAILED` | Gate theo đích TRƯỚC khi nạp DB (BP2): message của đích chết hoãn với 0 truy vấn đọc, 1 lệnh Redis |
+| **Auto-scale theo độ sâu queue** | Render free không có; scale lên còn bắn mạnh hơn vào đích yếu | Throttle + slow-start theo đích đã chặn tốc độ vào đích; áp lực ngược giữ DB khi hạ tầng hub ốm |
 | **Token bucket** cho rate limit / throttle | Cửa sổ cố định 1 lệnh Redis, đủ để chống spam/bảo vệ đích | Sai số tối đa 2× ở mép cửa sổ (§5.4b) |
 | **DLQ broker là nguồn sự thật** | Broker không truy vấn/lọc được, có trần policy (ADR-052) | Postgres `deliveries.status='DEAD'` + `raw_events` là nguồn; trang DLQ và replay đọc DB |
 | **Tự cảnh báo qua Telegram/Slack** (gửi bằng chính pipeline delivery) | Pipeline cháy thì kênh báo cháy theo; kênh `hub:alerts` cũ đã bỏ ở ADR-048 | Cảnh báo cho người vận hành (§5.4d): chuông/banner/toast console + email (outbox `alert_emails`), đi đường riêng không qua RabbitMQ |
@@ -369,6 +371,19 @@ CB, ADR-165..173 — thay cho "tự cảnh báo" ⭐ cũ và cờ chết `alert_
   ngân sách Redis R1 không đổi.
 - **Nhận định (insight) tính lúc đọc** ở `hub-api` (`GET /projects/:p/insights`), không lưu, dùng lại đúng hàm của luật (ADR-171).
 - Metric `hub_alerts_open{severity}` · `hub_alert_transitions_total{rule,to}` · `hub_alert_eval_errors_total{rule}` (panel Grafana 7–8).
+
+### 5.4e. Áp lực ngược khi hạ tầng của chính hub lỗi (BP5, ADR-200)
+
+Một bộ điều khiển `FailureRateController` cho phụ thuộc `db` mỗi tiến trình worker, dùng chung normalize + delivery, đếm trong bộ nhớ (0 lệnh Redis). Tín hiệu chỉ là lỗi hạ tầng của hub (`classifyInfraError === 'transient'`); **lỗi của đích không bao giờ là tín hiệu** (một đích chết của tenant này không làm chậm tenant khác). Cửa sổ 30s, mỗi 1s: tỷ lệ lỗi > 5% → factor +0.25, ngược lại −0.1; permits = max(1, ceil(20 × (1 − factor))); factor = 1 → chế độ dò (1 message / 5s). Message chờ permit trong tiến trình (unacked, prefetch giữ 20); quá 60s → republish không đốt lượt. Khi DB ốm (factor > 0), normalize hoãn lỗi tạm vào `retry.30s` **không đốt lượt** tối đa 60 phút. Tắt máy: message đang chờ permit không xử lý/không ack (C5).
+
+| | Canva (*Worker Backpressure Part 1*) | Hub |
+|---|---|---|
+| Vấn đề | Worker "tham lam": còn chỗ là nhận việc dù việc nào cũng lỗi; 1.795.025 lần thử thất bại nhưng chỉ 22 message vào DLQ | Normalize 5 lượt × 30s: Neon chết > 2,5 phút thì cả lô vào DLQ |
+| Bộ điều khiển | Cục bộ mỗi worker, tỷ lệ lỗi so set point 5% | `FailureRateController` cục bộ mỗi tiến trình, 0 lệnh Redis, set point 5%, +0.25 / −0.1 mỗi giây |
+| Giảm việc nhận vào | Ít slot hơn | permits = ceil(20 × (1 − factor)) cho MỖI consumer (một factor, hai semaphore — đích chậm không làm chậm normalize) |
+| Lùi hẳn rồi biết khi nào DB sống lại? | Để Part 2 | **Chế độ dò**: 1 message / 5s mỗi lane (ý HALF_OPEN của circuit) |
+| Không đốt lượt | — | Normalize hoãn không đốt lượt khi factor > 0 (≤ 60 phút); giữ quá 60s → republish không đốt lượt |
+| Tín hiệu | Lỗi phụ thuộc | CHỈ lỗi hạ tầng hub (`transient`) — lỗi đích không bao giờ là tín hiệu |
 
 ### 5.5. Máy trạng thái
 
@@ -405,8 +420,9 @@ Cron 5 phút trong `shop-api`: đơn `PENDING` tạo quá 10 phút → gọi API
 
 ### 6.0. Multi-tenancy — làm Ngày 1, không bao giờ làm sau (BB-5, ADR-015)
 
-**Năm bảng mang `tenant_id uuid NOT NULL`:** `sources` · `destinations` · `subscriptions` · `events` · `deliveries`.
-(`raw_events` suy ra tenant qua `source_id`; `delivery_attempts` qua `delivery_id`.)
+**17 bảng mang `tenant_id uuid NOT NULL`** (đếm từ `schema.prisma`, 13/10): nghiệp vụ `sources` · `destinations` · `subscriptions` · `events` · `deliveries` · `audit_logs` · `alerts` · `alert_emails` · `source_connections` · `ingest_duplicates` · `source_traffic_minutely` · `project_usage` · `storage_policies` · `storage_clean_jobs`; danh tính `api_keys` · `project_members` · `email_tokens`.
+
+**RLS (AU6, ADR-108) bật + FORCE trên 17 bảng:** 14 bảng nghiệp vụ có `tenant_id` ở trên + 3 bảng con suy tenant qua bảng cha (`raw_events` qua `source_id`, `source_secrets` qua `source_id`, `delivery_attempts` qua `delivery_id`). **Không RLS:** bảng danh tính (`api_keys`, `project_members`, `email_tokens` — CRUD qua repo / `IdentityRepository`, ADR-108 §5.12.3) và bảng hạ tầng dùng chung (`outbox`, `processed_messages` — không mang tenant, ADR-192).
 
 ```sql
 ALTER TABLE hub.sources ADD COLUMN tenant_id uuid NOT NULL;
@@ -428,7 +444,7 @@ Hiện tại chạy **một tenant** (một admin). Cột luôn mang cùng một
 ### 6.1. Schema `hub`
 
 ```sql
-CREATE TYPE hub.provider_enum    AS ENUM ('payos','sepay','github');
+CREATE TYPE hub.provider_enum    AS ENUM ('payos','sepay','github','stripe','generic','api');
 CREATE TYPE hub.raw_status       AS ENUM ('ACCEPTED','REJECTED','DUPLICATE');
 CREATE TYPE hub.event_origin     AS ENUM ('webhook','reconciliation','replay','derived');
 CREATE TYPE hub.destination_type AS ENUM ('webhook','telegram','discord');
@@ -671,9 +687,9 @@ lời — ước lượng khi nhiều instance. Lớp biên toàn hub (sourceKey
 | **Correlation ID** | `correlation_id = raw_event.id`, truyền qua AMQP `properties.headers['x-correlation-id']`, gắn vào mọi log | Tra được toàn bộ hành trình một sự kiện qua mọi tiến trình |
 | Log | `pino`, JSON có cấu trúc | |
 | Metrics | `prom-client`, đếm trong bộ nhớ (0 lệnh Redis). hub-api `GET /metrics` (không JWT; `METRICS_TOKEN` nếu đặt); hub-worker http tối giản `:9101/metrics` (chỉ mạng nội bộ) — S3-4, ADR-061 | api: `hub_ingest_requests_total{provider,outcome}` · `hub_ingest_duration_seconds{provider}` · worker: `hub_deliveries_total{destination_type,status}` · `hub_delivery_duration_seconds` · `hub_circuit_transitions_total{to}` · `hub_outbox_lag_seconds` · `hub_normalize_retries_total` · `hub_normalize_schema_errors_total{source}` · `hub_alerts_open{severity}` · `hub_alert_transitions_total{rule,to}` · `hub_alert_eval_errors_total{rule}` · default process metrics |
-| Grafana | provisioning trong repo `infra/grafana/provisioning` (datasource + dashboard "Webhook Hub" 8 panel — 7–8 là cảnh báo); Prometheus/Grafana ghim phiên bản | Đo bằng `k6/ingest-github.js` (`k6/README.md`) |
+| Grafana | provisioning trong repo `infra/grafana/provisioning` (datasource + dashboard "Webhook Hub" 10 panel — 7–8 cảnh báo, 9–10 lớp biên/hộp phạt EG2/EG4); Prometheus/Grafana ghim phiên bản | Đo bằng `k6/ingest-github.js` (`k6/README.md`) |
 | Health | `/health` kiểm Postgres · Redis · RabbitMQ | |
-| **Tự cảnh báo** | Cảnh báo cho người vận hành: evaluator trong `hub-worker` → `hub.alerts` → chuông/banner/toast + nhận định; email theo người qua outbox (§5.4d, ADR-165..173) | 9 luật, `destination.circuit_open` thay `alert_on_open` |
+| **Tự cảnh báo** | Cảnh báo cho người vận hành: evaluator trong `hub-worker` → `hub.alerts` → chuông/banner/toast + nhận định; email theo người qua outbox (§5.4d, ADR-165..173) | 13 luật (9 do evaluator đánh giá + 4 theo sự kiện dung lượng QT6), `destination.circuit_open` thay `alert_on_open` |
 
 ### 8.1. Polling (A) — cho service không nhận được push (ADR-016, ADR-077)
 
@@ -713,7 +729,7 @@ Cắt để vừa 14 ngày. Ghi vào báo cáo ở mục "hướng phát triển
 | `filter: {"data.amount": {"$gte": 1000}}` | Đây là viết lại query language của MongoDB. Khớp theo `event_types` là đủ. |
 | `{{data.amount \| vnd}}` pipe filter | = viết template engine. Dùng `String.replace` với `{{path}}` thuần, ~20 dòng. |
 | VNPAY · Gmail/Pub-Sub · Google Sheets · JSONata | Đã ở mục "mở rộng". Không chạm. |
-| Website bán hàng đầy đủ | BB-1 + trần 300 dòng của Shop. |
+| Website bán hàng đầy đủ | BB-1 + trần ~600 dòng của Shop (ADR-141/156). |
 
 > **GIỮ Grafana** — đề tài chấm nặng "chịu tải & scale". 30 phút công đổi lấy 3 phút demo mạnh nhất.
 
@@ -733,7 +749,7 @@ webhook-hub/
 │   │   └── src/modules/{auth,ingest,sources,destinations,subscriptions,events,metrics,realtime}
 │   ├── hub-worker/                # NestJS — consumer + relay + cleanup       -> Render
 │   │   └── src/{normalize-route,delivery/senders,scheduler}
-│   ├── shop/                      # !! TRẦN 300 DÒNG · schema riêng           -> Vercel (route handlers)
+│   ├── shop/                      # !! TRẦN ~600 DÒNG (ADR-141/156) · schema riêng -> Vercel (route handlers)
 │   └── web/                       # Next.js — dashboard + storefront          -> Vercel
 ├── libs/
 │   ├── providers/                 # Adapter pattern — trái tim tính mở rộng

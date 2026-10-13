@@ -363,6 +363,8 @@ Ngoài đường nóng: request sai chữ ký **0 lệnh** (EG3, ADR-178: rate l
 
 **Quota Upstash free (kiểm 10/10/2026 trên [upstash.com/pricing/redis](https://upstash.com/pricing/redis)): 500.000 lệnh/tháng** (≈ 16.600/ngày) → ≈ **2.700 sự kiện/ngày** với 1 đích (÷6), ≈ 2.000 với 2 đích (÷8) — chưa trừ lệnh nền (pub/sub adapter, health).
 
+**Đích chết — chi phí Redis sau BP2–BP4** (ADR-196..198): mỗi lần hoãn vì circuit = **1 lệnh** (gate `LUA_GATE`, trước khi nạp DB) và **0 truy vấn đọc**; `next_attempt_at` ghi thưa ≤ 1 lần / 2 phút. OPEN lần đầu 60s rồi **300s** sau probe thất bại → hoãn vào `retry.5m`. Một delivery tới đích chết suốt cửa sổ: mỗi lần thử ≈ 1 vòng 1m + ~6 vòng 5m (trần 30 phút) ≈ 7–8 lệnh × 6 lần thử ≈ **≤ 50 lệnh** (trước BP: 30 lần hoãn × 6 = 180). 1.000 delivery của MỘT đích chết 3 giờ ≈ 50.000 lệnh ≈ **10% quota tháng** (trước: ~180.000, hơn một phần ba). Probe: ≤ 1 / đích / 5 phút. Sau hồi phục, slow-start (60s) thêm ≤ 1 lệnh mỗi vòng `retry.10s` cho message vượt trần ramp.
+
 > ⚠️ **Chưa xác nhận** Upstash tính một `EVAL` là 1 lệnh: [tài liệu billing](https://upstash.com/docs/redis/overall/billing) chỉ nói "tính theo số lệnh", không nói riêng về script (tìm 10/10 không thấy). Mọi con số trên giả định 1 `EVAL` = 1 lệnh. Nếu Upstash tính cả lệnh bên trong script thì đường nóng tối đa: ingest 3 → 4 (INCR+EXPIRE ở lần đầu cửa sổ), delivery có throttle 2 → 4–5 (GET, GET, INCR, EXPIRE + PUBLISH). Cần hỏi support Upstash trước khi ghi số quota vào báo cáo.
 
 *Lịch sử (trước S3-5):* thiết kế cũ tiêu 5–8 lệnh/sự kiện, **cộng thêm phần tệ nhất**:

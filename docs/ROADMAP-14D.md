@@ -68,7 +68,7 @@ Không phải nghĩa A ("có UI, bấm nút thì có chuyện xảy ra"). Nghĩa
 > Deploy lần đầu **luôn** mất một ngày. Sáu cái bẫy (region lệch · thiếu `DIRECT_URL` · không nghe `PORT` · CORS chặn handshake · CloudAMQP hết connection · SIGTERM 25s) mất **nửa giờ mỗi cái** ở đây, **nửa ngày mỗi cái** ở Ngày 13.
 
 ### Ngày 4 — Chống đạn
-- [ ] 5 tầng retry queue + `x-dead-letter-exchange` quay về main + jitter ±20%
+- [ ] 5 tầng retry queue + `x-dead-letter-exchange` quay về main (TTL cố định theo queue, KHÔNG jitter ở tầng retry — chống dội = slow-start theo đích, ADR-198)
 - [ ] `q.delivery.dlq` **và** `q.normalize.dlq`
 - [ ] Phân loại lỗi: 4xx (trừ 408/429) → `DEAD` ngay · 5xx/timeout/mạng → retry
 - [ ] Manual ack + `prefetch=20` khắp nơi
