@@ -1,0 +1,11 @@
+# origin: constructed; source: https://docs.gitlab.com/user/project/integrations/webhooks/
+POST /webhook HTTP/1.1
+Content-Type: application/json
+User-Agent: GitLab/17.6.0
+X-Gitlab-Event: Push Hook
+X-Gitlab-Token: 0000
+X-Gitlab-Event-UUID: 13792a34-cac6-4fda-95a8-c58e00a3954e
+X-Gitlab-Instance: https://gitlab.example.com
+Idempotency-Key: 00000000-0000-0000-0000-000000000002
+
+{"object_kind":"push","event_name":"push","ref":"refs/heads/main","project":{"id":15,"name":"Diaspora"}}

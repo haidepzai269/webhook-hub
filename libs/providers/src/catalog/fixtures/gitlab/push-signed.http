@@ -1,7 +1,7 @@
 # origin: constructed; source: https://docs.gitlab.com/user/project/integrations/webhooks/
 POST /webhook HTTP/1.1
 Content-Type: application/json
-User-Agent: GitLab/17.6.0
+User-Agent: GitLab/19.1.0
 X-Gitlab-Event: Push Hook
 X-Gitlab-Event-UUID: 13792a34-cac6-4fda-95a8-c58e00a3954e
 X-Gitlab-Webhook-UUID: 6ab4c6a9-9b4d-4a5f-9f5f-1f6a4f3e2d1c

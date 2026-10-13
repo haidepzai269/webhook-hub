@@ -37,6 +37,19 @@ describe('[PK:T19] nghiệm thu nhận tên trên TOÀN danh mục (bài A, §13
     expect(new Set(top.map((m) => m.group))).toEqual(new Set(['svix']));
   });
 
+  it('review PK9 T-h: mục NGOÀI nhóm hoà điểm cao nhất -> bài A trượt (không phân xử bằng req / chữ cái)', () => {
+    const a = entry('shopify');
+    const b = entry('shopify');
+    b.id = 'shopify-clone';
+    b.name = 'Shopify clone';
+    const f = sources.fixtures.find((x) => x.entryId === 'shopify')!;
+    const rows = acceptanceA([a, b], [f]);
+    expect(rows[0].top.sort()).toEqual(['shopify', 'shopify-clone']);
+    expect(rows[0].ok).toBe(false);
+    // Trên danh mục thật: mọi fixture không hoà điểm cao nhất với mục ngoài nhóm.
+    for (const r of acceptanceA(CATALOG, sources.fixtures)) expect([r.fixture, r.ok]).toEqual([r.fixture, true]);
+  });
+
   it('luật nạp: thấp / không required / native lạ / unsupported thiếu đường đi vòng / config sai / sha1 không lý do -> lỗi', () => {
     const msg = (mut: (e: any) => void, base = 'shopify') => {
       const e = entry(base);
@@ -116,6 +129,31 @@ describe('[PK:T21] provider lạ: guess kèm bằng chứng; header chung không
     }
   });
 
+  it('review PK9 T-f: UA thư viện HTTP, header chung x-client-* / x-payload-* / x-custom-*, tên miền trong body -> không sinh tên', () => {
+    const guess = (head: string, body = '{"a":1}') => identify({ sample: `POST / HTTP/1.1\n${head}\n\n${body}` }, CATALOG).guess;
+    for (const ua of ['Go-http-client/1.1', 'Apache-HttpClient/4.5.13 (Java/17)', 'python-requests/2.31', 'Python-urllib/3.11', 'Python/3.11 aiohttp/3.9', 'axios/1.6.0', 'node-fetch/1.0', 'okhttp/4.12.0', 'curl/8.4.0', 'ReactorNetty/1.1', 'RestSharp/110.2']) {
+      expect([ua, guess(`User-Agent: ${ua}`)]).toEqual([ua, null]);
+    }
+    for (const h of ['x-client-signature', 'x-payload-signature', 'x-custom-token', 'x-custom-app-signature', 'x-client-id-signature', 'x-timestamp-signature', 'x-access-token']) {
+      expect([h, guess(`${h}: abc`)]).toEqual([h, null]);
+    }
+    // URL của chính shop trong body chỉ là bằng chứng phụ, không tự sinh tên.
+    expect(guess('Content-Type: application/json', '{"return_url":"https://myshop.vn/thanks"}')).toBeNull();
+  });
+
+  it('review PK9 T-j: header constructor / __proto__ vẫn đọc được (không bị prototype nuốt); tên đoán dài > 40 ký tự -> không sinh tên', () => {
+    const r = identify({ sample: 'POST / HTTP/1.1\nconstructor: x\n__proto__: y\nx-acme-signature: z\n\n{}' }, CATALOG);
+    expect(r.shape?.candidateHeaders).toEqual(['x-acme-signature']);
+    expect(r.guess?.name).toBe('Acme');
+    const hdr = identify({ captured: { method: 'POST', headers: { constructor: 'a', __proto__: 'b', 'x-acme-signature': 'c' } as any, body: '{}' } }, CATALOG);
+    expect(hdr.guess?.name).toBe('Acme');
+    const ctor = identify({ sample: 'POST / HTTP/1.1\nconstructor-signature: x\n\n{}' }, CATALOG);
+    expect(ctor.guess?.name).toBe('Constructor');
+    const long = 'a'.repeat(41);
+    expect(identify({ sample: `POST / HTTP/1.1\nx-${long}-signature: x\n\n{}` }, CATALOG).guess).toBeNull();
+    expect(identify({ sample: `POST / HTTP/1.1\nx-${'a'.repeat(40)}-signature: x\n\n{}` }, CATALOG).guess?.name).toBe('A'.concat('a'.repeat(39)));
+  });
+
   it('shape: *-timestamp -> signed-template; webhook-*/svix-* -> standard-webhooks; không header chữ ký -> unverified', () => {
     const shape = (h: string) => identify({ sample: `POST / HTTP/1.1\n${h}\n\n{"x":1}` }, CATALOG).shape?.scheme;
     expect(shape('x-foo-signature: abc\nx-foo-timestamp: 1')).toBe('signed-template');
@@ -178,6 +216,29 @@ describe('[PK:T23] mỗi khuôn body F15 có fixture parse được (không dự
     expect(broken.bodyFormat).toBeNull();
     expect(broken.problems.length).toBe(1);
     expect(() => identify({ sample: '\u0000￿<<' }, CATALOG)).not.toThrow();
+  });
+
+  it('review PK9 TB-1: XML ác ý (<!, <?, <!--, < lặp) 256 KB và 1 MB -> < 200 ms; input cắt ở 64 KB (có problems), không ném', () => {
+    for (const unit of ['<!', '<?', '<!--', '<']) {
+      for (const size of [256 * 1024, 1024 * 1024]) {
+        const body = '<' + unit.repeat(Math.ceil(size / unit.length));
+        const t0 = Date.now();
+        const r = identify({ sample: body }, CATALOG);
+        const t1 = Date.now();
+        const c = identify({ captured: { method: 'POST', headers: {}, body } }, CATALOG);
+        const ms = Math.max(t1 - t0, Date.now() - t1);
+        expect([unit, size, ms < 200]).toEqual([unit, size, true]);
+        expect(r.problems.some((p) => p.includes('64 KB'))).toBe(true);
+        expect(c.problems.some((p) => p.includes('64 KB'))).toBe(true);
+      }
+    }
+    // Thẻ gốc sau khai báo / chú thích / DOCTYPE vẫn đọc được (quét tuyến tính giữ nguyên nghĩa).
+    const xml = identify({ sample: '<?xml version="1.0"?>\n<!-- c -->\n<!DOCTYPE x>\n<notification a="1"><x/></notification>' }, CATALOG);
+    expect(xml.bodyFormat).toBe('xml');
+    expect(xml.problems).toEqual([]);
+    const unclosed = identify({ sample: '<?xml version="1.0"\n<root/>' }, CATALOG);
+    expect(unclosed.bodyFormat).toBeNull();
+    expect(unclosed.problems.length).toBe(1);
   });
 
   it('captured (PK6): headers + query + body -> nhận như mẫu dán; GET + query -> VNPay (unsupported)', () => {

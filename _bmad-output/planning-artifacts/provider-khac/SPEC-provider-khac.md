@@ -727,6 +727,17 @@ _(dev ghi vào đây; lệch với tài liệu provider thì tài liệu thắng
     - CircleCI: trang tham chiếu payload 404 → pending.
     - Bitbucket: trang chỉ nêu `X-Hub-Signature` → pending.
   - `GET /api/v1/catalog` trả `{entries}`, scope `read:project`. `POST /sources/:id/identify` để PK6.
+- **PK9 sửa sau review (2026-10-14, Amelia, REVIEW-PK9):**
+  - **Hotfix khởi động (ADR-210):** hub-api import `@hub/providers/catalog/catalog` — Node lúc chạy không resolve subpath (package không khai `exports`) → hub-api chết trong Docker. Giờ lấy `CATALOG` qua barrel `@hub/providers`; gate `server-lib-subpath` cấm tái phát.
+  - **TB-1:** `identify` cắt input ở 64 KB (`problems` báo), thẻ gốc XML đọc bằng một lượt `indexOf` (bỏ ba `replace` bậc hai). 1 MB `<!`/`<?`/`<!--`/`<` lặp < 200 ms.
+  - **TB-2:** GitLab mặc định **static-token** (`X-Gitlab-Token` + `Idempotency-Key`, GitLab ≥ 17.4); Standard Webhooks thành phương án phụ (signing token chỉ có từ 19.0, GA 19.1 — mới, self-managed phần lớn chưa lên). Ngưỡng ghi ở `docsVersion`, note phương án phụ, nhãn field. Bản < 17.4: không hỗ trợ (thiếu khoá chống trùng; chờ `bodyHash`). Thêm fixture `push-token.http` (17.6), fixture ký sửa UA thành 19.1.
+  - **T-b:** Shopify chống trùng theo `x-shopify-webhook-id` (shopify.dev/…/ignore-duplicates: "Use X-Shopify-Webhook-Id to deduplicate individual deliveries"; Event-Id để gom delivery cùng hành động).
+  - **T-f:** UA thư viện HTTP so trên chuỗi nguyên (thêm go, python, reactornetty, restsharp, vert.x, java-http-client); `STOP_NAMES` thêm client/payload/timestamp/body/content/custom/access/shared, so cả từ đầu của lõi (`x-custom-app-signature`). **Tên miền trong body không còn tự sinh tên** — chỉ là bằng chứng phụ khi trùng tên đoán từ header/UA (lệch ADR-208 gốc, đã ghi bổ sung).
+  - **T-j:** `headers` là `Object.create(null)`; tên đoán > 40 ký tự bị bỏ; bằng chứng header cắt 80 ký tự.
+  - **T-h:** bài A trượt khi mục ngoài nhóm hoà điểm cao nhất (trước đây phân xử bằng req / chữ cái).
+  - **T-g:** `GET /api/v1/catalog` trả `Cache-Control: private, max-age=300`. Không làm ETag (dữ liệu nhỏ, max-age đủ).
+  - **Typeform nạp** (`entries/typeform.json`: hmac sha256 base64, `prefix: "sha256="`, khoá `event_id`), fixture constructed theo payload mẫu chính thức → **21 mục / 70 pending**.
+  - **Để lại (Thấp, chưa làm):** T-a (`{id}` + ký tự ngăn cách dời byte khi id chứa chính ký tự đó — tác động thấp, body sau cắt luôn có rác); T-c (WooCommerce ping `webhook_id=` không ký → 401, chờ PK4 bắt tay); T-d (Linear chỉ chống phát lại bằng `webhookTimestamp` trong body, `hmac` chưa kiểm được); T-e (S1 chống trùng bằng header không được ký — đánh đổi chung như GitHub native, cần ADR khi làm `idempotency: {bodyHash: true}`); T-i (fixture github ghi official nhưng chữ ký/ body là placeholder); `shape` coi mọi `*timestamp*` là signed-template (Linear gợi ý sai scheme).
 
 ## 17. Bảng test và checklist (nguồn cho `verify/spec-sources.json`, E19)
 

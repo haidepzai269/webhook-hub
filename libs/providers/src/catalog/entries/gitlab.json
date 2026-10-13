@@ -36,18 +36,18 @@
   },
   "handler": {
     "config": {
-      "scheme": "standard-webhooks",
+      "scheme": "static-token",
+      "header": "x-gitlab-token",
+      "idempotency": {
+        "header": "idempotency-key"
+      },
       "eventType": "gitlab.event"
     },
     "alternatives": [
       {
-        "note": "Webhook không bật signing token: dùng token tĩnh X-Gitlab-Token (khoá chống trùng Idempotency-Key, không đổi khi gửi lại).",
+        "note": "GitLab ≥ 19.0 (GA 19.1) có signing token: dùng Standard Webhooks (chữ ký HMAC trên body + webhook-timestamp, an toàn hơn token tĩnh) — nên chọn nếu instance của bạn đủ phiên bản. Bản < 19.0 không gửi webhook-signature nên cách này 401 mãi.",
         "config": {
-          "scheme": "static-token",
-          "header": "x-gitlab-token",
-          "idempotency": {
-            "header": "idempotency-key"
-          },
+          "scheme": "standard-webhooks",
           "eventType": "gitlab.event"
         }
       }
@@ -56,13 +56,13 @@
   "fields": [
     {
       "name": "secret",
-      "label": "Signing token của webhook GitLab (hoặc Secret token nếu dùng cách token tĩnh)",
+      "label": "Secret token của webhook GitLab (cần GitLab ≥ 17.4 để có Idempotency-Key; bản cũ hơn không nối được). Nếu chọn Standard Webhooks: signing token (GitLab ≥ 19.0)",
       "secret": true
     }
   ],
   "secretSource": "provider",
   "docs": "https://docs.gitlab.com/user/project/integrations/webhooks/",
-  "docsVersion": null,
+  "docsVersion": "Secret token + Idempotency-Key: GitLab ≥ 17.4; signing token (Standard Webhooks): GitLab ≥ 19.0 (GA 19.1). Bản < 17.4 không hỗ trợ (thiếu khoá chống trùng).",
   "confidence": "cao",
   "sources": [
     "https://docs.gitlab.com/user/project/integrations/webhooks/",

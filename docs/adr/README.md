@@ -2197,6 +2197,8 @@ không thấy gì.
 - Dữ liệu danh mục nằm trong bundle hub-api (`catalog.data.ts`): thêm mục phải build lại và deploy. Bù lại không đọc đĩa lúc chạy và không có đường nạp dữ liệu chưa kiểm.
 - Client tải toàn bộ danh mục (vài chục KB): rẻ hơn mọi phương án gửi mẫu lên server.
 
+**Bổ sung (review PK9, 2026-10-14):** (a) TB-1: `identify` chỉ xét 64 KB đầu và đọc thẻ gốc XML bằng một lượt quét `indexOf` — ba `replace` cũ bậc hai (256 KB `<!<!…` = 28 s), mà server (PK6 ④) sẽ gọi cùng hàm trên body người ngoài gửi. (b) Tên miền trong body **không còn sinh tên** (URL `return_url` của chính shop thành "Myshop"); chỉ là bằng chứng phụ khi trùng tên đoán từ header/UA. UA thư viện HTTP so trên chuỗi nguyên; từ chung (client, payload, custom…) không thành tên; tên > 40 ký tự bỏ. (c) GitLab mặc định **static-token** + `Idempotency-Key` (≥ 17.4), Standard Webhooks là phương án phụ (signing token chỉ có từ 19.0) — đánh đổi: mặc định yếu hơn (token tĩnh không phủ body) để không 401 mãi trên bản self-managed phổ biến; ngưỡng phiên bản hiện ở `docsVersion`/note. (d) Shopify chống trùng theo `X-Shopify-Webhook-Id` (khuyến nghị chính chủ), không theo Event-Id. (e) Bài A trượt khi mục ngoài nhóm hoà điểm cao nhất.
+
 ## ADR-210 — Src phía server chỉ import barrel `@hub/<lib>`, không subpath; gate `server-lib-subpath` (PK9 hotfix, 2026-10-14)
 
 **Vấn đề:** fa1874c import `@hub/providers/catalog/catalog` trong hub-api. tsc (tsconfig `paths`) và jest (`moduleNameMapper`) resolve được nên test xanh. Node lúc chạy thì không: `node_modules/@hub/providers` là symlink tới gốc package (không phải `dist/`), package không khai `exports`, nên subpath trỏ vào `libs/providers/catalog/catalog` không tồn tại → `MODULE_NOT_FOUND`, hub-api không khởi động trong Docker, CI e2e đỏ.

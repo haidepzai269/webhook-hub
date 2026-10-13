@@ -1,0 +1,6 @@
+# origin: constructed; source: https://www.typeform.com/developers/webhooks/example-payload/
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Typeform-Signature: sha256=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+{"event_id":"LtWXD3crgy","event_type":"form_response","form_response":{"form_id":"lT4Z3j","token":"00000000000000000000000000000000","submitted_at":"2018-01-18T18:17:02Z","definition":{"id":"lT4Z3j","title":"Webhooks example","fields":[]},"answers":[]}}

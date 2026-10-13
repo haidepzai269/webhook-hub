@@ -1,0 +1,61 @@
+{
+  "id": "typeform",
+  "name": "Typeform",
+  "aliases": [
+    "typeform",
+    "type form"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "typeform-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "event_id",
+        "form_response"
+      ],
+      "optional": [
+        "event_type"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "typeform-signature",
+      "prefix": "sha256=",
+      "algo": "sha256",
+      "encoding": "base64",
+      "idempotency": {
+        "field": "event_id"
+      },
+      "eventType": "typeform.webhook"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret của webhook Typeform (Connect → Webhooks → Edit → Secret)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
+  "docsVersion": null,
+  "confidence": "cao",
+  "sources": [
+    "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
+    "https://www.typeform.com/developers/webhooks/example-payload/"
+  ]
+}

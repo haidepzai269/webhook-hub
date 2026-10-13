@@ -132,7 +132,9 @@ export function acceptanceA(entries: readonly CatalogEntry[], fixtures: Fixture[
       const top = r.matches.filter((m) => m.score === best).map((m) => m.id);
       const g = groupOf.get(f.entryId);
       const first = r.matches[0];
-      const ok = !!first && (first.id === f.entryId || (g !== null && g !== undefined && first.group === g && top.includes(f.entryId)));
+      // Review PK9 T-h: hoà điểm cao nhất với mục NGOÀI nhóm = trượt (thứ tự req / chữ cái không phải bằng chứng nhận đúng).
+      const sameGroup = (id: string) => id === f.entryId || (g !== null && g !== undefined && groupOf.get(id) === g);
+      const ok = !!first && top.every(sameGroup) && (first.id === f.entryId || (g !== null && g !== undefined && first.group === g && top.includes(f.entryId)));
       return { fixture: f.file, entryId: f.entryId, origin: f.origin, top, ok };
     });
 }

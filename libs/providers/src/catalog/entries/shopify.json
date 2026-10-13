@@ -34,7 +34,7 @@
       "algo": "sha256",
       "encoding": "base64",
       "idempotency": {
-        "header": "x-shopify-event-id"
+        "header": "x-shopify-webhook-id"
       },
       "eventType": "shopify.webhook"
     }
@@ -51,6 +51,7 @@
   "docsVersion": null,
   "confidence": "cao",
   "sources": [
-    "https://shopify.dev/docs/apps/build/webhooks/subscribe/https"
+    "https://shopify.dev/docs/apps/build/webhooks/subscribe/https",
+    "https://shopify.dev/docs/apps/build/webhooks/ignore-duplicates"
   ]
 }

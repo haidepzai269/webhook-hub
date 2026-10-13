@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, UseGuards } from '@nestjs/common';
 import { CATALOG } from '@hub/providers';
 import { SessionGuard } from '../auth/session.guard';
 import { RequireScope } from '../service-api/require-scope.decorator';
@@ -15,6 +15,8 @@ import { ProjectScopeGuard } from './project-scope.guard';
 export class CatalogController {
   @Get('catalog')
   @RequireScope('read:project')
+  // Review PK9 T-g: danh mục chỉ đổi khi deploy; `private` vì phản hồi đi sau SessionGuard (không cho proxy dùng chung).
+  @Header('Cache-Control', 'private, max-age=300')
   catalog() {
     return { entries: CATALOG };
   }

@@ -69,27 +69,42 @@ interface ParsedRequest {
 }
 
 function emptyReq(headerNames: string[] = []): ParsedRequest {
-  const headers: Record<string, string> = {};
+  // Review PK9 T-j: không prototype — header `constructor` / `__proto__` là header thường, không bị `in` / setter nuốt.
+  const headers: Record<string, string> = Object.create(null);
   for (const h of headerNames) headers[h] = '';
   return { method: null, headers, hasHeaders: headerNames.length > 0, queryKeys: new Set(), format: null, bodyKeys: new Set(), urls: [] };
 }
 
+/**
+ * Review PK9 TB-1: chỉ xét 64 KB đầu của mẫu dán / body thu được — đủ cho tiêu đề + khoá cấp một của mọi mẫu thật,
+ * và chặn trần thời gian của mọi bước parse (server PK6 ④ gọi cùng hàm trên body ≤ 1 MB do người ngoài gửi).
+ */
+export const IDENTIFY_MAX_CHARS = 64 * 1024;
+const TRUNCATED_PROBLEM = 'mẫu dài hơn 64 KB — chỉ xét 64 KB đầu';
+
+function clip(s: string, problems: string[]): string {
+  if (s.length <= IDENTIFY_MAX_CHARS) return s;
+  problems.push(TRUNCATED_PROBLEM);
+  return s.slice(0, IDENTIFY_MAX_CHARS);
+}
+
 function readRequest(input: IdentifyInput, problems: string[]): ParsedRequest | null {
   if (input.captured) return fromCaptured(input.captured, problems);
-  if (typeof input.sample === 'string' && input.sample.trim().length > 0) return fromSample(input.sample, problems);
+  if (typeof input.sample === 'string' && input.sample.trim().length > 0) return fromSample(clip(input.sample, problems), problems);
   return null;
 }
 
 function fromCaptured(c: CapturedSample, problems: string[]): ParsedRequest {
   const r = emptyReq();
   r.method = c.method ? c.method.toUpperCase() : null;
-  for (const [k, v] of Object.entries(c.headers ?? {})) {
+  for (const k of Object.keys(c.headers ?? {})) {
+    const v = (c.headers as Record<string, string | string[]>)[k];
     const s = Array.isArray(v) ? v[0] : v;
     if (typeof s === 'string') r.headers[k.toLowerCase()] = s;
   }
   r.hasHeaders = Object.keys(r.headers).length > 0;
   r.queryKeys = queryKeys(c.query ?? '');
-  applyBody(r, c.body ?? '', problems);
+  applyBody(r, clip(typeof c.body === 'string' ? c.body : '', problems), problems);
   return r;
 }
 
@@ -180,11 +195,10 @@ function applyBody(r: ParsedRequest, body: string, problems: string[]): void {
     return;
   }
   if (t[0] === '<') {
-    const stripped = t.replace(/<\?[\s\S]*?\?>/g, '').replace(/<!--[\s\S]*?-->/g, '').replace(/<![^>]*>/g, '');
-    const m = /<([A-Za-z_][\w:.-]*)[\s>/]/.exec(stripped);
-    if (m) {
+    const root = xmlRootTag(t);
+    if (root) {
       r.format = 'xml';
-      r.bodyKeys.add(m[1]);
+      r.bodyKeys.add(root);
       return;
     }
     problems.push('body bắt đầu bằng "<" nhưng không thấy thẻ gốc XML');
@@ -215,6 +229,31 @@ function applyBody(r: ParsedRequest, body: string, problems: string[]): void {
     return;
   }
   problems.push('không nhận ra khuôn body (JSON, form, XML, JWT, JSON lines)');
+}
+
+const XML_TAG_AT = /<([A-Za-z_][\w:.-]*)[\s>/]/y;
+
+/**
+ * Review PK9 TB-1: tên thẻ gốc XML bằng MỘT lượt quét (`indexOf`), bỏ qua `<?…?>`, `<!--…-->`, `<!…>`. Thay ba
+ * `replace` không tham lam cũ — bậc hai với `<!<!<!…` (256 KB = 28 s). Con trỏ chỉ tiến; thiếu dấu đóng thì dừng.
+ */
+function xmlRootTag(t: string): string | null {
+  let i = 0;
+  for (;;) {
+    const j = t.indexOf('<', i);
+    if (j < 0) return null;
+    const skip = t.startsWith('<?', j) ? '?>' : t.startsWith('<!--', j) ? '-->' : t.startsWith('<!', j) ? '>' : null;
+    if (skip) {
+      const k = t.indexOf(skip, j + 2);
+      if (k < 0) return null;
+      i = k + skip.length;
+      continue;
+    }
+    XML_TAG_AT.lastIndex = j;
+    const m = XML_TAG_AT.exec(t);
+    if (m) return m[1];
+    i = j + 1;
+  }
 }
 
 function tryJson(s: string): { ok: true; value: unknown } | { ok: false } {
@@ -341,8 +380,12 @@ const GENERIC_HEADERS = new Set([
   'x-callback-token',
 ]);
 /** Từ không phải tên (header `x-callback-token` không có nghĩa là provider "Callback"). */
-const STOP_NAMES = new Set(['callback', 'webhook', 'webhooks', 'hook', 'hooks', 'hub', 'signature', 'request', 'event', 'events', 'auth', 'api', 'token', 'delivery', 'notification', 'secret', 'sig', 'hmac', 'x']);
-const GENERIC_UA = /^(mozilla|curl|wget|go-http-client|axios|node-fetch|node|undici|python-requests|python-urllib|aiohttp|java|okhttp|apache-httpclient|ruby|faraday|postmanruntime|guzzlehttp|php|dart|libwww-perl|httpie|insomnia)$/i;
+// Review PK9 T-f: + từ chung client/payload/timestamp/body/content/custom/access/shared (x-client-signature ≠ provider "Client").
+const STOP_NAMES = new Set(['callback', 'webhook', 'webhooks', 'hook', 'hooks', 'hub', 'signature', 'request', 'event', 'events', 'auth', 'api', 'token', 'delivery', 'notification', 'secret', 'sig', 'hmac', 'x', 'client', 'payload', 'timestamp', 'body', 'content', 'custom', 'access', 'shared']);
+/** UA của thư viện HTTP / công cụ — so trên chuỗi NGUYÊN (trước khi cắt hậu tố `-client`…), nên `Go-http-client` không thành "Go Http". */
+const GENERIC_UA = /^(mozilla|curl|wget|go|go-http-client|axios|node-fetch|node|undici|python|python-requests|python-urllib|aiohttp|java|java-http-client|okhttp|apache-httpclient|reactornetty|restsharp|vert\.x|ruby|faraday|postmanruntime|guzzlehttp|php|dart|libwww-perl|httpie|insomnia)$/i;
+/** Review PK9 T-j: tên đoán dài hơn thế này không phải tên provider (header 64 KB không sinh tên 64 KB). */
+const MAX_GUESS_NAME = 40;
 const SIG_HEADER_RE = /signature|hmac|(^|-)sig($|-)|-token$|webhook/;
 /** Như `CANDIDATE_HEADER_RE` của GenericAdapter: tên header "trông như" mang bằng chứng xác thực. */
 const CANDIDATE_HEADER_RE = /sig|token|auth|hmac|key/;
@@ -361,14 +404,15 @@ function nameFromHeader(h: string): string | null {
     .replace(/^x-/, '')
     .replace(/-(webhook|signature|hmac|sig|token|hook|request|event)(-.*)?$/, '')
     .replace(/^(webhook|hook)-/, '');
-  if (!core || core === h.replace(/^x-/, '') || STOP_NAMES.has(core)) return null;
-  return core;
+  if (!core || core === h.replace(/^x-/, '') || STOP_NAMES.has(core) || STOP_NAMES.has(core.split('-')[0])) return null;
+  return core.length <= MAX_GUESS_NAME ? core : null;
 }
 
 function nameFromUa(ua: string): string | null {
   const first = ua.trim().split(/[/\s(]/)[0] ?? '';
+  if (GENERIC_UA.test(first)) return null;
   const core = first.replace(/[-_]?(webhooks?|hookshot|agent|bot|client|notifier|sender)$/i, '');
-  if (core.length < 2 || GENERIC_UA.test(core) || STOP_NAMES.has(core.toLowerCase())) return null;
+  if (core.length < 2 || core.length > MAX_GUESS_NAME || GENERIC_UA.test(core) || STOP_NAMES.has(core.toLowerCase())) return null;
   return core.toLowerCase();
 }
 
@@ -386,23 +430,26 @@ function guessName(r: ParsedRequest, _headerName?: string): IdentifyResult['gues
   const votes: Array<{ name: string; evidence: string }> = [];
   for (const h of Object.keys(r.headers).sort()) {
     const n = nameFromHeader(h);
-    if (n) votes.push({ name: n, evidence: `header ${h}` });
+    if (n) votes.push({ name: n, evidence: `header ${h.slice(0, 80)}` });
   }
   const ua = r.headers['user-agent'];
   if (typeof ua === 'string') {
     const n = nameFromUa(ua);
     if (n) votes.push({ name: n, evidence: `user-agent ${ua.slice(0, 80)}` });
   }
-  for (const u of r.urls.slice(0, 5)) {
-    const n = nameFromUrl(u);
-    if (n) votes.push({ name: n.name, evidence: `body url ${n.host}` });
-  }
   if (votes.length === 0) return null;
   const count = new Map<string, number>();
   for (const v of votes) count.set(v.name, (count.get(v.name) ?? 0) + 1);
   let best = votes[0].name;
   for (const v of votes) if ((count.get(v.name) ?? 0) > (count.get(best) ?? 0)) best = v.name;
-  return { name: titleCase(best), evidence: votes.filter((v) => v.name === best).map((v) => v.evidence) };
+  // Review PK9 T-f: tên miền trong body (vd `return_url` của chính shop) KHÔNG tự sinh tên — chỉ thêm bằng chứng khi trùng
+  // tên đã đoán từ header / User-Agent.
+  const evidence = votes.filter((v) => v.name === best).map((v) => v.evidence);
+  for (const u of r.urls.slice(0, 5)) {
+    const n = nameFromUrl(u);
+    if (n && n.name === best) evidence.push(`body url ${n.host}`);
+  }
+  return { name: titleCase(best), evidence };
 }
 
 function shapeOf(r: ParsedRequest): NonNullable<IdentifyResult['shape']> {

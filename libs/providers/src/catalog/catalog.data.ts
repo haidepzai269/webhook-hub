@@ -151,18 +151,18 @@ export const CATALOG_DATA: CatalogEntry[] = [
     },
     "handler": {
       "config": {
-        "scheme": "standard-webhooks",
+        "scheme": "static-token",
+        "header": "x-gitlab-token",
+        "idempotency": {
+          "header": "idempotency-key"
+        },
         "eventType": "gitlab.event"
       },
       "alternatives": [
         {
-          "note": "Webhook không bật signing token: dùng token tĩnh X-Gitlab-Token (khoá chống trùng Idempotency-Key, không đổi khi gửi lại).",
+          "note": "GitLab ≥ 19.0 (GA 19.1) có signing token: dùng Standard Webhooks (chữ ký HMAC trên body + webhook-timestamp, an toàn hơn token tĩnh) — nên chọn nếu instance của bạn đủ phiên bản. Bản < 19.0 không gửi webhook-signature nên cách này 401 mãi.",
           "config": {
-            "scheme": "static-token",
-            "header": "x-gitlab-token",
-            "idempotency": {
-              "header": "idempotency-key"
-            },
+            "scheme": "standard-webhooks",
             "eventType": "gitlab.event"
           }
         }
@@ -171,13 +171,13 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "fields": [
       {
         "name": "secret",
-        "label": "Signing token của webhook GitLab (hoặc Secret token nếu dùng cách token tĩnh)",
+        "label": "Secret token của webhook GitLab (cần GitLab ≥ 17.4 để có Idempotency-Key; bản cũ hơn không nối được). Nếu chọn Standard Webhooks: signing token (GitLab ≥ 19.0)",
         "secret": true
       }
     ],
     "secretSource": "provider",
     "docs": "https://docs.gitlab.com/user/project/integrations/webhooks/",
-    "docsVersion": null,
+    "docsVersion": "Secret token + Idempotency-Key: GitLab ≥ 17.4; signing token (Standard Webhooks): GitLab ≥ 19.0 (GA 19.1). Bản < 17.4 không hỗ trợ (thiếu khoá chống trùng).",
     "confidence": "cao",
     "sources": [
       "https://docs.gitlab.com/user/project/integrations/webhooks/",
@@ -749,7 +749,7 @@ export const CATALOG_DATA: CatalogEntry[] = [
         "algo": "sha256",
         "encoding": "base64",
         "idempotency": {
-          "header": "x-shopify-event-id"
+          "header": "x-shopify-webhook-id"
         },
         "eventType": "shopify.webhook"
       }
@@ -766,7 +766,8 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "docsVersion": null,
     "confidence": "cao",
     "sources": [
-      "https://shopify.dev/docs/apps/build/webhooks/subscribe/https"
+      "https://shopify.dev/docs/apps/build/webhooks/subscribe/https",
+      "https://shopify.dev/docs/apps/build/webhooks/ignore-duplicates"
     ]
   },
   {
@@ -932,6 +933,67 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "confidence": "cao",
     "sources": [
       "https://core.telegram.org/bots/api#setwebhook"
+    ]
+  },
+  {
+    "id": "typeform",
+    "name": "Typeform",
+    "aliases": [
+      "typeform",
+      "type form"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "typeform-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "event_id",
+          "form_response"
+        ],
+        "optional": [
+          "event_type"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "typeform-signature",
+        "prefix": "sha256=",
+        "algo": "sha256",
+        "encoding": "base64",
+        "idempotency": {
+          "field": "event_id"
+        },
+        "eventType": "typeform.webhook"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret của webhook Typeform (Connect → Webhooks → Edit → Secret)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
+    "docsVersion": null,
+    "confidence": "cao",
+    "sources": [
+      "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
+      "https://www.typeform.com/developers/webhooks/example-payload/"
     ]
   },
   {

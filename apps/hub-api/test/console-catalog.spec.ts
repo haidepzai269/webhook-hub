@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, HEADERS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { CATALOG } from '@hub/providers';
 import { CatalogController } from '../src/modules/console/catalog.controller';
 import { hubApiControllers } from '../src/app.module';
@@ -24,5 +24,8 @@ describe('PK9: GET /api/v1/catalog', () => {
     const json = JSON.stringify(body);
     expect(json).not.toContain('# origin:');
     expect(json).not.toContain('fixtures');
+  });
+  it('review PK9 T-g: Cache-Control: private, max-age=300 (dữ liệu chỉ đổi khi deploy; private vì sau SessionGuard)', () => {
+    expect(Reflect.getMetadata(HEADERS_METADATA, CatalogController.prototype.catalog)).toEqual([{ name: 'Cache-Control', value: 'private, max-age=300' }]);
   });
 });
