@@ -827,7 +827,7 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 - [x] **PK2** — `hmac` mở rộng + `static-token` basic/query
 - [x] **PK3** — `signed-template`
 - [x] **PK9** — danh mục + `identify` (client)
-- [ ] **PK4** — bắt tay + GET bắt tay + ack/rejectStatus
+- [x] **PK4** — bắt tay + GET bắt tay + ack/rejectStatus
 - [ ] **PK5** — `unverified` (bốn khoá + E4/E5/E7)
 - [ ] **PK6** — chế độ thu + kích hoạt
 - [ ] **PK7** — form "Provider khác"
