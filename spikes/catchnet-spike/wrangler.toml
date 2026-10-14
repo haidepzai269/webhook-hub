@@ -1,0 +1,23 @@
+# LH-S spike. Tên Worker CỐ ĐỊNH là "hub-hooks-spike" — KHÔNG BAO GIỜ đổi thành "hub-hooks" (tên thật, §9).
+name = "hub-hooks-spike"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+# Fan-out S6 có thể gọi chính workers.dev của Worker này; cờ này cho fetch đi đường Internet công khai
+# (không thì Cloudflare chặn Worker gọi Worker cùng zone — lỗi 1042).
+compatibility_flags = ["global_fetch_strictly_public"]
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hub-hooks-spike-db"
+# Thay bằng id in ra từ `npx wrangler d1 create hub-hooks-spike-db` trước khi deploy. Local thì giá trị nào cũng được.
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# S7: URL gốc hub Render (route /_spike/latency chỉ đo được URL cùng origin này).
+HUB_ORIGIN_URL = ""
+# S6: đặt thì mỗi lần cron làm 25 fetch tới URL này.
+SPIKE_FANOUT_URL = ""
+# Secret (KHÔNG để ở đây): SPIKE_DUMP_TOKEN → `.dev.vars` (local) / `wrangler secret put` (deploy).
