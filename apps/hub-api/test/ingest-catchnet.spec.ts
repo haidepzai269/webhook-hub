@@ -17,6 +17,7 @@ import { installPenaltyGate } from '../src/modules/ingest/penalty-gate';
 import { PENALTY_BOX_PROVIDER } from '../src/modules/ingest/penalty-provider';
 import { RedisService } from '../src/modules/redis/redis.service';
 import { installHubOutcome } from '../src/modules/ingest/hub-outcome';
+import { verifyCatchnetBody, verifyCatchnetHeaders } from '../src/modules/ingest/catchnet';
 
 /**
  * LH3 (SPEC-hub-sap §5 + ĐÍNH CHÍNH H1/H3/H4/H5, ADR-217/221): hub nhận request đi qua lưới hứng (Cloudflare Worker).
@@ -227,13 +228,46 @@ describe('[LH:T12] Stripe phát lại sau 20 phút: receivedAt của lưới (đ
     const e = stripeEvent(Math.floor(t / 1000));
     const h = { ...e.headers, ...cn({ target, body: e.body, receivedAt: t }) };
     expect((await call(target, { body: e.body, headers: h })).status).toBe(401);
+    // T-3: CATCHNET_RETENTION_DAYS bị kẹp ≤ EVENT_RETENTION_DAYS (mặc định 7) — 10 ngày mà retention 7 vẫn 401.
     process.env.CATCHNET_RETENTION_DAYS = '10';
-    expect((await call(target, { body: e.body, headers: h })).status).toBe(200);
-    // Tương lai xa hơn hạn cũng bị bỏ qua (|now − received_at|).
+    expect((await call(target, { body: e.body, headers: h })).status).toBe(401);
+    const prevRet = process.env.EVENT_RETENTION_DAYS;
+    process.env.EVENT_RETENTION_DAYS = '30';
+    try {
+      expect((await call(target, { body: e.body, headers: h })).status).toBe(200);
+    } finally {
+      if (prevRet === undefined) delete process.env.EVENT_RETENTION_DAYS;
+      else process.env.EVENT_RETENTION_DAYS = prevRet;
+    }
     delete process.env.CATCHNET_RETENTION_DAYS;
-    const f = Date.now() + 8 * DAY;
-    const e3 = stripeEvent(Math.floor(Date.now() / 1000) - 20 * 60);
-    expect((await call(target, { body: e3.body, headers: { ...e3.headers, ...cn({ target, body: e3.body, receivedAt: f }) } })).status).toBe(401);
+  });
+
+  it('T-2: received_at ở TƯƠNG LAI chỉ được lệch đồng hồ ≤ 5 phút (không phải tới hạn 7 ngày)', async () => {
+    const target = '/hooks/generic/src_gen';
+    const last = () => created[created.length - 1];
+    let e = genEvent();
+    await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: Date.now() + 6 * MIN }) } });
+    expect(last().via).toBeUndefined(); // +6 phút -> bỏ cả bộ header
+    e = genEvent();
+    await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: Date.now() + 2 * DAY }) } });
+    expect(last().via).toBeUndefined();
+    e = genEvent();
+    const soon = Date.now() + 1 * MIN;
+    await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: soon }) } });
+    expect([last().via, last().receivedAt?.getTime()]).toEqual(['catchnet-forward', soon]);
+  });
+
+  it('T-6: secret < 32 ký tự bị bỏ (lưới tắt nếu không còn giá trị nào); giá trị thứ ba trở đi bị bỏ', async () => {
+    const SHORT = 'ngan-qua-31-ky-tu-0123456789abc';
+    expect(SHORT.length).toBe(31);
+    const t = T();
+    const target = '/hooks/stripe/src_stripe';
+    process.env.CATCHNET_FORWARD_SECRET = SHORT;
+    const e = stripeEvent(Math.floor(t / 1000));
+    expect((await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: t, secret: SHORT }) } })).status).toBe(401);
+    process.env.CATCHNET_FORWARD_SECRET = `${FWD},${FWD_OLD},${FWD}-thu-ba`;
+    const e2 = stripeEvent(Math.floor(t / 1000));
+    expect((await call(target, { body: e2.body, headers: { ...e2.headers, ...cn({ target, body: e2.body, receivedAt: t, secret: `${FWD}-thu-ba` }) } })).status).toBe(401);
   });
 
   it('xoay khoá: CATCHNET_FORWARD_SECRET="mới,cũ" — Worker còn ký bằng khoá cũ vẫn được; không đặt biến -> tắt hẳn', async () => {
@@ -247,16 +281,55 @@ describe('[LH:T12] Stripe phát lại sau 20 phút: receivedAt của lưới (đ
     expect((await call(target, { body: e2.body, headers: { ...e2.headers, ...cn({ target, body: e2.body, receivedAt: t }) } })).status).toBe(401);
   });
 
-  it('so chữ ký lưới bằng crypto.timingSafeEqual (đủ cả chữ ký đầu lẫn body)', async () => {
+  it('so chữ ký lưới bằng crypto.timingSafeEqual (đủ cả chữ ký đầu lẫn body; mỗi secret một lần, không dừng sớm)', () => {
     const spy = jest.spyOn(nodeCrypto, 'timingSafeEqual');
-    const t = T();
-    const target = '/hooks/stripe/src_stripe';
-    const e = stripeEvent(Math.floor(t / 1000));
+    const env = { CATCHNET_FORWARD_SECRET: `${FWD},${FWD_OLD}` };
+    const target = '/hooks/generic/src_gen';
+    const body = '{"a":1}';
+    const h = cn({ target, body, secret: FWD });
     spy.mockClear();
-    expect((await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: t }) } })).status).toBe(200);
-    // ≥ 2 lần cho chữ ký lưới (đầu + body); Stripe SDK cũng gọi — đếm theo đối số độ dài 64 hex của lưới.
-    const catchnetCalls = spy.mock.calls.filter(([a]) => Buffer.isBuffer(a) && (a as Buffer).length === 64);
-    expect(catchnetCalls.length).toBeGreaterThanOrEqual(2);
+    const ing = verifyCatchnetHeaders({ method: 'POST', target, headers: h }, env);
+    expect(ing).not.toBeNull();
+    expect(spy).toHaveBeenCalledTimes(2); // khớp secret đầu vẫn so tiếp secret thứ hai
+    spy.mockClear();
+    expect(verifyCatchnetBody(ing!, h, Buffer.from(body), env)).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('T-7: header sai khuôn -> bỏ cả bộ: header lặp, received_at âm/rỗng/16 chữ số, IP sai, mode lạ, target tuyệt đối, chữ ký hoa', () => {
+    const env = { CATCHNET_FORWARD_SECRET: FWD };
+    const target = '/hooks/generic/src_gen';
+    const ok = cn({ target, body: '' });
+    expect(verifyCatchnetHeaders({ method: 'POST', target, headers: ok }, env)).not.toBeNull();
+    const bad = (patch: Record<string, string | string[]>, t = target) => verifyCatchnetHeaders({ method: 'POST', target: t, headers: { ...ok, ...patch } }, env);
+    // Node nối header lặp thành "a, b"; mảng (set-cookie kiểu) cũng không nhận.
+    expect(bad({ 'x-catchnet-signature': `${ok['x-catchnet-signature']}, ${ok['x-catchnet-signature']}` })).toBeNull();
+    expect(bad({ 'x-catchnet-client-ip': [ok['x-catchnet-client-ip'], '1.1.1.1'] })).toBeNull();
+    for (const at of ['-1', '', '1234567890123456', '1e12', ' 1760425200000']) expect(bad({ 'x-catchnet-received-at': at })).toBeNull();
+    for (const ip of ['999.1.1.1', 'localhost', '1.2.3.4.forward', '']) expect(bad(cn({ target, body: '', clientIp: ip }))).toBeNull();
+    expect(bad(cn({ target, body: '', mode: 'FORWARD' }))).toBeNull();
+    expect(bad({ 'x-catchnet-id': 'có.dấu.chấm' })).toBeNull();
+    const abs = `http://evil.example${target}`;
+    expect(bad(cn({ target: abs, body: '' }), abs)).toBeNull();
+    expect(bad({ 'x-catchnet-signature': ok['x-catchnet-signature'].toUpperCase().replace('V1=', 'v1=') })).toBeNull();
+  });
+
+  it('T-7: test vector CỐ ĐỊNH (libs/crypto/test/fixtures/catchnet-vectors.json, LH2 Worker dùng chung) khớp từng byte', () => {
+    const vec = JSON.parse(readFileSync(join(__dirname, '../../../libs/crypto/test/fixtures/catchnet-vectors.json'), 'utf8'));
+    const env = { CATCHNET_FORWARD_SECRET: vec.secret };
+    expect(vec.cases.length).toBeGreaterThanOrEqual(3);
+    for (const v of vec.cases) {
+      // Chuỗi ký và hex tính độc lập phải bằng giá trị đã ghi cứng (vector không tự trôi).
+      expect(`${v.id}.${v.receivedAt}.${v.clientIp}.${v.mode}.${v.method}.${v.target}`).toBe(v.signingString);
+      expect(`v1=${hmac(vec.secret, v.signingString)}`).toBe(v.signature);
+      const headers = {
+        'x-catchnet-id': v.id, 'x-catchnet-received-at': v.receivedAt, 'x-catchnet-client-ip': v.clientIp, 'x-catchnet-mode': v.mode,
+        'x-catchnet-signature': v.signature, 'x-catchnet-body-signature': v.bodySignature,
+      };
+      const ing = verifyCatchnetHeaders({ method: v.method, target: v.target, headers }, env, Number(v.receivedAt) + 1000);
+      expect([v.name, ing]).toEqual([v.name, { id: v.id, receivedAtMs: Number(v.receivedAt), clientIp: v.clientIp, mode: v.mode }]);
+      expect(verifyCatchnetBody(ing!, headers, Buffer.from(v.bodyUtf8, 'utf8'), env)).toBe(true);
+    }
   });
 
   it('StripeAdapter: verifyAt hỏng (Invalid Date) -> fail-closed (SDK coi NaN là "không quá hạn")', async () => {
@@ -320,6 +393,25 @@ describe('[LH:T13] IP cho hộp phạt chỉ lấy từ header lưới ĐÃ KÝ'
     expect(spy).toHaveBeenLastCalledWith('203.0.113.31');
     await call(target, { body: '{}', headers: { 'content-type': 'application/json', ...cn({ target, body: '{}', clientIp: '203.0.113.31', secret: 'sai' }) } });
     expect(spy).toHaveBeenLastCalledWith(CF_IP);
+    // REVIEW-LH3 T-1: chữ ký đầu đúng (chép lại) nhưng body lệch -> ingest chấm điểm theo IP KẾT NỐI, không đóng khung IP đã ký.
+    await call(target, { body: '{}', headers: { 'content-type': 'application/json', ...cn({ target, body: '{}', clientIp: '203.0.113.31', bodySignedOver: 'body-khac' }) } });
+    expect(spy).toHaveBeenLastCalledWith(CF_IP);
+  });
+
+  it('T-1: chữ ký đầu chép lại + body khác, chữ ký provider sai -> recordBadSignature theo IP kết nối; header lưu không có x-catchnet-* (trừ id)', async () => {
+    const bad = jest.spyOn(svc.penalty, 'recordBadSignature');
+    const target = '/hooks/generic/src_gen';
+    const e = genEvent(undefined, 'sai');
+    const h = { ...e.headers, ...cn({ target, body: e.body, clientIp: '203.0.113.44', bodySignedOver: 'body-goc-cua-provider' }) };
+    expect((await call(target, { body: e.body, headers: h })).status).toBe(401);
+    expect(bad).toHaveBeenLastCalledWith(CF_IP, 'src_gen', expect.anything());
+    const row = created[created.length - 1];
+    expect([row.status, row.via]).toEqual(['REJECTED', undefined]);
+    // Bản lưu: không còn chữ ký / IP / giờ / mode của lưới; còn id để nối với dòng D1.
+    const ok = genEvent();
+    await call(target, { body: ok.body, headers: { ...ok.headers, ...cn({ target, body: ok.body, clientIp: '203.0.113.45' }) } });
+    const stored = Object.keys(created[created.length - 1].headers).filter((k) => k.startsWith('x-catchnet-'));
+    expect(stored).toEqual(['x-catchnet-id']);
   });
 });
 
@@ -374,7 +466,8 @@ describe('[LH:T20] raw_events.via + received_at theo chữ ký lưới (H5)', ()
     expect([last().via, last().receivedAt?.getTime()]).toEqual(['catchnet-replay', t]);
     e = genEvent();
     await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: t, bodySignedOver: 'khac' }) } });
-    expect([last().via, last().receivedAt]).toEqual(['catchnet-forward', undefined]);
+    // REVIEW-LH3 T-1 (lệch H3, ADR-217): body lệch -> ingest coi như gọi thẳng (không via, không received_at).
+    expect([last().via, last().receivedAt]).toEqual([undefined, undefined]);
     e = genEvent();
     await call(target, { body: e.body, headers: { ...e.headers, ...cn({ target, body: e.body, receivedAt: t, secret: 'sai' }) } });
     expect([last().via, last().receivedAt]).toEqual([undefined, undefined]);
@@ -422,6 +515,7 @@ describe('[LH:T21] x-hub-outcome trên MỌI nhánh trả lời của /hooks/* (
     expect(await call('/hooks/generic/khong_co_t21', { body: '{}', headers: { 'content-type': 'application/json' } }).then((r) => [r.status, r.outcome])).toEqual([404, 'rejected']);
     expect(await call('/HOOKS/generic/src_gen', { body: '{}', headers: { 'content-type': 'application/json' } }).then((r) => [r.status, r.outcome])).toEqual([404, 'rejected']);
     expect(await call('/hooks/stripe/src_stripe', { body: '{hỏng', headers: { 'content-type': 'application/json' } }).then((r) => [r.status, r.outcome])).toEqual([400, 'rejected']);
+    expect(await call(`/hooks/generic/src_gen?q=${'a'.repeat(9000)}`, { body: '{}', headers: { 'content-type': 'application/json' } }).then((r) => [r.status, r.outcome])).toEqual([414, 'rejected']);
     const big = Buffer.alloc(1024 * 1024 + 10, 0x61);
     expect(await call('/hooks/generic/src_gen', { body: big, headers: { 'content-type': 'application/octet-stream' } }).then((r) => [r.status, r.outcome])).toEqual([413, 'rejected']);
     expect(await call('/hooks/generic/src_gen', { method: 'GET' }).then((r) => [r.status, r.outcome])).toEqual([405, 'rejected']);
@@ -451,6 +545,14 @@ describe('[LH:T21] x-hub-outcome trên MỌI nhánh trả lời của /hooks/* (
     const e = genEvent();
     expect(await call('/hooks/generic/src_dberr', { body: e.body, headers: e.headers }).then((r) => [r.status, r.outcome])).toEqual([500, 'unavailable']);
     expect(await call('/hooks/generic/src_boom', { body: '{}', headers: { 'content-type': 'application/json' } }).then((r) => [r.status, r.outcome])).toEqual([500, 'unavailable']);
+  });
+
+  it('T-7: header KHÔNG lọt ra route ngoài /hooks; OPTIONS (preflight) cố ý không mang outcome', async () => {
+    for (const p of ['/api/v1/khong-co', '/health', '/hooksx/a/b', '/v1/p/x/events']) {
+      const r = await call(p, { body: '{}', headers: { 'content-type': 'application/json' } });
+      expect([p, r.outcome]).toEqual([p, null]);
+    }
+    expect((await call('/hooks/generic/src_gen', { method: 'OPTIONS' })).outcome).toBeNull();
   });
 
   it('main.ts cài header outcome TRƯỚC guard /hooks và cổng phạt (không nhánh nào trả trước khi có lưới đỡ)', () => {

@@ -42,7 +42,8 @@ function isHooksPath(url: string | undefined): boolean {
 
 export function hubOutcomeMiddleware(req: IncomingMessage & { originalUrl?: string }, res: ServerResponse, next: (err?: unknown) => void): void {
   try {
-    if (!isHooksPath(req.originalUrl ?? req.url)) return next();
+    // OPTIONS (preflight CORS) không bao giờ tới ingest — cố ý không gắn outcome (REVIEW-LH3 T-7).
+    if (req.method === 'OPTIONS' || !isHooksPath(req.originalUrl ?? req.url)) return next();
     const original = res.writeHead;
     res.writeHead = function patchedWriteHead(this: ServerResponse, statusCode: number, ...rest: unknown[]) {
       try {

@@ -45,8 +45,11 @@ export class IngestController {
     const body = Buffer.isBuffer(req.body) ? undefined : req.body;
     // LH3 (H3, ADR-217): chữ ký đầu của lưới (đã kiểm ở cổng phạt, nhớ trên req) -> IP client đã ký; chữ ký body khớp mới
     // cho dùng giờ Worker nhận làm "bây giờ" khi verify. Không có / sai -> request thường (IP kết nối, Date.now()).
-    const catchnet = catchnetOf(req);
-    const bodySigned = catchnet ? verifyCatchnetBody(catchnet, req.headers, rawBodyBuffer) : false;
+    // REVIEW-LH3 T-1 (lệch H3 có lý do, ADR-217): Worker thật luôn ký body khớp — body lệch = có người sửa / phát lại chữ ký
+    // đầu với body khác. Khi đó ingest coi như GỌI THẲNG (IP kết nối, không via, URL HUB_PUBLIC_URL, Date.now()): kẻ chép
+    // chữ ký đầu không đóng khung được IP của provider cho điểm phạt. Cổng phạt (trước body) đã chỉ KIỂM theo IP đã ký.
+    const signed = catchnetOf(req);
+    const catchnet = signed && verifyCatchnetBody(signed, req.headers, rawBodyBuffer) ? signed : null;
 
     const rawReq: RawWebhookRequest = {
       provider: provider as ProviderType,
@@ -62,7 +65,7 @@ export class IngestController {
 
     const result = await this.ingestService.ingestWebhook(
       rawReq,
-      catchnet ? { catchnet: { mode: catchnet.mode, receivedAt: bodySigned ? new Date(catchnet.receivedAtMs) : undefined } } : {},
+      catchnet ? { catchnet: { mode: catchnet.mode, receivedAt: new Date(catchnet.receivedAtMs) } } : {},
     );
     if (result.headers) res.set(result.headers); // EG2: Retry-After của hộp phạt; PK4: header-echo, nosniff
     if (result.outcome) res.set({ [HUB_OUTCOME_HEADER]: result.outcome }); // LH3 (H1, ADR-221)

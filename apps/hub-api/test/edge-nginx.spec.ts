@@ -144,6 +144,45 @@ describe('EG1 — template nginx + envsubst', () => {
     for (const l of ['= /health', '/socket.io/', '/']) expect(locs.find(([x]) => x === l)?.[1]).toBe(false);
   });
 
+  it('[LH:T22] (REVIEW-LH3 TB-1) lưới hứng bật -> nginx tắt cầu chì + limit_conn theo IP cho /hooks/* (không tin x-catchnet-client-ip), /v1/p/* giữ; phản hồi nginx tự sinh trên /hooks* mang x-hub-outcome', () => {
+    const SECRET = 's'.repeat(40);
+    const block = (conf: string, head: string) => conf.split(`${head} {\n`)[1]?.split('}')[0] ?? '';
+    const hooksLoc = 'location ~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"';
+    // Không có lưới (hoặc secret < 32 ký tự = hub cũng coi là tắt): như EG1 — khoá theo IP.
+    for (const env of [{ EDGE_IP_FUSE: '1' }, { EDGE_IP_FUSE: '1', CATCHNET_FORWARD_SECRET: 'ngan' }]) {
+      const conf = render(env);
+      expect(conf).toMatch(/map "1" \$edge_hooks_fuse_key \{\s*"1" \$edge_fuse_key;/);
+      expect(conf).toMatch(/map "1" \$edge_hooks_conn_key \{\s*"1" \$binary_remote_addr;/);
+      expect(edge.edgeVars(env, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' }).vars.EDGE_HOOKS_IP_LIMITS).toBe('1');
+    }
+    const on = render({ EDGE_IP_FUSE: '1', CATCHNET_FORWARD_SECRET: `ngan,${SECRET}` });
+    expect(on).toMatch(/map "0" \$edge_hooks_fuse_key \{\s*"1" \$edge_fuse_key;\s*default "";/);
+    expect(on).toMatch(/map "0" \$edge_hooks_conn_key \{\s*"1" \$binary_remote_addr;\s*default "";/);
+    // Zone của /hooks/* và limit_conn khoá bằng map trên (rỗng = không đếm); /v1/p/* vẫn hooks_ip theo $edge_fuse_key.
+    expect(on).toMatch(/limit_req_zone \$edge_hooks_fuse_key zone=hooks_path_ip:/);
+    expect(on).toMatch(/limit_conn_zone \$edge_hooks_conn_key zone=hooks_conn:/);
+    expect(on).toMatch(/limit_req_zone \$edge_fuse_key zone=hooks_ip:/);
+    expect(block(on, hooksLoc)).toMatch(/limit_req zone=hooks_path_ip /);
+    expect(block(on, 'location ~* "^/v1/p/"')).toMatch(/limit_req zone=hooks_ip /);
+    // nginx KHÔNG BAO GIỜ đọc header lưới (không kiểm được chữ ký) — luật cứng trên template.
+    expect(TEMPLATE).not.toMatch(/\$http_x_catchnet/i);
+    // Secret không lọt vào cấu hình nginx (chỉ đọc độ dài).
+    expect(on).not.toContain(SECRET);
+    const w = edge.edgeVars({ EDGE_IP_FUSE: '1', EDGE_TRUSTED_PROXIES: '0.0.0.0/0', EDGE_REAL_IP_RECURSIVE: 'off', CATCHNET_FORWARD_SECRET: SECRET }, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' }).warnings;
+    expect(w).toEqual([expect.objectContaining({ level: 50, msg: expect.stringMatching(/lưới hứng/) })]);
+    expect(edge.edgeVars({ CATCHNET_FORWARD_SECRET: SECRET }, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' }).warnings).toEqual([]);
+    expect(edge.catchnetOn({ CATCHNET_FORWARD_SECRET: ` ${SECRET} ` })).toBe(true);
+    expect(edge.catchnetOn({ CATCHNET_FORWARD_SECRET: 'a,b,' + SECRET })).toBe(false); // giá trị thứ ba bị bỏ như hub-api
+    // x-hub-outcome cho phản hồi nginx tự sinh — chỉ trên /hooks* (map theo $uri, ngoài /hooks = rỗng = không gắn).
+    expect(block(on, 'location @edge_rate_limited')).toMatch(/add_header x-hub-outcome \$edge_outcome_refused always;/);
+    expect(block(on, 'location @edge_upstream_unavailable')).toMatch(/add_header x-hub-outcome \$edge_outcome_unavailable always;/);
+    expect(block(on, 'location @edge_payload_too_large')).toMatch(/add_header x-hub-outcome \$edge_outcome_rejected always;/);
+    expect(block(on, 'location ~* "^/hooks(/|$)"')).toMatch(/add_header x-hub-outcome rejected always;/);
+    for (const v of ['refused', 'rejected', 'unavailable']) {
+      expect(on).toMatch(new RegExp(`map \\$uri \\$edge_outcome_${v} \\{\\s*"~\\*\\^/hooks\\(/\\|\\$\\)" ${v};\\s*default "";`));
+    }
+  });
+
   it('[EG:T10] (phần e) L0: path viết hoa (`/HOOKS/…`, `/Hooks/…`, `/V1/P/…`) KHÔNG đi vòng location được bảo vệ — express khớp route không phân biệt hoa thường (review EG1 lượt 3, TB-2): /hooks/* hoa -> 404 tĩnh, /v1/p/* hoa -> có cầu chì', () => {
     const conf = render();
     const HOOK_OK = '~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"';

@@ -587,7 +587,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // ADR-051: chỉ lưu bản headers ĐÃ che (Authorization/Cookie/X-API-Key...), cộng header bí mật theo cấu hình source mà
     // adapter khai (S8: token static ở header tuỳ chọn). `req.headers` gốc vẫn còn cho adapter (extractIdempotencyKey/
     // buildAck); bodyRaw giữ nguyên bytes. PK4: tính TRƯỚC bắt tay (dòng `handshake` cũng chỉ lưu bản đã che).
-    const storedHeaders = redactHeaders(req.headers as Record<string, unknown>, adapter.sensitiveHeaders?.(ctx) ?? []);
+    const storedHeaders = omitCatchnetHeaders(redactHeaders(req.headers as Record<string, unknown>, adapter.sensitiveHeaders?.(ctx) ?? []));
     // S3-1: adapter tự biết chữ ký của mình ở đâu (header GitHub/Stripe, body PayOS, SePay đã che).
     // Lõi không đoán header -> thêm provider không phải sửa dòng này.
     const signatureHeader = adapter.extractSignature(req, ctx);
@@ -822,6 +822,16 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 }
 
 export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error' };
+
+/**
+ * REVIEW-LH3 T-1: bỏ header lưới khỏi bản lưu `raw_events.headers` (tab Lắng nghe, log) — chép lại chữ ký đầu là đặt được
+ * IP đã ký trong 7 ngày. Giữ `x-catchnet-id` (nối với dòng D1 của Worker); mode/giờ đã có cột `via`/`received_at`.
+ */
+export function omitCatchnetHeaders<T extends Record<string, unknown>>(headers: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(headers)) if (!k.toLowerCase().startsWith('x-catchnet-') || k.toLowerCase() === 'x-catchnet-id') out[k] = v;
+  return out as T;
+}
 
 /** LH3 (H5): đường vào của request — `raw_events.via` (+ `received_at` = giờ Worker khi chữ ký body khớp, §5.2). */
 export interface IngestPath {

@@ -1,5 +1,7 @@
 import { createHash, createHmac } from 'crypto';
 import { timingSafeCompare } from '@hub/crypto';
+import { eventRetentionDaysFromEnv } from '@hub/database';
+import { logger } from '@hub/common';
 import type { IncomingMessage } from 'http';
 import * as net from 'net';
 
@@ -46,21 +48,46 @@ const METHOD_RE = /^[A-Z]{1,16}$/;
 const SIG_RE = /^v1=([0-9a-f]{64})$/;
 const DAY_MS = 86_400_000;
 export const DEFAULT_CATCHNET_RETENTION_DAYS = 7;
+/** REVIEW-LH3 T-6: secret ngắn bị dò offline từ một header lộ ra (HMAC trên dữ liệu kẻ xấu biết hết). */
+export const MIN_CATCHNET_SECRET_CHARS = 32;
+/** REVIEW-LH3 T-2: `received_at` ở TƯƠNG LAI chỉ được lệch đồng hồ, không phải tới hạn quá khứ. */
+export const CATCHNET_FUTURE_SKEW_MS = 5 * 60_000;
 
-/** `CATCHNET_FORWARD_SECRET`: một hoặc hai giá trị phân tách `,` (xoay khoá). Thiếu/rỗng -> [] = tắt hẳn. */
-export function catchnetSecrets(env: Env = process.env): string[] {
-  return (env.CATCHNET_FORWARD_SECRET ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 2);
+let lastWarnKey = '';
+function warnOnce(key: string, msg: string): void {
+  if (lastWarnKey === key) return;
+  lastWarnKey = key;
+  logger.warn(msg);
 }
 
-/** `CATCHNET_RETENTION_DAYS` (mặc định 7, nguyên 1..30; sai khuôn -> 7) -> ms. Cùng giá trị với Worker (§13). */
+/**
+ * `CATCHNET_FORWARD_SECRET`: một hoặc hai giá trị phân tách `,` (xoay khoá). Thiếu/rỗng -> [] = tắt hẳn. Giá trị < 32 ký tự
+ * bị BỎ (T-6) và giá trị thứ ba trở đi bị bỏ — mỗi cấu hình sai log cảnh báo MỘT lần (không in secret).
+ */
+export function catchnetSecrets(env: Env = process.env): string[] {
+  const raw = env.CATCHNET_FORWARD_SECRET ?? '';
+  const all = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const kept = all.slice(0, 2).filter((s) => s.length >= MIN_CATCHNET_SECRET_CHARS);
+  if (kept.length !== all.length) {
+    warnOnce(
+      `${all.length}:${all.map((s) => s.length).join('/')}`,
+      `CATCHNET_FORWARD_SECRET: bỏ ${all.length - kept.length} giá trị (ngắn hơn ${MIN_CATCHNET_SECRET_CHARS} ký tự hoặc quá 2 giá trị)` +
+        (kept.length ? '' : ' -> lưới hứng TẮT: mọi header x-catchnet-* bị bỏ qua'),
+    );
+  }
+  return kept;
+}
+
+/**
+ * `CATCHNET_RETENTION_DAYS` (mặc định 7, nguyên 1..30; sai khuôn -> 7) -> ms. Cùng giá trị với Worker (§13).
+ * REVIEW-LH3 T-3: kẹp ≤ EVENT_RETENTION_DAYS — raw có received_at cũ hơn retention đã ngoài vòng đời event (mồ côi,
+ * cleanup), nhận về cũng không cứu được.
+ */
 export function catchnetRetentionMs(env: Env = process.env): number {
   const n = Number(env.CATCHNET_RETENTION_DAYS);
   const days = Number.isInteger(n) && n >= 1 && n <= 30 ? n : DEFAULT_CATCHNET_RETENTION_DAYS;
-  return days * DAY_MS;
+  const cap = Math.max(1, Math.floor(eventRetentionDaysFromEnv(env as NodeJS.ProcessEnv)));
+  return Math.min(days, cap) * DAY_MS;
 }
 
 export function catchnetVia(mode: CatchnetMode): 'catchnet-forward' | 'catchnet-replay' {
@@ -107,7 +134,8 @@ export function verifyCatchnetHeaders(
   if (!sig || id === null || !ID_RE.test(id) || at === null || !MS_RE.test(at) || ip === null || net.isIP(ip) === 0) return null;
   if (mode === null || !MODES.has(mode) || !METHOD_RE.test(method) || !target.startsWith('/')) return null;
   const receivedAtMs = Number(at);
-  if (!Number.isFinite(nowMs) || Math.abs(nowMs - receivedAtMs) > catchnetRetentionMs(env)) return null;
+  // Quá khứ ≤ hạn giữ; tương lai ≤ lệch đồng hồ (T-2).
+  if (!Number.isFinite(nowMs) || nowMs - receivedAtMs > catchnetRetentionMs(env) || receivedAtMs - nowMs > CATCHNET_FUTURE_SKEW_MS) return null;
   if (!matchesAny(sig[1], secrets, `${id}.${at}.${ip}.${mode}.${method}.${target}`)) return null;
   return { id, receivedAtMs, clientIp: ip, mode: mode as CatchnetMode };
 }
