@@ -281,7 +281,7 @@ export function CheckoutModal() {
         {/* UI-MS: bước ở trên đứng yên, chỉ phần này cuộn (khung .ckbox không bao giờ cao quá khung nhìn) */}
         <div className="ckbody">
         {!order && (
-          <form onSubmit={submit} noValidate>
+          <form id="ckForm" onSubmit={submit} noValidate>
             <h4 className="cktitle">Thông tin nhận món</h4>
             <div className="row g-3">
               <div className="col-sm-6">
@@ -354,17 +354,6 @@ export function CheckoutModal() {
               <strong>{formatVnd(cartSubtotal(items, products))}</strong>
             </div>
             {submitError && <p className="ckerr mt-2">{submitError}</p>}
-            <button type="submit" className="mpaddcart mt-3" disabled={submitting || items.length === 0}>
-              {submitting ? (
-                <>
-                  <i className="fas fa-spinner fa-spin" /> Đang tạo đơn...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-qrcode" /> Tạo đơn &amp; lấy mã QR
-                </>
-              )}
-            </button>
           </form>
         )}
 
@@ -503,16 +492,6 @@ export function CheckoutModal() {
                 {simError && <p className="ckerr mt-2">{simError}</p>}
               </div>
             )}
-
-            {finished || timedOut ? (
-              <button type="button" className="mpaddcart mt-3" onClick={resetOrder}>
-                Tạo đơn mới
-              </button>
-            ) : (
-              <button type="button" className="ckcancel mt-3" onClick={resetOrder}>
-                Đổi món / tạo đơn mới
-              </button>
-            )}
           </div>
         )}
 
@@ -523,11 +502,40 @@ export function CheckoutModal() {
             <p>
               Đơn <strong>{order.orderCode}</strong> đã nhận {formatVnd(paid || amount)}. Bếp đang chuẩn bị món cho bạn.
             </p>
-            <button type="button" className="mpaddcart mt-3" onClick={close}>
-              Tiếp tục xem thực đơn
-            </button>
           </div>
         )}
+        </div>
+
+        {/* Review UI-MS T3: hàng nút hành động đứng yên dưới thân cuộn */}
+        <div className="ckfoot">
+          {!order && (
+            <button type="submit" form="ckForm" className="mpaddcart" disabled={submitting || items.length === 0}>
+              {submitting ? (
+                <>
+                  <i className="fas fa-spinner fa-spin" /> Đang tạo đơn...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-qrcode" /> Tạo đơn &amp; lấy mã QR
+                </>
+              )}
+            </button>
+          )}
+          {order && status !== "PAID" &&
+            (finished || timedOut ? (
+              <button type="button" className="mpaddcart" onClick={resetOrder}>
+                Tạo đơn mới
+              </button>
+            ) : (
+              <button type="button" className="ckcancel" onClick={resetOrder}>
+                Đổi món / tạo đơn mới
+              </button>
+            ))}
+          {order && status === "PAID" && (
+            <button type="button" className="mpaddcart" onClick={close}>
+              Tiếp tục xem thực đơn
+            </button>
+          )}
         </div>
       </div>
     </div>

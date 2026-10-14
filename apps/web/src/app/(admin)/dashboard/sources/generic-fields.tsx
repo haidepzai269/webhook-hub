@@ -182,6 +182,7 @@ function TextField({
   label,
   placeholder,
   hint,
+  wide = false,
 }: {
   control: Control<SourceFormValues>;
   name:
@@ -213,13 +214,15 @@ function TextField({
   label: string;
   placeholder: string;
   hint: string;
+  /** Ô dài (chuỗi ký) — chiếm cả hàng khi form xếp 2 cột (UI-MS review T2). */
+  wide?: boolean;
 }) {
   return (
     <Controller
       control={control}
       name={name}
       render={({ field, fieldState }) => (
-        <Field className="gap-1.5" data-invalid={fieldState.invalid}>
+        <Field className={wide ? "gap-1.5 sm:col-span-2" : "gap-1.5"} data-invalid={fieldState.invalid}>
           <FieldLabel htmlFor={id}>{label}</FieldLabel>
           <Input {...field} id={id} placeholder={placeholder} aria-invalid={fieldState.invalid} />
           <FieldDescription>{hint}</FieldDescription>
@@ -307,7 +310,7 @@ export function GenericFields({
         />
       )}
       {tpl && (
-        <Field className="gap-1.5">
+        <Field className="gap-1.5 sm:col-span-2">
           <FieldLabel>{t("page.sources.generic.preset")}</FieldLabel>
           <div className="flex flex-wrap gap-2">
             {(Object.keys(TEMPLATE_PRESETS) as TemplatePreset[]).map((p) => (
@@ -324,6 +327,7 @@ export function GenericFields({
           control={control}
           name="template"
           id="src-template"
+          wide
           label={t("page.sources.generic.template")}
           placeholder="v0:{timestamp}:{body}"
           hint={t("page.sources.generic.template-hint")}

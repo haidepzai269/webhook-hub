@@ -518,8 +518,26 @@ button.sovcat {
 @media (max-width: 991px) {
   .mpbox .mpimg {
     min-height: 0;
+    height: 30vh; /* dự phòng trình duyệt chưa có dvh (review T8) */
     height: min(240px, 30dvh);
   }
+  /* Review T4: hộp cuộn cả khối trên màn hẹp -> nút đóng dính trên cùng, không trôi mất.
+     Chiếm một dòng flex cao 0 (margin-bottom âm) nên ảnh vẫn nằm sát mép trên. */
+  .mpbox > .mpclose {
+    position: sticky;
+    top: 14px;
+    right: auto;
+    margin: 14px 14px -48px auto;
+  }
+}
+/* Review T3: hàng nút của thanh toán đứng yên dưới phần cuộn */
+.ckfoot {
+  flex-shrink: 0;
+  padding-top: 14px;
+  text-align: center;
+}
+.ckfoot:empty {
+  display: none;
 }
 .cartlist {
   min-height: 0;

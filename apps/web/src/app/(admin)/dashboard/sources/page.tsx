@@ -491,8 +491,8 @@ export default function SourcesPage() {
         description={t("page.sources.form.description")}
         formId="source-form"
         submitting={create.isPending}
-        // UI-MS: nguồn generic có nhiều ô ký -> cỡ lg + 2 cột; provider có sẵn giữ md
-        size={provider === "generic" ? "lg" : "md"}
+        // UI-MS: một cỡ cố định (lg) — đổi provider không làm hộp nhảy cỡ (review T2); generic dùng lưới 2 cột
+        size="lg"
       >
         <form id="source-form" noValidate autoComplete="off" onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup className="gap-4">
