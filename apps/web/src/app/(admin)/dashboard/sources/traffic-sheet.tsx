@@ -13,7 +13,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -53,14 +53,16 @@ export function TrafficSheet({ source, onClose }: { source: Source | null; onClo
   const t = useT();
   return (
     <Sheet open={Boolean(source)} onOpenChange={(o) => !o && onClose()}>
-      <AdminSheetContent className="w-full gap-0 overflow-y-auto data-[side=right]:sm:max-w-2xl">
+      <AdminSheetContent size="lg">
         {source && (
           <>
             <SheetHeader>
               <SheetTitle>{t("traffic.title", { name: source.name })}</SheetTitle>
               <SheetDescription>{t("traffic.description")}</SheetDescription>
             </SheetHeader>
-            <TrafficBlock sourceId={source.id} />
+            <SheetBody>
+              <TrafficBlock sourceId={source.id} />
+            </SheetBody>
           </>
         )}
       </AdminSheetContent>
@@ -93,7 +95,7 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
   const blocked = blockedNowText(data?.blockedNow, t);
 
   return (
-    <div className="space-y-4 px-4 pb-6">
+    <div className="space-y-4 px-4 pt-4 pb-6">
       <ToggleGroup
         type="single"
         variant="outline"

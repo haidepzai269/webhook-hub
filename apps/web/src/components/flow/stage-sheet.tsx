@@ -6,7 +6,7 @@ import type { FlowBranch, StageView } from "@hub/flow";
 
 import { useT } from "@/lib/i18n/use-t";
 import { AdminSheetContent } from "@/components/admin/overlay-content";
-import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 import { HeadersCard } from "./detail-cards";
 import { JsonViewer } from "./json-viewer";
@@ -29,7 +29,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
 
   return (
     <Sheet open={Boolean(stage)} onOpenChange={(o) => !o && onClose()}>
-      <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
+      <AdminSheetContent size="lg">
         {stage && (
           <>
             <SheetHeader>
@@ -48,7 +48,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
                 {branch ? ` · ${branch.destination.name}` : ""}
               </p>
             </SheetHeader>
-            <div className="space-y-4 px-4 pb-6">
+            <SheetBody className="space-y-4 px-4 pt-4 pb-6">
               {stage.reason && (
                 <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--flow-crashed)" }}>
                   <div className="font-mono text-xs" style={{ color: "var(--flow-crashed)" }}>
@@ -101,7 +101,7 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
                   maxHeight="28rem"
                 />
               )}
-            </div>
+            </SheetBody>
           </>
         )}
       </AdminSheetContent>
