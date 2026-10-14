@@ -531,7 +531,7 @@ CREATE TABLE sources_sync (
 
 - ✅ LH-S (spike, không có mã test nên không dùng dạng tick của `verify:map`) — spike Worker nháp: cổng ĐẠT (S1 Stripe, S2 PayOS kênh thật, S3 GitHub, S5 bytes), S6 đạt, S7 mới đo lúc hub thức, S4 SePay hoãn. Kết quả ở `SPIKE-workers-dev.md`
 - [x] **LH-URL** — §9 tách `HUB_INGEST_PUBLIC_URL` (`[LH:T17]`, ADR-211). REVIEW-LH-URL ĐẠT (0 Nặng / 0 TB). Nợ Thấp L1–L6 ghi ở §16
-- [ ] **LH3** — hub nhận request từ lưới (H1, H3, H4, H5): `[LH:T11]`–`[LH:T13]`, `[LH:T18]` (phía hub), `[LH:T19]` (H4, sửa REVIEW-LH-URL L1), `[LH:T20]` (H5), `[LH:T21]` (H1); ADR-217, ADR-221
+- [x] **LH3** — REVIEW-LH3-R2 ĐẠT (0 Nặng/0 TB; nợ Thấp R2-L1 limit_conn /hooks nới cho mọi IP → cân nhắc `geo` dải Cloudflare, R2-L2 log khi kẹp hạn + sửa DEPLOYMENT, R2-L4 cảnh báo secret lúc khởi động) · hub nhận request từ lưới (H1, H3, H4, H5): `[LH:T11]`–`[LH:T13]`, `[LH:T18]` (phía hub), `[LH:T19]` (H4, sửa REVIEW-LH-URL L1), `[LH:T20]` (H5), `[LH:T21]` (H1); ADR-217, ADR-221
 - [ ] **LH2** · [ ] **LH0** · [ ] **LH6** · [ ] **LH5** · [ ] **LH1** · [ ] **LH4** · [ ] **LH7**
 
 ## 16. Ghi chú / nợ phát hiện khi code
