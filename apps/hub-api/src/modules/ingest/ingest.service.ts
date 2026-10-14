@@ -484,7 +484,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       },
       // PK5 (E14): cờ project nạp CÙNG câu với source (+0 lượt DB). Lõi chỉ chuyển qua — adapter quyết (khoá 1).
       projectFlags: { allowUnverified: (source as { allowUnverified?: unknown }).allowUnverified === true },
-      // PK5 (E6/E18): URL công khai của request dựng từ HUB_PUBLIC_URL (cùng hàm "Kết nối provider"), KHÔNG từ Host. Lười.
+      // PK5 (E6/E18): URL công khai của request dựng từ base ingest (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL — ADR-211;
+      // cùng hàm "Kết nối provider"), KHÔNG từ Host. Lười.
       publicUrl: () => publicHooksUrl(req),
     };
     // 2 (PK4, §6.2, E27): method. Không cài `acceptsMethod` = chỉ POST; HEAD chỉ khi adapter nhận (`head-ok`, ADR-205 bổ sung). 405 không ghi DB, không phạt, không vào
@@ -765,8 +766,9 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error' };
 
 /**
- * PK5 (E6/E18, ADR-206): URL công khai đầy đủ của request `/hooks` — `HUB_PUBLIC_URL` qua `publicIngestBase` (cùng hàm "Kết
- * nối provider"; localhost / IP nội bộ -> null) + path + query gốc. KHÔNG BAO GIỜ dựng từ `Host` (giả được). Thuần.
+ * PK5 (E6/E18, ADR-206): URL công khai đầy đủ của request `/hooks` — base ingest qua `publicIngestBase` (ADR-211:
+ * `HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL`; cùng hàm "Kết nối provider"; localhost / IP nội bộ -> null) + path +
+ * query gốc. KHÔNG BAO GIỜ dựng từ `Host` (giả được). Thuần. LH3 (H4): base theo đường request đi vào — sửa ở publicIngestBase.
  */
 export function publicHooksUrl(req: Pick<RawWebhookRequest, 'provider' | 'sourceKey' | 'query'>, env: Record<string, string | undefined> = process.env): string | null {
   const base = publicIngestBase(env);

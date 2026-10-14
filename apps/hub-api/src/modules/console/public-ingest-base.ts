@@ -1,16 +1,35 @@
 import * as net from 'net';
 import { isLinkLocalIp, isPrivateIp } from '@hub/crypto';
 
+/** Tên biến môi trường đang quyết định URL ingest — lời nhắc lỗi / DRIFTED phải gọi đúng biến này. */
+export type IngestUrlVar = 'HUB_INGEST_PUBLIC_URL' | 'HUB_PUBLIC_URL';
+
 /**
- * KN2 (SPEC-ket-noi §4.4): URL công khai mà provider gọi vào. `HUB_PUBLIC_URL` là localhost / IP nội bộ / tên một nhãn
- * (vd `hub-api` trong docker) -> null (422 `public_url_required`, KHÔNG gọi provider).
- * Ngoài production, `CONNECTOR_INGEST_BASE_URL` thay hẳn (stack kiểm chứng: fake provider trong sink gọi `http://hub-api:4000`);
- * production có biến này -> app không khởi động (testOnlyConfigProblems).
+ * §9 SPEC-hub-sap (ADR-211): `HUB_INGEST_PUBLIC_URL` = URL provider gọi vào (`/hooks/*`), tách khỏi `HUB_PUBLIC_URL`
+ * (API, console, connection string). Thiếu / chỉ khoảng trắng -> rơi về `HUB_PUBLIC_URL` y như trước khi tách.
+ * Có giá trị mà không công khai -> KHÔNG rơi về (publicIngestBase trả null): cấu hình sai phải lộ ra, không âm thầm
+ * đăng ký URL Render cho source mới.
  */
-export function publicIngestBase(env: Record<string, string | undefined> = process.env): string | null {
-  const override = env.NODE_ENV === 'production' ? '' : (env.CONNECTOR_INGEST_BASE_URL ?? '').trim();
+export function ingestPublicUrlVar(env: Record<string, string | undefined> = process.env): IngestUrlVar {
+  return (env.HUB_INGEST_PUBLIC_URL ?? '').trim() ? 'HUB_INGEST_PUBLIC_URL' : 'HUB_PUBLIC_URL';
+}
+
+/**
+ * KN2 (SPEC-ket-noi §4.4) + §9 (ADR-211): MỘT hàm duy nhất trả base URL ingest công khai — đăng ký PayOS/Stripe, so
+ * DRIFTED `public_url_changed`, `publicHooksUrl()` (unverified/forwardUrl, provider ký trên URL), URL console cho dev copy.
+ * Base = `HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL`. Localhost / IP nội bộ / tên một nhãn (vd `hub-api` trong
+ * docker) -> null (422 `public_url_required`, KHÔNG gọi provider).
+ * Ngoài production, `CONNECTOR_INGEST_BASE_URL` thay hẳn (stack kiểm chứng: fake provider trong sink gọi `http://hub-api:4000`);
+ * production có biến này -> app không khởi động (testOnlyConfigProblems). `connectorOverride: false` bỏ qua nó (URL hiện
+ * cho người — tên trong mạng docker không mở được từ trình duyệt).
+ *
+ * LH3 (H4) móc Ở ĐÂY: request đi qua lưới hứng (chữ ký lưới hợp lệ) -> base lưới; đi thẳng Render -> `HUB_PUBLIC_URL`.
+ * Mọi chỗ dựng URL ingest phải đi qua hàm này để LH3 chỉ sửa một nơi.
+ */
+export function publicIngestBase(env: Record<string, string | undefined> = process.env, opts: { connectorOverride?: boolean } = {}): string | null {
+  const override = opts.connectorOverride === false || env.NODE_ENV === 'production' ? '' : (env.CONNECTOR_INGEST_BASE_URL ?? '').trim();
   if (override) return override.replace(/\/$/, '');
-  const raw = (env.HUB_PUBLIC_URL ?? '').trim().replace(/\/$/, '');
+  const raw = (env[ingestPublicUrlVar(env)] ?? '').trim().replace(/\/$/, '');
   let u: URL;
   try {
     u = new URL(raw);
@@ -23,4 +42,10 @@ export function publicIngestBase(env: Record<string, string | undefined> = proce
   if (net.isIP(host)) return isPrivateIp(host) || isLinkLocalIp(host) ? null : raw;
   if (!host.includes('.')) return null;
   return raw;
+}
+
+/** URL ingest tuyệt đối của một source cho console hiện / dev copy; hub không có URL công khai -> null (web tự ghép). */
+export function sourceIngestUrl(provider: string, sourceKey: string, env: Record<string, string | undefined> = process.env): string | null {
+  const base = publicIngestBase(env, { connectorOverride: false });
+  return base ? `${base}/hooks/${provider}/${sourceKey}` : null;
 }

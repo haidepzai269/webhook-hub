@@ -35,7 +35,7 @@ export function testOnlyConfigProblems(env: Record<string, string | undefined>):
     }
   }
   if ((env.CONNECTOR_INGEST_BASE_URL ?? '').trim()) {
-    problems.push('CONNECTOR_INGEST_BASE_URL chỉ dành cho kiểm chứng — production đăng ký URL ingest theo HUB_PUBLIC_URL');
+    problems.push('CONNECTOR_INGEST_BASE_URL chỉ dành cho kiểm chứng — production đăng ký URL ingest theo HUB_INGEST_PUBLIC_URL (thiếu thì HUB_PUBLIC_URL)');
   }
   return problems;
 }

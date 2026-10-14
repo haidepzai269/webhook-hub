@@ -634,6 +634,14 @@ HUB_PUBLIC_URL=          # hub-api: URL https CÔNG KHAI của CHÍNH hub-api, v
                          # URL Vercel, không đuôi /). "Kết nối provider" (SPEC-ket-noi, ADR-138/151) đăng ký
                          # <HUB_PUBLIC_URL>/hooks/<provider>/<sourceKey> tại PayOS/Stripe. Thiếu / localhost / IP nội bộ ->
                          # 422 public_url_required (app vẫn chạy). Đổi domain -> kết nối báo DRIFTED, bấm "Kết nối lại".
+                         # Vẫn là host trong connection string (hubs://<key>@<host>/<project>) và gốc API/console.
+HUB_INGEST_PUBLIC_URL=   # hub-api (ADR-211, SPEC-hub-sap §9): URL provider gọi vào (/hooks/*), tách khỏi HUB_PUBLIC_URL.
+                         # Trống / không đặt -> = HUB_PUBLIC_URL (hành vi cũ, không cần làm gì). Đặt thì MỌI URL ingest
+                         # dùng nó: "Kết nối provider" đăng ký <HUB_INGEST_PUBLIC_URL>/hooks/<provider>/<sourceKey>,
+                         # console hiện URL đó cho dev copy, url của unverified/forwardUrl. Connection string KHÔNG đổi.
+                         # Lưới hứng (ADR-220): https://hub-hooks.webhookhub.workers.dev. Đổi giá trị -> kết nối
+                         # PayOS/Stripe báo DRIFTED public_url_changed, bấm "Kết nối lại". Đặt mà localhost/IP nội bộ
+                         # -> 422 public_url_required (KHÔNG rơi về HUB_PUBLIC_URL).
 
 # --- KHÔNG BAO GIỜ đặt trên production (hub-api VÀ hub-worker) — chỉ cho stack kiểm chứng / test ---
 # *_FAKE_BASE_URL (PAYOS_/STRIPE_/GITHUB_/GOOGLE_OAUTH_…)  -> NODE_ENV=production + có giá trị: app THOÁT lúc khởi động

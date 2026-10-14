@@ -1020,7 +1020,7 @@ Console có hai nút "một bước" thay cho làm tay ở hai đầu:
 
 ```
 1. TX: Source + SourceSecret (secret ký dev nhập, vd checksumKey) + source_connections PENDING + audit  → COMMIT
-2. NGOÀI TX: connector.connect(ingestUrl = HUB_PUBLIC_URL/hooks/<provider>/<sourceKey>)
+2. NGOÀI TX: connector.connect(ingestUrl = HUB_INGEST_PUBLIC_URL (thiếu thì HUB_PUBLIC_URL, ADR-211)/hooks/<provider>/<sourceKey>)
       ↳ provider bắn request kiểm tra vào ingest NGAY lúc này → source phải tồn tại, verify được, trả 200
 3. TX: CONNECTED + display (+ SourceSecret do provider sinh) | FAILED + last_error/last_fix (source giữ lại, "Thử lại")
 ```

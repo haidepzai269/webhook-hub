@@ -305,8 +305,8 @@ export const ERROR_CATALOG = {
   },
   public_url_required: {
     status: 422,
-    message: 'HUB_PUBLIC_URL is not reachable from the internet, so the provider cannot call the hub.',
-    fix: () => 'Use a named cloudflared tunnel or the deployed hub, and set HUB_PUBLIC_URL to its public https URL.',
+    message: 'The ingest URL (HUB_INGEST_PUBLIC_URL, or HUB_PUBLIC_URL when unset) is not reachable from the internet, so the provider cannot call the hub.',
+    fix: () => 'Use a named cloudflared tunnel or the deployed hub, and set HUB_INGEST_PUBLIC_URL (or HUB_PUBLIC_URL when the provider calls hub-api directly) to its public https URL.',
   },
   overwrite_not_acknowledged: {
     status: 422,

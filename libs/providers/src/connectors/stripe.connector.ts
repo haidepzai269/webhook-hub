@@ -13,7 +13,7 @@ function fail(status: number, body: any): never {
   const says = providerSays(body?.error?.message);
   if (status === 401) throw new ConnectorError('invalid_credentials', `Stripe từ chối key${says}. Dán lại restricted key (rk_…) của đúng tài khoản/chế độ.`);
   if (status === 403) throw new ConnectorError('insufficient_permissions', `Key thiếu quyền${says}. Tạo restricted key có quyền "Webhook Endpoints: Write".`);
-  throw new ConnectorError('stripe_rejected', `Stripe không tạo được webhook endpoint${says}. Kiểm HUB_PUBLIC_URL là https công khai.`);
+  throw new ConnectorError('stripe_rejected', `Stripe không tạo được webhook endpoint${says}. Kiểm URL ingest (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL) là https công khai.`);
 }
 
 /**

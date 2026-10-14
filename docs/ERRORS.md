@@ -501,11 +501,12 @@ curl -si -X POST "$API/api/v1/sources/connect?projectId=$PID" -b cookies.txt -H 
 
 ## public_url_required
 
-**422.** `HUB_PUBLIC_URL` là localhost / IP nội bộ: provider ngoài internet không gọi vào được, nên hub không đăng ký.
+**422.** URL ingest là localhost / IP nội bộ: provider ngoài internet không gọi vào được, nên hub không đăng ký.
+URL ingest = `HUB_INGEST_PUBLIC_URL`, không đặt thì `HUB_PUBLIC_URL` (ADR-211); `detail` nêu đúng biến đang có hiệu lực.
 Không có lời gọi nào tới provider.
-**Sửa:** dùng named tunnel (cloudflared) hoặc bản deployed, đặt `HUB_PUBLIC_URL` là URL https công khai.
+**Sửa:** dùng named tunnel (cloudflared) hoặc bản deployed, đặt biến đó là URL https công khai.
 ```bash
-HUB_PUBLIC_URL=https://hub.example.com npm run start:api
+HUB_INGEST_PUBLIC_URL=https://hub-hooks.example.workers.dev npm run start:api   # hoặc HUB_PUBLIC_URL=… khi provider gọi thẳng hub-api
 ```
 
 ## overwrite_not_acknowledged

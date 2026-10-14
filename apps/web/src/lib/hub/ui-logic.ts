@@ -162,7 +162,8 @@ export function errorMessageOf(body: unknown, t: TranslateFn): string {
   const b = body as { detail?: unknown; message?: unknown; error?: unknown; requestId?: unknown };
   const key = typeof b.error === "string" ? apiErrorKey(b.error) : null;
   let text = "";
-  // Admin gặp 422 vì HUB_PUBLIC_URL chưa đặt trên Render: nói ĐÚNG biến nào, đặt ở đâu (thắng detail của hub).
+  // Admin gặp 422 vì URL ingest chưa đặt trên Render: nói ĐÚNG biến nào (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL —
+  // ADR-211), đặt ở đâu (thắng detail của hub).
   if (b.error === "public_url_required") text = t("errors.api.public-url-required");
   else if (typeof b.detail === "string" && b.detail) text = b.detail;
   else if (key) text = t(key);
