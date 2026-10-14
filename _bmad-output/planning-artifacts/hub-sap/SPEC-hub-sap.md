@@ -2,10 +2,115 @@
 
 > Phòng party viết ngày 2026-10-13. Spec chỉ mô tả việc cần làm, **chưa có code**. Admin giao cho phiên dev.
 > Tiền tố mã test là `LH:`. Phải thêm namespace `LH` vào `verify/spec-sources.json` **trước** khi viết test đầu tiên, theo dạng khai báo của `BP`.
-> **Số ADR bắt đầu từ ADR-211.** BP giữ 195–200, PK giữ 201–210. Grep lại trước khi ghi: `git grep -oh "ADR-2[0-9][0-9]" master -- docs _bmad-output | sort -u`.
+> **Dải ADR của LH là 211–229** (Admin chốt 2026-10-14; PK dùng 230 trở đi). BP giữ 195–200, PK chặng 1–4 giữ 201–210. Grep lại trước khi ghi: `git grep -oh "ADR-2[0-9][0-9]" master -- docs _bmad-output | sort -u`.
+> **Đọc mục "ĐÍNH CHÍNH H1–H13" ngay dưới đây trước.** Khi đính chính và phần thân khác nhau thì đính chính thắng.
 > Thứ tự giao dev ở §11. **§9 (URL công khai) đã chốt 2026-10-14: `workers.dev` + chạy song song.**
 > **Mỗi mục có khối "Vì sao sửa"**: chuyện gì hỏng, kịch bản cụ thể, vì sao chọn cách này mà không chọn cách khác. Agent dev phải dùng khối này làm dòng **Vấn đề / Đánh đổi** của ADR và làm thân commit. Không viết lại lý do theo trí nhớ. Nếu lúc code thấy lý do không còn đúng thì dừng lại và báo phòng.
 > **Số liệu gói free và hành vi retry của provider** (§1) là kết quả tra web ngày 2026-10-13. Dev đối chiếu trang chính thức lúc làm và ghi ngày tra vào ADR. Lệch thì trang chính thức thắng, ghi vào §16.
+
+## ĐÍNH CHÍNH H1–H13 (phòng soi spec với code master `305a402`, 2026-10-14; thắng phần thân)
+
+Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đúng những chỗ lưới hứng chạm vào. Lõi thiết kế vẫn giữ nguyên: ghi xuyên, Worker không giữ secret, một cửa `/hooks/*`. Các mối nối dưới đây phải sửa trước khi code.
+
+**H1 (Nặng). Hub từ chối bằng 503 không được bị hiểu là "hub vắng".**
+- **Vì sao:** PK4 cho source đặt `ack.rejectStatus: 503` khi chữ ký sai (`libs/providers/src/generic-config.ts:57`, ADR-205). §4.1 lại coi mọi 5xx là hub chết, nên Worker sẽ ghi D1 và trả 2xx cho một request chữ ký rác. Kẻ xấu vòng được qua hộp phạt EG2 và làm đầy D1 tới trần.
+- **Sửa:**
+  - Mọi phản hồi từ `/hooks/*` do hub **cố ý** trả đều mang header `x-hub-outcome: accepted | duplicate | rejected | handshake | refused`. Lỗi tạm thời thì không mang header này (vd DB down, đúng BB-3), hoặc mang `x-hub-outcome: unavailable`.
+  - Worker coi là "hub vắng" **chỉ khi** gặp timeout, lỗi mạng, hoặc 5xx **mà không** có `x-hub-outcome`, hoặc có `x-hub-outcome: unavailable`. Có outcome khác thì trả nguyên phản hồi cho provider, **không** ghi D1.
+  - Worker không chuyển header `x-hub-outcome` ra cho provider.
+  - Test `[LH:T18]`: source `rejectStatus: 503` + chữ ký sai → provider nhận 503, D1 rỗng.
+
+**H2 (Nặng). Phát lại gặp 429 không được chuyển sang `inbox_dead`.**
+- **Vì sao:** §4.4 viết "4xx → `inbox_dead`". Nhưng hub trả 429 khi vượt rate limit 100/phút/source, và cổng phạt cũng trả 429. Hub vừa thức, phát lại cộng lưu lượng mới vượt trần, thì sự kiện thật thành hàng chết.
+- **Sửa:**
+  - 408, 429, và mọi 5xx mà H1 coi là "hub vắng" → retry. Có `Retry-After` thì `next_at ≥` giá trị đó.
+  - Chỉ chuyển sang `inbox_dead` khi hub trả 4xx khác **có** `x-hub-outcome: rejected | refused`, hoặc trả 404 (source không còn).
+  - Test `[LH:T8]` thêm ca 429 → `next_at` lùi, dòng còn nguyên.
+
+**H3 (Nặng). Chữ ký lưới phải kiểm được ở cổng phạt, mà cổng chạy trước khi đọc body.**
+- **Vì sao:** `apps/hub-api/src/modules/ingest/penalty-gate.ts` chạy **trước body parser** (D3, ADR-177), có chủ ý không đọc body rác. Chữ ký §5 lại có `sha256(body)` nên không kiểm được ở cổng. Hệ quả là IP Cloudflare vẫn bị phạt chung, F7 không được giải.
+- **Sửa:** tách thành hai chữ ký.
+  - `x-catchnet-signature: v1=HMAC(secret, id.received_at.client_ip.mode.method.path_and_query)`. Không có body. Cổng phạt kiểm chữ ký này để lấy `client_ip`.
+  - `x-catchnet-body-signature: v1=HMAC(secret, id.hex(sha256(body)))`. Hub kiểm sau khi parse body: tự tính `sha256(rawBody)`, dựng lại HMAC rồi so bằng `timingSafeEqual`. **Chỉ khi khớp** thì `receivedAt` của lưới mới được dùng làm `ctx.verifyAt`.
+  - Chữ ký đầu đúng mà body lệch → bỏ `receivedAt` (verify theo `Date.now()`), vẫn dùng IP đã ký cho hộp phạt.
+- **Code có sẵn:** `AdapterContext.verifyAt` đã có (`libs/providers/src/generic.adapter.ts:454`). LH3 chỉ đổ giá trị vào đó, rồi sửa `stripe.adapter.ts:33` truyền `receivedAt` vào `constructEvent` (ADR-174 vẫn đúng: cùng hàm của SDK, chỉ thêm tham số).
+
+**H4 (Trung bình). URL công khai của request phụ thuộc đường nó đi vào.**
+- **Vì sao:** F9 bỏ sót `publicHooksUrl()` (`apps/hub-api/src/modules/ingest/ingest.service.ts:768`) và `public-ingest-base.ts`. Hai chỗ này do PK5 thêm, dùng cho `unverified` + `forwardUrl`, và cho provider ký trên URL (Twilio trong danh mục). Theo U-C, source mới đi `workers.dev`, còn source cũ đi thẳng Render.
+- **Sửa:**
+  - Request có chữ ký lưới hợp lệ (H3) → URL = `HUB_INGEST_PUBLIC_URL` + path + query.
+  - Không có → `HUB_PUBLIC_URL` như cũ.
+  - Commit §9 (`[LH:T17]`) phải sửa cả hai chỗ trên. Phần chọn base theo header lưới thì làm ở LH3.
+
+**H5 (Trung bình). `raw_events.via` phải phân biệt chuyển tiếp với phát lại.**
+- **Vì sao:** ghi xuyên thì lúc hub sống, mọi request vẫn đi qua Worker. Một giá trị `'catchnet'` làm báo cáo "lưới đã cứu" đếm gấp hàng trăm lần.
+- **Sửa:**
+  - Worker gửi `x-catchnet-mode: forward | replay`. Header này nằm trong chuỗi ký H3.
+  - `via` nhận giá trị `'catchnet-forward' | 'catchnet-replay' | NULL`.
+  - Nhãn "đã được lưới bảo vệ" (§9) tắt khi gặp một trong hai giá trị. Số "lưới đã cứu" chỉ đếm `catchnet-replay`.
+
+**H6 (Trung bình). Không hứng request bắt tay.**
+- **Vì sao:** khi hub vắng, Worker trả `{"ok":true}` cho GET `hub.challenge` (Meta) hay `url_verification` (Slack). Provider sẽ báo "xác minh URL thất bại", và hub phát lại một handshake thì cũng vô nghĩa.
+- **Sửa:**
+  - `sources_sync` thêm cột `catch_methods TEXT NOT NULL DEFAULT 'POST'`. GET/HEAD **không bao giờ** được hứng, trừ khi source khai báo GET là sự kiện (VNPay IPN, sau PK6). Request không được hứng mà hub vắng → 503.
+  - Bắt tay nằm trong body (Slack) thì Worker không nhận ra được. Chấp nhận: provider báo lỗi xác minh, dev bấm lại. Khi phát lại, hub ghi một dòng `handshake` vô hại. Ghi vào ADR-215.
+
+**H7 (Thấp). Tham chiếu cũ trong spec.**
+- "PK2 (danh mục)" là **PK9** (`libs/providers/src/catalog`, ADR-208).
+- `buildAck(result, ctx)` **đã có** (`provider.interface.ts:252`), cùng `ack.successStatus` 200/202/204 của PK4. Dùng luôn, không chờ PK6.
+- Hiện chưa có adapter VNPay hay MoMo. GET sự kiện cần PK6 bên hub. `[LH:T9]` chỉ kiểm phía Worker (lưu và phát lại giữ nguyên query); nửa phía hub làm sau PK6.
+- Code ở F8 đã dời sang `source-connection.service.ts:253-256`.
+
+**H8 (Trung bình). LH5 PayOS và trần Shop.**
+- `apps/shop/src` đang ở **đúng 600/600 dòng**. Commit thay cron bằng `reconcile` phải giảm dòng, báo số dòng trước/sau trong thân commit.
+- Khoá chống trùng PayOS là `payos:${orderCode}:${reference}` (`payos.adapter.ts:78`). `lookupByRef` phải sinh **một item cho mỗi giao dịch** trong `transactions[]`, dùng đúng `reference` của giao dịch đó, không dùng `paymentLinkId`. Nếu không thì `[LH:T15]` ra 2 event.
+
+**H9 (Trung bình). LH0: hub ngủ không phải gián đoạn (Admin chốt 2026-10-14).**
+- **Vì sao:** Render free ngủ cho tới khi có request chạm vào. Heartbeat thuần thì sáng nào cũng có "khoảng hở 7 tiếng", banner thành tiếng ồn, và dev sẽ bỏ qua đúng hôm mất thật. Bản bán thật thì chạy VPS, không ngủ.
+- **Sửa:**
+  - Tắt máy sạch (SIGTERM → graceful shutdown, gồm Render cho ngủ và deploy) ghi `process_heartbeats.stopped_at = now()`.
+  - Lúc khởi động:
+    - `stopped_at` đã đặt → **không** ghi khoảng hở (ngủ hoặc deploy).
+    - Không có `stopped_at` và `last_beat_at` cũ quá 2 × 60s → crash → ghi `outage_gaps (source='heartbeat')`.
+  - Lưới hứng báo phải giữ request → ghi `outage_gaps (source='catchnet')`, kể cả khi hub đang ngủ. Đây là bằng chứng có request bị lỡ.
+  - Banner chỉ hiện với hai loại trên.
+  - **Không** dùng cron Worker ping giữ Render thức (đốt quota Neon và giờ Render).
+  - `[LH:T2]` thêm ca: tắt sạch rồi nằm 3 phút → không ghi gì.
+
+**H10 (Trung bình). Chỗ đặt Worker và cách test.**
+- `apps/catchnet/` nằm **ngoài** npm workspaces gốc: `package.json` và lock riêng, job CI riêng. `wrangler`/`workerd` nặng, không được làm chậm `npm ci` của hub.
+- Test Miniflare chạy trong CI, không chạy trên máy dev yếu.
+- Spike vẫn ở `spikes/catchnet-spike/`.
+- So token và chữ ký ở Worker bằng `crypto.subtle.timingSafeEqual` (API của runtime Workers), kiểm độ dài trước.
+- Body > 1MB (trần ingest của hub) → không hứng, trả 413. D1 có trần kích thước dòng; dev tra và ghi §16.
+
+**H11. Dải ADR.**
+- LH dùng 211–229. Các số ở §12 giữ nguyên; ADR phát sinh thêm dùng từ 221.
+- PK dùng 230+ (PK10 đã dùng ADR-230).
+
+**H12. Thứ tự (thay §11, Admin chốt 2026-10-14: lưới hứng làm TRƯỚC PK6–PK8).**
+
+| # | Story | Phụ thuộc |
+|---|---|---|
+| 1 | §7c mục J trong `KEYS-CAN-LAY.md` + §9 tách `HUB_INGEST_PUBLIC_URL` (gồm H4 phần env) | — |
+| 2 | LH-S spike (cổng) | Admin có tài khoản Cloudflare; Admin có mặt lúc S2 PayOS |
+| 3 | LH3 (H1 header outcome, H3, H4, H5) | LH-S đạt |
+| 4 | LH2 Worker + D1 + phát lại (H2, H6, H10) | LH3 |
+| 5 | LH0 sổ khoảng hở (H9) | — (có migration) |
+| 6 | LH6 chaos LOCAL | LH2, LH3 |
+| 7 | LH5 reconcile PayOS + Shop bỏ cron (H8) | — |
+| 8 | LH1 `recovery` + nhãn 🛡️ | PK10 đã gộp (cùng sửa `catalog.data.ts`) |
+| 9 | LH4 backfill Stripe | LH0 |
+| 10 | LH7 giấy | tất cả |
+
+- Story có migration (LH0, LH3 thêm `raw_events.via`) đặt timestamp **sau** `20261014090000_unverified_sources`.
+- Bật Worker thật `hub-hooks` (`wrangler deploy` tên thật, đặt secret, đổi `HUB_INGEST_PUBLIC_URL` trên Render) là thao tác hạ tầng: **hỏi Admin từng lần**.
+
+**H13. Còn đúng, đã kiểm.**
+- Route `/hooks/:provider/:sourceKey` (GET + POST) khớp §4.1.
+- `swVerify` nhận `nowSec` (F5).
+- `buildAck` dùng được cho ack ở §4.3.
+- `EventOrigin.reconciliation` có sẵn (F2).
 
 ## 0. Bối cảnh và mong muốn của Admin
 
