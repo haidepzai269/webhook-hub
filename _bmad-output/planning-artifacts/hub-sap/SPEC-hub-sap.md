@@ -444,7 +444,7 @@ CREATE TABLE sources_sync (
 **Luật cho U-A (vì URL `workers.dev` ghép từ tên Worker và subdomain tài khoản):**
 - URL có dạng `https://<tên-worker>.<subdomain-tài-khoản>.workers.dev/hooks/:provider/:sourceKey`. **Đổi tên Worker hoặc đổi subdomain tài khoản = đổi URL của MỌI source.** Chọn một lần, ghi vào ADR-220, coi như bất biến.
 - Tên Worker cố định trong `wrangler.toml` (`name = "hub-hooks"` hoặc tên Admin chọn). Không deploy thêm Worker khác cùng tên cho môi trường khác. Môi trường thử dùng tên riêng (`hub-hooks-staging`).
-- Đã chốt: subdomain tài khoản **`webhook-hub`**, tên Worker **`hub-hooks`** → `https://hub-hooks.webhook-hub.workers.dev`.
+- Đã chốt: subdomain tài khoản **`webhookhub`** (`webhook-hub` đã có người dùng, Admin đổi 2026-10-14), tên Worker **`hub-hooks`** → `https://hub-hooks.webhookhub.workers.dev`.
 - `HUB_INGEST_PUBLIC_URL` = URL `workers.dev` đó. `HUB_ORIGIN_URL` của Worker = URL Render thật.
 - Dev kiểm trước khi bật: PayOS `confirm-webhook` và Stripe tạo endpoint **chấp nhận** URL `*.workers.dev`. Bị từ chối thì ghi §16 và báo phòng, **không** tự đổi phương án.
 
@@ -521,7 +521,7 @@ CREATE TABLE sources_sync (
 - ~~Q1 (§9)~~ **Đã chốt 2026-10-14:** U-C + U-A (`workers.dev`, không mua domain).
 - ~~Q2~~ **Đã chốt 2026-10-14:** giữ 7 ngày.
 - ~~Q3~~ **Đã chốt 2026-10-14:** (a) Shop thay cron ADR-009 bằng `reconcile(refs)`.
-- ~~Q4~~ **Đã chốt 2026-10-14:** Admin tự tạo tài khoản Cloudflare free theo hướng dẫn dev viết vào `KEYS-CAN-LAY.md` (§7c). Subdomain tài khoản = **`webhook-hub`** → URL thật `https://hub-hooks.webhook-hub.workers.dev`, URL nháp `https://hub-hooks-spike.webhook-hub.workers.dev`.
+- ~~Q4~~ **Đã chốt 2026-10-14:** Admin tự tạo tài khoản Cloudflare free theo hướng dẫn dev viết vào `KEYS-CAN-LAY.md` (§7c). Subdomain tài khoản = **`webhookhub`** (`webhook-hub` bị chiếm) → URL thật `https://hub-hooks.webhookhub.workers.dev`, URL nháp `https://hub-hooks-spike.webhookhub.workers.dev`.
 
 ## 16. Ghi chú / nợ phát hiện khi code
 
