@@ -21,10 +21,11 @@ import {
   fastFailRedisOptions,
   countsTowardCircuit,
   isNonRetryableHttpStatus,
+  LOG_THROTTLE_INTERVAL_MS,
+  LogThrottle,
 } from '@hub/common';
 import { aesGcmDecrypt } from '@hub/crypto';
 import * as amqp from 'amqplib';
-import { performance } from 'perf_hooks';
 import { createHash } from 'crypto';
 import Redis from 'ioredis';
 
@@ -60,28 +61,9 @@ const UNKNOWN_DEFER = retryQueueForDelay(60_000); // q.delivery.retry.1m
  * BP1 review M3: lỗi hạ tầng lặp lại cho TỪNG message mỗi 10s tới khi DB về -> không log mỗi lần. Tối đa một dòng
  * mỗi `intervalMs` mỗi tiến trình, kèm số lần đã gộp. Đếm trong bộ nhớ (0 lệnh Redis); metric vẫn đếm đủ từng lần.
  */
-export const INFRA_LOG_INTERVAL_MS = 30_000;
-export class LogThrottle {
-  private lastAt = -Infinity;
-  private suppressed = 0;
-  constructor(
-    private readonly intervalMs = INFRA_LOG_INTERVAL_MS,
-    // Đồng hồ đơn điệu (review L2-1): chỉnh giờ hệ thống/NTP không làm log im lâu hay bật lại sớm. Test tiêm đồng hồ giả.
-    private readonly now: () => number = () => performance.now(),
-  ) {}
-  /** Trả số lần đã gộp từ dòng log trước (>= 0) nếu được log lúc này; null nếu phải im. */
-  take(): number | null {
-    const t = this.now();
-    if (t - this.lastAt < this.intervalMs) {
-      this.suppressed++;
-      return null;
-    }
-    const n = this.suppressed;
-    this.lastAt = t;
-    this.suppressed = 0;
-    return n;
-  }
-}
+export const INFRA_LOG_INTERVAL_MS = LOG_THROTTLE_INTERVAL_MS;
+/** Review PK10 T-b: lớp dời về `@hub/common` (hub-api dùng chung); giữ export ở đây cho chỗ import cũ. */
+export { LogThrottle };
 
 /**
  * BP6 (nợ §16 của BP1): message delivery HỎNG (không parse được). `q.delivery.main` KHÔNG có DLX (topology.ts) nên

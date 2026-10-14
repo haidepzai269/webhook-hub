@@ -2270,6 +2270,7 @@ không thấy gì.
 ## ADR-230 — Chống trùng theo id lồng (`idempotency.path`) và theo băm nội dung (`idempotency.bodyHash`) cho nguồn generic (PK10/E31, 2026-10-14)
 
 **Số ADR:** PK giữ 201–210 (209 dành cho PK6/E8, chưa ghi). SPEC-hub-sap giữ "từ ADR-211" không nêu trần và đã nhắc tới ADR-220, nên lấy 230 để không đụng dải đang mở của hub-sap.
+**Dải số PK đã dùng (review PK10 T-d):** **201–210 và 230**. 211–229 để trống cho hub-sap. Số PK kế tiếp lấy từ 231, grep trước khi ghi.
 **Vấn đề:** `validateGenericConfig` chỉ nhận khoá `{header}` hoặc `{field}` cấp một. Bên có id nằm lồng (Heroku `webhook_metadata.event.id`, Pipedrive `meta.id`) hoặc không có id thì không nạp được (REVIEW-PK9 §2). Dev buộc phải bỏ provider đó, vì khoá ngẫu nhiên bị cấm (BB-2: gửi lại sẽ thành 2 sự kiện).
 **Chọn:**
 - **`{path: "a.b.c"}`:** 1–3 cấp, mỗi cấp `^[A-Za-z0-9_-]{1,64}$`. Cấm `__proto__` / `prototype` / `constructor`. Không biểu thức, không chỉ số mảng (§15).
@@ -2294,3 +2295,19 @@ không thấy gì.
 - Với `static-token`, body không được ký: ai có token thì giả được mọi thứ, nhưng khoá vẫn tất định.
 - `path` thiếu giá trị rơi về băm body thay vì 422. Đổi lại, bản ghi sai khuôn của provider vẫn vào luồng (chống trùng theo bytes) thay vì kẹt 422 mãi.
 - Tài liệu Heroku / Pipedrive / Checkout không nói rõ id giữ nguyên khi gửi lại. Điều này được ghi ở `docsVersion` của từng mục.
+**Bổ sung sau review (REVIEW-PK10, 2026-10-14):**
+- **Pipedrive chỉ cho webhook v2.**
+  - Vấn đề: ở v1, `meta.id` là id ĐỐI TƯỢNG. Lần cập nhật thứ hai của cùng deal bị báo DUPLICATE, nên sự kiện mất vĩnh viễn.
+  - Chọn: fingerprint đòi `data` cấp một — khoá chỉ v2 có (v1 dùng `current`; `identify` chỉ đọc khoá cấp một). Nhãn field và `docsVersion` ghi "CHỈ webhook v2; v1 hãy tạo lại webhook v2". Có test: body v1 không khớp mục.
+  - Đánh đổi: dev vẫn chọn tay mục này cho webhook v1 được; chỉ có cảnh báo chặn.
+- **`path` không nhận cấp toàn số** (`items.0.id`), ở cả server lẫn form. Lý do: lúc đọc không đi qua mảng, nên cấu hình kiểu này sẽ âm thầm rơi về băm body.
+- **`path` trỏ vào object / mảng / boolean:**
+  - Vẫn rơi về băm body như trước.
+  - Thêm log warn có nhịp: một dòng mỗi nguồn mỗi 30s, `LogThrottle` dời về `@hub/common`, 0 lệnh Redis.
+  - "Lắng nghe" chẩn đoán `idempotency_path_not_scalar`, chỉ kèm TÊN path.
+- **Id dạng số ngoài `Number.isSafeInteger`** (cả `path` lẫn `field`):
+  - Đọc lại đúng chữ số từ bytes gốc (reviver `JSON.parse` có `source`, Node 22), chỉ ở nhánh hiếm này.
+  - Không đọc được thì `path` rơi về băm body, `field` giữ cách cũ.
+  - Đánh đổi: source có id số lớn đổi khoá một lần, từ dạng đã làm tròn sang dạng đúng. Sự kiện đang được gửi lại qua lúc deploy có thể vào hai lần (nhận trùng, không mất).
+- **Đổi kiểu khoá của nguồn đang chạy** từ `field`/`path` sang `bodyHash`: dải khoá khác, nên sự kiện đang được gửi lại có thể vào hai lần (nhận trùng, không mất). Chấp nhận.
+- **`empty_body`** vào catalog lỗi và `docs/ERRORS.md`. `EMPTY_BODY_FIX` của adapter lấy từ catalog (một nguồn câu).

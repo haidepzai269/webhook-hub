@@ -587,4 +587,14 @@ describe("[PK:T40] (phần d) form: kiểu khoá chống trùng path / bodyHash 
   it("chẩn đoán empty_body có câu riêng (không rơi về unknown)", () => {
     expect(LISTEN_REASON_KEYS.empty_body).toBe("page.sources.listen.reason.empty-body");
   });
+
+  it("review PK10 T-a: cấp toàn số (items.0.id) bị chặn ở form như server; T-b: idempotency_path_not_scalar có câu riêng", () => {
+    for (const p of ["items.0.id", "0", "data.123", "v2.id", "0x.id"]) {
+      expect({ p, web: isIdempotencyPath(p) }).toEqual({ p, web: idempotencyPathProblem(p) === null });
+    }
+    expect(isIdempotencyPath("items.0.id")).toBe(false);
+    const f = { ...FORM, idKind: "path" as const, idValue: "items.0.id" };
+    expect(genericFormIssues(f, "secret_value_x")).toContainEqual({ path: "idValue", issue: "id-path-invalid" });
+    expect(LISTEN_REASON_KEYS.idempotency_path_not_scalar).toBe("page.sources.listen.reason.idempotency-path-not-scalar");
+  });
 });

@@ -263,6 +263,14 @@ Gặp ở nguồn tuỳ chỉnh thiếu cấu hình `idempotency`.
 curl -si -X POST $API/hooks/generic/$SOURCE_KEY -H 'content-type: application/json' -d '{"khong_co_id":1}'
 ```
 
+## empty_body
+
+**422.** Body rỗng trong khi nguồn chống trùng theo **băm nội dung** (`"idempotency": {"bodyHash": true}`, hoặc `path` thiếu giá trị nên phải rơi về băm body). Không có byte nào để băm có nghĩa — mọi request rỗng sẽ thành một khoá và nuốt nhau — nên hub từ chối (REJECTED, chữ ký vẫn đúng) chứ không tự sinh khoá ngẫu nhiên. Chế độ "Lắng nghe" của nguồn chẩn đoán `empty_body`. PK10, ADR-230.
+**Sửa:** chuyển khoá chống trùng sang tiêu đề hoặc trường body duy nhất mỗi sự kiện, hoặc cấu hình nhà cung cấp gửi kèm body.
+```bash
+curl -si -X POST $HUB/hooks/generic/$SOURCE_KEY -H 'content-type: application/json' -H "x-acme-signature: $SIG_CUA_BODY_RONG" --data-binary ''
+```
+
 ## payload_too_large
 
 **413.** Body quá lớn. Tham số: `limit`.

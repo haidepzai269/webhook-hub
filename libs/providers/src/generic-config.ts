@@ -128,6 +128,8 @@ export type IdempotencyKind = (typeof IDEMPOTENCY_KINDS)[number];
 /** PK10: một cấp của `idempotency.path`. */
 export const PATH_SEGMENT_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const PATH_MAX_DEPTH = 3;
+/** Review PK10 T-a: cấp toàn số = chỉ số mảng — cấm (web có bản sao, test đối chiếu). */
+export const PATH_INDEX_SEGMENT_RE = /^[0-9]+$/;
 /** Tên thuộc tính của nguyên mẫu JS — đọc theo đường dẫn không bao giờ được đi vào đây. */
 const PATH_FORBIDDEN_SEGMENTS: readonly string[] = ['__proto__', 'prototype', 'constructor'];
 
@@ -139,6 +141,9 @@ export function idempotencyPathProblem(path: unknown): string | null {
   if (segs.length > PATH_MAX_DEPTH) return `path tối đa ${PATH_MAX_DEPTH} cấp (vd webhook_metadata.event.id)`;
   if (!segs.every((s) => PATH_SEGMENT_RE.test(s))) return rule;
   if (segs.some((s) => PATH_FORBIDDEN_SEGMENTS.includes(s))) return 'path không dùng __proto__ / prototype / constructor';
+  // Review PK10 T-a: cấp toàn số là chỉ số mảng trá hình (`items.0.id`) — lúc đọc không bao giờ đi qua mảng nên sự kiện sẽ
+  // ÂM THẦM rơi về băm body. Chặn ngay lúc lưu.
+  if (segs.some((s) => PATH_INDEX_SEGMENT_RE.test(s))) return 'path không dùng chỉ số mảng (cấp toàn số như items.0.id) — chỉ tên trường';
   return null;
 }
 

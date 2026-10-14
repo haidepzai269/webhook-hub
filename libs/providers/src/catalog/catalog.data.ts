@@ -821,16 +821,17 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "fields": [
       {
         "name": "secret",
-        "label": "user:pass đặt ở http_auth_user / http_auth_password khi tạo webhook Pipedrive (Basic auth)",
+        "label": "CHỈ webhook v2 (meta.version \"2.0\"; webhook v1 hãy tạo lại webhook v2). user:pass đặt ở http_auth_user / http_auth_password khi tạo webhook Pipedrive (Basic auth)",
         "secret": true
       }
     ],
     "secretSource": "provider",
     "docs": "https://pipedrive.readme.io/docs/guide-for-webhooks-v2",
-    "docsVersion": "Webhooks v2 (mặc định từ 2025-03-17; trang cập nhật 2026-07-28, đối chiếu 2026-10-14). Pipedrive không ký body — chỉ Basic auth tuỳ chọn, nên phải đặt user/pass khi tạo webhook. Khoá chống trùng meta.id 'ID of the event triggering the webhook' (path, PK10); meta.attempt đổi theo lần gửi nên không băm body. Tài liệu không nói rõ meta.id giữ nguyên khi gửi lại.",
+    "docsVersion": "CHỈ webhook v2 (meta.version \"2.0\"; mặc định từ 2025-03-17; trang cập nhật 2026-07-28, đối chiếu 2026-10-14). Webhook v1 (meta.v = 1, dữ liệu ở 'current'): meta.id là 'ID of the object' — id đối tượng, lần cập nhật thứ hai của cùng deal sẽ bị coi là trùng và MẤT; webhook v1 (tạo qua API hoặc trước 2025-03-17) hãy tạo lại webhook v2. Fingerprint đòi 'data' cấp một — chỉ v2 có (v1 dùng 'current'), nên v1 không được gợi ý mục này. Pipedrive không ký body — chỉ Basic auth tuỳ chọn, nên phải đặt user/pass khi tạo webhook. Khoá chống trùng v2: meta.id 'ID of the event' (khác meta.entity_id = id đối tượng; path, PK10); meta.attempt đổi theo lần gửi nên không băm body. Tài liệu không nói rõ meta.id giữ nguyên khi gửi lại.",
     "confidence": "trung bình",
     "sources": [
       "https://pipedrive.readme.io/docs/guide-for-webhooks-v2",
+      "https://pipedrive.readme.io/docs/guide-for-webhooks",
       "https://developers.pipedrive.com/docs/api/v1/Webhooks"
     ]
   },

@@ -108,6 +108,7 @@ export const LISTEN_REASON_KEYS: Record<string, MessageKey> = {
   missing_kv_key: "page.sources.listen.reason.missing-kv-key",
   missing_idempotency_key: "page.sources.listen.reason.missing-idempotency-key",
   empty_body: "page.sources.listen.reason.empty-body",
+  idempotency_path_not_scalar: "page.sources.listen.reason.idempotency-path-not-scalar",
   mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
   mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",
   config_invalid: "page.sources.listen.reason.config-invalid",
@@ -325,9 +326,14 @@ export type IdKind = (typeof ID_KIND_CHOICES)[number];
 export const PATH_SEGMENT_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const PATH_MAX_DEPTH = 3;
 const PATH_FORBIDDEN_SEGMENTS = ["__proto__", "prototype", "constructor"];
+/** Review PK10 T-a: như `PATH_INDEX_SEGMENT_RE` của server — cấp toàn số là chỉ số mảng trá hình (`items.0.id`). */
+export const PATH_INDEX_SEGMENT_RE = /^[0-9]+$/;
 export function isIdempotencyPath(path: string): boolean {
   const segs = path.split(".");
-  return segs.length <= PATH_MAX_DEPTH && segs.every((x) => PATH_SEGMENT_RE.test(x) && !PATH_FORBIDDEN_SEGMENTS.includes(x));
+  return (
+    segs.length <= PATH_MAX_DEPTH &&
+    segs.every((x) => PATH_SEGMENT_RE.test(x) && !PATH_FORBIDDEN_SEGMENTS.includes(x) && !PATH_INDEX_SEGMENT_RE.test(x))
+  );
 }
 
 /** PK10: `idempotency` của config từ ô form (null = bỏ trống: standard-webhooks dùng webhook-id, unverified chỉ băm body). */

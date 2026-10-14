@@ -1,3 +1,4 @@
+import { logger } from '@hub/common';
 import { bodyHashKey } from '@hub/crypto';
 import {
   EMPTY_BODY_ERROR,
@@ -12,6 +13,7 @@ import {
 import type { AdapterContext } from '../src';
 import { CATALOG, entryProblems } from '../src/catalog/catalog';
 import { acceptanceA, readCatalogSources } from '../src/catalog/catalog-files';
+import { identify } from '../src/catalog/identify';
 import { CatalogEntry } from '../src/catalog/types';
 
 /**
@@ -65,6 +67,14 @@ describe('[PK:T40] (phần a) validator: idempotency.path (≤ 3 cấp, tên tr�
     ];
     for (const p of badPaths) expect([p, field(cfg({ path: p }))]).toEqual([p, 'idempotency.path']);
     expect(idempotencyPathProblem('a.b.c.d')).toMatch(/tối đa 3 cấp/);
+  });
+
+  it('review PK10 T-a: cấp toàn số (chỉ số mảng trá hình) -> 422; cấp có chữ lẫn số vẫn nhận', () => {
+    for (const p of ['items.0.id', '0', 'data.123', '0.id']) {
+      expect([p, field(cfg({ path: p }))]).toEqual([p, 'idempotency.path']);
+      expect(idempotencyPathProblem(p)).toMatch(/chỉ số mảng/);
+    }
+    for (const p of ['v2.id', 'a0.b1', '0x.id']) expect([p, idempotencyPathProblem(p)]).toEqual([p, null]);
   });
 
   it('bodyHash: true nhận ở hmac, hmac-sha256, static-token (header/basic/query), signed-template, unverified; standard-webhooks -> 422 (luôn có webhook-id)', () => {
@@ -129,6 +139,61 @@ describe('[PK:T40] (phần b) adapter: khoá theo path / bodyHash — tất đ�
     expect(readIdempotencyPath({ a: {} }, 'a.hasOwnProperty')).toBeUndefined();
     expect(readIdempotencyPath(JSON.parse('{"__proto__":{"id":"p"}}'), '__proto__.id')).toBe('p'); // khoá riêng thật, không phải nguyên mẫu
     expect(readIdempotencyPath(null, 'a')).toBeUndefined();
+    // Review PK10 T-a (đột biến M6): không bao giờ đi qua mảng, kể cả bằng chỉ số hay thuộc tính riêng `length`.
+    expect(readIdempotencyPath({ items: [{ id: 'x' }] }, 'items.0.id')).toBeUndefined();
+    expect(readIdempotencyPath({ a: ['x'] }, 'a.length')).toBeUndefined();
+  });
+
+  it('review PK10 T-b: path trỏ object / mảng / boolean -> rơi băm body + log warn CÓ NHỊP (một dòng / nguồn / nhịp, không giá trị)', () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      const c = ctx(cfg({ path: 'data.id' }));
+      const r1 = { ...req('{"data":{"id":{"v":"secret-ish"}}}'), sourceKey: 'src_tb_obj' };
+      expect(a.extractIdempotencyKey(r1, c)).toBe(`generic:body:${bodyHashKey(r1.rawBody)}`);
+      expect(a.extractIdempotencyKey(r1, c)).toBe(`generic:body:${bodyHashKey(r1.rawBody)}`); // lần 2 cùng nhịp: im
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = JSON.stringify(warn.mock.calls[0]);
+      expect(logged).toContain('src_tb_obj');
+      expect(logged).toContain('data.id');
+      expect(logged).not.toContain('secret-ish');
+      for (const [i, b] of ['{"data":{"id":[1]}}', '{"data":{"id":true}}'].entries()) {
+        a.extractIdempotencyKey({ ...req(b), sourceKey: `src_tb_${i}` }, c);
+      }
+      expect(warn).toHaveBeenCalledTimes(3);
+      // Vắng / chuỗi rỗng / quá dài không phải "trỏ nhầm" -> không log.
+      for (const [i, b] of ['{"other":1}', '{"data":{"id":""}}', '{"data":{"id":"E1"}}'].entries()) {
+        a.extractIdempotencyKey({ ...req(b), sourceKey: `src_tb_ok_${i}` }, c);
+      }
+      expect(warn).toHaveBeenCalledTimes(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('review PK10 T-b: chẩn đoán ACCEPTED của nguồn path trỏ object/mảng/boolean -> idempotency_path_not_scalar (chỉ TÊN path)', () => {
+    const acc = (body: unknown) => ({ status: 'ACCEPTED', signatureValid: true, headers: {}, body, receivedAt: new Date() });
+    const c = ctx(cfg({ path: 'data.id' }));
+    for (const v of [{ v: 1 }, [1], true]) {
+      expect(a.diagnose(acc({ data: { id: v } }), c)).toEqual({ ok: true, reason: 'idempotency_path_not_scalar', field: 'data.id' });
+    }
+    expect(a.diagnose(acc({ data: { id: 'E1' } }), c)).toEqual({ ok: true, reason: 'ok' });
+    expect(a.diagnose(acc({ other: 1 }), c)).toEqual({ ok: true, reason: 'ok' });
+    expect(a.diagnose(acc({ data: { id: { v: 1 } } }), ctx(cfg({ field: 'data' })))).toEqual({ ok: true, reason: 'ok' });
+  });
+
+  it('review PK10 T-c: id SỐ > 2^53 đọc đúng từ bytes gốc (không làm tròn) — path và field; hai id khác nhau -> hai khoá', () => {
+    const big1 = '12345678901234567890';
+    const big2 = '12345678901234567891'; // JSON.parse làm tròn cả hai về cùng một số
+    expect(JSON.parse(big1)).toBe(JSON.parse(big2));
+    const p = ctx(cfg({ path: 'meta.id' }));
+    expect(a.extractIdempotencyKey(req(`{"meta":{"id":${big1}}}`), p)).toBe(`generic:${big1}`);
+    expect(a.extractIdempotencyKey(req(`{"meta":{"id":${big2}}}`), p)).toBe(`generic:${big2}`);
+    const f = ctx(cfg({ field: 'id' }));
+    expect(a.extractIdempotencyKey(req(`{"id":${big1}}`), f)).toBe(`generic:${big1}`);
+    expect(a.extractIdempotencyKey(req(`{"id":1e21}`), f)).toBe('generic:1e21');
+    // Số an toàn: như cũ.
+    expect(a.extractIdempotencyKey(req('{"id":42}'), f)).toBe('generic:42');
+    expect(a.extractIdempotencyKey(req('{"meta":{"id":42}}'), p)).toBe('generic:42');
   });
 
   it('bodyHash: cùng bytes -> cùng khoá; khác 1 byte -> khoá khác; khoá = generic:body:bodyHashKey(rawBody) (không ngẫu nhiên)', () => {
@@ -191,7 +256,36 @@ describe('[PK:T40] (phần b) adapter: khoá theo path / bodyHash — tất đ�
   });
 });
 
-describe('[PK:T41] danh mục: mục bodyHash phải có bodyHashReason kèm nguồn; mục mới qua bài A', () => {
+describe('[PK:T41] (phần b) review PK10 N-1: mục pipedrive CHỈ cho webhook v2 (v1 meta.id là id ĐỐI TƯỢNG)', () => {
+  // Khuôn v1 theo pipedrive.readme.io/docs/guide-for-webhooks (đối chiếu 2026-10-14): khoá cấp một v, matches_filters, meta,
+  // retry, current, previous, event; meta.id = "ID of the object". Không có `data`, meta.version, meta.entity_id.
+  const V1 =
+    '{"v":1,"matches_filters":{"current":[],"previous":[]},"meta":{"v":1,"action":"updated","object":"deal","change_source":"app","id":7,' +
+    '"company_id":1,"user_id":1,"host":"company.pipedrive.com","timestamp":1,"timestamp_micro":1,"permitted_user_ids":[1],"trans_pending":false,' +
+    '"is_bulk_update":false,"pipedrive_service_name":false,"webhook_id":1},"retry":0,"current":{"id":7},"previous":{"id":7},"event":"updated.deal"}';
+  const pd = () => CATALOG.find((e) => e.id === 'pipedrive')!;
+
+  it('body v1 (có current, meta.v=1) KHÔNG khớp mục pipedrive — không nhận nhầm; fixture v2 vẫn khớp', () => {
+    const r = identify({ sample: ['POST /hook HTTP/1.1', 'Content-Type: application/json', 'Authorization: Basic eDp4', '', V1].join('\n') }, CATALOG);
+    expect(r.matches.map((m) => m.id)).not.toContain('pipedrive');
+    const rows = acceptanceA(CATALOG, readCatalogSources().fixtures).filter((x) => x.entryId === 'pipedrive');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.filter((x) => !x.ok)).toEqual([]);
+  });
+
+  it('fingerprint bám trường CHỈ v2 có: `data` cấp một (v1 dùng `current`); nhãn field + docsVersion nói rõ chỉ v2, v1 phải tạo lại', () => {
+    expect(pd().fingerprint.body.required).toEqual(expect.arrayContaining(['meta', 'data']));
+    expect(pd().fingerprint.body.required).not.toContain('current');
+    const label = pd().fields.map((f) => f.label).join(' ');
+    expect(label).toMatch(/CHỈ webhook v2/);
+    expect(pd().docsVersion).toMatch(/CHỈ webhook v2/);
+    expect(pd().docsVersion).toMatch(/v1.*id (của )?đối tượng/i);
+    expect(pd().docsVersion).toMatch(/tạo lại webhook v2/);
+    expect(pd().sources).toContain('https://pipedrive.readme.io/docs/guide-for-webhooks');
+  });
+});
+
+describe('[PK:T41] (phần a) danh mục: mục bodyHash phải có bodyHashReason kèm nguồn; mục mới qua bài A', () => {
   const sources = readCatalogSources();
   const base = (): CatalogEntry => JSON.parse(JSON.stringify(CATALOG.find((e) => e.id === 'typeform')!));
   const withBodyHash = (mut: (e: any) => void = () => undefined) => {
