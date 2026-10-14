@@ -38,7 +38,7 @@ Dòng = số dòng ở master `9fe279c`. Lỗi: **CQ** cao quá/không cap · **
 |---|---|---|---|---|---|
 | 1 | `components/admin/form-dialog.tsx:33` | Khung form "Tạo mới" (dùng ở #2–#4) | CT (`max-h-[90dvh] overflow-y-auto` trên cả hộp → tiêu đề + nút Huỷ/Tạo cuộn mất), TC | `DialogBody` + `size` | ✅ |
 | 2 | `dashboard/destinations/page.tsx:308` | Tạo đích | CT, DÀI (5 ô xếp dọc) | `md`; **khoá ký + giới hạn tốc độ gộp 1 hàng** | ✅ |
-| 3 | `dashboard/sources/page.tsx:487` | Tạo nguồn (provider có sẵn / generic) | CT, DÀI rất nặng với generic (tới ~15 ô ký) | provider có sẵn `md`; **generic `lg` + lưới 2 cột** (ghi chú `role=note` trải hết hàng) | ✅ |
+| 3 | `dashboard/sources/page.tsx:487` | Tạo nguồn (provider có sẵn / generic) | CT, DÀI rất nặng với generic (tới ~15 ô ký) | **một cỡ `lg` cố định** (đổi provider không nhảy cỡ — review T2); generic lưới 2 cột, ghi chú `role=note` + nút điền nhanh + ô chuỗi ký trải hết hàng | ✅ |
 | 4 | `dashboard/subscriptions/page.tsx:276` | Tạo subscription | CT, DÀI | `md`; **tên + đích gộp 1 hàng** | ✅ |
 | 5 | `dashboard/api-keys/page.tsx:167` | Tạo API key / hiện connection string 1 lần | CT | `md` + `DialogBody` | ✅ |
 | 6 | `dashboard/destinations/endpoint-dialogs.tsx:148` | Tạo endpoint (+ secret 1 lần) | CT, DÀI (tên, URL, kiểu, nguồn, cờ chưa xác thực) | **`lg`**; **tên + URL 1 hàng; nguồn + cờ chưa xác thực 1 hàng**; `DialogBody` | ✅ |
@@ -67,22 +67,22 @@ Dòng = số dòng ở master `9fe279c`. Lỗi: **CQ** cao quá/không cap · **
 | 19 | `components/flow/stage-sheet.tsx:32` | Chi tiết chặng (tab vào/ra/chi tiết) | CT | `lg`, `SheetBody` | ✅ |
 | 20 | `dashboard/sources/listen-sheet.tsx:40` | Lắng nghe nguồn generic | CT | `lg`, `SheetBody` | ✅ |
 | 21 | `dashboard/sources/traffic-sheet.tsx:56` | Lưu lượng nguồn (biểu đồ + bảng IP) | CT | `lg`, `SheetBody` | ✅ |
-| 22 | `components/ui/sidebar.tsx:189` | Sidebar mobile (Sheet trái) | — | Không sửa: ghi đè rộng `--sidebar-width`, tự cuộn bên trong; nhận khung mới không đổi hình | ⏸ không cần |
+| 22 | `components/ui/sidebar.tsx:189` | Sidebar mobile (Sheet trái) | **Hồi quy do UI-MS (review N1):** `data-[side=left]:w-full` (0,2,0) đè `w-(--sidebar-width)` → phủ kín 375px, ✕ bị ẩn, không có dải overlay để chạm đóng | `sheet.tsx`: bề rộng mặc định thành class trơn `w-full` (gộp được qua cn) → `w-(--sidebar-width)` thắng; 5 sheet nội dung không đổi (không truyền `w-*`). Chặn hồi quy: `components/ui/sheet-width.spec.ts` | ✅ |
 
 ### 2.4 Popover — admin
 
 | # | File:dòng | Popover | Lỗi trước | Cách sửa | Trạng thái |
 |---|---|---|---|---|---|
 | 23 | `components/admin/layout-controls.tsx:47` | Tuỳ chỉnh giao diện (nhiều nhóm) | **CQ** trên màn thấp — không cap | Cap ở primitive (chỗ trống thật) + tự cuộn | ✅ |
-| 24 | `components/alerts/alert-bell.tsx:78` | Chuông cảnh báo | `100vh` (sai trên mobile có thanh địa chỉ) | `100dvh`; danh sách `.scroll-area` | ✅ |
+| 24 | `components/alerts/alert-bell.tsx:78` | Chuông cảnh báo | `100vh` (sai trên mobile có thanh địa chỉ) | `100dvh`; danh sách `.scroll-area` là vùng cuộn **duy nhất** (popover `overflow-hidden`, panel cap theo `--radix-popover-content-available-height` — review T1) | ✅ |
 | 25 | `components/storage/storage-banner.tsx:95` | Gợi ý liên hệ (1 câu) | — | Nhận cap của primitive; không đổi | ⏸ không cần |
 
 ### 2.5 Overlay tự viết — storefront `(shop)` (CSS thuần, ADR-025 không Tailwind)
 
 | # | File:dòng | Overlay | Lỗi trước | Cách sửa | Trạng thái |
 |---|---|---|---|---|---|
-| 26 | `(shop)/shop/_components/CheckoutModal.tsx:263` + `shop-cart.css:274` | Thanh toán (form → QR → xong) | CT (`.ckbox` `92vh` cuộn cả hộp, bước + nút đóng trôi), `vh` sai mobile, KN giật | `.ckbox` `min(760px, 90dvh)` flex-col; **bước đứng yên, chỉ `.ckbody` cuộn**; lề safe-area; khoá nền qua `scroll-lock` | ✅ |
-| 27 | `(shop)/shop/_components/MenuPopup.tsx:44` + `style.css:2048` | Popup món | CT (nút đóng trôi khi cuộn), thanh cuộn 3px đỏ riêng | `min(640px, 88dvh)`; **màn rộng: ảnh đứng yên, cột chữ cuộn**; màn hẹp: ảnh thấp `min(240px,30dvh)`; bỏ thanh cuộn riêng | ✅ |
+| 26 | `(shop)/shop/_components/CheckoutModal.tsx:263` + `shop-cart.css:274` | Thanh toán (form → QR → xong) | CT (`.ckbox` `92vh` cuộn cả hộp, bước + nút đóng trôi), `vh` sai mobile, KN giật | `.ckbox` `min(760px, 90dvh)` flex-col; **bước + hàng nút (`.ckfoot`, nút submit dùng `form="ckForm"`) đứng yên, chỉ `.ckbody` cuộn** (review T3); lề safe-area; khoá nền qua `scroll-lock` | ✅ |
+| 27 | `(shop)/shop/_components/MenuPopup.tsx:44` + `style.css:2048` | Popup món | CT (nút đóng trôi khi cuộn), thanh cuộn 3px đỏ riêng | `min(640px, 88dvh)`; **màn rộng: ảnh đứng yên, cột chữ cuộn**; màn hẹp: ảnh thấp `min(240px,30dvh)` (dự phòng `30vh` — T8), **nút đóng `sticky`** (T4); bỏ thanh cuộn riêng | ✅ |
 | 28 | `(shop)/shop/_components/CartDrawer.tsx:34` + `shop-cart.css:117` | Ngăn giỏ hàng | KN giật (body `overflow:hidden` không bù thanh cuộn), danh sách kéo cuộn trang | `.cartlist` `min-height:0` + `overscroll contain`; khoá nền qua `scroll-lock` (ShopEffects) | ✅ |
 | 29 | `(shop)/shop/_components/Gallery.tsx:56` | Lightbox ảnh | KN giật; xung đột với khoá của ShopEffects (cái nào đóng trước xoá khoá của cái kia) | `bodyScrollLock` đếm tham chiếu | ✅ (khung ảnh `64vh` giữ nguyên) |
 | 30 | `(shop)/shop/_components/SearchOverlay.tsx:50` | Tìm kiếm toàn màn | KN giật | Khoá nền qua ShopEffects → `scroll-lock`; kết quả đã cuộn riêng (`40vh`) — giữ nguyên | ✅ |
@@ -113,3 +113,13 @@ Dòng = số dòng ở master `9fe279c`. Lỗi: **CQ** cao quá/không cap · **
 
 - Chromium không chạy `transition` trên `::-webkit-scrollbar-thumb` → nở/đậm tức thì. Firefox không có hover-nở.
 - Shop khi khoá nền: phần tử `position: fixed` bám mép phải (nút giỏ nổi) có thể dịch ~thanh cuộn (15px) — body được bù padding, phần tử fixed thì không. Nhỏ, không sửa để tránh đụng template.
+
+## 6. Sau review `REVIEW-UI-MODAL-SCROLL.md` (42d5fd0)
+
+- **N1 (Nặng) đã sửa:** sidebar mobile, xem dòng #22. Spec `sheet-width.spec.ts` có 3 ca: không có `w-*` dưới variant `data-[side]`, sidebar vẫn truyền `w-(--sidebar-width)`, `cn` gộp đè `w-full`. Ca đầu ĐỎ trên bản trước khi sửa.
+- **Thấp đã sửa:** T1 (chuông: một vùng cuộn), T2 (Tạo nguồn một cỡ `lg`; preset + chuỗi ký trải 2 cột), T3 (footer thanh toán đứng yên), T4 (nút đóng popup món dính trên màn hẹp), T8 (dự phòng `vh`).
+- **Nợ ghi nhận, không làm:**
+  - **T5:** `body{overflow:hidden}` không chặn cuộn chạm trên iOS Safari < 16; phần tử `fixed` bám mép phải dịch theo bề rộng thanh cuộn khi khoá; thiếu ca test cho adapter DOM thật `bodyScrollLock`.
+  - **T6:** rãnh WebKit luôn 10px (thumb 6px) → vùng cuộn mất 10px ngang; `transition` trên thumb không có tác dụng ở Chromium.
+  - **T7:** nhãn/gợi ý tiếng Anh ở nửa cột xuống dòng nhiều hơn, hai ô cạnh nhau có thể lệch hàng — QA ở locale EN.
+  - **T2b:** ô của generic hiện/ẩn theo `scheme`/`sigMode` nên có thể đổi cột khi đổi lựa chọn (thứ tự DOM/tab vẫn đúng).
