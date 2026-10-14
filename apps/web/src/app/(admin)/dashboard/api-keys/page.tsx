@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/admin/page-header";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogBody,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -164,11 +165,12 @@ export default function ApiKeysPage() {
       </Table>
 
       <Dialog open={open} onOpenChange={close}>
-        <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <AdminDialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t("page.api-keys.create")}</DialogTitle>
             <DialogDescription>{t("page.api-keys.dialog.description")}</DialogDescription>
           </DialogHeader>
+          <DialogBody>
           {connectionString ? (
             <ConnectionStringOnce connectionString={connectionString} />
           ) : (
@@ -198,6 +200,7 @@ export default function ApiKeysPage() {
               </FieldGroup>
             </form>
           )}
+          </DialogBody>
           <DialogFooter>
             {connectionString ? (
               <Button type="button" onClick={() => close(false)}>
@@ -218,6 +221,7 @@ export default function ApiKeysPage() {
 
       <AlertDialog open={Boolean(target)} onOpenChange={(o) => !o && !revoke.isPending && setTarget(null)}>
         <AlertDialogContent>
+          <AlertDialogBody>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("page.api-keys.revoke-confirm", { service: target?.serviceName ?? "" })}
@@ -226,6 +230,7 @@ export default function ApiKeysPage() {
               {t("page.api-keys.revoke-warning", { tail: target ? prefixTail(target.keyPrefix) : "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          </AlertDialogBody>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={revoke.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction

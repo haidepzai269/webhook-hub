@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogBody,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -67,6 +68,7 @@ export function OrphanBanner() {
 
       <AlertDialog open={open} onOpenChange={(o) => !renormalize.isPending && setOpen(o)}>
         <AlertDialogContent>
+          <AlertDialogBody>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("page.events.orphan.confirm-title", { count: Math.min(total, 500) })}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -79,6 +81,7 @@ export function OrphanBanner() {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
+          </AlertDialogBody>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={renormalize.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
