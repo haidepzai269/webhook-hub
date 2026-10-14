@@ -642,6 +642,8 @@ HUB_INGEST_PUBLIC_URL=   # hub-api (ADR-211, SPEC-hub-sap §9): URL provider g�
                          # Lưới hứng (ADR-220): https://hub-hooks.webhookhub.workers.dev. Đổi giá trị -> kết nối
                          # PayOS/Stripe báo DRIFTED public_url_changed, bấm "Kết nối lại". Đặt mà localhost/IP nội bộ
                          # -> 422 public_url_required (KHÔNG rơi về HUB_PUBLIC_URL).
+                         # CHƯA đặt trên Render trước khi LH3 lên: tới lúc đó url của unverified/forwardUrl dùng
+                         # biến này cho cả request đi thẳng Render (H4). Đặt/đổi là thao tác hạ tầng — hỏi Admin.
 
 # --- KHÔNG BAO GIỜ đặt trên production (hub-api VÀ hub-worker) — chỉ cho stack kiểm chứng / test ---
 # *_FAKE_BASE_URL (PAYOS_/STRIPE_/GITHUB_/GOOGLE_OAUTH_…)  -> NODE_ENV=production + có giá trị: app THOÁT lúc khởi động
