@@ -6,6 +6,7 @@ import AOS from "aos";
 
 import { useCart } from "@/lib/shop/cart";
 import { useAnyOverlayOpen, useShopUi } from "@/lib/shop/ui";
+import { bodyScrollLock } from "@/lib/ui/scroll-lock";
 
 /** Hiệu ứng toàn trang của main.js gốc: AOS, Esc, khoá cuộn body, dọn giỏ. Không render gì. */
 export function ShopEffects() {
@@ -29,11 +30,11 @@ export function ShopEffects() {
     for (const l of items) if (!products.some((p) => p.id === l.id)) remove(l.id);
   }, [products]);
 
+  // Khoá cuộn nền (đếm tham chiếu + bù bề rộng thanh cuộn → trang không giật khi mở giỏ/popup)
   useEffect(() => {
-    document.body.style.overflow = overlayOpen ? "hidden" : "";
-    return () => {
-      document.body.style.overflow = "";
-    };
+    if (!overlayOpen) return;
+    bodyScrollLock.lock();
+    return () => bodyScrollLock.unlock();
   }, [overlayOpen]);
 
   // Esc đóng tìm kiếm / popup món / giỏ (modal thanh toán & gallery tự xử lý Esc)

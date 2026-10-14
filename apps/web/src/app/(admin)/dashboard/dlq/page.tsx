@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/admin/page-header";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogBody,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -20,7 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -148,11 +149,12 @@ function BulkReplayDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <AdminDialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t("page.dlq.bulk")}</DialogTitle>
           <DialogDescription>{t("page.dlq.bulk.description")}</DialogDescription>
         </DialogHeader>
+        <DialogBody>
         <FieldGroup className="gap-4">
           <div className="rounded-md border p-3 text-sm">
             <span className="text-muted-foreground">{t("page.dlq.bulk.filters")}</span>
@@ -189,6 +191,7 @@ function BulkReplayDialog({
             </div>
           )}
         </FieldGroup>
+        </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" disabled={bulk.isPending} onClick={() => close(false)}>
             {t("common.cancel")}
@@ -378,6 +381,7 @@ function DlqView() {
         }}
       >
         <AlertDialogContent>
+          <AlertDialogBody>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("page.dlq.confirm.title")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -408,6 +412,7 @@ function DlqView() {
               disabled={replay.isPending}
             />
           </Field>
+          </AlertDialogBody>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={replay.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction

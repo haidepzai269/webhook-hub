@@ -7,7 +7,7 @@ import { ProjectChip, SeverityIcon, useAlertText, useOpenAlertTarget } from "@/c
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { factRows } from "@/lib/alerts/facts";
 import { alertActions } from "@/lib/alerts/links";
 import type { AlertView } from "@/lib/alerts/types";
@@ -23,7 +23,7 @@ import { useLocale, useT } from "@/lib/i18n/use-t";
 export function AlertSheet({ alert, subjectName, onClose }: { alert: AlertView | null; subjectName: string | null; onClose: () => void }) {
   return (
     <Sheet open={Boolean(alert)} onOpenChange={(o) => !o && onClose()}>
-      <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-lg">{alert && <Body alert={alert} subjectName={subjectName} onClose={onClose} />}</AdminSheetContent>
+      <AdminSheetContent size="md">{alert && <Body alert={alert} subjectName={subjectName} onClose={onClose} />}</AdminSheetContent>
     </Sheet>
   );
 }
@@ -71,7 +71,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
         <SheetDescription>{t("page.alerts.sheet.description", { project: a.project.name, opened: formatRelative(a.openedAt, undefined, locale) })}</SheetDescription>
       </SheetHeader>
 
-      <div className="space-y-5 p-4">
+      <SheetBody className="space-y-5 p-4">
         {msg.message && (
           <section>
             <h3 className="mb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">{t("page.alerts.sheet.what")}</h3>
@@ -150,7 +150,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
             </dl>
           )}
         </section>
-      </div>
+      </SheetBody>
     </>
   );
 }

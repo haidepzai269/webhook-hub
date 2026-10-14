@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { bodyScrollLock } from "@/lib/ui/scroll-lock";
+
 interface GalleryItem {
   img: string;
   title: string;
@@ -53,14 +55,14 @@ export function Gallery() {
 
   useEffect(() => {
     if (!open) return;
-    document.body.style.overflow = "hidden";
+    bodyScrollLock.lock();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      bodyScrollLock.unlock();
     };
   }, [open]);
 

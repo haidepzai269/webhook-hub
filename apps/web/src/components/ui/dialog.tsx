@@ -5,6 +5,7 @@ import { cn } from "cn"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
+import { DIALOG_SIZE, type OverlaySize } from "@/components/ui/overlay-size"
 import { XIcon } from "lucide-react"
 
 function Dialog({
@@ -47,13 +48,20 @@ function DialogOverlay({
   )
 }
 
+/**
+ * Khung modal dùng chung (UI-MS): cỡ cố định theo `size` (sm | md | lg — overlay-size.ts), không bao giờ cao/rộng quá
+ * khung nhìn. Bố cục: DialogHeader (đứng yên) · DialogBody (CUỘN bên trong) · DialogFooter (đứng yên). Khoá cuộn nền +
+ * bù bề rộng thanh cuộn do Radix (react-remove-scroll) lo — không tự viết.
+ */
 function DialogContent({
   className,
   children,
+  size = "md",
   showCloseButton = true,
   closeLabel = "Close",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  size?: OverlaySize
   showCloseButton?: boolean
   /** Nhãn đọc màn hình của nút đóng — admin truyền chữ đã dịch (AdminDialogContent); primitive không phụ thuộc i18n. */
   closeLabel?: string
@@ -63,8 +71,10 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        data-size={size}
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 flex w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          DIALOG_SIZE[size],
           className
         )}
         {...props}
@@ -92,7 +102,18 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn("flex shrink-0 flex-col gap-2 px-4 pt-4 pr-12 pb-3", className)}
+      {...props}
+    />
+  )
+}
+
+/** Thân modal: phần DUY NHẤT được cuộn (header/footer đứng yên). pt-1: chừa vòng focus của ô đầu tiên. */
+function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-body"
+      className={cn("scroll-area grid min-h-0 flex-1 content-start gap-4 px-4 pt-1 pb-4", className)}
       {...props}
     />
   )
@@ -112,7 +133,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "flex shrink-0 flex-col-reverse gap-2 border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -161,6 +182,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
