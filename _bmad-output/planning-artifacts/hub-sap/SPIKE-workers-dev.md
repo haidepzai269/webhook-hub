@@ -1,7 +1,7 @@
 # SPIKE LH-S — Worker nháp `hub-hooks-spike` trên `workers.dev`
 
 > Story LH-S, SPEC-hub-sap §7b (cổng cho LH2/LH3). Mã: `spikes/catchnet-spike/` (ngoài npm workspaces, H10).
-> **Cổng:** S1, S3, S5 (và S2 với Admin) đạt → được code LH2/LH3. S4/S6/S7 trượt → ghi §16, chưa chặn.
+> **Cổng:** S1, S3, S5 (và S2 với Admin) đạt → được code LH2/LH3. S4/S6/S7 trượt → ghi §16, chưa chặn. **Kết quả 2026-10-14: CỔNG ĐẠT (S1, S2, S3, S5 ✅).**
 > File này **không chứa secret** (token, `whsec_`, `sk_test_` chỉ ở `.dev.vars` / `KEYS-CAN-LAY.md` mục J).
 > Giờ ghi theo UTC (`Z`); giờ Việt Nam = +7.
 
@@ -16,7 +16,8 @@
 | S5 Bytes | **ĐẠT** |
 | S6 Gói free | **ĐẠT** |
 | S7 Độ trễ | Có số khi hub **đang thức**; ca **đang ngủ** chưa đo |
-| S2 PayOS, S4 SePay | Chờ coordinator + Admin |
+| S2 PayOS | ✅ ĐẠT (2026-10-14 13:23–13:38 UTC, Admin ngồi cùng) |
+| S4 SePay | Hoãn — Admin chưa xác định tài khoản SePay; không chặn cổng |
 
 ## Kết quả
 
@@ -24,9 +25,9 @@
 |---|---|---|---|---|
 | S0 | Local `wrangler dev --local` (wrangler 4.145.0): body 51 byte có CRLF, tiếng Việt, emoji, byte `1f 8b 08 00 … ff fe 00 0d 0a 80 c3`; 1.1MB; `/hooks/momo/*`; dump token sai/thiếu; `__scheduled` | **Đạt (local).** sha256 lưu = sha256 file gốc, body lấy lại bằng từng byte; query giữ nguyên; >1MB → `body_too_large=1`, body NULL, vẫn 200; momo 204; token sai/thiếu 401; cron ghi `cron_tick` | 2026-10-14 ~04:01Z | dump đối chiếu bằng node |
 | S1 | Stripe **test mode**, lib `stripe` 22.6.2 (của monorepo, không thêm dep): `webhookEndpoints.create` URL `/hooks/stripe/spike`, event `payment_intent.succeeded` → PaymentIntent `pm_card_visa` confirm=true → dump → `stripe.webhooks.constructEvent(bytes D1, Stripe-Signature D1, whsec_ endpoint)` → xoá endpoint | **ĐẠT.** Stripe chấp nhận URL `*.workers.dev` (endpoint `status: enabled`). Request tới D1 sau ~1,3s (UA `Stripe/1.0`, 2404 byte). `constructEvent` OK → `payment_intent.succeeded`. Phản chứng: đổi 1 byte → trượt | 04:50:13Z → 04:50:21Z | endpoint `we_1UQK8nDt500MnSAbIQoQ5S6d`, PI `pi_3UQK8nDt500MnSAb0YnqSpDj`, event `evt_3UQK8nDt500MnSAb0NWBtoQJ`, D1 row 17 |
-| S2 | PayOS kênh thật (coordinator + Admin) | _chờ Admin_ | | |
+| S2 | PayOS kênh thật SHOP.MALL: Admin dán URL nháp trên my.payos.vn → Lưu | ✅ ĐẠT. PayOS chấp nhận `*.workers.dev`; request kiểm tra (POST 529 byte, `code 00`, `orderCode 123` mẫu) vào D1 lúc 13:30:14 UTC; sha256 khớp; checksum HMAC theo `checksumKey` trên `data` đã lưu → khớp (`timingSafeEqual`) | 13:23–13:38 UTC | Trả lại: Admin bấm "Thử lại / Kết nối lại" ở console → "✅ Đã kết nối"; my.payos.vn hiện lại `https://hub-api-c9hg.onrender.com/hooks/payos/src_payos_…`. Đơn tạo trong khung giờ được cron đối soát Shop (ADR-009) phủ |
 | S3 | Repo nháp private `haidepzai269/catchnet-spike`: `gh api POST /hooks` (content_type json, secret 32 byte ngẫu nhiên) → `ping` tự gửi; `push` bằng contents API tạo `README.md` (repo rỗng nên không làm được commit trống qua git data API) → verify `X-Hub-Signature-256` offline (`timingSafeEqual`) → deliveries → xoá hook | **ĐẠT.** GitHub nhận URL. Deliveries: `ping 200 OK`, `push 200 OK`. Chữ ký sha256 khớp cả hai trên bytes D1; phản chứng đổi 1 byte → trượt | 04:50:39Z → 04:51:19Z | delivery `cddbd388-c78a-11f1-…` (ping, row 19, 7182 B), `d3b2873e-c78a-11f1-…` (push, row 20, 8040 B), UA `GitHub-Hookshot/54f8899` |
-| S4 | SePay dashboard (coordinator + Admin) | _chờ Admin_ | | |
+| S4 | SePay dashboard (coordinator + Admin) | Hoãn (không chặn cổng) | | |
 | S5 | (a) curl từ máy dev tới URL deploy: body lạ 51 B (CRLF/unicode/byte gzip) có query `?x=1&y=%C3%A9`; body **gzip thật** + `Content-Encoding: gzip`; JSON có khoảng trắng lạ + CRLF với `X-Hub-Signature-256` tự tính; `/hooks/momo/*`; 1.1MB. (b) Chữ ký thật ở S1/S3 | **ĐẠT.** Cả 5 body: `body_len` = độ dài gốc, sha256 lưu = sha256 gốc, bytes bằng từng byte. Cloudflare **không giải nén** body gzip (giữ nguyên bytes, header `content-encoding: gzip` còn). Header chữ ký còn nguyên giá trị. S1/S3 verify trên bytes D1 đều khớp | 04:36:34Z | D1 row 1–5; S1/S3 ở trên |
 | S6 | Cron `* * * * *` trên gói free; deploy kèm `--var SPIKE_FANOUT_URL:<Worker>/_spike/noop` (không sửa toml) → mỗi tick 25 `fetch` về chính `workers.dev` của Worker (cờ `global_fetch_strictly_public`) → tắt fan-out bằng deploy lại | **ĐẠT.** 11 tick liên tiếp 04:39:34Z → 04:49:34Z, khoảng cách **đúng 60s** cả 10 khoảng, qua 2 lần redeploy. 3 tick fan-out (04:39, 04:40, 04:41): mỗi lần `{"fanout":25,"ok":25,"fail":0,"errors":[]}` — không lỗi subrequest/CPU, không lỗi 1042 | fan-out bật 04:37:17Z, tắt 04:42:21Z | dump `kind=cron_tick` |
 | S7 | `GET /_spike/latency?target=https://hub-api-c9hg.onrender.com/health&n=20`, hai lượt liền; kiểm route từ chối target lạ | Hub **đang thức**: lượt 1 p50 **81ms**, max **953ms** (mẫu đầu, mở kết nối); lượt 2 p50 **82ms**, max **245ms**; tất cả 200. Target `https://example.com` → 400 `target phải là HUB_ORIGIN_URL`. **Ca hub đang ngủ chưa đo** (hub đang thức lúc thử; cần đo lại sau ≥ 15 phút không có request). Chỉ dùng để chọn `CATCHNET_FORWARD_TIMEOUT_MS`, không vào báo cáo hiệu năng (ADR-019) | 04:36:49Z → 04:36:54Z | JSON trả về của route |
