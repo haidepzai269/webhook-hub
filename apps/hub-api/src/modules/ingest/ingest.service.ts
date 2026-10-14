@@ -38,8 +38,18 @@ import { IngestResponse, blockedAck, providerMetricLabel, storageFullAck } from 
 import { TrafficOutcome, TrafficRecorder } from './traffic-recorder';
 import { onShutdownFlush } from '../../shutdown';
 import { publicIngestBase } from '../console/public-ingest-base';
+import { CatchnetMode, catchnetVia } from './catchnet';
+import { HubOutcome } from './hub-outcome';
 
 export type { IngestResponse } from './blocked-ack';
+
+/**
+ * LH3 (H3/H5, ADR-217): request đi qua lưới hứng — CHỈ khi chữ ký đầu của lưới hợp lệ (controller kiểm). `receivedAt` CHỈ
+ * có khi chữ ký body cũng khớp: làm "bây giờ" khi verify (`ctx.verifyAt`) và làm `raw_events.received_at`.
+ */
+export interface IngestOptions {
+  catchnet?: { mode: CatchnetMode; receivedAt?: Date };
+}
 
 /**
  * S2-2 (ADR-049): chặng ①–④ (nhận, verify, COMMIT, ACK) chạy trong hub-api -> phát `trace.ingested`
@@ -65,6 +75,36 @@ interface TraceState {
   storageFull?: boolean;
   /** ADR-205 bổ sung: HEAD `head-ok` trả 200 rỗng — chỉ metric `HEAD_OK`, không lưu lượng, không trace. */
   headOk?: boolean;
+  /** LH3 (H1): đã trả lời bắt tay (outcome REJECTED cho lưu lượng — E8 — nhưng `x-hub-outcome: handshake`). */
+  handshake?: boolean;
+  /** LH3 (H1): adapter từ chối vì chính sách (cờ unverified tắt, 413 unverified) — `refused`, không phải chữ ký sai. */
+  refused?: boolean;
+}
+
+/**
+ * LH3 (H1, ADR-221): `x-hub-outcome` của một phản hồi `/hooks` — MỘT chỗ suy từ trạng thái trace (mọi nhánh của ingestCore
+ * đã ghi vào trace). Nhánh không ghi gì (404, 400, 405, 413, 414…) -> theo status: ≥ 500 `unavailable`, còn lại `rejected`.
+ */
+export function outcomeOf(
+  trace: Pick<TraceState, 'outcome' | 'blocked' | 'storageFull' | 'headOk' | 'handshake' | 'refused'>,
+  status: number,
+): HubOutcome {
+  if (trace.blocked || trace.storageFull || trace.refused) return 'refused';
+  if (trace.headOk || trace.handshake) return 'handshake';
+  switch (trace.outcome) {
+    case 'ACCEPTED':
+      return 'accepted';
+    case 'DUPLICATE':
+      return 'duplicate';
+    case 'REJECTED':
+      return 'rejected';
+    case 'RATE_LIMITED':
+      return 'refused';
+    case 'ERROR':
+      return 'unavailable';
+    default:
+      return status >= 500 ? 'unavailable' : 'rejected';
+  }
 }
 
 /** EG4: outcome của trace -> outcome của bảng lưu lượng (ERROR không lưu — đã có metric + log). */
@@ -167,8 +207,13 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     await Promise.all([this.duplicates.close(), this.traffic.close()]);
   }
 
-  async ingestWebhook(req: RawWebhookRequest): Promise<IngestResponse> {
-    return this.traced(req, (trace) => this.ingestCore(req, trace));
+  async ingestWebhook(req: RawWebhookRequest, opts: IngestOptions = {}): Promise<IngestResponse> {
+    let seen: TraceState | undefined;
+    const result = await this.traced(req, (trace) => {
+      seen = trace;
+      return this.ingestCore(req, trace, opts);
+    });
+    return { ...result, outcome: outcomeOf(seen ?? {}, result.status) };
   }
 
   /**
@@ -254,7 +299,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
      * PK5 (E5, ADR-206): `verified: false` = nhận KHÔNG xác thực (scheme `unverified`) -> `raw_events.verified=false`; normalize
      * chép sang `events.verified`. `signature_valid` vẫn true ("không sai chữ ký" — không mở cảnh báo signature_failing).
      */
-    opts: { verified?: boolean } = {},
+    opts: { verified?: boolean } & IngestPath = {},
   ): Promise<PersistResult> {
     const log = logger.child({ correlationId, provider: req.provider, sourceId: source.id });
     const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
@@ -281,6 +326,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
             verified: opts.verified !== false,
             status: 'ACCEPTED',
             origin: stored.origin ?? 'webhook', // MS-R6: /events = 'api'
+            ...pathColumns(opts), // LH3 (H5): via + received_at của lưới; gọi thẳng -> {}
           },
         });
         // Transactional outbox trong CÙNG transaction
@@ -366,6 +412,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     signatureHeader: string | null,
     trace: TraceState,
     log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void; info: (o: object, m: string) => void },
+    path: IngestPath = {},
   ): Promise<IngestResponse> {
     if (h.kind === 'invalid') {
       log.warn({ message: h.message }, 'Bắt tay không hợp lệ -> 400');
@@ -377,8 +424,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, trace.correlationId, log, {
       meta: { reason: 'handshake', handshake: h.meta },
       metaOnly: true,
+      path,
     });
     trace.outcome = 'REJECTED';
+    trace.handshake = true;
     log.info({ kind: h.meta?.kind }, 'Đã trả lời bắt tay của provider');
     return {
       status,
@@ -403,8 +452,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async ingestCore(req: RawWebhookRequest, trace: TraceState): Promise<IngestResponse> {
+  private async ingestCore(req: RawWebhookRequest, trace: TraceState, opts: IngestOptions = {}): Promise<IngestResponse> {
     const correlationId = trace.correlationId;
+    // LH3 (H5, ADR-217): đường vào của request -> raw_events.via (+ received_at khi chữ ký body khớp). Gọi thẳng -> {}.
+    const path: IngestPath = opts.catchnet ? { via: catchnetVia(opts.catchnet.mode), receivedAt: opts.catchnet.receivedAt } : {};
     const log = logger.child({
       correlationId,
       provider: req.provider,
@@ -484,9 +535,12 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       },
       // PK5 (E14): cờ project nạp CÙNG câu với source (+0 lượt DB). Lõi chỉ chuyển qua — adapter quyết (khoá 1).
       projectFlags: { allowUnverified: (source as { allowUnverified?: unknown }).allowUnverified === true },
-      // PK5 (E6/E18): URL công khai của request dựng từ base ingest (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL — ADR-211;
-      // cùng hàm "Kết nối provider"), KHÔNG từ Host. Lười.
-      publicUrl: () => publicHooksUrl(req),
+      // PK5 (E6/E18): URL công khai của request, KHÔNG từ Host. Lười. LH3 (H4, ADR-217): theo ĐƯỜNG VÀO — qua lưới (chữ ký
+      // lưới hợp lệ) -> base ingest (HUB_INGEST_PUBLIC_URL); gọi thẳng -> HUB_PUBLIC_URL (URL source cũ đã đăng ký, U-C).
+      publicUrl: () => publicHooksUrl(req, process.env, opts.catchnet ? 'catchnet' : 'direct'),
+      // LH3 (H3, ADR-217): giờ Worker nhận (đã ký, body khớp) làm "bây giờ" cho cửa sổ thời gian (Stripe, Standard Webhooks,
+      // signed-template). Không có -> adapter dùng Date.now() như cũ.
+      ...(opts.catchnet?.receivedAt ? { verifyAt: opts.catchnet.receivedAt } : {}),
     };
     // 2 (PK4, §6.2, E27): method. Không cài `acceptsMethod` = chỉ POST; HEAD chỉ khi adapter nhận (`head-ok`, ADR-205 bổ sung). 405 không ghi DB, không phạt, không vào
     // lưu lượng (đặt TRƯỚC `trace.tenantId`) — URL đúng mà sai method là lỗi cấu hình, không phải dò sourceKey.
@@ -541,7 +595,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       log.warn('Chữ ký webhook không hợp lệ! Lưu raw_event với status REJECTED');
       // Lưu MẪU request lỗi để điều tra (§7.1) — có giới hạn (S1-4): tối đa 4KB body và
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
-      trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log);
+      trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log, { path });
       trace.outcome = 'REJECTED';
       // EG2 luật (b): phạt theo CẶP (ip, sourceKey) — tenant khác dùng chung IP của provider không bị vạ lây.
       // PK4 (E21): `rejectStatus: 503` vẫn phạt — mã HTTP đổi, luật phạt thì không.
@@ -552,19 +606,22 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // 2h (PK4, E9): bắt tay query/body/header-echo, manual-url — TRƯỚC verify, KHÔNG qua EG3, 0 lệnh Redis, không outbox,
     // không SET NX. Ghi MỘT dòng REJECTED `signature_valid=true` + `__hub_meta.reason='handshake'` (E8).
     const before = this.runHandshake(adapter, req, decryptedSecrets, ctx, 'before-verify', log);
-    if (before) return before.kind === 'reject' ? rejectSignature() : this.answerHandshake(before, source, req, storedHeaders, signatureHeader, trace, log);
+    if (before) return before.kind === 'reject' ? rejectSignature() : this.answerHandshake(before, source, req, storedHeaders, signatureHeader, trace, log, path);
     // GET chỉ để bắt tay (§6.2, §15): GET không phải bắt tay thì không bao giờ tới verify / persist.
     if (method !== 'POST') return METHOD_NOT_ALLOWED;
 
     // 3. Adapter xác thực chữ ký (verify). PK5 (E5): kết quả có thể là `{ok, verified}` — `verdictOf` chuẩn hoá.
     const verdict = verdictOf(await adapter.verify(req, decryptedSecrets, ctx));
     // PK5 (E14, E17): từ chối KHÔNG vì chữ ký sai (cờ project tắt, body quá trần) -> không lưu mẫu, không phạt, không lưu lượng.
-    if (verdict.refusal) return this.refuse(adapter, verdict.refusal, log, ctx);
+    if (verdict.refusal) {
+      trace.refused = true;
+      return this.refuse(adapter, verdict.refusal, log, ctx);
+    }
     if (!verdict.ok) return rejectSignature();
 
     // 3h (PK4, E3): hmac-echo CHỈ sau verify qua — kẻ biết sourceKey không xin được chữ ký hộ. Vẫn trước EG3, 0 lệnh Redis.
     const after = this.runHandshake(adapter, req, decryptedSecrets, ctx, 'after-verify', log);
-    if (after) return after.kind === 'reject' ? rejectSignature() : this.answerHandshake(after, source, req, storedHeaders, signatureHeader, trace, log);
+    if (after) return after.kind === 'reject' ? rejectSignature() : this.answerHandshake(after, source, req, storedHeaders, signatureHeader, trace, log, path);
 
     // 3c. EG3 (ADR-178): rate limit theo source chạy SAU verify — chỉ request ký đúng mới tiêu hạn mức. Kẻ biết một
     // sourceKey thật bắn chữ ký sai không còn khoá được webhook thật của nạn nhân. Cửa sổ cố định 60s, 1 EVAL INCR+EXPIRE,
@@ -588,7 +645,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       // S8: lỗi CHUNG — chữ ký đúng nhưng không có khoá chống trùng. KHÔNG fallback ulid (gửi lại = 2 sự kiện).
       // Lưu REJECTED (signature_valid = true) để chế độ lắng nghe chẩn đoán được; trả 422.
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
-      trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log);
+      trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log, { path });
       trace.outcome = 'REJECTED';
       return rejectAck(adapter, 422, 'missing_idempotency_key', log, ctx);
     }
@@ -600,7 +657,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       idempotencyKey,
       correlationId,
       { headers: meta ? { ...storedHeaders, [REJECTED_META_KEY]: meta } : storedHeaders, signatureHeader },
-      { verified: verdict.verified },
+      { verified: verdict.verified, ...path },
     );
     // 8. ACK theo định dạng của provider (PK4: mã thành công theo `ack.successStatus`)
     return this.ackFor(adapter, persisted, idempotencyKey, trace, ctx);
@@ -728,7 +785,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
      * PK4 (E8, E29): `meta.reason: 'handshake'` (+ `handshake`) — `countSignatureBySource` loại dòng có reason. `metaOnly`
      * (review PK4 T-2): không lưu body (bytes rỗng, body `{}`), trần riêng `HANDSHAKE_ROWS_PER_MINUTE`.
      */
-    extra?: { meta?: Record<string, unknown>; metaOnly?: boolean },
+    extra?: { meta?: Record<string, unknown>; metaOnly?: boolean; path?: IngestPath },
   ): Promise<number> {
     const sourceId = source.id;
     const limiter = extra?.metaOnly ? this.handshakeLimiter : this.rejectedLimiter;
@@ -753,6 +810,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
           signatureValid,
           status: 'REJECTED',
           origin: 'webhook',
+          ...pathColumns(extra?.path),
         },
       }));
       return sample.bodyRaw.length;
@@ -765,13 +823,31 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 
 export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error' };
 
+/** LH3 (H5): đường vào của request — `raw_events.via` (+ `received_at` = giờ Worker khi chữ ký body khớp, §5.2). */
+export interface IngestPath {
+  via?: 'catchnet-forward' | 'catchnet-replay';
+  receivedAt?: Date;
+}
+
+/** Cột raw_events theo đường vào. Gọi thẳng -> {} (via NULL, received_at = now() của DB như cũ). */
+function pathColumns(p: IngestPath | undefined): { via?: string; receivedAt?: Date } {
+  if (!p?.via) return {};
+  return p.receivedAt ? { via: p.via, receivedAt: p.receivedAt } : { via: p.via };
+}
+
 /**
- * PK5 (E6/E18, ADR-206): URL công khai đầy đủ của request `/hooks` — base ingest qua `publicIngestBase` (ADR-211:
- * `HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL`; cùng hàm "Kết nối provider"; localhost / IP nội bộ -> null) + path +
- * query gốc. KHÔNG BAO GIỜ dựng từ `Host` (giả được). Thuần. LH3 (H4): base theo đường request đi vào — sửa ở publicIngestBase.
+ * PK5 (E6/E18, ADR-206): URL công khai đầy đủ của request `/hooks` — base + path + query gốc. KHÔNG BAO GIỜ dựng từ `Host`
+ * (giả được). Thuần. LH3 (H4, ADR-217; sửa REVIEW-LH-URL L1): base theo ĐƯỜNG VÀO của request —
+ *   - `catchnet` (chữ ký lưới hợp lệ): base ingest `publicIngestBase` (`HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL`);
+ *   - `direct` (mặc định — gọi thẳng, hoặc header lưới sai chữ ký): `HUB_PUBLIC_URL`, URL mà source cũ đã đăng ký (U-C).
+ * Provider ký trên URL (Twilio) tính chữ ký trên đúng URL nó đã gọi; dựng sai base là 401 oan.
  */
-export function publicHooksUrl(req: Pick<RawWebhookRequest, 'provider' | 'sourceKey' | 'query'>, env: Record<string, string | undefined> = process.env): string | null {
-  const base = publicIngestBase(env);
+export function publicHooksUrl(
+  req: Pick<RawWebhookRequest, 'provider' | 'sourceKey' | 'query'>,
+  env: Record<string, string | undefined> = process.env,
+  via: 'catchnet' | 'direct' = 'direct',
+): string | null {
+  const base = publicIngestBase(env, { route: via === 'catchnet' ? 'ingest' : 'direct' });
   if (!base) return null;
   const q = req.query ?? '';
   return `${base}/hooks/${req.provider}/${req.sourceKey}${q ? `?${q}` : ''}`;

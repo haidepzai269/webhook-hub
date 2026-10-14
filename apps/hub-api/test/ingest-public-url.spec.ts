@@ -90,7 +90,9 @@ describe('[LH-URL] HUB_INGEST_PUBLIC_URL tách khỏi HUB_PUBLIC_URL (§9, ADR-2
   it('[LH:T17] (phần b) có cả hai -> URL ingest / đăng ký / DRIFTED / publicHooksUrl dùng HUB_INGEST_PUBLIC_URL; connection string giữ HUB_PUBLIC_URL', async () => {
     const env = { HUB_PUBLIC_URL: RENDER, HUB_INGEST_PUBLIC_URL: `${WORKERS}/` };
     expect(publicIngestBase(env)).toBe(WORKERS);
-    expect(publicHooksUrl({ provider: 'generic', sourceKey: 'k', query: '' }, env)).toBe(`${WORKERS}/hooks/generic/k`);
+    // LH3 (H4, [LH:T19]): publicHooksUrl theo đường vào — request qua lưới dùng base ingest; gọi thẳng giữ HUB_PUBLIC_URL.
+    expect(publicHooksUrl({ provider: 'generic', sourceKey: 'k', query: '' }, env, 'catchnet')).toBe(`${WORKERS}/hooks/generic/k`);
+    expect(publicHooksUrl({ provider: 'generic', sourceKey: 'k', query: '' }, env)).toBe(`${RENDER}/hooks/generic/k`);
     expect(await registeredUrl(env)).toBe(`${WORKERS}/hooks/stripe/src_stripe_main`);
     expect(hubPublicUrl(env as unknown as NodeJS.ProcessEnv)).toBe(RENDER);
     // URL console cho dev copy; stack kiểm chứng (CONNECTOR_INGEST_BASE_URL = tên trong mạng docker) không lọt ra màn hình.

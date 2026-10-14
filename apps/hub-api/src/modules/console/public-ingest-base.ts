@@ -23,13 +23,18 @@ export function ingestPublicUrlVar(env: Record<string, string | undefined> = pro
  * production có biến này -> app không khởi động (testOnlyConfigProblems). `connectorOverride: false` bỏ qua nó (URL hiện
  * cho người — tên trong mạng docker không mở được từ trình duyệt).
  *
- * LH3 (H4) móc Ở ĐÂY: request đi qua lưới hứng (chữ ký lưới hợp lệ) -> base lưới; đi thẳng Render -> `HUB_PUBLIC_URL`.
- * Mọi chỗ dựng URL ingest phải đi qua hàm này để LH3 chỉ sửa một nơi.
+ * LH3 (H4, ADR-217): `route: 'direct'` = base cho request GỌI THẲNG (không có chữ ký lưới hợp lệ) -> `HUB_PUBLIC_URL`, bỏ qua
+ * `HUB_INGEST_PUBLIC_URL` (`publicHooksUrl` chọn theo đường vào). Mặc định `'ingest'`: URL đăng ký / hiện cho source MỚI.
+ * Mọi chỗ dựng URL ingest phải đi qua hàm này.
  */
-export function publicIngestBase(env: Record<string, string | undefined> = process.env, opts: { connectorOverride?: boolean } = {}): string | null {
+export function publicIngestBase(
+  env: Record<string, string | undefined> = process.env,
+  opts: { connectorOverride?: boolean; route?: 'ingest' | 'direct' } = {},
+): string | null {
   const override = opts.connectorOverride === false || env.NODE_ENV === 'production' ? '' : (env.CONNECTOR_INGEST_BASE_URL ?? '').trim();
   if (override) return override.replace(/\/$/, '');
-  const raw = (env[ingestPublicUrlVar(env)] ?? '').trim().replace(/\/$/, '');
+  const varName: IngestUrlVar = opts.route === 'direct' ? 'HUB_PUBLIC_URL' : ingestPublicUrlVar(env);
+  const raw = (env[varName] ?? '').trim().replace(/\/$/, '');
   let u: URL;
   try {
     u = new URL(raw);

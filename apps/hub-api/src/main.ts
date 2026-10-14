@@ -11,6 +11,7 @@ import { installErrorHandling } from './modules/errors/install';
 import { configureBodyParsers, installHooksPathGuard } from './body-parsers';
 import { IngestService } from './modules/ingest/ingest.service';
 import { installPenaltyGate } from './modules/ingest/penalty-gate';
+import { installHubOutcome } from './modules/ingest/hub-outcome';
 import { installShutdown } from './shutdown';
 import { parseTrustProxy } from './trust-proxy';
 
@@ -76,6 +77,10 @@ async function bootstrap() {
 
   // Kích hoạt CORS cho Dashboard và Demo Shop
   app.enableCors(corsOptions()); // MS-P2-6: không '*' kèm credentials
+
+  // LH3 (H1, ADR-221): `x-hub-outcome` cho mọi phản hồi /hooks/* — lưới đỡ theo status cài TRƯỚC guard, cổng phạt, body
+  // parser để không nhánh nào trả lời mà thiếu header (lưới hứng phân biệt "hub từ chối" với "hub vắng").
+  installHubOutcome(app);
 
   // EG1 (ADR-175 bổ sung lượt 5): `/HOOKS/...` (sai hoa thường) -> 404 như nginx, đặt TRƯỚC gate để IP sạch và IP bị ban
   // nhận cùng phản hồi.
