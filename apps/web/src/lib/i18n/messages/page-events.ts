@@ -31,6 +31,9 @@ export const pageEvents = defineMessages("page.events", {
     "page.events.load-error": "Không tải được: {message}",
     "page.events.no-match": "Không có hành trình nào khớp bộ lọc.",
     "page.events.quick-view": "Xem nhanh dấu vết",
+    // PK5 (E4, ADR-206): sự kiện từ nguồn chưa xác thực (hub không kiểm chữ ký — nơi nhận tự kiểm).
+    "page.events.unverified": "Chưa xác thực",
+    "page.events.unverified-hint": "Hub không kiểm chữ ký của nguồn này — nơi nhận phải tự kiểm chữ ký gốc của nhà cung cấp.",
     "page.events.loading-more": "Đang tải thêm…",
     "page.events.end": "Hết.",
     // Cột bảng sự kiện (dùng cả ở Tổng quan)
@@ -154,6 +157,8 @@ export const pageEvents = defineMessages("page.events", {
     "page.events.load-error": "Couldn't load: {message}",
     "page.events.no-match": "No journeys match the filters.",
     "page.events.quick-view": "Quick view of the trace",
+    "page.events.unverified": "Unverified",
+    "page.events.unverified-hint": "The hub did not verify this source — the receiver must verify the original provider signature.",
     "page.events.loading-more": "Loading more…",
     "page.events.end": "End.",
     "page.events.table.received-at": "Received",

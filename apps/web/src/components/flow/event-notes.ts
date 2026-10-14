@@ -33,6 +33,8 @@ export interface NoteInput {
   failedAt: FailedAtLike | null;
   /** events.probe của server (ADR-159, ADR-163). Vắng = server cũ -> phỏng đoán theo tên kiểu. */
   probe?: boolean;
+  /** PK5 (ADR-206): false = nguồn `unverified` — chấm Xác thực là warning (unverified_source) nhưng request ĐÃ qua. */
+  verified?: boolean;
 }
 
 /** neutral = bình thường · expected = trông lạ nhưng đúng thiết kế · attention = cần xem cấu hình · error = hỏng. */
@@ -82,7 +84,7 @@ export function isProbeType(type: string | null): boolean {
   return probeOf(type) !== null;
 }
 
-type ProbeInput = Pick<NoteInput, "type" | "provider" | "failedAt" | "summary" | "probe">;
+type ProbeInput = Pick<NoteInput, "type" | "provider" | "failedAt" | "summary" | "probe" | "verified">;
 
 /** Probe do adapter đánh dấu nhưng kiểu chưa có trong bảng PROBES (provider mới) — câu chung, vẫn trung tính. */
 const GENERIC_PROBE: Omit<ProbeInfo, "provider"> = {
@@ -231,7 +233,9 @@ export function stageHint(i: ProbeInput, d: DotLike, t: TranslateFn): string | n
   }
   if (d.stage === "persisted" && d.status === "skipped") {
     // Chỉ là "trùng" khi đã qua xác thực; dòng REJECTED (chữ ký sai) dừng ở `verified` nên `persisted` cũng skipped.
-    const verifiedOk = dot(i.summary, "verified")?.status === "ok" && f?.stage !== "verified";
+    // REVIEW-PK5-R2 T-b: nguồn chưa xác thực -> chấm Xác thực warning (lý do unverified_source) vẫn là "đã qua".
+    const v = dot(i.summary, "verified")?.status;
+    const verifiedOk = (v === "ok" || (v === "warning" && i.verified === false)) && f?.stage !== "verified";
     return verifiedOk ? t("journey.hint.duplicate") : t("journey.hint.not-run");
   }
   if (d.stage === "normalized" && d.status === "skipped" && i.type === null) {

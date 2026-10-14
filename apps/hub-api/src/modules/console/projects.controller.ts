@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 import {
   API_SCOPES,
+  OWNER_GRANTED_API_SCOPES,
   parseStorageLevel,
   quotaBytesFor,
   PROJECT_SLUG_RE,
@@ -168,6 +169,44 @@ export class ProjectsController {
     return { id: projectId, storageQuotaMb: v, quotaBytes: quotaBytesFor(v) };
   }
 
+  /** PK5 khoá 1 (SPEC-provider-khac §7.1, E14): project có nhận nguồn `unverified` không — ai đọc project cũng xem được. */
+  @Get(':projectId/unverified-sources')
+  @UseGuards(ProjectScopeGuard)
+  @RequireScope('read:project')
+  async getUnverifiedSources(@Param('projectId') projectId: string) {
+    const project = await this.requireProject(projectId);
+    return { allowUnverifiedSources: (project as { allowUnverifiedSources?: boolean }).allowUnverifiedSources === true };
+  }
+
+  /**
+   * PK5 khoá 1 (§7.1, E14, ADR-206): OWNER bật/tắt "Nhận nguồn chưa xác thực" (`manage:project`; người vận hành = owner qua
+   * viaOperator). Ghi + `audit_logs` cùng transaction. Tắt -> mọi source `unverified` của project bị từ chối ngay request kế
+   * tiếp (ingest đọc cờ cùng câu nạp source), không ghi, không phạt.
+   */
+  @Put(':projectId/unverified-sources')
+  @UseGuards(ProjectScopeGuard)
+  @RequireScope('manage:project')
+  async setUnverifiedSources(@CurrentUser() actor: string, @Param('projectId') projectId: string, @Body() body: any) {
+    const project = await this.requireProject(projectId);
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    if (!keys || keys.length !== 1 || keys[0] !== 'allowUnverifiedSources' || typeof body.allowUnverifiedSources !== 'boolean') {
+      invalid('allowUnverifiedSources', 'Body là {"allowUnverifiedSources": true | false}');
+    }
+    const before = (project as { allowUnverifiedSources?: boolean }).allowUnverifiedSources === true;
+    const after: boolean = body.allowUnverifiedSources;
+    await this.prisma.tenantTx(projectId, async (tx) => {
+      await this.prisma.setProjectAllowUnverified(projectId, after, tx);
+      await this.prisma.forTenant(projectId, tx).createAuditLog({
+        action: 'project.unverified_sources_changed',
+        entityType: 'project',
+        entityId: projectId,
+        actor,
+        metadata: { before, after },
+      });
+    });
+    return { id: projectId, allowUnverifiedSources: after };
+  }
+
   /** Người tạo thành owner (membership) trong CÙNG transaction. `live` cần email đã xác minh (§5.6). */
   @Post()
   @NoProjectScope('tạo project MỚI — người tạo thành owner; chưa thuộc project nào để kiểm scope')
@@ -227,6 +266,15 @@ export class ProjectsController {
   async createKey(@Req() req: RequestWithPrincipal, @CurrentUser() actor: string, @Param('projectId') projectId: string, @Body() body: any) {
     const project = await this.requireProject(projectId);
     const input = parseCreateKey(body);
+    // PK5 (E4, ADR-206): `read:unverified` (polling trả event chưa xác thực) chỉ người có scope đó (owner / người vận hành) cấp.
+    const mine = (req.principal as { scopes?: string[] } | undefined)?.scopes ?? [];
+    const ungrantable = input.scopes.filter((s) => (OWNER_GRANTED_API_SCOPES as readonly string[]).includes(s) && !mine.includes(s));
+    if (ungrantable.length > 0) {
+      throw new HttpException(
+        { error: 'missing_scope', message: `Chỉ owner của project cấp được ${ungrantable.join(', ')} cho API key`, required: ungrantable[0] },
+        HttpStatus.FORBIDDEN,
+      );
+    }
     // §5.6 / UA28: hk_live_ (project live) cần email đã xác minh; hk_test_ thì được ngay (Quickstart 60 giây).
     if (project.environment === 'live' && !me(req).emailVerified) emailNotVerified();
     const key = generateApiKey(project.environment);

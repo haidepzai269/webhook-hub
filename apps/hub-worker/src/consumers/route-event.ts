@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { TenantScopedRepository } from '@hub/database';
 import { EventReceivedNotice, buildDeliveryMessage, logger } from '@hub/common';
+import { unverifiedSkipped } from '../metrics';
 
 /** Topic outbox cho chặng normalize → delivery (S1-2). Relay định tuyến theo TOPIC_ROUTES. */
 export const DELIVERY_REQUESTED_TOPIC = 'delivery.requested';
@@ -15,13 +16,20 @@ export async function routeEventToSubscriptions(
   tx: Prisma.TransactionClient,
   repoTx: TenantScopedRepository,
   tenantId: string,
-  evt: { id: string; type: string; sourceId: string | null; correlationId: string },
+  /** PK5 khoá 4: `verified: false` -> chỉ subscription `acceptUnverified`. Vắng = true (event của hub, dữ liệu cũ). */
+  evt: { id: string; type: string; sourceId: string | null; correlationId: string; verified?: boolean },
   log: Pick<typeof logger, 'info'> = logger,
 ): Promise<EventReceivedNotice['deliveries']> {
   const routed: EventReceivedNotice['deliveries'] = [];
   const subscriptions = await repoTx.findActiveSubscriptionsForEvent(evt.type, evt.sourceId ?? null);
   log.info({ eventType: evt.type, subscriptionCount: subscriptions.length }, 'Tìm thấy subscriptions phù hợp');
   for (const sub of subscriptions) {
+    // PK5 khoá 4 (§7.1, ADR-206): sự kiện CHƯA xác thực chỉ tới đích đã tự đồng ý — không tạo delivery, đếm metric.
+    if (evt.verified === false && (sub as { acceptUnverified?: boolean }).acceptUnverified !== true) {
+      unverifiedSkipped.inc();
+      log.info({ subscriptionId: sub.id }, 'Bỏ qua subscription không nhận sự kiện chưa xác thực (acceptUnverified=false)');
+      continue;
+    }
     const dest = sub.destination as { type?: string; verification?: string } | undefined;
     if (dest?.type === 'webhook' && dest.verification && dest.verification !== 'VERIFIED') {
       log.info({ subscriptionId: sub.id, destinationId: sub.destinationId, verification: dest.verification }, 'Bỏ qua đích webhook chưa VERIFIED');

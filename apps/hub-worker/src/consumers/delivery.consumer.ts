@@ -217,6 +217,8 @@ function toNormalizedEvent(row: DeliveryForSend): NormalizedEvent {
     parentEventId: e.parentEventId ?? undefined,
     origin: e.origin as NormalizedEvent['origin'],
     normalized: (e as { normalized?: boolean }).normalized !== false,
+    // PK5 (E4): phong bì / tin nhắn phải nói được "chưa xác thực" — chép cờ của dòng events.
+    verified: (e as { verified?: boolean }).verified !== false,
   };
 }
 

@@ -1,0 +1,5 @@
+# origin: constructed; source: https://developers.momo.vn/v3/docs/payment/api/result-handling/notification
+POST /webhook HTTP/1.1
+Content-Type: application/json
+
+{"partnerCode":"MOMO","orderId":"ORDER0001","requestId":"REQ0001","amount":50000,"orderInfo":"thanh toan","orderType":"momo_wallet","transId":4088878653,"resultCode":0,"message":"Successful.","payType":"qr","responseTime":1700000000000,"extraData":"","signature":"0000000000000000000000000000000000000000000000000000000000000000"}

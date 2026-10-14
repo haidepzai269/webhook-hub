@@ -8,6 +8,8 @@ export const KEY_SCOPES = [
   { scope: "read:events", hintKey: "page.api-keys.scope.read-events" },
   { scope: "publish:events", hintKey: "page.api-keys.scope.publish-events" },
   { scope: "manage:sources", hintKey: "page.api-keys.scope.manage-sources" },
+  // PK5 (E4, ADR-206): polling trả cả sự kiện chưa xác thực — chỉ owner cấp được (server 403 với người khác).
+  { scope: "read:unverified", hintKey: "page.api-keys.scope.read-unverified" },
 ] as const satisfies readonly { scope: string; hintKey: MessageKey }[];
 
 /** Mặc định cho Shop: tự đăng ký endpoint + đọc sự kiện (SPEC §3). */

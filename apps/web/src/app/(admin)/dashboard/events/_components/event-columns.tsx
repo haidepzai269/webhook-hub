@@ -4,6 +4,7 @@ import { useMemo } from "react";
 
 import type { HubColumn } from "@/components/admin/data-table";
 import { DeliverySummary } from "@/components/admin/status-badge";
+import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime, formatRelative } from "@/lib/hub/format";
 import type { HubEvent } from "@/lib/hub/types";
@@ -27,7 +28,13 @@ export const buildEventColumns = (t: TranslateFn, locale: Locale): HubColumn<Hub
     id: "type",
     header: t("page.events.table.type"),
     accessorFn: (e) => e.type,
-    cell: ({ row }) => <span className="font-mono text-xs">{row.original.type}</span>,
+    cell: ({ row }) => (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate font-mono text-xs">{row.original.type}</span>
+        {/* PK5 khoá 2: nhãn "Chưa xác thực" ở mọi nơi có event. */}
+        <UnverifiedBadge of={row.original} />
+      </span>
+    ),
   },
   {
     id: "source",

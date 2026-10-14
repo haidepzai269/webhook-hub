@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService, getMasterKey } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
-import { AdapterContext, HandshakeOutcome, IdempotencyKeyMissingError, ProviderAdapter, ProviderRegistry } from '@hub/providers';
+import { AdapterContext, HandshakeOutcome, IdempotencyKeyMissingError, ProviderAdapter, ProviderRegistry, VerifyRefusal, verdictOf } from '@hub/providers';
 import { aesGcmDecrypt } from '@hub/crypto';
 import {
   RawWebhookRequest,
@@ -37,6 +37,7 @@ import { createPenaltyBox } from './penalty-provider';
 import { IngestResponse, blockedAck, providerMetricLabel, storageFullAck } from './blocked-ack';
 import { TrafficOutcome, TrafficRecorder } from './traffic-recorder';
 import { onShutdownFlush } from '../../shutdown';
+import { publicIngestBase } from '../console/public-ingest-base';
 
 export type { IngestResponse } from './blocked-ack';
 
@@ -249,6 +250,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     idempotencyKey: string,
     correlationId: string,
     stored: { headers: Record<string, unknown>; signatureHeader: string | null; origin?: 'webhook' | 'api' },
+    /**
+     * PK5 (E5, ADR-206): `verified: false` = nhận KHÔNG xác thực (scheme `unverified`) -> `raw_events.verified=false`; normalize
+     * chép sang `events.verified`. `signature_valid` vẫn true ("không sai chữ ký" — không mở cảnh báo signature_failing).
+     */
+    opts: { verified?: boolean } = {},
   ): Promise<PersistResult> {
     const log = logger.child({ correlationId, provider: req.provider, sourceId: source.id });
     const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
@@ -272,6 +278,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
             contentType: req.contentType,
             signatureHeader: stored.signatureHeader,
             signatureValid: true,
+            verified: opts.verified !== false,
             status: 'ACCEPTED',
             origin: stored.origin ?? 'webhook', // MS-R6: /events = 'api'
           },
@@ -475,6 +482,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
           return null;
         }
       },
+      // PK5 (E14): cờ project nạp CÙNG câu với source (+0 lượt DB). Lõi chỉ chuyển qua — adapter quyết (khoá 1).
+      projectFlags: { allowUnverified: (source as { allowUnverified?: unknown }).allowUnverified === true },
+      // PK5 (E6/E18): URL công khai của request dựng từ HUB_PUBLIC_URL (cùng hàm "Kết nối provider"), KHÔNG từ Host. Lười.
+      publicUrl: () => publicHooksUrl(req),
     };
     // 2 (PK4, §6.2, E27): method. Không cài `acceptsMethod` = chỉ POST; HEAD chỉ khi adapter nhận (`head-ok`, ADR-205 bổ sung). 405 không ghi DB, không phạt, không vào
     // lưu lượng (đặt TRƯỚC `trace.tenantId`) — URL đúng mà sai method là lỗi cấu hình, không phải dò sourceKey.
@@ -544,9 +555,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // GET chỉ để bắt tay (§6.2, §15): GET không phải bắt tay thì không bao giờ tới verify / persist.
     if (method !== 'POST') return METHOD_NOT_ALLOWED;
 
-    // 3. Adapter xác thực chữ ký (verify)
-    const isSignatureValid = await adapter.verify(req, decryptedSecrets, ctx);
-    if (!isSignatureValid) return rejectSignature();
+    // 3. Adapter xác thực chữ ký (verify). PK5 (E5): kết quả có thể là `{ok, verified}` — `verdictOf` chuẩn hoá.
+    const verdict = verdictOf(await adapter.verify(req, decryptedSecrets, ctx));
+    // PK5 (E14, E17): từ chối KHÔNG vì chữ ký sai (cờ project tắt, body quá trần) -> không lưu mẫu, không phạt, không lưu lượng.
+    if (verdict.refusal) return this.refuse(adapter, verdict.refusal, log, ctx);
+    if (!verdict.ok) return rejectSignature();
 
     // 3h (PK4, E3): hmac-echo CHỈ sau verify qua — kẻ biết sourceKey không xin được chữ ký hộ. Vẫn trước EG3, 0 lệnh Redis.
     const after = this.runHandshake(adapter, req, decryptedSecrets, ctx, 'after-verify', log);
@@ -562,7 +575,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       return { status: 429, body: { error: 'Vượt quá tần suất cho phép (Rate limit)' } };
     }
     // EG2 (đính chính ADR-177): ký đúng VÀ qua rate limit -> nhớ "cặp tốt" (bộ nhớ, 0 I/O). Request bị 429 không được tính.
-    this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey, source.tenantId), undefined);
+    // Review PK5 T-2: "cặp tốt" nghĩa là KÝ ĐÚNG — request `unverified` (không ai kiểm chữ ký) không được nâng ngưỡng phạt.
+    if (verdict.verified) this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey, source.tenantId), undefined);
 
     // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)
     let idempotencyKey: string;
@@ -577,12 +591,45 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       trace.outcome = 'REJECTED';
       return rejectAck(adapter, 422, 'missing_idempotency_key', log, ctx);
     }
-    const persisted = await this.persistAccepted(source, req, idempotencyKey, correlationId, {
-      headers: storedHeaders as Record<string, unknown>,
-      signatureHeader,
-    });
+    // PK5 (E6): meta adapter dựng lúc nhận (vd URL công khai khi `forwardUrl`) -> `headers.__hub_meta` của raw ACCEPTED.
+    const meta = this.storedMetaOf(adapter, req, ctx, log);
+    const persisted = await this.persistAccepted(
+      source,
+      req,
+      idempotencyKey,
+      correlationId,
+      { headers: meta ? { ...storedHeaders, [REJECTED_META_KEY]: meta } : storedHeaders, signatureHeader },
+      { verified: verdict.verified },
+    );
     // 8. ACK theo định dạng của provider (PK4: mã thành công theo `ack.successStatus`)
     return this.ackFor(adapter, persisted, idempotencyKey, trace, ctx);
+  }
+
+  /**
+   * PK5 (E14, E17, ADR-206): adapter từ chối KHÔNG phải vì chữ ký sai — cờ project `allowUnverified` tắt (401 -> `rejectStatus`
+   * của adapter, không bao giờ 2xx) hoặc body vượt trần của `unverified` (413). KHÔNG `storeRejected`, KHÔNG `recordBadSignature`
+   * (kẻ biết sourceKey không làm bẩn cảnh báo / khoá IP của provider thật), không vào lưu lượng; metric outcome INVALID/TOO_LARGE.
+   */
+  private refuse(
+    adapter: ProviderAdapter,
+    refusal: VerifyRefusal,
+    log: { warn: (o: unknown, m?: string) => void },
+    ctx: AdapterContext,
+  ): IngestResponse {
+    log.warn({ error: refusal.error }, 'Adapter từ chối (không phải chữ ký sai) -> không lưu, không phạt');
+    if (refusal.status === 401) return rejectAck(adapter, 401, refusal.error, log, ctx);
+    return { status: 413, body: { error: refusal.error, message: 'Payload quá lớn cho nguồn chưa xác thực', fix: refusal.fix } };
+  }
+
+  /** PK5 (E6): meta adapter muốn lưu cùng raw ACCEPTED. Adapter ném -> không lưu meta (log), request vẫn được nhận. */
+  private storedMetaOf(adapter: ProviderAdapter, req: RawWebhookRequest, ctx: AdapterContext, log: { warn: (o: object, m: string) => void }): Record<string, unknown> | null {
+    if (!adapter.storedMeta) return null;
+    try {
+      return adapter.storedMeta(req, ctx);
+    } catch (err: any) {
+      log.warn({ err: err?.message }, 'storedMeta của adapter lỗi -> không lưu meta');
+      return null;
+    }
   }
 
   /** EG4: cộng một request vào lưu lượng trong bộ nhớ (không I/O). Lỗi -> bỏ qua (số liệu quan sát). */
@@ -716,6 +763,17 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 }
 
 export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error' };
+
+/**
+ * PK5 (E6/E18, ADR-206): URL công khai đầy đủ của request `/hooks` — `HUB_PUBLIC_URL` qua `publicIngestBase` (cùng hàm "Kết
+ * nối provider"; localhost / IP nội bộ -> null) + path + query gốc. KHÔNG BAO GIỜ dựng từ `Host` (giả được). Thuần.
+ */
+export function publicHooksUrl(req: Pick<RawWebhookRequest, 'provider' | 'sourceKey' | 'query'>, env: Record<string, string | undefined> = process.env): string | null {
+  const base = publicIngestBase(env);
+  if (!base) return null;
+  const q = req.query ?? '';
+  return `${base}/hooks/${req.provider}/${req.sourceKey}${q ? `?${q}` : ''}`;
+}
 
 /** Trần request/phút/source (mặc định 100). Giá trị không hợp lệ -> 100. */
 export function ingestRateLimitPerMin(v: string | undefined = process.env.INGEST_RATE_LIMIT_PER_MIN): number {

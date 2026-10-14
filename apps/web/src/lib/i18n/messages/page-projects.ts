@@ -20,6 +20,17 @@ export const pageProjects = defineMessages("page.projects", {
     "page.projects.env.live": "thật",
     "page.projects.select": "Chọn",
     "page.projects.api-keys": "Khoá API",
+    // PK5 khoá 1 (ADR-206): cờ "Nhận nguồn chưa xác thực" của dự án đang chọn
+    "page.projects.unverified.title": "Nhận nguồn chưa xác thực",
+    "page.projects.unverified.hint":
+      "Bật để nguồn \"Chưa xác thực\" (hub không kiểm chữ ký, nơi nhận tự kiểm) nhận được yêu cầu. Tắt: mọi nguồn loại này bị từ chối ngay, không lưu. Dung lượng mỗi sự kiện ≈ 2,33 lần nội dung.",
+    "page.projects.unverified.on": "Đang bật",
+    "page.projects.unverified.off": "Đang tắt",
+    "page.projects.unverified.turn-on": "Bật nhận nguồn chưa xác thực",
+    "page.projects.unverified.turn-off": "Tắt nhận nguồn chưa xác thực",
+    "page.projects.unverified.enabled": "Đã bật nhận nguồn chưa xác thực",
+    "page.projects.unverified.disabled": "Đã tắt nhận nguồn chưa xác thực",
+    "page.projects.unverified.owner-only": "Chỉ chủ dự án đổi được cài đặt này (có ghi nhật ký).",
     "page.projects.created": "Đã tạo dự án \"{name}\" — đang chọn dự án này",
     "page.projects.dialog.description":
       "Bạn là chủ sở hữu của dự án mới. Mã định danh nằm trong chuỗi kết nối của dịch vụ.",
@@ -54,6 +65,16 @@ export const pageProjects = defineMessages("page.projects", {
     "page.projects.env.live": "live",
     "page.projects.select": "Select",
     "page.projects.api-keys": "API keys",
+    "page.projects.unverified.title": "Accept unverified sources",
+    "page.projects.unverified.hint":
+      "Turn on so \"Unverified\" sources (the hub does not check signatures, the receiver does) accept requests. Off: every such source is refused immediately, nothing stored. Storage per event ≈ 2.33× the body.",
+    "page.projects.unverified.on": "On",
+    "page.projects.unverified.off": "Off",
+    "page.projects.unverified.turn-on": "Accept unverified sources",
+    "page.projects.unverified.turn-off": "Stop accepting unverified sources",
+    "page.projects.unverified.enabled": "Unverified sources are now accepted",
+    "page.projects.unverified.disabled": "Unverified sources are no longer accepted",
+    "page.projects.unverified.owner-only": "Only a project owner can change this (audited).",
     "page.projects.created": "Created project \"{name}\" — now selected",
     "page.projects.dialog.description":
       "You are the owner of the new project. The slug is part of your services' connection string.",

@@ -188,6 +188,24 @@ export const ERROR_CATALOG = {
     message: 'The query string is too long.',
     fix: () => 'Send at most 8KB of query string to /hooks URLs.',
   },
+  // PK5 (SPEC-provider-khac §7, E14/E17, ADR-206): nguồn `unverified` ("đích tự kiểm").
+  source_unverified_disabled: {
+    status: 401,
+    message: 'This source accepts events without verifying them, and its project does not allow unverified sources.',
+    fix: () =>
+      'A project owner turns on "Accept unverified sources" in the console (Projects → settings), or change the source to a scheme the hub verifies (hmac, static-token, standard-webhooks, signed-template). Nothing was stored.',
+  },
+  unverified_body_too_large: {
+    status: 413,
+    message: 'The body is too large for an unverified source.',
+    fix: () =>
+      'Unverified sources accept at most 45KB per request: the raw body is forwarded base64-encoded, together with the forwarded URL and headers, and must fit the 64KB delivery limit. Ask the provider for smaller payloads (or a shorter query string), or use a scheme the hub verifies.',
+  },
+  unverified_not_accepted: {
+    status: 409,
+    message: 'This event was received without verification and the subscription does not accept unverified events.',
+    fix: () => 'Turn on "Accept unverified events" on the subscription (the destination must verify the original provider signature itself), then replay.',
+  },
   // ---- trạng thái / xung đột ----
   source_inactive: {
     status: 409,

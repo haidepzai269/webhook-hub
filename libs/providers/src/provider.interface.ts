@@ -16,6 +16,41 @@ export interface AdapterContext {
    * adapter tự biết giá trị nào cần mở. Lỗi giải mã -> null (fail-closed). Không có (renormalize, inspect) -> adapter từ chối.
    */
   openSealed?: (enc: string) => string | null;
+  /**
+   * PK5 (E14, ADR-206): cờ của PROJECT mà adapter cần — nạp CÙNG câu với source (+0 lượt DB, như `storageLevel`). Lõi chỉ
+   * chuyển qua, không đọc. Vắng (renormalize, inspect, đối chiếu secret) = mọi cờ tắt (fail-closed).
+   */
+  projectFlags?: { allowUnverified: boolean };
+  /**
+   * PK5 (E6/E18): URL công khai của CHÍNH request này (`HUB_PUBLIC_URL` + `/hooks/<provider>/<sourceKey>` + query gốc), lõi
+   * dựng từ env LÚC NHẬN — không bao giờ từ header `Host` (giả được). `null` khi hub không có URL công khai (localhost / IP
+   * nội bộ). Hàm (lười): chỉ adapter cần mới gọi.
+   */
+  publicUrl?: () => string | null;
+}
+
+/**
+ * PK5 (E5, E14, E17, ADR-206): kết quả `verify`. Adapter cũ trả `boolean` — lõi hiểu `true` là `{ok:true, verified:true}`.
+ * - `{ ok: true, verified: false }`: NHẬN mà không xác thực (scheme `unverified`, cờ project bật) — lõi ghi
+ *   `raw_events.verified=false`, `signature_valid` vẫn true ("không sai chữ ký").
+ * - `{ ok: false, refusal }`: TỪ CHỐI KHÔNG phải vì chữ ký sai (cờ project tắt, body quá trần) — lõi KHÔNG lưu mẫu
+ *   REJECTED, KHÔNG phạt EG2, không vào lưu lượng; chỉ trả status (401 -> `rejectStatus` của adapter; 413 nguyên văn).
+ */
+export interface VerifyRefusal {
+  status: 401 | 413;
+  /** Mã lỗi ổn định trong docs/ERRORS.md (vd `source_unverified_disabled`, `unverified_body_too_large`). */
+  error: string;
+  /** Câu sửa cho dev (ADR-136) — không bao giờ chứa giá trị header/secret/body. */
+  fix: string;
+}
+export type VerifyResult = boolean | { ok: true; verified: boolean } | { ok: false; refusal?: VerifyRefusal };
+
+/** PK5: chuẩn hoá kết quả `verify` (boolean cũ hoặc object mới). Mọi chỗ gọi `verify` đi qua đây — object luôn "truthy". */
+export function verdictOf(r: VerifyResult): { ok: boolean; verified: boolean; refusal?: VerifyRefusal } {
+  if (r === true) return { ok: true, verified: true };
+  if (r === false || r === null || typeof r !== 'object') return { ok: false, verified: false };
+  if (r.ok === true) return { ok: true, verified: r.verified !== false };
+  return { ok: false, verified: false, ...(r.refusal ? { refusal: r.refusal } : {}) };
 }
 
 /**
@@ -73,6 +108,11 @@ export interface Diagnosis {
     | 'mapping_field_missing'
     | 'mapping_field_invalid'
     | 'config_invalid'
+    /**
+     * PK5 khoá 2 (REVIEW-PK5 TB-1): ACCEPTED của nguồn `unverified` — đã NHẬN nhưng hub không kiểm chữ ký. `ok: true`
+     * (kết nối thông) nhưng console KHÔNG được ghi "hợp lệ".
+     */
+    | 'unverified'
     /** PK4: dòng bắt tay (inspect gắn, không phải adapter). */
     | 'handshake';
   expectedHeader?: string;
@@ -156,8 +196,9 @@ export interface ProviderAdapter {
    * Xác thực request webhook.
    * Nhận MẢNG secret để hỗ trợ xoay secret (secret rotation).
    * Tính trên raw bytes (rawBody).
+   * PK5 (E5): được trả `VerifyResult` — gọi qua `verdictOf` (object luôn truthy, không dùng thẳng trong `if`).
    */
-  verify(req: RawWebhookRequest, secrets: string[], ctx?: AdapterContext): Promise<boolean>;
+  verify(req: RawWebhookRequest, secrets: string[], ctx?: AdapterContext): Promise<VerifyResult>;
 
   /**
    * Khóa chống trùng (idempotency key), ổn định giữa các lần provider gửi lại (redelivery).
@@ -178,6 +219,12 @@ export interface ProviderAdapter {
    * ngoài danh sách cố định của redactHeaders. Không có -> không cài.
    */
   sensitiveHeaders?(ctx?: AdapterContext): string[];
+
+  /**
+   * PK5 (E6, ADR-206): meta adapter muốn lõi lưu vào `headers.__hub_meta` của raw ACCEPTED, dựng LÚC NHẬN (vd URL công khai
+   * khi `forwardUrl`). Worker chỉ đọc lại giá trị đã lưu — đổi env rồi renormalize không đổi URL. Không cài / null -> không lưu.
+   */
+  storedMeta?(req: RawWebhookRequest, ctx?: AdapterContext): Record<string, unknown> | null;
 
   /** S9: chẩn đoán một raw_event đã lưu. Không cài -> lõi trả `{ok: signatureValid}`. */
   diagnose?(raw: StoredRawEvent, ctx?: AdapterContext): Diagnosis;

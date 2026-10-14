@@ -211,7 +211,7 @@ export function useCreateSource() {
   const qc = useQueryClient();
   return useMutation({
     // PK1: `verificationConfig` chỉ cho provider generic ("Nhà cung cấp khác") — server kiểm lại (422 có tên trường).
-    mutationFn: (body: { provider: string; name: string; secret: string; verificationConfig?: Record<string, unknown> }) =>
+    mutationFn: (body: { provider: string; name: string; secret?: string; verificationConfig?: Record<string, unknown> }) =>
       hubFetch<Source>("/api/v1/sources", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => invalidateAudited(qc, hubKeys.sources),
   });
@@ -249,7 +249,7 @@ export function useCreateDestination() {
 export function useCreateSubscription() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { destinationId: string; name: string; eventTypes: string[]; template?: string }) =>
+    mutationFn: (body: { destinationId: string; name: string; eventTypes: string[]; template?: string; acceptUnverified?: boolean }) =>
       hubFetch<Subscription>("/api/v1/subscriptions", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => invalidateAudited(qc, hubKeys.subscriptions),
   });

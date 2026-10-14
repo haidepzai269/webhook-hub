@@ -18,6 +18,32 @@ export function useCreateProject() {
   });
 }
 
+/**
+ * PK5 khoá 1 (SPEC-provider-khac §7.1, E14, ADR-206): cờ "Nhận nguồn chưa xác thực" của project. Đọc: mọi thành viên; đổi:
+ * chỉ owner (server `manage:project`, có audit `project.unverified_sources_changed`).
+ */
+const unverifiedKey = (projectId: string | null) => ["unverifiedSources", projectId] as const;
+
+export function useUnverifiedSources(projectId: string | null) {
+  return useQuery({
+    queryKey: unverifiedKey(projectId),
+    enabled: !!projectId,
+    queryFn: () => hubFetch<{ allowUnverifiedSources: boolean }>(`/api/v1/projects/${encodeURIComponent(projectId ?? "")}/unverified-sources`),
+  });
+}
+
+export function useSetUnverifiedSources(projectId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (allowUnverifiedSources: boolean) =>
+      hubFetch<{ id: string; allowUnverifiedSources: boolean }>(`/api/v1/projects/${encodeURIComponent(projectId ?? "")}/unverified-sources`, {
+        method: "PUT",
+        body: JSON.stringify({ allowUnverifiedSources }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: unverifiedKey(projectId) }),
+  });
+}
+
 export function useApiKeys(projectId: string | null) {
   return useQuery({
     queryKey: keysKey(projectId),

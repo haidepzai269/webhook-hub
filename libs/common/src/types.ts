@@ -67,6 +67,11 @@ export interface NormalizedEvent {
    * Thiếu = false.
    */
   probe?: boolean;
+  /**
+   * PK5 (khoá 2, E5, ADR-206): false = sự kiện từ nguồn `unverified` — hub KHÔNG xác thực, đích tự verify (`data.raw` +
+   * `data.headers` + `data.url`). Lõi chép từ `raw_events.verified` (không suy từ config). Thiếu = true.
+   */
+  verified?: boolean;
 }
 
 /**

@@ -41,6 +41,7 @@ import {
   writeLogHeight,
 } from "./log-layout";
 import { ProviderIcon } from "./provider-icon";
+import { UnverifiedBadge } from "./unverified-badge";
 import { ICON, TONE_VAR } from "./tokens";
 
 /** localStorage có thể ném (chế độ riêng tư, site data bị chặn) → null, trang vẫn chạy. */
@@ -342,8 +343,10 @@ function EventLogPanel() {
                   <span className="min-w-0 overflow-hidden">
                     <MiniPipeline summary={i.summary} context={i} decorative />
                   </span>
-                  <span className="truncate" title={i.type ?? resultLabel}>
-                    {i.type ?? <span style={{ color }}>{resultLabel}</span>}
+                  <span className="flex min-w-0 items-center gap-1.5" title={i.type ?? resultLabel}>
+                    <span className="truncate">{i.type ?? <span style={{ color }}>{resultLabel}</span>}</span>
+                    {/* PK5 khoá 2 (REVIEW-PK5-R2 T-a): nhãn chữ, không chỉ chấm mini decorative. */}
+                    <UnverifiedBadge of={i} />
                   </span>
                   <span className="min-w-0 truncate" title={failedAtText(i.failedAt, t) ?? resultLabel}>
                     {i.failedAt ? (

@@ -49,6 +49,8 @@ export interface PollOptions {
   status?: 'failed';
   endpointId?: string;
   wait?: number;
+  /** PK5 (E4): trả cả event CHƯA xác thực (`verified: false`) — key cần scope `read:unverified` (owner cấp), thiếu -> 403. */
+  includeUnverified?: boolean;
 }
 export interface HubEvent {
   id: string;
@@ -60,6 +62,8 @@ export interface HubEvent {
   subject: string | null;
   data: any;
   normalized: boolean;
+  /** PK5 (E4): false = hub KHÔNG xác thực (nguồn `unverified`) — dùng `unwrapUnverified` rồi tự verify chữ ký gốc. Thiếu = true. */
+  verified?: boolean;
   correlationId: string;
   occurredAt: string;
   receivedAt: string;
@@ -154,6 +158,7 @@ export class HubClient {
     if (opts.status) q.set('status', opts.status);
     if (opts.endpointId) q.set('endpointId', opts.endpointId);
     if (opts.wait !== undefined) q.set('wait', String(opts.wait));
+    if (opts.includeUnverified) q.set('includeUnverified', 'true');
     const qs = q.toString();
     return this.request('GET', `/events${qs ? `?${qs}` : ''}`);
   }

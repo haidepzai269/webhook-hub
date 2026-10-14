@@ -62,6 +62,8 @@ export interface Subscription {
   eventTypes: string[];
   template: string | null;
   isActive: boolean;
+  /** PK5 khoá 4 (ADR-206): đích tự đồng ý nhận sự kiện chưa xác thực (nguồn `unverified`). */
+  acceptUnverified?: boolean;
   createdAt: string;
   destination?: Destination;
 }
@@ -92,6 +94,8 @@ export interface HubEvent {
   correlationId: string;
   occurredAt: string;
   receivedAt: string;
+  /** PK5 (E4, ADR-206): false = hub KHÔNG xác thực sự kiện này (nguồn `unverified`). Vắng = true. */
+  verified?: boolean;
   deliveries?: Delivery[];
 }
 
@@ -101,6 +105,8 @@ export interface HubEventDetail extends HubEvent {
     headers: Record<string, unknown>;
     body: unknown;
     signatureValid: boolean;
+    /** PK5 khoá 2: `raw_events.verified` — false = nguồn `unverified` (signatureValid vẫn true, KHÔNG nghĩa là "hợp lệ"). */
+    verified?: boolean;
     status: "ACCEPTED" | "REJECTED" | "DUPLICATE";
     contentType: string | null;
     receivedAt: string;
@@ -123,6 +129,8 @@ export interface Source {
   secretVersions?: number;
   /** QT5/QT7 (E1): cờ "Giữ lâu" do user tự gắn — không gợi ý/không dọn tự động, còn nhận tới 110% khi LOCKED. */
   keepLonger?: boolean;
+  /** Cấu hình xác thực công khai (server đã bỏ phần bí mật) — đọc `scheme` (PK5: `unverified`). */
+  verificationConfig?: unknown;
 }
 
 export interface HealthDependency {
@@ -235,7 +243,17 @@ export interface ReplayBulkSampleRow {
 }
 
 /** ADR-163: lý do một id đã xem trước không được replay lúc chạy thật. */
-export type ReplaySkipReason = "not_found" | "not_dead" | "already_replayed" | "destination_unavailable";
+/**
+ * PK5 T-7: + `unverified_not_accepted` (event chưa xác thực, subscription tắt "Nhận sự kiện chưa xác thực").
+ * REVIEW-PK5-R2 T-e: + `event_trimmed` (QT7 — nội dung event đã Dọn; server có từ trước, web thiếu nên rơi về mã thô).
+ */
+export type ReplaySkipReason =
+  | "not_found"
+  | "not_dead"
+  | "already_replayed"
+  | "destination_unavailable"
+  | "unverified_not_accepted"
+  | "event_trimmed";
 
 export type ReplayBulkResult =
   | {

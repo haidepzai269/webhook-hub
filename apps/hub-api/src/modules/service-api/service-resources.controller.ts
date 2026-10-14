@@ -121,6 +121,8 @@ export function publicSubscription(s: any) {
     eventTypes: s.eventTypes,
     sourceIds: s.sourceIds ?? [],
     isActive: s.isActive,
+    // PK5 khoá 4: đích có nhận sự kiện chưa xác thực không (console tick).
+    acceptUnverified: s.acceptUnverified === true,
     createdAt: s.createdAt,
   };
 }
@@ -360,6 +362,15 @@ export class ServiceResourcesController {
       throw new NotFoundException(NOT_FOUND);
     }
     const readTypes = req.apiKey!.readTypes ?? [];
+    // PK5 khoá 4 (E4, ADR-206): event chưa xác thực chỉ trả khi xin rõ VÀ key có scope `read:unverified` (owner cấp). Xin mà
+    // thiếu scope -> 403 (không lọc im lặng: service tưởng nguồn chưa có gì).
+    if (q.includeUnverified !== undefined && q.includeUnverified !== 'true' && q.includeUnverified !== 'false') {
+      unprocessable({ error: 'validation_failed', field: 'includeUnverified', message: 'includeUnverified là "true" | "false"' });
+    }
+    const includeUnverified = q.includeUnverified === 'true';
+    if (includeUnverified && !(req.apiKey!.scopes ?? []).includes('read:unverified')) {
+      throw new HttpException({ error: 'missing_scope', message: 'includeUnverified=true cần scope read:unverified (owner cấp)', required: 'read:unverified' }, HttpStatus.FORBIDDEN);
+    }
     let closed = false;
     res.on?.('close', () => (closed = true));
     const opts = {
@@ -367,6 +378,7 @@ export class ServiceResourcesController {
       limit,
       types,
       readTypes,
+      ...(includeUnverified ? { includeUnverified: true } : {}),
       ...(q.status === 'failed' ? { failedOnly: true, endpointId: q.endpointId } : {}),
     };
     const rows = await longPoll(() => repo.pollEvents(opts), wait, () => closed);
@@ -394,7 +406,8 @@ export class ServiceResourcesController {
         sourceKey,
         isActive: true,
         ...(input.verificationConfig ? { verificationConfig: input.verificationConfig as any } : {}),
-        secrets: { create: { secretEncrypted: aesGcmEncrypt(input.secret, masterKey), version: 1 } },
+        // PK5 (E14): `unverified` không có secret -> không tạo SourceSecret.
+        ...(input.secret !== null ? { secrets: { create: { secretEncrypted: aesGcmEncrypt(input.secret, masterKey), version: 1 } } } : {}),
       } as any);
       await repo.createAuditLog({
         action: 'source.create',

@@ -15,6 +15,7 @@ import { JourneyCanvas, journeyHeight } from "@/components/flow/journey-canvas";
 import { TonePill } from "@/components/flow/pills";
 import { ProviderIcon } from "@/components/flow/provider-icon";
 import { StageSheet } from "@/components/flow/stage-sheet";
+import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { ICON, ICON_SM } from "@/components/flow/tokens";
 import { fullDate } from "@/components/flow/time";
 import { PLAYGROUND_PREFILL_KEY } from "@/components/flow/prefill";
@@ -33,6 +34,7 @@ import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { journeyUnverified } from "@/lib/hub/unverified";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 
@@ -148,6 +150,8 @@ export default function EventJourneyPage() {
             <div className="flex items-center gap-2">
               <h1 className="font-semibold text-xl tracking-tight">{t("page.events.detail.title")}</h1>
               <ExecutionStatusPill status={data.executionStatus} />
+              {/* PK5 khoá 2 (REVIEW-PK5 TB-1): hub không kiểm chữ ký nguồn này — chặng "Xác thực" cũng là cảnh báo, không xanh. */}
+              <UnverifiedBadge of={journeyUnverified(data) ? { verified: false } : null} />
             </div>
             <div className="mt-0.5 flex items-center gap-1 font-mono text-muted-foreground text-xs">
               <span className="truncate">{displayId}</span>

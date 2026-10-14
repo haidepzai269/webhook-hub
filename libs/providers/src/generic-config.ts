@@ -10,7 +10,7 @@ import { timingSafeCompare } from '@hub/crypto';
  * vòng lặp. `hmac-sha256` là bí danh cũ, đọc ra `{algo:"sha256", keyEncoding:"utf8"}` qua `hmacParams` — khuôn lưu
  * của source cũ KHÔNG đổi, hành vi không đổi. `static-token` thêm `location`: header | basic | query.
  */
-export type GenericScheme = 'hmac' | 'hmac-sha256' | 'static-token' | 'standard-webhooks' | 'signed-template';
+export type GenericScheme = 'hmac' | 'hmac-sha256' | 'static-token' | 'standard-webhooks' | 'signed-template' | 'unverified';
 export type MappingValue = string | { const: string | number };
 export type HmacAlgo = 'sha1' | 'sha256' | 'sha512';
 export type KeyEncoding = 'utf8' | 'hex' | 'base64';
@@ -94,8 +94,16 @@ export interface GenericConfig {
   idHeader?: string;
   /** PK3: độ lệch tối đa giữa timestamp và "bây giờ" (giây, 5..900), bắt buộc khi có `{timestamp}`. */
   toleranceSec?: number;
-  idempotency: { header: string } | { field: string };
+  /**
+   * Khoá chống trùng. Bắt buộc với mọi scheme có verify. PK5 `unverified`: tuỳ chọn — khoá LUÔN ghép `bodyHashKey(rawBody)`
+   * (E7: chỉ bản trùng đúng từng byte mới là trùng); vắng = chỉ `bodyHashKey`.
+   */
+  idempotency?: { header: string } | { field: string };
   eventType: string;
+  /** PK5 `unverified`: header gốc gửi kèm event (`data.headers`) để đích tự verify — ≤ 10 tên, viết thường. */
+  forwardHeaders?: string[];
+  /** PK5 `unverified` (E18): gửi `data.url` (URL công khai, CHỨA sourceKey) — chỉ khi provider ký cả URL (S6: Twilio…). */
+  forwardUrl?: true;
   mapping?: Record<string, MappingValue>;
   timezone?: string;
   /** PK4: bắt tay lúc đăng ký URL. */
@@ -106,7 +114,7 @@ export interface GenericConfig {
 
 export type ConfigCheck = { ok: true; config: GenericConfig } | { ok: false; field: string; message: string };
 
-const SCHEMES: GenericScheme[] = ['hmac', 'hmac-sha256', 'static-token', 'standard-webhooks', 'signed-template'];
+const SCHEMES: GenericScheme[] = ['hmac', 'hmac-sha256', 'static-token', 'standard-webhooks', 'signed-template', 'unverified'];
 /**
  * Hai mẫu có `encoding` (tách hằng: gate sig-compare cấm `===`/`!==` trên dòng nhắc tới hmac). `LEGACY_SCHEME` là bí
  * danh cũ — giữ nguyên hành vi (sha256, khoá utf8, prefix tĩnh).
@@ -114,6 +122,9 @@ const SCHEMES: GenericScheme[] = ['hmac', 'hmac-sha256', 'static-token', 'standa
 const PARAM_SCHEME: GenericScheme = 'hmac';
 const LEGACY_SCHEME: GenericScheme = 'hmac-sha256';
 const TEMPLATE_SCHEME: GenericScheme = 'signed-template';
+/** PK5 (§7, ADR-206): "đích tự kiểm" — hub nhận bằng URL bí mật, giữ nguyên bytes, KHÔNG verify; đích tự verify. */
+export const UNVERIFIED_SCHEME: GenericScheme = 'unverified';
+export const isUnverifiedScheme = (c: Pick<GenericConfig, 'scheme'>): boolean => c.scheme === UNVERIFIED_SCHEME;
 const SCHEMES_WITH_ENCODING: readonly GenericScheme[] = [PARAM_SCHEME, LEGACY_SCHEME];
 const ENCODINGS = ['hex', 'base64'];
 /** PK2: tập thuật toán. sha1 là ngoại lệ có chủ đích (provider quy định: Vercel, Intercom, Trello, WebSub), ADR-203. */
@@ -220,6 +231,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if (!SCHEMES.includes(c.scheme)) return bad('scheme', `scheme là một trong ${SCHEMES.join(', ')}`);
   const scheme = c.scheme as GenericScheme;
   if (scheme === TEMPLATE_SCHEME) return validateSignedTemplate(c);
+  if (scheme === UNVERIFIED_SCHEME) return validateUnverified(c);
   const sw = scheme === 'standard-webhooks';
   const withEncoding = SCHEMES_WITH_ENCODING.includes(scheme);
   const isParam = scheme === PARAM_SCHEME;
@@ -270,7 +282,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
   if ('bad' in tail) return tail.bad;
   const { idempotency, eventType, mapping } = tail;
 
-  const config: GenericConfig = { scheme, idempotency, eventType };
+  const config: GenericConfig = { scheme, ...(idempotency ? { idempotency } : {}), eventType };
   if (!headerless) config.header = c.header;
   if (withEncoding) config.encoding = c.encoding ?? 'hex';
   if (isParam) {
@@ -291,7 +303,7 @@ export function validateGenericConfig(input: unknown): ConfigCheck {
 type Tail =
   | {
       ok: true;
-      idempotency: GenericConfig['idempotency'];
+      idempotency?: GenericConfig['idempotency'];
       eventType: string;
       mapping?: GenericConfig['mapping'];
       handshake?: HandshakeConfig;
@@ -300,11 +312,13 @@ type Tail =
   | { ok: false; bad: ConfigCheck };
 
 /** Phần chung mọi scheme: khoá chống trùng, kiểu sự kiện, múi giờ, ánh xạ (tách ra để `signed-template` dùng lại). */
-function parseTail(c: Record<string, any>, sw: boolean): Tail {
+function parseTail(c: Record<string, any>, sw: boolean, idempotencyOptional = false): Tail {
   const fail = (field: string, message: string): Tail => ({ ok: false, bad: bad(field, message) });
   let idempotency: GenericConfig['idempotency'];
   if (c.idempotency === undefined && sw) {
     idempotency = { header: 'webhook-id' };
+  } else if (c.idempotency === undefined && idempotencyOptional) {
+    idempotency = undefined; // PK5 `unverified`: khoá chỉ là bodyHashKey (E7)
   } else {
     if (!isObj(c.idempotency)) return fail('idempotency', 'idempotency là {header} HOẶC {field}');
     const keys = Object.keys(c.idempotency);
@@ -537,7 +551,7 @@ export function eventHeadersOf(c: Omit<GenericConfig, 'handshake'>): string[] {
   if (c.signature) out.push(...('kv' in c.signature ? [c.signature.header] : c.signature.headers));
   if (c.timestampHeader) out.push(c.timestampHeader);
   if (c.idHeader) out.push(c.idHeader);
-  if ('header' in c.idempotency) out.push(c.idempotency.header);
+  if (c.idempotency && 'header' in c.idempotency) out.push(c.idempotency.header);
   return out;
 }
 
@@ -566,7 +580,7 @@ function handshakeConflict(c: GenericConfig): ConfigCheck | null {
     if ('header' in h.when) {
       const m = clash(h.when.header);
       if (m) return bad('handshake.when.header', m);
-    } else if ('field' in c.idempotency && h.when.field === c.idempotency.field) {
+    } else if (c.idempotency && 'field' in c.idempotency && h.when.field === c.idempotency.field) {
       return bad('handshake.when.field', `${h.when.field} là trường chống trùng — mọi sự kiện đều mang; chọn trường chỉ request bắt tay mới có (vd type)`);
     }
   }
@@ -727,6 +741,119 @@ function validateSignedTemplate(c: Record<string, any>): ConfigCheck {
   if (tail.mapping) config.mapping = tail.mapping;
   if (c.timezone !== undefined) config.timezone = c.timezone;
   if (tail.handshake) config.handshake = tail.handshake;
+  if (tail.ack) config.ack = tail.ack;
+  return handshakeConflict(config) ?? { ok: true, config };
+}
+
+
+// ───────────────────────── PK5: unverified — "đích tự kiểm" (SPEC-provider-khac §7, E7/E14/E17/E18/E24, ADR-206) ─────────────────────────
+
+/** ≤ 10 header gửi kèm (`data.headers`). */
+export const FORWARD_HEADERS_MAX = 10;
+/**
+ * Header KHÔNG được gửi kèm: bí mật dùng chung của request (lõi che trước khi lưu — giá trị gửi đi sẽ là `***`), cookie, và
+ * `x-hub-*` (không giả được header của chính hub). Tên header viết thường.
+ */
+export const FORWARD_HEADERS_FORBIDDEN: readonly string[] = ['authorization', 'proxy-authorization', 'cookie', 'set-cookie', 'x-api-key'];
+export const isForbiddenForwardHeader = (h: string): boolean => FORWARD_HEADERS_FORBIDDEN.includes(h) || h.startsWith('x-hub-');
+/**
+ * E17: trần body của source `unverified`. `data.raw` là base64 (×4/3) + phong bì phải lọt trần gửi 64KB của worker
+ * (`SEND_MAX_BYTES`) — 45KB × 4/3 = 60KB, chừa ~4KB cho phong bì và header. Vượt -> 413 lúc ingest (kèm `fix`), không
+ * nhận rồi giao mãi không được.
+ */
+export const UNVERIFIED_MAX_BODY_BYTES = 45 * 1024;
+/**
+ * Review PK5 T-3: trần 45KB chỉ tính body — `data.url` (query thô tới 8KB, E27) và `data.headers` (≤ 10 header) cũng nằm
+ * trong phong bì. Ước lượng phong bì webhook (`toWebhookBody`) phải ≤ trần gửi 64KB (`SEND_MAX_BYTES` của worker), không thì
+ * request được ACK (BB-3) nhưng delivery DEAD vĩnh viễn. Vượt -> 413 lúc ingest như E17.
+ */
+export const UNVERIFIED_ENVELOPE_MAX_BYTES = 64 * 1024;
+/** Phần cố định của phong bì: id, type (≤128), source, sourceId, contentType, method, mốc thời gian, tên khoá JSON. */
+export const UNVERIFIED_ENVELOPE_FIXED_BYTES = 1024;
+/** Phần cố định của `data.url` ngoài query: `PUBLIC_HOOKS_BASE_URL` + `/hooks/generic/<sourceKey>`. */
+export const UNVERIFIED_URL_BASE_BYTES = 512;
+
+/**
+ * Ước lượng (trên, không thấp hơn thật) số byte phong bì webhook của một event `unverified`: base64 của body + URL (chỉ khi
+ * `forwardUrl`; query tính theo độ dài JSON đã thoát) + mọi header gửi kèm có mặt (tên + giá trị JSON) + `contentType`
+ * (JSON đã thoát) + phần cố định.
+ */
+export function estimateUnverifiedEnvelopeBytes(o: {
+  bodyBytes: number;
+  query: string | null;
+  forwardHeaders: Record<string, string>;
+  /** REVIEW-PK5-R2 T-c: header `content-type` do bên gửi kiểm soát — nằm nguyên văn trong `data.contentType`. */
+  contentType?: string | null;
+}): number {
+  const base64 = 4 * Math.ceil(o.bodyBytes / 3);
+  const contentType = o.contentType ? JSON.stringify(o.contentType).length : 0;
+  const url = o.query === null ? 0 : UNVERIFIED_URL_BASE_BYTES + JSON.stringify(o.query).length;
+  let headers = 0;
+  for (const [k, v] of Object.entries(o.forwardHeaders)) headers += JSON.stringify(k).length + JSON.stringify(v).length + 2;
+  return UNVERIFIED_ENVELOPE_FIXED_BYTES + base64 + url + headers + contentType;
+}
+/** Trường cấp một không có ở `unverified` (không verify, không ánh xạ — `data` khuôn cố định). */
+const UNVERIFIED_FORBIDDEN_FIELDS = [
+  'header',
+  'encoding',
+  'prefix',
+  'algo',
+  'algos',
+  'keyEncoding',
+  'location',
+  'param',
+  'template',
+  'signature',
+  'timestampHeader',
+  'timestampFormat',
+  'idHeader',
+  'toleranceSec',
+  'mapping',
+  'timezone',
+] as const;
+
+/**
+ * PK5: `{scheme:'unverified', forwardHeaders?, forwardUrl?, idempotency?, eventType, handshake?, ack?}`.
+ * - khoá 3 (E24): `eventType` KHÔNG được thuộc namespace chuẩn (`isReservedType`: payment.*, repo.*, hub.*) — không bao giờ có
+ *   `payment.received` chưa xác thực. Worker normalize kiểm lần hai (lỗi vĩnh viễn).
+ * - bắt tay: không `hmac-echo` (không có secret để ký), không `afterVerify` (không có gì được verify).
+ * - `secret` không được gửi kèm (E14) — kiểm ở `parseSourceInput`.
+ */
+function validateUnverified(c: Record<string, any>): ConfigCheck {
+  for (const f of UNVERIFIED_FORBIDDEN_FIELDS) {
+    if (c[f] !== undefined) return bad(f, `unverified không có ${f} (hub không verify; data có khuôn cố định {raw, contentType, headers, url?, method})`);
+  }
+  let forwardHeaders: string[] | undefined;
+  if (c.forwardHeaders !== undefined) {
+    const fh = c.forwardHeaders;
+    if (
+      !Array.isArray(fh) ||
+      fh.length > FORWARD_HEADERS_MAX ||
+      fh.some((h: unknown) => typeof h !== 'string' || !HEADER_RE.test(h)) ||
+      new Set(fh).size !== fh.length
+    ) {
+      return bad('forwardHeaders', `forwardHeaders là mảng ≤ ${FORWARD_HEADERS_MAX} tên header viết thường ^[a-z0-9-]{1,64}$, không trùng`);
+    }
+    const banned = (fh as string[]).find(isForbiddenForwardHeader);
+    if (banned) return bad('forwardHeaders', `${banned} không gửi kèm được (bí mật của request / cookie / header của hub)`);
+    if (fh.length > 0) forwardHeaders = [...fh];
+  }
+  if (c.forwardUrl !== undefined && typeof c.forwardUrl !== 'boolean') return bad('forwardUrl', 'forwardUrl là true | false');
+  if (typeof c.eventType === 'string' && isReservedType(c.eventType)) {
+    return bad(
+      'eventType',
+      `${c.eventType} thuộc kiểu chuẩn (payment.*, repo.*, hub.*) — sự kiện chưa xác thực không bao giờ mang kiểu chuẩn; đặt tên riêng (vd momo.ipn)`,
+    );
+  }
+  const tail = parseTail(c, false, true);
+  if ('bad' in tail) return tail.bad;
+  const h = tail.handshake;
+  if (h?.kind === 'hmac-echo') return bad('handshake.kind', 'unverified không có secret để ký hmac-echo');
+  if (h && 'afterVerify' in h && h.afterVerify) return bad('handshake.afterVerify', 'unverified không verify request nào — bỏ afterVerify');
+  const config: GenericConfig = { scheme: UNVERIFIED_SCHEME, ...(tail.idempotency ? { idempotency: tail.idempotency } : {}), eventType: tail.eventType };
+  if (forwardHeaders) config.forwardHeaders = forwardHeaders;
+  if (c.forwardUrl === true) config.forwardUrl = true;
+  if (h) config.handshake = h;
   if (tail.ack) config.ack = tail.ack;
   return handshakeConflict(config) ?? { ok: true, config };
 }

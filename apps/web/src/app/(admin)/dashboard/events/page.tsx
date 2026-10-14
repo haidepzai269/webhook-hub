@@ -13,6 +13,7 @@ import { ProjectPicker } from "@/components/flow/project-picker";
 import { ProviderIcon } from "@/components/flow/provider-icon";
 import { clock } from "@/components/flow/time";
 import { ICON, TONE_VAR } from "@/components/flow/tokens";
+import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -246,7 +247,11 @@ function ExecutionsView() {
                 <span className="truncate">{i.providerLabel}</span>
               </span>
               <span className="min-w-0">
-                <span className="block truncate font-mono text-xs">{i.type ?? "—"}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate font-mono text-xs">{i.type ?? "—"}</span>
+                  {/* PK5 (E4): nhãn ở mọi nơi có event — hub không xác thực nguồn này. */}
+                  <UnverifiedBadge of={i} />
+                </span>
                 {i.subject && <span className="block truncate text-muted-foreground text-xs">{i.subject}</span>}
               </span>
               <MiniPipeline summary={i.summary} context={i} />

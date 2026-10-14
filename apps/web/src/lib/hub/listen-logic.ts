@@ -1,5 +1,6 @@
 // PK1 (SPEC-provider-khac §3, ADR-202): logic thuần của tab "Lắng nghe" và form tay "Nhà cung cấp khác" (generic).
 // Không import React — test bằng jest ở gốc repo.
+import type { MessageKey } from "../i18n/dictionary";
 
 /** Chẩn đoán của adapter (khuôn `Diagnosis` của @hub/providers) — chỉ TÊN header/trường, không bao giờ giá trị. */
 export interface InspectDiagnosis {
@@ -34,7 +35,13 @@ export interface InspectRow {
 export type ConnectionState =
   | { kind: "waiting" }
   | { kind: "handshaken"; handshake: InspectHandshake }
-  | { kind: "connected"; lastFailure: InspectDiagnosis | null; handshake: InspectHandshake | null }
+  | {
+      kind: "connected";
+      lastFailure: InspectDiagnosis | null;
+      handshake: InspectHandshake | null;
+      /** PK5 khoá 2 (REVIEW-PK5 TB-1): request đã nhận là của nguồn `unverified` — nhận được, nhưng KHÔNG "hợp lệ ✓". */
+      unverified: boolean;
+    }
   | { kind: "failing"; diagnosis: InspectDiagnosis };
 
 /** PK4: dòng REJECTED của bắt tay KHÔNG phải trượt (E8) — nó là "đã bắt tay". */
@@ -52,9 +59,15 @@ export function connectionState(rows: InspectRow[] | undefined): ConnectionState
   const list = rows ?? [];
   const hsRow = list.find(isHandshakeRow);
   const handshake = hsRow ? (hsRow.handshake ?? { kind: "unknown" }) : null;
-  if (list.some((r) => r.status === "ACCEPTED")) {
+  const accepted = list.find((r) => r.status === "ACCEPTED");
+  if (accepted) {
     const latest = list[0];
-    return { kind: "connected", lastFailure: latest?.status === "REJECTED" && !isHandshakeRow(latest) ? latest.diagnosis : null, handshake };
+    return {
+      kind: "connected",
+      lastFailure: latest?.status === "REJECTED" && !isHandshakeRow(latest) ? latest.diagnosis : null,
+      handshake,
+      unverified: accepted.diagnosis?.reason === "unverified",
+    };
   }
   const rejected = list.find((r) => r.status === "REJECTED");
   if (rejected && isHandshakeRow(rejected)) return { kind: "handshaken", handshake: handshake! };
@@ -81,6 +94,26 @@ export function isSnsSubscribeUrl(url: string): boolean {
   }
 }
 
+/**
+ * Câu i18n cho từng lý do chẩn đoán của adapter. PK5 (REVIEW-PK5 TB-1): `unverified` (ACCEPTED của nguồn chưa xác thực) có
+ * câu riêng — KHÔNG BAO GIỜ rơi về "hợp lệ" (`ok`). Lý do lạ -> "unknown".
+ */
+export const LISTEN_REASON_KEYS: Record<string, MessageKey> = {
+  ok: "page.sources.listen.reason.ok",
+  unverified: "page.sources.listen.reason.unverified",
+  missing_header: "page.sources.listen.reason.missing-header",
+  signature_mismatch: "page.sources.listen.reason.signature-mismatch",
+  token_mismatch: "page.sources.listen.reason.token-mismatch",
+  timestamp_out_of_range: "page.sources.listen.reason.timestamp-out-of-range",
+  missing_kv_key: "page.sources.listen.reason.missing-kv-key",
+  missing_idempotency_key: "page.sources.listen.reason.missing-idempotency-key",
+  mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
+  mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",
+  config_invalid: "page.sources.listen.reason.config-invalid",
+  handshake: "page.sources.listen.reason.handshake",
+};
+export const listenReasonKey = (reason: string): MessageKey => LISTEN_REASON_KEYS[reason] ?? "page.sources.listen.reason.unknown";
+
 /** Tách chẩn đoán thành lý do + tên header/trường để dựng câu i18n. Không có lý do -> "unknown". */
 export function diagnosisParts(d: InspectDiagnosis): { reason: string; name: string | null; candidates: string[] } {
   return {
@@ -96,7 +129,17 @@ export function diagnosisParts(d: InspectDiagnosis): { reason: string; name: str
  * Mẫu xác thực mà form tay đưa ra. PK2 (ADR-203): `hmac` có tham số; bí danh cũ `hmac-sha256` chỉ còn cho source đã tạo
  * (server vẫn nhận), form không tạo mới bằng nó.
  */
-export const GENERIC_SCHEMES = ["hmac", "signed-template", "static-token", "standard-webhooks"] as const;
+export const GENERIC_SCHEMES = ["hmac", "signed-template", "static-token", "standard-webhooks", "unverified"] as const;
+/** PK5 (SPEC-provider-khac §7, ADR-206): "đích tự kiểm" — hub nhận không xác thực; cần project bật cờ, đích bật nhận. */
+export const UNVERIFIED_SCHEME = "unverified";
+/** PK5: như `FORWARD_HEADERS_MAX` / `isForbiddenForwardHeader` / `UNVERIFIED_MAX_BODY_BYTES` của server (test đối chiếu). */
+export const FORWARD_HEADERS_MAX = 10;
+export const FORWARD_HEADERS_FORBIDDEN = ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"] as const;
+export const isForbiddenForwardHeader = (h: string): boolean => (FORWARD_HEADERS_FORBIDDEN as readonly string[]).includes(h) || h.startsWith("x-hub-");
+export const UNVERIFIED_MAX_BODY_KB = 45;
+/** E26: dung lượng của sự kiện chưa xác thực ≈ 2,33 lần body (body_raw + data.raw base64 ×4/3). */
+export const UNVERIFIED_STORAGE_FACTOR = 2.33;
+export const FORWARD_URL_CHOICES = ["no", "yes"] as const;
 export type GenericScheme = (typeof GENERIC_SCHEMES)[number];
 /** `from-prefix` = chữ ký dạng `<algo>=<sig>` (Bitbucket, Jira, WebSub) -> `prefix: "<algo>="`, không gửi `algo`. */
 export const HMAC_ALGO_CHOICES = ["sha256", "sha512", "sha1", "from-prefix"] as const;
@@ -173,7 +216,21 @@ export interface GenericFormValues {
   hsRespond: (typeof ECHO_RESPOND_CHOICES)[number];
   ackSuccess: (typeof ACK_SUCCESS_CHOICES)[number];
   ackReject: (typeof ACK_REJECT_CHOICES)[number];
+  /** PK5 `unverified`: tên header gửi kèm, cách nhau dấu phẩy (≤ 10). */
+  forwardHeaders: string;
+  /** PK5 `unverified` (E18): gửi `data.url` — URL chứa sourceKey. */
+  forwardUrl: (typeof FORWARD_URL_CHOICES)[number];
 }
+
+/** PK5: giá trị mặc định của các ô `unverified`. */
+export const UNVERIFIED_FORM_DEFAULTS: Pick<GenericFormValues, "forwardHeaders" | "forwardUrl"> = { forwardHeaders: "", forwardUrl: "no" };
+
+/** PK5: tách ô "tiêu đề gửi kèm" (dấu phẩy / khoảng trắng) thành tên viết thường, bỏ rỗng. */
+export const forwardHeaderList = (v: Pick<GenericFormValues, "forwardHeaders">): string[] =>
+  v.forwardHeaders
+    .split(/[\s,]+/)
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h !== "");
 
 /** PK4: giá trị mặc định của các ô bắt tay / phản hồi (không bắt tay; 200 / 401 như trước PK4). */
 export const HANDSHAKE_FORM_DEFAULTS: Pick<
@@ -265,6 +322,16 @@ export const idKindOf = (v: Pick<GenericFormValues, "scheme" | "idKind">): "head
 export function buildGenericConfig(v: GenericFormValues): Record<string, unknown> {
   const config: Record<string, unknown> = { scheme: v.scheme };
   if (v.scheme === "signed-template") return withHandshakeAck(v, buildTemplateConfig(v, config));
+  if (v.scheme === UNVERIFIED_SCHEME) {
+    // PK5: không header/secret/mapping; khoá chống trùng tuỳ chọn (server luôn ghép băm body — E7).
+    const fh = forwardHeaderList(v);
+    if (fh.length > 0) config.forwardHeaders = fh;
+    if (v.forwardUrl === "yes") config.forwardUrl = true;
+    const idv = v.idValue.trim();
+    if (idv) config.idempotency = v.idKind === "header" ? { header: idv.toLowerCase() } : { field: idv };
+    config.eventType = v.eventType.trim();
+    return withHandshakeAck(v, config);
+  }
   if (needsHeader(v)) config.header = v.header.trim().toLowerCase();
   if (v.scheme === "hmac") {
     // PK2: tham số HMAC. "Đọc từ tiền tố" -> prefix "<algo>=", không có algo.
@@ -416,7 +483,10 @@ export type GenericFormIssue =
   | "hs-when-invalid"
   | "hs-field-invalid"
   | "hs-header-invalid"
-  | "hs-conflict";
+  | "hs-conflict"
+  | "forward-headers-invalid"
+  | "secret-unverified"
+  | "hs-unverified";
 
 /** PK4: như `WHEN_EQUALS_RE` / `VERIFY_TOKEN_RE` / echo của server (test đối chiếu). */
 const WHEN_EQUALS_RE = /^[\x21-\x7E]{1,128}$/;
@@ -433,18 +503,38 @@ export function genericFormIssues(v: GenericFormValues, secret: string): { path:
   if (v.scheme === "static-token" && v.location === "query" && !PARAM_RE.test(v.param.trim())) out.push({ path: "param", issue: "param-required" });
   const id = v.idValue.trim();
   const idOk = idKindOf(v) === "header" ? HEADER_RE.test(id.toLowerCase()) : FIELD_RE.test(id);
-  if ((id || v.scheme !== "standard-webhooks") && !idOk) out.push({ path: "idValue", issue: "id-required" });
+  // PK5: `unverified` — khoá chống trùng tuỳ chọn (vắng = băm body), như standard-webhooks (vắng = id của bộ header).
+  const idOptional = v.scheme === "standard-webhooks" || v.scheme === UNVERIFIED_SCHEME;
+  if ((id || !idOptional) && !idOk) out.push({ path: "idValue", issue: "id-required" });
   const eventType = v.eventType.trim();
   if (!EVENT_TYPE_RE.test(eventType) || eventType.length > 128) out.push({ path: "eventType", issue: "event-type-invalid" });
   // Review PK1 T-2: kiểu chuẩn cần ánh xạ trường (PK7 / API) — form tay không có ô mapping, server sẽ 422.
   else if (isReservedType(eventType)) out.push({ path: "eventType", issue: "event-type-reserved" });
   if (v.scheme === "signed-template") out.push(...templateIssues(v));
+  if (v.scheme === UNVERIFIED_SCHEME) out.push(...unverifiedIssues(v, secret));
   const keyed = v.scheme === "hmac" || v.scheme === "signed-template";
   if (keyed && v.keyEncoding === "hex" && !HEX_KEY_RE.test(secret)) out.push({ path: "secret", issue: "secret-hex" });
   if (keyed && v.keyEncoding === "base64" && !isCanonicalBase64(secret)) out.push({ path: "secret", issue: "secret-base64" });
   if (v.scheme === "static-token" && v.location === "basic" && !secret.includes(":")) out.push({ path: "secret", issue: "secret-basic" });
   if (v.scheme === "static-token" && v.location === "query" && !QUERY_TOKEN_RE.test(secret)) out.push({ path: "secret", issue: "secret-query" });
   out.push(...handshakeIssues(v));
+  return out;
+}
+
+/**
+ * PK5 (§7, E14/E24): luật `unverified` của server (`validateUnverified` + `parseSourceInput`): tiêu đề gửi kèm ≤ 10, đúng khuôn,
+ * không phải bí mật / cookie / x-hub-*; KHÔNG có secret; bắt tay không hmac-echo / afterVerify. Kiểu chuẩn đã chặn ở trên.
+ */
+function unverifiedIssues(v: GenericFormValues, secret: string): { path: keyof GenericFormValues | "secret"; issue: GenericFormIssue }[] {
+  const out: { path: keyof GenericFormValues | "secret"; issue: GenericFormIssue }[] = [];
+  const fh = forwardHeaderList(v);
+  if (fh.length > FORWARD_HEADERS_MAX || fh.some((h) => !HEADER_RE.test(h) || isForbiddenForwardHeader(h)) || new Set(fh).size !== fh.length) {
+    out.push({ path: "forwardHeaders", issue: "forward-headers-invalid" });
+  }
+  if (secret !== "") out.push({ path: "secret", issue: "secret-unverified" });
+  if (v.hsKind === "hmac-echo" || ((v.hsKind === "body-echo" || v.hsKind === "manual-url") && v.hsAfterVerify === "yes")) {
+    out.push({ path: "hsKind", issue: "hs-unverified" });
+  }
   return out;
 }
 

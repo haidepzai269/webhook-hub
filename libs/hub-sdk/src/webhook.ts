@@ -65,3 +65,36 @@ export function challengeResponse(body: unknown): { challenge: string } | null {
   const b = body as { type?: unknown; challenge?: unknown };
   return b.type === 'endpoint.verification' && typeof b.challenge === 'string' && b.challenge.length > 0 ? { challenge: b.challenge } : null;
 }
+
+/**
+ * PK5 (SPEC-provider-khac §7.2, ADR-206): sự kiện từ nguồn `unverified` ("đích tự kiểm") — hub nhận bằng URL bí mật, giữ
+ * nguyên bytes và KHÔNG xác thực (`event.verified === false`). Hàm này trả đúng thứ SDK của provider cần để verify:
+ * `rawBody` = bytes gốc (giải base64 `data.raw`, đúng từng byte), `headers` = các header gốc đã khai `forwardHeaders` (giá
+ * trị nguyên văn), `url` = URL công khai lúc nhận (chỉ khi nguồn bật `forwardUrl`; không thì null).
+ * KHÔNG verify thay: đích phải tự kiểm chữ ký gốc (và chống trùng nghiệp vụ theo id của provider) TRƯỚC khi tin.
+ * Kiểm hai lớp: `verifyWebhook` (chữ ký của hub) rồi chữ ký gốc của provider trên kết quả này.
+ */
+export interface UnwrappedUnverified {
+  rawBody: Buffer;
+  headers: Record<string, string>;
+  url: string | null;
+  contentType: string | null;
+  method: string;
+}
+
+export function unwrapUnverified(event: { verified?: boolean; data?: unknown }): UnwrappedUnverified {
+  if (event?.verified !== false) throw new Error('unwrapUnverified: event is not from an unverified source (verified !== false)');
+  const d = event.data as Record<string, unknown> | null | undefined;
+  if (d === null || typeof d !== 'object' || typeof d.raw !== 'string') throw new Error('unwrapUnverified: event.data.raw (base64) is missing');
+  const headers: Record<string, string> = {};
+  if (d.headers !== null && typeof d.headers === 'object' && !Array.isArray(d.headers)) {
+    for (const [k, v] of Object.entries(d.headers as Record<string, unknown>)) if (typeof v === 'string') headers[k] = v;
+  }
+  return {
+    rawBody: Buffer.from(d.raw, 'base64'),
+    headers,
+    url: typeof d.url === 'string' ? d.url : null,
+    contentType: typeof d.contentType === 'string' ? d.contentType : null,
+    method: typeof d.method === 'string' ? d.method : 'POST',
+  };
+}

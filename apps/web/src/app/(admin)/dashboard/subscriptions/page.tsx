@@ -59,6 +59,8 @@ const makeSchema = (t: TranslateFn) =>
           .min(1, t("page.subscriptions.form.types-required")),
       ),
     template: z.string(),
+    // PK5 khoá 4 (ADR-206): đích tự đồng ý nhận sự kiện chưa xác thực (mặc định không).
+    acceptUnverified: z.boolean(),
   });
 type FormIn = z.input<ReturnType<typeof makeSchema>>;
 type FormOut = z.output<ReturnType<typeof makeSchema>>;
@@ -186,12 +188,21 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] 
     id: "isActive",
     header: t("common.status"),
     accessorFn: (s) => (s.isActive ? "active" : "inactive"),
-    cell: ({ row }) =>
-      row.original.isActive ? (
-        <Badge variant="outline">{t("common.enabled")}</Badge>
-      ) : (
-        <Badge variant="destructive">{t("page.subscriptions.inactive")}</Badge>
-      ),
+    cell: ({ row }) => (
+      <div className="flex flex-wrap gap-1">
+        {row.original.isActive ? (
+          <Badge variant="outline">{t("common.enabled")}</Badge>
+        ) : (
+          <Badge variant="destructive">{t("page.subscriptions.inactive")}</Badge>
+        )}
+        {/* PK5 khoá 4: subscription nhận cả sự kiện chưa xác thực — nơi nhận phải tự kiểm chữ ký gốc. */}
+        {row.original.acceptUnverified && (
+          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
+            {t("page.subscriptions.accept-unverified-badge")}
+          </Badge>
+        )}
+      </div>
+    ),
   },
   {
     id: "createdAt",
@@ -219,7 +230,7 @@ export default function SubscriptionsPage() {
   const [open, setOpen] = useState(false);
   const form = useForm<FormIn, unknown, FormOut>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", destinationId: "", eventTypes: "", template: "" },
+    defaultValues: { name: "", destinationId: "", eventTypes: "", template: "", acceptUnverified: false },
   });
 
   const onSubmit = (v: FormOut) =>
@@ -229,6 +240,7 @@ export default function SubscriptionsPage() {
         destinationId: v.destinationId,
         eventTypes: v.eventTypes,
         template: v.template.trim() || undefined,
+        ...(v.acceptUnverified ? { acceptUnverified: true } : {}),
       })
       .then(
         (s) => {
@@ -354,6 +366,19 @@ export default function SubscriptionsPage() {
                     placeholder={t("page.subscriptions.form.template-placeholder")}
                   />
                   <FieldDescription>{t("page.subscriptions.form.template-hint")}</FieldDescription>
+                </Field>
+              )}
+            />
+            <Controller
+              control={form.control}
+              name="acceptUnverified"
+              render={({ field }) => (
+                <Field className="gap-1.5">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />
+                    {t("page.subscriptions.form.accept-unverified")}
+                  </label>
+                  <FieldDescription>{t("page.subscriptions.form.accept-unverified-hint")}</FieldDescription>
                 </Field>
               )}
             />

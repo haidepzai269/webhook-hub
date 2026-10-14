@@ -154,6 +154,9 @@ model Project {
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   /// QT (SPEC-han-muc-dung-luong §2, ADR-182): operator ghi đè hạn mức (MB). NULL = `PROJECT_STORAGE_QUOTA_MB` (mặc định 50).
   storageQuotaMb Int?    @map("storage_quota_mb")
+  /// PK5 khoá 1 (SPEC-provider-khac §7.1, E14, ADR-206): project tự bật nhận nguồn `unverified` (owner, audit). Tắt -> source
+  /// `unverified` bị từ chối (rejectStatus, không ghi, không phạt). Ingest nạp CÙNG câu với source (+0 lượt DB).
+  allowUnverifiedSources Boolean @default(false) @map("allow_unverified_sources")
 
   apiKeys ApiKey[]
   members ProjectMember[]
@@ -385,6 +388,9 @@ model RawEvent {
   receivedAt      DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)
   /// QT §5.1 (ADR-184): "Dọn" đã bỏ nội dung (body_raw rỗng) — dòng gầy giữ khoá chống trùng (BB-2).
   trimmedAt       DateTime?   @map("trimmed_at") @db.Timestamptz(6)
+  /// PK5 khoá 2 (E5, ADR-206): false = nhận KHÔNG xác thực (scheme `unverified`). Ghi lúc ingest; normalize chép sang
+  /// `events.verified` (không suy từ config hiện tại). `signature_valid` vẫn true ("không sai chữ ký").
+  verified        Boolean     @default(true)
 
   source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   event  Event?
@@ -555,6 +561,9 @@ model Event {
   createdAt      DateTime    @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(6)
   /// QT §5.1 (ADR-184): "Dọn" đã bỏ `data` — polling trả `trimmed: true, data: null`.
   trimmedAt      DateTime?   @map("trimmed_at") @db.Timestamptz(6)
+  /// PK5 khoá 2 (E5, ADR-206): chép từ `raw_events.verified`. false -> chỉ tới subscription `acceptUnverified`; polling
+  /// không trả (trừ `includeUnverified` + scope `read:unverified`); envelope mang `"verified": false`.
+  verified       Boolean     @default(true)
 
   rawEvent   RawEvent?  @relation(fields: [rawEventId], references: [id], onDelete: SetNull)
   deliveries Delivery[]
@@ -616,6 +625,8 @@ model Subscription {
   isActive      Boolean   @default(true) @map("is_active")
   /// ADR-161: lưu trữ ("Xoá" trên bản đồ luồng) — luôn kèm is_active=false; không bao giờ khớp sự kiện mới.
   archivedAt    DateTime? @map("archived_at") @db.Timestamptz(6)
+  /// PK5 khoá 4 (§7.1, ADR-206): đích tự đồng ý nhận sự kiện `verified=false`. Mặc định không — router không tạo delivery.
+  acceptUnverified Boolean @default(false) @map("accept_unverified")
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   // S1 (ADR-038): khoá ngoại GHÉP (destination_id, tenant_id) — DB từ chối subscription trỏ sang đích của

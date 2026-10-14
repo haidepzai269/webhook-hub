@@ -66,7 +66,7 @@ export function useEventTypeCatalog() {
 export function useCreateEndpoint() {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (body: { name: string; url: string; eventTypes: string[]; sourceIds?: string[] }) =>
+    mutationFn: (body: { name: string; url: string; eventTypes: string[]; sourceIds?: string[]; acceptUnverified?: boolean }) =>
       hubFetch<CreateEndpointResult>("/api/v1/endpoints", { method: "POST", body: JSON.stringify(body) }),
     onSettled: invalidate,
   });

@@ -17,6 +17,8 @@ export interface WebhookBodyEvent {
   subject?: string | null;
   /** S3-2 (ADR-053): thiếu = true (event cũ trước S3-2). */
   normalized?: boolean;
+  /** PK5 (E4, ADR-206): thiếu = true. false = hub KHÔNG xác thực sự kiện này (nguồn `unverified`) — đích phải tự verify. */
+  verified?: boolean;
   data: unknown;
   occurredAt: string | Date;
   receivedAt: string | Date;
@@ -33,6 +35,8 @@ export function toWebhookBody(event: WebhookBodyEvent, renderedContent?: string)
     sourceId: event.sourceId || null,
     subject: event.subject ?? undefined,
     normalized: event.normalized !== false,
+    // PK5 (E4): luôn có trong phong bì — đích phân biệt được sự kiện chưa xác thực; vắng ở dữ liệu cũ = true.
+    verified: event.verified !== false,
     data: event.data,
     occurredAt: iso(event.occurredAt),
     receivedAt: iso(event.receivedAt),

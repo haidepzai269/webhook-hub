@@ -39,6 +39,11 @@ export const pageSubscriptions = defineMessages("page.subscriptions", {
     "page.subscriptions.form.template": "Mẫu nội dung (không bắt buộc)",
     "page.subscriptions.form.template-placeholder": "Nhận {{data.amount}} {{data.currency}} — {{data.memo}}",
     "page.subscriptions.form.template-hint": "Để trống: gửi nguyên sự kiện dạng JSON.",
+    // PK5 khoá 4 (ADR-206)
+    "page.subscriptions.form.accept-unverified": "Nhận sự kiện chưa xác thực",
+    "page.subscriptions.form.accept-unverified-hint":
+      "Sự kiện từ nguồn chưa xác thực chỉ tới nơi nhận đã tick ô này. Nơi nhận phải tự kiểm chữ ký gốc; tin nhắn Telegram/Discord mang tiền tố [Chưa xác thực].",
+    "page.subscriptions.accept-unverified-badge": "Nhận chưa xác thực",
   },
   en: {
     "page.subscriptions.title": "Subscriptions",
@@ -77,5 +82,9 @@ export const pageSubscriptions = defineMessages("page.subscriptions", {
     "page.subscriptions.form.template": "Template (optional)",
     "page.subscriptions.form.template-placeholder": "Received {{data.amount}} {{data.currency}} — {{data.memo}}",
     "page.subscriptions.form.template-hint": "Leave empty to send the whole event as JSON.",
+    "page.subscriptions.form.accept-unverified": "Accept unverified events",
+    "page.subscriptions.form.accept-unverified-hint":
+      "Events from unverified sources reach only receivers with this ticked. The receiver must verify the original signature; Telegram/Discord messages carry an 'unverified' prefix.",
+    "page.subscriptions.accept-unverified-badge": "Accepts unverified",
   },
 });

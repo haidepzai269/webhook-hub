@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { SignatureBadge, UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -12,6 +13,7 @@ import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime } from "@/lib/hub/format";
 import { useEventDetail } from "@/lib/hub/queries";
+import { isUnverified, SIGNATURE_VIEW, signatureView } from "@/lib/hub/unverified";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { TraceTimeline } from "./trace-timeline";
@@ -39,7 +41,11 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
     <Sheet open={open && Boolean(eventId)} onOpenChange={(o) => !o && onClose()}>
       <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle className="font-mono text-base">{ev?.type ?? t("page.events.sheet.title")}</SheetTitle>
+          <SheetTitle className="flex items-center gap-2 font-mono text-base">
+            {ev?.type ?? t("page.events.sheet.title")}
+            {/* PK5 khoá 2: nhãn "Chưa xác thực" ở mọi nơi có event. */}
+            <UnverifiedBadge of={ev} />
+          </SheetTitle>
           <SheetDescription>
             {t("page.events.sheet.description")}
           </SheetDescription>
@@ -72,11 +78,8 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
                 <Row label={t("page.events.sheet.received-at")} value={formatDateTime(ev.receivedAt, locale)} />
                 {ev.rawEvent && (
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <Badge variant={ev.rawEvent.signatureValid ? "secondary" : "destructive"}>
-                      {ev.rawEvent.signatureValid
-                        ? t("page.events.sheet.signature-valid")
-                        : t("page.events.sheet.signature-invalid")}
-                    </Badge>
+                    {/* REVIEW-PK5-R2 TB-1b: event/raw chưa xác thực -> "Chưa xác thực" hổ phách, không bao giờ "Chữ ký hợp lệ". */}
+                    <SignatureBadge view={SIGNATURE_VIEW[signatureView(ev)]} title={isUnverified(ev) || isUnverified(ev.rawEvent) ? t("page.events.unverified-hint") : undefined} />
                     <Badge variant="outline">{t("page.events.sheet.raw-status", { status: ev.rawEvent.status })}</Badge>
                   </div>
                 )}

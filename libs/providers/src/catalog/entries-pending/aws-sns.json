@@ -12,5 +12,5 @@
   "blockedBy": [
     "PK5"
   ],
-  "pendingReason": "PK4 xong (manual-url: lưu SubscribeURL, console hiện link, hub không gọi ra). Còn chặn: chữ ký RSA với chứng chỉ tải qua mạng -> unverified (PK5)."
+  "pendingReason": "PK4 xong (manual-url). PK5 có unverified nhưng CHƯA ghim được TopicArn theo cấu hình source (review PK4 T-1): unverified + manual-url nhận SubscribeURL của BẤT KỲ topic nào kẻ biết sourceKey gửi tới. Cần khoá TopicArn (vd when/header x-amz-sns-topic-arn bằng giá trị khai, khác -> từ chối) — chưa có trong khuôn config, cần ADR riêng."
 }

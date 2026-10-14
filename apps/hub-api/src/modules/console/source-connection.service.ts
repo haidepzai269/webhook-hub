@@ -1,13 +1,13 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import * as net from 'net';
 import { PrismaService, TenantScopedRepository, getMasterKey } from '@hub/database';
-import { aesGcmDecrypt, aesGcmEncrypt, isLinkLocalIp, isPrivateIp } from '@hub/crypto';
+import { aesGcmDecrypt, aesGcmEncrypt } from '@hub/crypto';
 import { logger } from '@hub/common';
-import { ConnectorError, ProviderConnector, ProviderRegistry, connectorBaseUrl } from '@hub/providers';
+import { ConnectorError, ProviderConnector, ProviderRegistry, connectorBaseUrl, verdictOf } from '@hub/providers';
 import { unprocessable } from '../service-api/service-api.controller';
 import { hubError } from '../errors/hub-error';
 import { assertSourceLimit } from './source-limit';
 import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from './source-key';
+import { publicIngestBase } from './public-ingest-base';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** `GET …/connection` gọi `status?` của provider tối đa 1 lần / phút / kết nối (đọc `last_checked_at`, 0 lệnh Redis). */
@@ -37,29 +37,8 @@ function publicSource(source: any) {
   return { ...rest, secretVersions: Array.isArray(secrets) ? secrets.length : 0, webhookUrl: `/hooks/${source.provider}/${source.sourceKey}` };
 }
 
-/**
- * KN2 (SPEC-ket-noi §4.4): URL công khai mà provider gọi vào. `HUB_PUBLIC_URL` là localhost / IP nội bộ / tên một nhãn
- * (vd `hub-api` trong docker) -> null (422 `public_url_required`, KHÔNG gọi provider).
- * Ngoài production, `CONNECTOR_INGEST_BASE_URL` thay hẳn (stack kiểm chứng: fake provider trong sink gọi `http://hub-api:4000`);
- * production có biến này -> app không khởi động (testOnlyConfigProblems).
- */
-export function publicIngestBase(env: Record<string, string | undefined> = process.env): string | null {
-  const override = env.NODE_ENV === 'production' ? '' : (env.CONNECTOR_INGEST_BASE_URL ?? '').trim();
-  if (override) return override.replace(/\/$/, '');
-  const raw = (env.HUB_PUBLIC_URL ?? '').trim().replace(/\/$/, '');
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (host === 'localhost' || /\.(localhost|local|internal|lan|home)$/.test(host)) return null;
-  if (net.isIP(host)) return isPrivateIp(host) || isLinkLocalIp(host) ? null : raw;
-  if (!host.includes('.')) return null;
-  return raw;
-}
+// PK5 (E6): `publicIngestBase` tách sang `public-ingest-base.ts` (ingest dùng chung, không kéo service này vào vòng import).
+export { publicIngestBase } from './public-ingest-base';
 
 function lastN(v: string, n = 4): string {
   return v.length <= n ? '****' : `****${v.slice(-n)}`;
@@ -516,11 +495,11 @@ export class SourceConnectionService {
     for (const e of events) {
       // Thứ tự receivedAt giảm dần (repo).
       const req = { provider: source.provider, sourceKey: source.sourceKey, headers: (e.headers ?? {}) as any, rawBody: Buffer.from(e.bodyRaw), body: e.body, contentType: e.contentType ?? undefined };
-      if (await adapter.verify(req, [entered], ctx)) {
+      if (verdictOf(await adapter.verify(req, [entered], ctx)).ok) {
         await this.tx(tenantId, (repo) => repo.retireSourceSecretVersions(source.id, others.map((x) => x.version), new Date(Date.now() + SECRET_OVERLAP_MS)));
         return 'confirmed';
       }
-      if (await adapter.verify(req, others.map((x) => x.value), ctx)) return 'mismatch';
+      if (verdictOf(await adapter.verify(req, others.map((x) => x.value), ctx)).ok) return 'mismatch';
     }
     return null;
   }
