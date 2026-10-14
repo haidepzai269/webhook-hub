@@ -133,6 +133,19 @@ Reviewer độc lập (`_bmad-output/planning-artifacts/REVIEW-PK-SPEC-v2.md`) t
   - Nhãn metric của 503 đường thu là `CAPTURE_FULL`. Đây là nhãn Prometheus, không phải enum DB.
 - **E30:** PK1.4: `swVerify` đã khớp nhiều chữ ký (`standard-webhooks.ts:50-55`), chỉ cần thêm bộ `svix-*`.
 
+### Quyết định của Admin sau đêm (2026-10-14 sáng)
+
+- **E31: chống trùng theo băm nội dung và theo id lồng (Admin đồng ý: "có nhé, chống trùng theo băm id cũng được"). Story PK10.**
+  - `idempotency` có thêm hai dạng, ngoài `{header}` và `{field}`:
+    - `{ path: "data.id" }`: id nằm trong trường lồng (heroku, webflow, coinbase-commerce…). Chỉ cho **tối đa 3 cấp**, mỗi cấp là tên trường thuần (`^[A-Za-z0-9_-]{1,64}$`); không biểu thức, không chỉ số mảng (§15). Khoá là `generic:` + giá trị. Thiếu giá trị → `bodyHashKey`, không ngẫu nhiên.
+    - `{ bodyHash: true }`: khoá là `bodyHashKey(rawBody)`. **Chỉ** dùng khi provider không có id ổn định **và** tài liệu xác nhận khi gửi lại thì body giữ nguyên. Mục danh mục dùng dạng này phải có `bodyHashReason` kèm nguồn.
+  - Ưu tiên id: có `header`/`field`/`path` dùng được thì không dùng `bodyHash`.
+  - Body rỗng hoặc hằng (vd google-drive) với `bodyHash` → 422 lúc lưu config (body rỗng) / REJECTED lúc nhận (không có byte để băm có nghĩa).
+  - Console ghi rõ đánh đổi: "chống trùng theo nội dung: gửi lại mà đổi một byte (vd timestamp trong body) sẽ thành sự kiện mới".
+  - Nạp thêm danh mục: các mục pending vướng **chỉ** khoá chống trùng (REVIEW-PK9: lemon-squeezy, clickup, calendly, brevo, haravan, docusign, pipedrive, squarespace, checkout-com, azure-devops, xendit, circleci; cùng heroku, webflow, coinbase-commerce với `path`). Mỗi mục phải đối chiếu tài liệu (WebFetch), ghi nguồn; không xác minh được thì giữ pending kèm lý do.
+  - Test mới `[PK:T40]` (validator + ingest: path 3 cấp, path sai khuôn 422, bodyHash cùng byte → DUPLICATE, khác 1 byte → mới, body rỗng 422) và `[PK:T41]` (bài A vẫn xanh với các mục mới; mỗi mục bodyHash có `bodyHashReason`). ADR-211 nếu còn trống (grep trước; hub-sap giữ 211+ thì lấy số trống kế tiếp và ghi lý do).
+- **Trạng thái:** PK0–PK5 + PK9 đã lên production (xem `ROLLBACK-TRUOC-PK.md`). Còn PK10 (E31), PK6, PK7, PK8.
+
 ### Thứ tự giao dev đêm nay (RAM 16GB, chỉ ~1,4GB trống)
 
 Chỉ **một** agent nặng mỗi lúc. §8 (danh mục) **không chạy song song**; làm sau PK3, khi các scheme S1–S4 đã có.
@@ -835,6 +848,8 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 | `[PK:T23]` | PK9 | Mỗi khuôn body F15 có fixture parse được |
 | `[PK:T32]` | PK7 | Form: Shopify / VNPay / acme ra đúng trạng thái; ①②③ không gửi mẫu lên mạng |
 | `[PK:T39]` | PK8 | docs-sync: ARCHITECTURE/EVENT-CATALOG/ERRORS/CLAUDE.md có đủ mục PK (unverified, handshake, chế độ thu, mã lỗi mới) |
+| `[PK:T40]` | PK10 | idempotency `path` (≤3 cấp, khuôn tên) và `bodyHash` (cùng byte trùng, khác byte mới, body rỗng 422) — E31 |
+| `[PK:T41]` | PK10 | Danh mục: mục mới qua bài A; mỗi mục bodyHash có `bodyHashReason` kèm nguồn — E31 |
 
 **Checklist** (đánh `[x]` khi story đã review ĐẠT và CI xanh):
 
@@ -848,3 +863,4 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 - [ ] **PK6** — chế độ thu + kích hoạt
 - [ ] **PK7** — form "Provider khác"
 - [ ] **PK8** — giấy + nghiệm thu §13
+- [ ] **PK10** — chống trùng `path` lồng + `bodyHash` (E31) + nạp thêm danh mục
