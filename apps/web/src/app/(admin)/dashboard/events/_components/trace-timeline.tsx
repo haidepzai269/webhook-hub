@@ -3,9 +3,11 @@
 import type { ReactNode } from "react";
 
 import { DeliveryStatusBadge } from "@/components/admin/status-badge";
+import { SignatureBadge } from "@/components/flow/unverified-badge";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/hub/format";
 import type { DeliveryAttempt, HubEventDetail } from "@/lib/hub/types";
+import { isUnverified, SIGNATURE_VIEW, signatureView } from "@/lib/hub/unverified";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 import { RetryCountdown } from "../../deliveries/_components/delivery-columns";
@@ -70,6 +72,9 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
   const t = useT();
   const locale = useLocale();
   const raw = ev.rawEvent;
+  // REVIEW-PK5-R2 TB-1b: nguồn `unverified` có signatureValid=true — trạng thái chữ ký phải đi qua isUnverified (event HOẶC raw).
+  const sig = SIGNATURE_VIEW[signatureView(ev)];
+  const unverified = isUnverified(ev) || isUnverified(raw);
   const deliveries = [...(ev.deliveries ?? [])].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.attemptGeneration - b.attemptGeneration,
   );
@@ -81,13 +86,11 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
           <Step
             n="①"
             title={t("page.events.trace.received")}
-            tone={raw.signatureValid ? "ok" : "bad"}
+            tone={sig.tone}
             time={formatDateTime(raw.receivedAt, locale)}
           >
             <div className="flex flex-wrap gap-1.5">
-              <Badge variant={raw.signatureValid ? "secondary" : "destructive"}>
-                {raw.signatureValid ? t("page.events.sheet.signature-valid") : t("page.events.sheet.signature-invalid")}
-              </Badge>
+              <SignatureBadge view={sig} title={unverified ? t("page.events.unverified-hint") : undefined} />
               <Badge variant="outline">{t("page.events.sheet.raw-status", { status: raw.status })}</Badge>
             </div>
           </Step>

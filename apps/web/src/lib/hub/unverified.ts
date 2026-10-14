@@ -29,3 +29,25 @@ export const unverifiedSourceBlocked = (
   s: { provider: string; verificationConfig?: unknown },
   allowUnverifiedSources: boolean | undefined,
 ): boolean => isUnverifiedSource(s) && allowUnverifiedSources === false;
+
+/**
+ * REVIEW-PK5-R2 TB-1b: nhãn chữ ký ở xem nhanh (event-sheet) + bước ① (trace-timeline). Nguồn `unverified` ghi
+ * `raw_events.signature_valid = true` (cố ý, để không bật cảnh báo signature_failing) — nên KHÔNG được suy "hợp lệ" từ
+ * riêng `signatureValid`: event HOẶC raw mang `verified: false` -> "Chưa xác thực" (hổ phách, tông cảnh báo).
+ */
+export type SignatureView = "unverified" | "valid" | "invalid";
+
+export const signatureView = (ev: VerifiedFlag & { rawEvent?: (VerifiedFlag & { signatureValid: boolean }) | null }): SignatureView =>
+  isUnverified(ev) || isUnverified(ev.rawEvent) ? "unverified" : ev.rawEvent?.signatureValid ? "valid" : "invalid";
+
+/** Khoá i18n + tông chấm + kiểu badge cho từng trạng thái. Chỉ `valid` được xanh (`ok`). */
+export const SIGNATURE_VIEW = {
+  unverified: {
+    key: "page.events.unverified",
+    tone: "warn",
+    variant: "outline",
+    className: "border-amber-500/50 text-amber-700 dark:text-amber-400",
+  },
+  valid: { key: "page.events.sheet.signature-valid", tone: "ok", variant: "secondary", className: "" },
+  invalid: { key: "page.events.sheet.signature-invalid", tone: "bad", variant: "destructive", className: "" },
+} as const satisfies Record<SignatureView, { key: string; tone: "ok" | "bad" | "warn"; variant: "outline" | "secondary" | "destructive"; className: string }>;

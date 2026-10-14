@@ -213,6 +213,21 @@ describe('[PK5] review — T-1 bắt tay, T-3 ước lượng phong bì, TB-1 ch
     }
   });
 
+  it('[PK:T38] (phần g) REVIEW-PK5-R2 T-c: content-type dài (bên gửi kiểm soát) được tính vào ước lượng — body sát trần vẫn không thấp hơn thật', async () => {
+    const vc = { ...BASE, forwardUrl: false, forwardHeaders: [] };
+    const BS = String.fromCharCode(92);
+    const contentType = `application/json; x=${`"${BS}`.repeat(600)}`; // ~2,4KB sau khi thoát JSON
+    const size = UNVERIFIED_MAX_BODY_BYTES;
+    const r = req(Buffer.alloc(size, 0x41), { parse: false, contentType });
+    const [evt] = a.normalize(r, { tenantId: 't', sourceId: '00000000-0000-4000-8000-000000000000', correlationId: 'c', rawEventId: 'r', verificationConfig: vc });
+    const actual = Buffer.byteLength(toWebhookBody({ ...evt, id: '01JAAAAAAAAAAAAAAAAAAAAAAA', verified: false }));
+    expect(estimateUnverifiedEnvelopeBytes({ bodyBytes: size, query: null, forwardHeaders: {}, contentType })).toBeGreaterThanOrEqual(actual);
+    // Adapter dùng đúng ước lượng đó: content-type dài đẩy phong bì quá 64KB -> 413 thay vì ACK rồi DEAD.
+    const huge = `text/plain; x=${'"'.repeat(32 * 1024)}`; // ~64KB sau khi thoát JSON
+    const v = verdictOf(await a.verify(req(Buffer.alloc(1000, 0x41), { parse: false, contentType: huge }), [], ctx(vc)));
+    expect(v).toMatchObject({ ok: false, refusal: { status: 413, error: 'unverified_body_too_large' } });
+  });
+
   it('[PK:T16] (phần j) TB-1: diagnose ACCEPTED của nguồn unverified = reason "unverified" (không bao giờ "ok"/"hợp lệ")', () => {
     const stored = { status: 'ACCEPTED', signatureValid: true, headers: {}, body: {}, receivedAt: new Date() };
     expect(a.diagnose(stored, ctx(BASE))).toEqual({ ok: true, reason: 'unverified' });

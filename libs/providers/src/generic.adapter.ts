@@ -585,7 +585,12 @@ function verifyUnverified(req: RawWebhookRequest, ctx?: AdapterContext): VerifyR
     const v = headerOf(req, h);
     if (v !== null) forwarded[h] = v;
   }
-  const est = estimateUnverifiedEnvelopeBytes({ bodyBytes: req.rawBody.length, query: c?.forwardUrl ? (req.query ?? '') : null, forwardHeaders: forwarded });
+  const est = estimateUnverifiedEnvelopeBytes({
+    bodyBytes: req.rawBody.length,
+    query: c?.forwardUrl ? (req.query ?? '') : null,
+    forwardHeaders: forwarded,
+    contentType: req.contentType ?? null,
+  });
   if (est > UNVERIFIED_ENVELOPE_MAX_BYTES) return tooLarge;
   return { ok: true, verified: false };
 }

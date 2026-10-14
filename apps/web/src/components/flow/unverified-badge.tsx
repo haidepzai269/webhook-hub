@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { isUnverified, type VerifiedFlag } from "@/lib/hub/unverified";
+import { isUnverified, type SIGNATURE_VIEW, type VerifiedFlag } from "@/lib/hub/unverified";
 import { useT } from "@/lib/i18n/use-t";
 
 /**
@@ -18,6 +18,19 @@ export function UnverifiedBadge({ of, className }: { of: VerifiedFlag | null | u
       className={`shrink-0 border-amber-500/50 text-[10px] text-amber-700 dark:text-amber-400 ${className ?? ""}`}
     >
       {t("page.events.unverified")}
+    </Badge>
+  );
+}
+
+/**
+ * REVIEW-PK5-R2 TB-1b: nhãn chữ ký dùng chung cho xem nhanh (event-sheet) và bước ① (trace-timeline). Trạng thái lấy từ
+ * `signatureView` (đi qua isUnverified) — sự kiện chưa xác thực ra "Chưa xác thực" hổ phách, không bao giờ "Chữ ký hợp lệ".
+ */
+export function SignatureBadge({ view, title }: { view: (typeof SIGNATURE_VIEW)[keyof typeof SIGNATURE_VIEW]; title?: string }) {
+  const t = useT();
+  return (
+    <Badge variant={view.variant} className={view.className || undefined} title={title}>
+      {t(view.key)}
     </Badge>
   );
 }

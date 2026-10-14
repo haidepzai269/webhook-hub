@@ -105,6 +105,8 @@ export interface HubEventDetail extends HubEvent {
     headers: Record<string, unknown>;
     body: unknown;
     signatureValid: boolean;
+    /** PK5 khoá 2: `raw_events.verified` — false = nguồn `unverified` (signatureValid vẫn true, KHÔNG nghĩa là "hợp lệ"). */
+    verified?: boolean;
     status: "ACCEPTED" | "REJECTED" | "DUPLICATE";
     contentType: string | null;
     receivedAt: string;
@@ -241,8 +243,17 @@ export interface ReplayBulkSampleRow {
 }
 
 /** ADR-163: lý do một id đã xem trước không được replay lúc chạy thật. */
-/** PK5 T-7: + `unverified_not_accepted` (event chưa xác thực, subscription tắt "Nhận sự kiện chưa xác thực"). */
-export type ReplaySkipReason = "not_found" | "not_dead" | "already_replayed" | "destination_unavailable" | "unverified_not_accepted";
+/**
+ * PK5 T-7: + `unverified_not_accepted` (event chưa xác thực, subscription tắt "Nhận sự kiện chưa xác thực").
+ * REVIEW-PK5-R2 T-e: + `event_trimmed` (QT7 — nội dung event đã Dọn; server có từ trước, web thiếu nên rơi về mã thô).
+ */
+export type ReplaySkipReason =
+  | "not_found"
+  | "not_dead"
+  | "already_replayed"
+  | "destination_unavailable"
+  | "unverified_not_accepted"
+  | "event_trimmed";
 
 export type ReplayBulkResult =
   | {

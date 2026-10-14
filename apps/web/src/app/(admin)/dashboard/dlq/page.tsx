@@ -53,6 +53,7 @@ const SKIP_LABEL: Record<ReplaySkipReason, MessageKey> = {
   already_replayed: "page.dlq.skip.already-replayed",
   destination_unavailable: "page.dlq.skip.destination-unavailable",
   unverified_not_accepted: "page.dlq.skip.unverified-not-accepted",
+  event_trimmed: "page.dlq.skip.event-trimmed",
 };
 
 const AGE_LABEL: Record<(typeof DLQ_AGE_VALUES)[number], MessageKey> = {

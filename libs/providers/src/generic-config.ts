@@ -775,14 +775,22 @@ export const UNVERIFIED_URL_BASE_BYTES = 512;
 
 /**
  * Ước lượng (trên, không thấp hơn thật) số byte phong bì webhook của một event `unverified`: base64 của body + URL (chỉ khi
- * `forwardUrl`; query tính theo độ dài JSON đã thoát) + mọi header gửi kèm có mặt (tên + giá trị JSON) + phần cố định.
+ * `forwardUrl`; query tính theo độ dài JSON đã thoát) + mọi header gửi kèm có mặt (tên + giá trị JSON) + `contentType`
+ * (JSON đã thoát) + phần cố định.
  */
-export function estimateUnverifiedEnvelopeBytes(o: { bodyBytes: number; query: string | null; forwardHeaders: Record<string, string> }): number {
+export function estimateUnverifiedEnvelopeBytes(o: {
+  bodyBytes: number;
+  query: string | null;
+  forwardHeaders: Record<string, string>;
+  /** REVIEW-PK5-R2 T-c: header `content-type` do bên gửi kiểm soát — nằm nguyên văn trong `data.contentType`. */
+  contentType?: string | null;
+}): number {
   const base64 = 4 * Math.ceil(o.bodyBytes / 3);
+  const contentType = o.contentType ? JSON.stringify(o.contentType).length : 0;
   const url = o.query === null ? 0 : UNVERIFIED_URL_BASE_BYTES + JSON.stringify(o.query).length;
   let headers = 0;
   for (const [k, v] of Object.entries(o.forwardHeaders)) headers += JSON.stringify(k).length + JSON.stringify(v).length + 2;
-  return UNVERIFIED_ENVELOPE_FIXED_BYTES + base64 + url + headers;
+  return UNVERIFIED_ENVELOPE_FIXED_BYTES + base64 + url + headers + contentType;
 }
 /** Trường cấp một không có ở `unverified` (không verify, không ánh xạ — `data` khuôn cố định). */
 const UNVERIFIED_FORBIDDEN_FIELDS = [

@@ -201,7 +201,7 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.listen.reason.unverified": "đã nhận, chưa xác thực — hub không kiểm chữ ký, nơi nhận tự kiểm",
     // Review PK5 T-9: request vào nguồn chưa xác thực bị từ chối mà không ghi gì khi project chưa bật cờ.
     "page.sources.unverified-blocked":
-      "Dự án chưa bật \"Nhận nguồn chưa xác thực\" — mọi request vào nguồn này đang bị từ chối và không được ghi lại. Chủ dự án bật ở trang Dự án.",
+      "Dự án chưa bật \"Nhận nguồn chưa xác thực\" — mọi request vào nguồn này đang bị từ chối và không được ghi lại, kể cả request bắt tay — bật cờ rồi đăng ký lại URL ở nhà cung cấp. Chủ dự án bật ở trang Dự án.",
     "page.sources.listen.failing": "Trượt: {reason}",
     "page.sources.listen.last-failure": "Request mới nhất trượt: {reason}",
     "page.sources.listen.candidates": "tiêu đề gửi kèm: {names}",
@@ -479,7 +479,7 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.listen.connected-unverified": "First request received — NOT verified (the receiver checks the original signature)",
     "page.sources.listen.reason.unverified": "received, not verified — the hub does not check the signature, the receiver does",
     "page.sources.unverified-blocked":
-      "This project has not turned on \"Accept unverified sources\" — every request to this source is refused and nothing is recorded. A project owner turns it on in Projects.",
+      "This project has not turned on \"Accept unverified sources\" — every request to this source is refused and nothing is recorded, including handshake requests — turn it on, then re-register the URL with the provider. A project owner turns it on in Projects.",
     "page.sources.listen.failing": "Failing: {reason}",
     "page.sources.listen.last-failure": "Latest request failed: {reason}",
     "page.sources.listen.candidates": "headers sent: {names}",

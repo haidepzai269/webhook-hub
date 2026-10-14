@@ -264,6 +264,12 @@ describe("stageHint — dòng lý do trong tooltip chấm chặng", () => {
 
 describe("stageHint — chấm Lưu (persisted) bị bỏ qua (M1)", () => {
   const persisted = { stage: "persisted", status: "skipped" };
+  it("[PK:T16] (phần r) REVIEW-PK5-R2 T-b: nguồn chưa xác thực (chấm Xác thực warning, verified=false) trùng -> 'Trùng', không phải 'chưa chạy'", () => {
+    const dup = { provider: "generic", type: null, failedAt: null, verified: false, summary: summary({ verified: "warning" }) };
+    expect(stageHint(dup, persisted, t)).toContain("Trùng");
+    // warning ở Xác thực mà KHÔNG phải nguồn chưa xác thực -> vẫn coi là chưa qua.
+    expect(stageHint({ ...dup, verified: undefined }, persisted, t)).toBe("Không chạy — dừng ở chặng trước");
+  });
   it("REJECTED (chữ ký sai, dừng ở verified) -> 'dừng ở chặng trước', KHÔNG phải 'Trùng'", () => {
     const rejected = row({
       type: null,
