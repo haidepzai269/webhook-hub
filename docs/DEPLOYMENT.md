@@ -642,8 +642,17 @@ HUB_INGEST_PUBLIC_URL=   # hub-api (ADR-211, SPEC-hub-sap §9): URL provider g�
                          # Lưới hứng (ADR-220): https://hub-hooks.webhookhub.workers.dev. Đổi giá trị -> kết nối
                          # PayOS/Stripe báo DRIFTED public_url_changed, bấm "Kết nối lại". Đặt mà localhost/IP nội bộ
                          # -> 422 public_url_required (KHÔNG rơi về HUB_PUBLIC_URL).
-                         # CHƯA đặt trên Render trước khi LH3 lên: tới lúc đó url của unverified/forwardUrl dùng
-                         # biến này cho cả request đi thẳng Render (H4). Đặt/đổi là thao tác hạ tầng — hỏi Admin.
+                         # LH3 (H4, ADR-217): url của unverified/forwardUrl (provider ký trên URL) theo ĐƯỜNG VÀO —
+                         # request có chữ ký lưới hợp lệ dùng biến này, request đi thẳng Render dùng HUB_PUBLIC_URL.
+                         # Đặt/đổi là thao tác hạ tầng — hỏi Admin.
+CATCHNET_FORWARD_SECRET= # hub-api + Worker secret (LH3, ADR-217): HMAC header lưới hứng (`x-catchnet-signature` không
+                         # body — cổng phạt kiểm để lấy IP client; `x-catchnet-body-signature` — chỉ khi khớp mới dùng
+                         # giờ Worker nhận làm "bây giờ" khi verify Stripe/Standard Webhooks/signed-template). ≥ 32 byte
+                         # ngẫu nhiên (`openssl rand -hex 32`). Xoay khoá: đặt "mới,cũ" (tối đa 2, phân tách `,`) ở hub
+                         # trước, đổi Worker sang mới, rồi bỏ cũ. TRỐNG = tắt hẳn: mọi header x-catchnet-* bị bỏ qua
+                         # (IP Cloudflare bị phạt chung, phát lại Stripe sau 5 phút = 401). Đặt là thao tác hạ tầng — hỏi Admin.
+CATCHNET_RETENTION_DAYS= # hub-api + Worker (LH3): |now − x-catchnet-received-at| tối đa (ngày, nguyên 1..30, mặc định 7).
+                         # Quá hạn -> header lưới bị bỏ qua. PHẢI bằng giá trị của Worker (Worker giữ D1 đúng chừng đó).
 
 # --- KHÔNG BAO GIỜ đặt trên production (hub-api VÀ hub-worker) — chỉ cho stack kiểm chứng / test ---
 # *_FAKE_BASE_URL (PAYOS_/STRIPE_/GITHUB_/GOOGLE_OAUTH_…)  -> NODE_ENV=production + có giá trị: app THOÁT lúc khởi động

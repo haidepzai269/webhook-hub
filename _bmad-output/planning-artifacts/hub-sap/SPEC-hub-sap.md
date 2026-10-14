@@ -536,7 +536,7 @@ CREATE TABLE sources_sync (
 ## 16. Ghi chú / nợ phát hiện khi code
 
 - **LH-URL (REVIEW-LH-URL, Thấp):**
-  - **L1:** trước LH3, `publicHooksUrl()` dùng base ingest cho mọi request. **Không đặt `HUB_INGEST_PUBLIC_URL` trên Render trước khi LH3 lên.**
+  - **L1:** trước LH3, `publicHooksUrl()` dùng base ingest cho mọi request. **Không đặt `HUB_INGEST_PUBLIC_URL` trên Render trước khi LH3 lên.** → **Đã sửa ở LH3** (`[LH:T19]`, ADR-217): base theo đường vào.
   - **L2:** biến đặt sai thì chỉ nút Kết nối báo 422. Nên kiểm biến lúc khởi động ở production.
   - **L3:** `connect()`, `connectExisting()` và trường `ingestUrl` của controller chưa có test.
   - **L4:** `ingestUrl` chưa có trong response PATCH và connect.
@@ -547,5 +547,13 @@ CREATE TABLE sources_sync (
   - Header tới Worker bị viết thường và đổi thứ tự.
   - Cloudflare tự thêm `cf-*`, `x-real-ip`, `x-forwarded-proto`; LH2 phải bỏ khi chuyển tiếp.
   - Lần deploy đầu, cron chạy chậm vài phút.
+
+- **LH3 (2026-10-14):**
+  - `[LH:T12]` spec ghi "→ 202"; ack Stripe của hub là **200** `{received:true}` (adapter không khai `successStatus`). Test kiểm 200 + `x-hub-outcome: accepted`.
+  - `[LH:T18]` ở LH3 chỉ là nửa phía hub (503 `rejectStatus` mang `x-hub-outcome: rejected`, cả khi đi qua lưới). Nửa Worker (provider nhận 503, D1 rỗng) thuộc LH2.
+  - 429 (cổng phạt, hộp phạt trong ingest, rate limit) mang `x-hub-outcome: refused`. LH2 phải xét 408/429 **trước** outcome (H2: retry). 507 cũng `refused`: khi phát lại nên retry, LH2 quyết (ADR-221).
+  - `CATCHNET_RETENTION_DAYS` ở hub nhận nguyên 1..30 (sai khuôn → 7). Worker phải dùng cùng giá trị.
+  - Header lưới lặp (mảng) hoặc `x-catchnet-mode` ngoài {forward, replay} → bỏ qua cả bộ header. Worker (LH2) gửi đúng một giá trị mỗi header, `path_and_query` = pathname + search **thô** như URL provider gọi (không decode), METHOD chữ hoa.
+  - `raw_events.via` ghi ở cả dòng REJECTED / bắt tay (để nút "Đã đổi" ở §9 nhận ra request đầu tiên qua lưới kể cả khi chữ ký provider sai).
 
 _(dev ghi vào đây; lệch với tài liệu provider hoặc trang giá Cloudflare thì trang chính thức thắng)_
