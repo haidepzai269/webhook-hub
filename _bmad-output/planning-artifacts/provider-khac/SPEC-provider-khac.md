@@ -844,7 +844,7 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 - [x] **PK3** — `signed-template`
 - [x] **PK9** — danh mục + `identify` (client)
 - [x] **PK4** — bắt tay + GET bắt tay + ack/rejectStatus
-- [ ] **PK5** — `unverified` (bốn khoá + E4/E5/E7)
+- [x] **PK5** — `unverified` (bốn khoá + E4/E5/E7)
 - [ ] **PK6** — chế độ thu + kích hoạt
 - [ ] **PK7** — form "Provider khác"
 - [ ] **PK8** — giấy + nghiệm thu §13
