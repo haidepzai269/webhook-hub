@@ -96,9 +96,10 @@ export interface GenericConfig {
   toleranceSec?: number;
   /**
    * Khoá chống trùng. Bắt buộc với mọi scheme có verify. PK5 `unverified`: tuỳ chọn — khoá LUÔN ghép `bodyHashKey(rawBody)`
-   * (E7: chỉ bản trùng đúng từng byte mới là trùng); vắng = chỉ `bodyHashKey`.
+   * (E7: chỉ bản trùng đúng từng byte mới là trùng); vắng = chỉ `bodyHashKey`. PK10 (E31): thêm `{path}` (id lồng ≤ 3 cấp)
+   * và `{bodyHash: true}` — xem `IdempotencyConfig`.
    */
-  idempotency?: { header: string } | { field: string };
+  idempotency?: IdempotencyConfig;
   eventType: string;
   /** PK5 `unverified`: header gốc gửi kèm event (`data.headers`) để đích tự verify — ≤ 10 tên, viết thường. */
   forwardHeaders?: string[];
@@ -110,6 +111,48 @@ export interface GenericConfig {
   handshake?: HandshakeConfig;
   /** PK4: mã HTTP của ack. */
   ack?: AckConfig;
+}
+
+/**
+ * PK10 (SPEC-provider-khac E31, ADR-230): khoá chống trùng — đúng MỘT dạng.
+ * - `{header}` / `{field}`: như cũ (header viết thường; trường CẤP MỘT của body).
+ * - `{path}`: id nằm trong trường lồng (`data.id`, `webhook_metadata.event.id`) — ≤ 3 cấp, mỗi cấp là tên trường thuần
+ *   `^[A-Za-z0-9_-]{1,64}$`; KHÔNG biểu thức, KHÔNG chỉ số mảng (§15). Body thiếu giá trị ở đường dẫn -> khoá theo băm
+ *   bytes body (`bodyHashKey`), không bao giờ ngẫu nhiên.
+ * - `{bodyHash: true}`: khoá = `bodyHashKey(rawBody)` — chỉ khi provider không có id ổn định VÀ gửi lại đúng từng byte.
+ *   Body rỗng -> REJECTED lúc nhận (không có byte để băm có nghĩa). standard-webhooks luôn có `webhook-id` -> không nhận.
+ */
+export type IdempotencyConfig = { header: string } | { field: string } | { path: string } | { bodyHash: true };
+export const IDEMPOTENCY_KINDS = ['header', 'field', 'path', 'bodyHash'] as const;
+export type IdempotencyKind = (typeof IDEMPOTENCY_KINDS)[number];
+/** PK10: một cấp của `idempotency.path`. */
+export const PATH_SEGMENT_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const PATH_MAX_DEPTH = 3;
+/** Tên thuộc tính của nguyên mẫu JS — đọc theo đường dẫn không bao giờ được đi vào đây. */
+const PATH_FORBIDDEN_SEGMENTS: readonly string[] = ['__proto__', 'prototype', 'constructor'];
+
+/** PK10: lỗi của `idempotency.path` (null = hợp lệ). Chỉ chuỗi `a.b.c`: 1–3 cấp, mỗi cấp khớp `PATH_SEGMENT_RE`. */
+export function idempotencyPathProblem(path: unknown): string | null {
+  const rule = `path là 1–${PATH_MAX_DEPTH} cấp tên trường nối bằng dấu chấm, mỗi cấp ^[A-Za-z0-9_-]{1,64}$ (vd data.id) — không biểu thức, không chỉ số mảng`;
+  if (typeof path !== 'string') return rule;
+  const segs = path.split('.');
+  if (segs.length > PATH_MAX_DEPTH) return `path tối đa ${PATH_MAX_DEPTH} cấp (vd webhook_metadata.event.id)`;
+  if (!segs.every((s) => PATH_SEGMENT_RE.test(s))) return rule;
+  if (segs.some((s) => PATH_FORBIDDEN_SEGMENTS.includes(s))) return 'path không dùng __proto__ / prototype / constructor';
+  return null;
+}
+
+/**
+ * PK10: đọc giá trị theo `idempotency.path` đã kiểm. CHỈ thuộc tính riêng của object thường (không đi qua mảng, không đọc
+ * nguyên mẫu). Không có -> `undefined`.
+ */
+export function readIdempotencyPath(body: unknown, path: string): unknown {
+  let cur: unknown = body;
+  for (const seg of path.split('.')) {
+    if (cur === null || typeof cur !== 'object' || Array.isArray(cur) || !Object.prototype.hasOwnProperty.call(cur, seg)) return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
 }
 
 export type ConfigCheck = { ok: true; config: GenericConfig } | { ok: false; field: string; message: string };
@@ -320,10 +363,21 @@ function parseTail(c: Record<string, any>, sw: boolean, idempotencyOptional = fa
   } else if (c.idempotency === undefined && idempotencyOptional) {
     idempotency = undefined; // PK5 `unverified`: khoá chỉ là bodyHashKey (E7)
   } else {
-    if (!isObj(c.idempotency)) return fail('idempotency', 'idempotency là {header} HOẶC {field}');
+    if (!isObj(c.idempotency)) return fail('idempotency', 'idempotency là {header} | {field} | {path} | {bodyHash: true}');
     const keys = Object.keys(c.idempotency);
-    if (keys.length !== 1 || !['header', 'field'].includes(keys[0])) return fail('idempotency', 'idempotency có ĐÚNG MỘT trong header | field');
-    if (keys[0] === 'header') {
+    if (keys.length !== 1 || !(IDEMPOTENCY_KINDS as readonly string[]).includes(keys[0])) {
+      return fail('idempotency', 'idempotency có ĐÚNG MỘT trong header | field | path | bodyHash');
+    }
+    if (keys[0] === 'bodyHash') {
+      // PK10 (E31): ưu tiên id — standard-webhooks luôn có webhook-id (đã ký), băm body chỉ làm yếu đi.
+      if (sw) return fail('idempotency.bodyHash', 'standard-webhooks luôn có webhook-id — dùng nó (bỏ trống idempotency), không băm body');
+      if (c.idempotency.bodyHash !== true) return fail('idempotency.bodyHash', 'bodyHash chỉ nhận true');
+      idempotency = { bodyHash: true };
+    } else if (keys[0] === 'path') {
+      const m = idempotencyPathProblem(c.idempotency.path);
+      if (m) return fail('idempotency.path', m);
+      idempotency = { path: c.idempotency.path };
+    } else if (keys[0] === 'header') {
       if (typeof c.idempotency.header !== 'string' || !HEADER_RE.test(c.idempotency.header)) {
         return fail('idempotency.header', 'header viết thường ^[a-z0-9-]{1,64}$');
       }
@@ -580,10 +634,17 @@ function handshakeConflict(c: GenericConfig): ConfigCheck | null {
     if ('header' in h.when) {
       const m = clash(h.when.header);
       if (m) return bad('handshake.when.header', m);
-    } else if (c.idempotency && 'field' in c.idempotency && h.when.field === c.idempotency.field) {
+    } else if (c.idempotency && h.when.field === idempotencyTopField(c.idempotency)) {
       return bad('handshake.when.field', `${h.when.field} là trường chống trùng — mọi sự kiện đều mang; chọn trường chỉ request bắt tay mới có (vd type)`);
     }
   }
+  return null;
+}
+
+/** Trường CẤP MỘT mà khoá chống trùng đọc (field, hoặc cấp đầu của path) — mọi sự kiện đều mang. */
+function idempotencyTopField(id: IdempotencyConfig): string | null {
+  if ('field' in id) return id.field;
+  if ('path' in id) return id.path.split('.')[0];
   return null;
 }
 

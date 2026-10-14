@@ -59,6 +59,11 @@ export interface CatalogEntry {
   secretSource: 'provider' | 'hub' | 'first-request' | null;
   /** Bắt buộc khi config dùng sha1 (ADR-203: sha1 chỉ khi nhà cung cấp quy định). */
   sha1Reason?: string;
+  /**
+   * PK10 (E31, ADR-230): bắt buộc khi config (hoặc alternatives) chống trùng bằng `idempotency.bodyHash` — vì sao provider
+   * không có id ổn định và tài liệu nói gửi lại giữ nguyên body. Phải chứa URL nguồn (có trong `sources`).
+   */
+  bodyHashReason?: string;
   docs: string;
   docsVersion: string | null;
   confidence: 'cao' | 'trung bình';

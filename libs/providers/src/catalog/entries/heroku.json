@@ -1,0 +1,69 @@
+{
+  "id": "heroku",
+  "name": "Heroku App Webhooks",
+  "aliases": [
+    "heroku"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "heroku-webhook-hmac-sha256"
+      ],
+      "optional": [
+        "authorization"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "action",
+        "resource",
+        "data",
+        "webhook_metadata"
+      ],
+      "optional": [
+        "actor",
+        "previous_data",
+        "created_at",
+        "updated_at",
+        "published_at",
+        "sequence",
+        "version"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "heroku-webhook-hmac-sha256",
+      "algo": "sha256",
+      "encoding": "base64",
+      "idempotency": {
+        "path": "webhook_metadata.event.id"
+      },
+      "eventType": "heroku.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret đặt khi đăng ký webhook (heroku webhooks:add --secret)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://devcenter.heroku.com/articles/app-webhooks",
+  "docsVersion": "Trang cập nhật 2025-01-09 (đối chiếu 2026-10-14). Khoá chống trùng là id SỰ KIỆN webhook_metadata.event.id (path, PK10) — body còn có webhook_metadata.delivery.id và webhook_metadata.attempt.id theo từng lần gửi, nên không chống trùng theo băm body. Tài liệu không nói rõ event.id giữ nguyên khi gửi lại.",
+  "confidence": "cao",
+  "sources": [
+    "https://devcenter.heroku.com/articles/app-webhooks"
+  ]
+}

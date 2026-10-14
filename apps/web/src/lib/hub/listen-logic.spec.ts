@@ -13,6 +13,10 @@ import {
   type GenericConfig,
   UNVERIFIED_MAX_BODY_BYTES,
   HANDSHAKE_KINDS,
+  IDEMPOTENCY_KINDS,
+  PATH_MAX_DEPTH as SERVER_PATH_MAX_DEPTH,
+  PATH_SEGMENT_RE as SERVER_PATH_SEGMENT_RE,
+  idempotencyPathProblem,
   secretProblem,
   validateGenericConfig,
 } from "@hub/providers";
@@ -37,7 +41,13 @@ import {
   HANDSHAKE_CHOICES,
   HANDSHAKE_FORM_DEFAULTS,
   HMAC_ALGO_CHOICES,
+  ID_KIND_CHOICES,
   idKindOf,
+  idempotencyOf,
+  isIdempotencyPath,
+  LISTEN_REASON_KEYS,
+  PATH_MAX_DEPTH,
+  PATH_SEGMENT_RE,
   type InspectRow,
   isReservedType,
   isSnsSubscribeUrl,
@@ -528,5 +538,53 @@ describe("PK5: form \"Chưa xác thực\" (unverified) — cùng luật server (
     }
     // Secret: unverified không có khoá bí mật (server 422 secret).
     expect(genericFormIssues(U, "x".repeat(SECRET_MIN)).map((i) => i.issue)).toContain("secret-unverified");
+  });
+});
+
+describe("[PK:T40] (phần d) form: kiểu khoá chống trùng path / bodyHash khớp server (E31, ADR-230)", () => {
+  it("bốn kiểu = IDEMPOTENCY_KINDS của server; luật path là bản sao (đối chiếu từng ca)", () => {
+    expect([...ID_KIND_CHOICES].sort()).toEqual([...IDEMPOTENCY_KINDS].sort());
+    expect(PATH_SEGMENT_RE.source).toBe(SERVER_PATH_SEGMENT_RE.source);
+    expect(PATH_MAX_DEPTH).toBe(SERVER_PATH_MAX_DEPTH);
+    for (const p of ["id", "data.id", "webhook_metadata.event.id", "a.b.c.d", "data[0].id", "$.a", "a..b", "", "__proto__.x", "a.constructor", "x-y.z_1"]) {
+      expect({ p, web: isIdempotencyPath(p) }).toEqual({ p, web: idempotencyPathProblem(p) === null });
+    }
+  });
+
+  it("buildGenericConfig: path -> {path}; bodyHash -> {bodyHash:true} (bỏ qua ô tên); server nhận nguyên khuôn mọi scheme có nghĩa", () => {
+    const forms: GenericFormValues[] = [
+      { ...FORM, idKind: "path", idValue: " webhook_metadata.event.id " },
+      { ...FORM, idKind: "bodyHash", idValue: "bất kỳ" },
+      { ...FORM, scheme: "static-token", header: "x-token", idKind: "bodyHash", idValue: "" },
+      { ...FORM, ...UNVERIFIED_FORM_DEFAULTS, scheme: "unverified", idKind: "path", idValue: "data.id" },
+    ];
+    for (const f of forms) {
+      const built = buildGenericConfig(f);
+      const r = validateGenericConfig(built);
+      expect({ f: f.idKind, ok: r.ok }).toEqual({ f: f.idKind, ok: true });
+      expect((r as unknown as { config: Record<string, unknown> }).config).toMatchObject(built);
+    }
+    expect(buildGenericConfig(forms[0]).idempotency).toEqual({ path: "webhook_metadata.event.id" });
+    expect(buildGenericConfig(forms[1]).idempotency).toEqual({ bodyHash: true });
+    expect(idempotencyOf({ scheme: "standard-webhooks", idKind: "bodyHash", idValue: "" })).toBeNull(); // sw luôn theo tiêu đề
+  });
+
+  it("genericFormIssues: path vượt 3 cấp / sai khuôn -> id-path-invalid (server cũng 422 idempotency.path); bodyHash không đòi ô tên", () => {
+    for (const p of ["a.b.c.d", "data[0].id", "$.x"]) {
+      const f = { ...FORM, idKind: "path" as const, idValue: p };
+      expect(genericFormIssues(f, "secret_value_x")).toContainEqual({ path: "idValue", issue: "id-path-invalid" });
+      expect((validateGenericConfig(buildGenericConfig(f)) as { field?: string }).field).toBe("idempotency.path");
+    }
+    expect(genericFormIssues({ ...FORM, idKind: "bodyHash", idValue: "" }, "secret_value_x")).toEqual([]);
+    expect(genericFormIssues({ ...FORM, idKind: "path", idValue: "data.id" }, "secret_value_x")).toEqual([]);
+  });
+
+  it("bắt tay when.field trùng cấp đầu của path -> hs-conflict (như server)", () => {
+    const f = { ...FORM, idKind: "path" as const, idValue: "data.id", hsKind: "body-echo" as const, hsWhenKind: "field" as const, hsWhenName: "data", hsWhenEquals: "url_verification", hsEchoField: "challenge" };
+    expect(genericFormIssues(f, "secret_value_x")).toContainEqual({ path: "hsWhenName", issue: "hs-conflict" });
+  });
+
+  it("chẩn đoán empty_body có câu riêng (không rơi về unknown)", () => {
+    expect(LISTEN_REASON_KEYS.empty_body).toBe("page.sources.listen.reason.empty-body");
   });
 });

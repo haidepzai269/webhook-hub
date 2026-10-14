@@ -1,0 +1,69 @@
+{
+  "id": "checkout-com",
+  "name": "Checkout.com",
+  "aliases": [
+    "checkout.com",
+    "checkout com",
+    "cko"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "cko-signature"
+      ],
+      "optional": [
+        "authorization"
+      ]
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "type",
+        "data"
+      ],
+      "optional": [
+        "source",
+        "timestamp",
+        "version",
+        "action_invocations",
+        "_links"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "cko-signature",
+      "algo": "sha256",
+      "encoding": "hex",
+      "idempotency": {
+        "field": "id"
+      },
+      "eventType": "checkout.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Webhook signature key (Dashboard → Workflows → webhook action → Generate key)",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://www.checkout.com/docs/workflows/set-up-your-webhook-receiver",
+  "docsVersion": "Đối chiếu 2026-10-14. Khoá chống trùng id (evt_…): mẫu payment_captured có _links.self = /workflows/events/<id>, tức id của SỰ KIỆN; trang không mô tả trường và không nói id giữ nguyên khi gửi lại. Checkout giao ít nhất một lần, gửi lại tay có thể trùng với lần tự động.",
+  "confidence": "trung bình",
+  "sources": [
+    "https://www.checkout.com/docs/workflows/set-up-your-webhook-receiver",
+    "https://www.checkout.com/docs/developer-resources/event-notifications/receive-webhooks",
+    "https://www.checkout.com/docs/developer-resources/webhooks/webhook-event-types/payment_captured"
+  ]
+}

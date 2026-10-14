@@ -4,6 +4,144 @@ import type { CatalogEntry } from './types';
 
 export const CATALOG_DATA: CatalogEntry[] = [
   {
+    "id": "checkout-com",
+    "name": "Checkout.com",
+    "aliases": [
+      "checkout.com",
+      "checkout com",
+      "cko"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "cko-signature"
+        ],
+        "optional": [
+          "authorization"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "type",
+          "data"
+        ],
+        "optional": [
+          "source",
+          "timestamp",
+          "version",
+          "action_invocations",
+          "_links"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "cko-signature",
+        "algo": "sha256",
+        "encoding": "hex",
+        "idempotency": {
+          "field": "id"
+        },
+        "eventType": "checkout.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Webhook signature key (Dashboard → Workflows → webhook action → Generate key)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://www.checkout.com/docs/workflows/set-up-your-webhook-receiver",
+    "docsVersion": "Đối chiếu 2026-10-14. Khoá chống trùng id (evt_…): mẫu payment_captured có _links.self = /workflows/events/<id>, tức id của SỰ KIỆN; trang không mô tả trường và không nói id giữ nguyên khi gửi lại. Checkout giao ít nhất một lần, gửi lại tay có thể trùng với lần tự động.",
+    "confidence": "trung bình",
+    "sources": [
+      "https://www.checkout.com/docs/workflows/set-up-your-webhook-receiver",
+      "https://www.checkout.com/docs/developer-resources/event-notifications/receive-webhooks",
+      "https://www.checkout.com/docs/developer-resources/webhooks/webhook-event-types/payment_captured"
+    ]
+  },
+  {
+    "id": "circleci",
+    "name": "CircleCI",
+    "aliases": [
+      "circleci",
+      "circle ci"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "circleci-event-type"
+        ],
+        "optional": [
+          "circleci-signature"
+        ]
+      },
+      "userAgent": "^CircleCI-Webhook/",
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "type",
+          "happened_at",
+          "webhook"
+        ],
+        "optional": [
+          "project",
+          "organization",
+          "pipeline",
+          "workflow",
+          "job"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "circleci-signature",
+        "prefix": "v1=",
+        "algo": "sha256",
+        "encoding": "hex",
+        "idempotency": {
+          "field": "id"
+        },
+        "eventType": "circleci.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret của webhook CircleCI (Project Settings → Webhooks). Bắt buộc đặt: không có secret thì CircleCI không gửi circleci-signature",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://circleci.com/docs/guides/integration/outbound-webhooks/",
+    "docsVersion": "Guide last_updated 2026-10-07, reference 2026-09-28 (đối chiếu 2026-10-14). circleci-signature là danh sách 'v1=…,v2=…'; hiện chỉ có v1 — config tiền tố tĩnh 'v1=' sẽ trượt nếu CircleCI thêm v2 vào cùng header. Khoá chống trùng id: 'ID used to uniquely identify each event … the client can use this to deduplicate events'.",
+    "confidence": "cao",
+    "sources": [
+      "https://circleci.com/docs/guides/integration/outbound-webhooks/",
+      "https://circleci.com/docs/reference/outbound-webhooks-reference/"
+    ]
+  },
+  {
     "id": "discord",
     "name": "Discord (Interactions endpoint)",
     "aliases": [
@@ -182,6 +320,75 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "sources": [
       "https://docs.gitlab.com/user/project/integrations/webhooks/",
       "https://docs.gitlab.com/user/project/integrations/webhook_events/"
+    ]
+  },
+  {
+    "id": "heroku",
+    "name": "Heroku App Webhooks",
+    "aliases": [
+      "heroku"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "heroku-webhook-hmac-sha256"
+        ],
+        "optional": [
+          "authorization"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "action",
+          "resource",
+          "data",
+          "webhook_metadata"
+        ],
+        "optional": [
+          "actor",
+          "previous_data",
+          "created_at",
+          "updated_at",
+          "published_at",
+          "sequence",
+          "version"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "heroku-webhook-hmac-sha256",
+        "algo": "sha256",
+        "encoding": "base64",
+        "idempotency": {
+          "path": "webhook_metadata.event.id"
+        },
+        "eventType": "heroku.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret đặt khi đăng ký webhook (heroku webhooks:add --secret)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://devcenter.heroku.com/articles/app-webhooks",
+    "docsVersion": "Trang cập nhật 2025-01-09 (đối chiếu 2026-10-14). Khoá chống trùng là id SỰ KIỆN webhook_metadata.event.id (path, PK10) — body còn có webhook_metadata.delivery.id và webhook_metadata.attempt.id theo từng lần gửi, nên không chống trùng theo băm body. Tài liệu không nói rõ event.id giữ nguyên khi gửi lại.",
+    "confidence": "cao",
+    "sources": [
+      "https://devcenter.heroku.com/articles/app-webhooks"
     ]
   },
   {
@@ -568,6 +775,63 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "confidence": "cao",
     "sources": [
       "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/"
+    ]
+  },
+  {
+    "id": "pipedrive",
+    "name": "Pipedrive",
+    "aliases": [
+      "pipedrive"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [],
+        "optional": [
+          "authorization"
+        ]
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "meta",
+          "data"
+        ],
+        "optional": [
+          "previous"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "static-token",
+        "location": "basic",
+        "idempotency": {
+          "path": "meta.id"
+        },
+        "eventType": "pipedrive.event"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "user:pass đặt ở http_auth_user / http_auth_password khi tạo webhook Pipedrive (Basic auth)",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://pipedrive.readme.io/docs/guide-for-webhooks-v2",
+    "docsVersion": "Webhooks v2 (mặc định từ 2025-03-17; trang cập nhật 2026-07-28, đối chiếu 2026-10-14). Pipedrive không ký body — chỉ Basic auth tuỳ chọn, nên phải đặt user/pass khi tạo webhook. Khoá chống trùng meta.id 'ID of the event triggering the webhook' (path, PK10); meta.attempt đổi theo lần gửi nên không băm body. Tài liệu không nói rõ meta.id giữ nguyên khi gửi lại.",
+    "confidence": "trung bình",
+    "sources": [
+      "https://pipedrive.readme.io/docs/guide-for-webhooks-v2",
+      "https://developers.pipedrive.com/docs/api/v1/Webhooks"
     ]
   },
   {
@@ -991,6 +1255,69 @@ export const CATALOG_DATA: CatalogEntry[] = [
       "https://docs.slack.dev/authentication/verifying-requests-from-slack",
       "https://docs.slack.dev/apis/events-api/",
       "https://docs.slack.dev/reference/events/url_verification"
+    ]
+  },
+  {
+    "id": "squarespace",
+    "name": "Squarespace (Commerce webhooks)",
+    "aliases": [
+      "squarespace"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "squarespace-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "id",
+          "websiteId",
+          "subscriptionId",
+          "topic",
+          "createdOn",
+          "data"
+        ],
+        "optional": []
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "hmac",
+        "header": "squarespace-signature",
+        "algo": "sha256",
+        "encoding": "hex",
+        "keyEncoding": "hex",
+        "idempotency": {
+          "field": "id"
+        },
+        "eventType": "squarespace.notification"
+      }
+    },
+    "fields": [
+      {
+        "name": "secret",
+        "label": "Secret (hex) của webhook subscription Squarespace — hub giải mã hex trước khi ký",
+        "secret": true
+      }
+    ],
+    "secretSource": "provider",
+    "docs": "https://developers.squarespace.com/webhooks/verifying-notifications",
+    "docsVersion": "Đối chiếu 2026-10-14. Khoá = hexToBytes(secret). Khoá chống trùng id 'unique notification id'; trang notification-delivery: giao ít nhất một lần, 'track processed notification ids to handle duplicates'.",
+    "confidence": "trung bình",
+    "sources": [
+      "https://developers.squarespace.com/webhooks/verifying-notifications",
+      "https://developers.squarespace.com/webhooks/notification-delivery",
+      "https://developers.squarespace.com/webhooks/events/order-update"
     ]
   },
   {

@@ -11,5 +11,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): không có id sự kiện/lần giao (meta chỉ có event_name, custom_data; data.id là id tài nguyên); tài liệu KHÔNG nói gửi lại giữ nguyên body -> không đủ điều kiện bodyHash (E31). Nguồn: docs.lemonsqueezy.com/help/webhooks/webhook-requests"
 }

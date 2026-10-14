@@ -24,6 +24,7 @@ Các luật dưới đây do `entryProblems` và `readCatalogSources` kiểm.
   - `native`: phải có trong `ProviderRegistry`.
   - `unsupported`: có `reason`, và `workaround` chỉ đường `POST /v1/p/:project/events`.
 - Config dùng sha1 thì phải có `sha1Reason` (ADR-203).
+- Config dùng `idempotency.bodyHash` thì phải có `bodyHashReason`: vì sao provider không có id ổn định và tài liệu nói gửi lại giữ nguyên body. Lý do phải trích ít nhất một URL có trong `sources` (PK10, ADR-230). Body luôn rỗng (khuôn `empty`) thì không dùng `bodyHash`. Có id lồng thì dùng `idempotency.path` (≤ 3 cấp).
 - `sources` khác rỗng. Chi tiết nào nghiên cứu ghi "chưa xác minh" / "kiến thức chung" thì **không** vào mục: hoặc bỏ trống, hoặc chuyển mục sang pending.
 - Có ít nhất 1 fixture.
 

@@ -21,6 +21,8 @@ import {
   type GenericFormValues,
   HANDSHAKE_CHOICES,
   HMAC_ALGO_CHOICES,
+  ID_KIND_CHOICES,
+  type IdKind,
   KEY_ENCODING_CHOICES,
   KV_SEP_CHOICES,
   needsHeader,
@@ -36,6 +38,14 @@ import {
 import type { Provider } from "@/lib/hub/types";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+
+/** PK10 (E31): nhãn bốn kiểu khoá chống trùng. */
+const ID_KIND_KEY: Record<IdKind, MessageKey> = {
+  field: "page.sources.generic.id-kind.field",
+  header: "page.sources.generic.id-kind.header",
+  path: "page.sources.generic.id-kind.path",
+  bodyHash: "page.sources.generic.id-kind.body-hash",
+};
 
 /**
  * Review PK2 T-7: khuôn ĐẦY ĐỦ của form tạo nguồn (trang `sources/page.tsx` khẳng định `z.infer` của schema = kiểu này) — các ô
@@ -249,6 +259,7 @@ export function GenericFields({
   const tpl = scheme === "signed-template";
   const unv = scheme === UNVERIFIED_SCHEME;
   const forwardUrl = useWatch({ control, name: "forwardUrl" });
+  const idKind = useWatch({ control, name: "idKind" });
   const v = { scheme, algo, location, sigMode };
   const hasTs = tpl && template.includes("{timestamp}");
   const tsInKv = sigMode === "kv" && kvTimestamp.trim() !== "";
@@ -486,20 +497,32 @@ export function GenericFields({
           control={control}
           name="idKind"
           label={t("page.sources.generic.id-kind")}
-          options={[
-            { value: "field", label: t("page.sources.generic.id-kind.field") },
-            { value: "header", label: t("page.sources.generic.id-kind.header") },
-          ]}
+          options={ID_KIND_CHOICES.map((k) => ({ value: k, label: t(ID_KIND_KEY[k]) }))}
         />
       )}
-      <TextField
-        control={control}
-        name="idValue"
-        id="src-id"
-        label={t("page.sources.generic.id-value")}
-        placeholder={sw ? "" : "transId"}
-        hint={t(sw ? "page.sources.generic.id-value-hint-sw" : unv ? "page.sources.generic.unverified.id-value-hint" : "page.sources.generic.id-value-hint")}
-      />
+      {/* PK10 (E31, ADR-230): băm nội dung không có ô tên — chỉ câu đánh đổi. */}
+      {!sw && idKind === "bodyHash" ? (
+        <p className="text-sm text-muted-foreground" role="note">
+          {t(unv ? "page.sources.generic.id-body-hash-unverified" : "page.sources.generic.id-body-hash-tradeoff")}
+        </p>
+      ) : (
+        <TextField
+          control={control}
+          name="idValue"
+          id="src-id"
+          label={t(!sw && idKind === "path" ? "page.sources.generic.id-path" : "page.sources.generic.id-value")}
+          placeholder={sw ? "" : idKind === "path" ? "data.id" : "transId"}
+          hint={t(
+            sw
+              ? "page.sources.generic.id-value-hint-sw"
+              : idKind === "path"
+                ? "page.sources.generic.id-path-hint"
+                : unv
+                  ? "page.sources.generic.unverified.id-value-hint"
+                  : "page.sources.generic.id-value-hint",
+          )}
+        />
+      )}
       <TextField
         control={control}
         name="eventType"

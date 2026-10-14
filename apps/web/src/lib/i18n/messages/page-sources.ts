@@ -180,6 +180,16 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.id-kind": "Khoá chống trùng lấy từ",
     "page.sources.generic.id-kind.header": "Tiêu đề",
     "page.sources.generic.id-kind.field": "Trường cấp một của body",
+    "page.sources.generic.id-kind.path": "Đường dẫn lồng trong body (≤ 3 cấp)",
+    "page.sources.generic.id-kind.body-hash": "Băm nội dung (không có id)",
+    "page.sources.generic.id-path": "Đường dẫn tới id",
+    "page.sources.generic.id-path-hint":
+      "Tên trường nối bằng dấu chấm, tối đa 3 cấp, VD `data.id`, `webhook_metadata.event.id`. Không biểu thức, không chỉ số mảng. Body thiếu giá trị thì hub chống trùng theo băm nội dung.",
+    "page.sources.generic.id-path-invalid": "Đường dẫn là 1–3 tên trường nối bằng dấu chấm, mỗi tên chỉ gồm chữ, số, `_`, `-` (VD `data.id`).",
+    "page.sources.generic.id-body-hash-tradeoff":
+      "Chống trùng theo nội dung: gửi lại mà đổi một byte (VD timestamp trong body) sẽ thành sự kiện mới. Chỉ chọn khi nhà cung cấp không có id ổn định và gửi lại giữ nguyên body. Body rỗng bị từ chối (422).",
+    "page.sources.generic.id-body-hash-unverified":
+      "Nguồn chưa xác thực vốn đã chống trùng theo nội dung: chỉ bản trùng đúng từng byte mới bị coi là trùng.",
     "page.sources.generic.id-value": "Tên tiêu đề / trường",
     "page.sources.generic.id-value-hint": "Giá trị duy nhất cho mỗi sự kiện. Standard Webhooks bỏ trống = webhook-id / svix-id.",
     "page.sources.generic.id-required": "Nhập tên tiêu đề hoặc trường làm khoá chống trùng.",
@@ -216,6 +226,7 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.listen.reason.timestamp-out-of-range": "dấu thời gian lệch quá 5 phút",
     "page.sources.listen.reason.missing-kv-key": "thiếu khoá thời điểm {name} trong tiêu đề chữ ký",
     "page.sources.listen.reason.missing-idempotency-key": "thiếu khoá chống trùng {name}",
+    "page.sources.listen.reason.empty-body": "body rỗng — nguồn chống trùng theo băm nội dung nên không có gì để băm",
     "page.sources.listen.reason.mapping-field-missing": "body thiếu trường {name}",
     "page.sources.listen.reason.mapping-field-invalid": "trường {name} sai kiểu",
     "page.sources.listen.reason.config-invalid": "cấu hình nguồn không hợp lệ",
@@ -460,6 +471,16 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.id-kind": "Idempotency key from",
     "page.sources.generic.id-kind.header": "Header",
     "page.sources.generic.id-kind.field": "Top-level body field",
+    "page.sources.generic.id-kind.path": "Nested body path (≤ 3 levels)",
+    "page.sources.generic.id-kind.body-hash": "Body hash (no id)",
+    "page.sources.generic.id-path": "Path to the id",
+    "page.sources.generic.id-path-hint":
+      "Field names joined by dots, at most 3 levels, e.g. `data.id`, `webhook_metadata.event.id`. No expressions, no array indexes. If the body has no value there, the hub deduplicates by body hash.",
+    "page.sources.generic.id-path-invalid": "A path is 1–3 field names joined by dots; each name uses letters, digits, `_`, `-` (e.g. `data.id`).",
+    "page.sources.generic.id-body-hash-tradeoff":
+      "Deduplicate by content: a resend that changes one byte (e.g. a timestamp in the body) becomes a new event. Choose this only when the provider has no stable id and resends the exact same body. Empty bodies are rejected (422).",
+    "page.sources.generic.id-body-hash-unverified":
+      "Unverified sources already deduplicate by content: only byte-identical copies count as duplicates.",
     "page.sources.generic.id-value": "Header / field name",
     "page.sources.generic.id-value-hint": "Unique per event. Standard Webhooks: leave empty = webhook-id / svix-id.",
     "page.sources.generic.id-required": "Enter the header or field used as the idempotency key.",
@@ -494,6 +515,7 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.listen.reason.timestamp-out-of-range": "timestamp is more than 5 minutes off",
     "page.sources.listen.reason.missing-kv-key": "the signature header has no timestamp key {name}",
     "page.sources.listen.reason.missing-idempotency-key": "missing idempotency key {name}",
+    "page.sources.listen.reason.empty-body": "empty body — this source deduplicates by body hash, so there is nothing to hash",
     "page.sources.listen.reason.mapping-field-missing": "body is missing field {name}",
     "page.sources.listen.reason.mapping-field-invalid": "field {name} has the wrong type",
     "page.sources.listen.reason.config-invalid": "source configuration is invalid",

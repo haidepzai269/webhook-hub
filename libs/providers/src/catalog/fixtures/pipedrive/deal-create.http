@@ -1,0 +1,6 @@
+# origin: constructed; source: https://pipedrive.readme.io/docs/guide-for-webhooks-v2
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Authorization: Basic eDp4
+
+{"meta":{"action":"create","entity":"deal","company_id":"1","correlation_id":"00000000-0000-0000-0000-000000000000","entity_id":"1","id":"00000000-0000-0000-0000-000000000001","is_bulk_edit":false,"timestamp":"2023-01-01T00:00:00.000Z","type":"general","user_id":"1","version":"2.0","webhook_id":"1","webhook_owner_id":"1","change_source":"app","attempt":1,"host":"company.pipedrive.com"},"data":{},"previous":null}

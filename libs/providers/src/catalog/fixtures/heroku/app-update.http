@@ -1,0 +1,6 @@
+# origin: constructed; source: https://devcenter.heroku.com/articles/app-webhooks
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Heroku-Webhook-Hmac-SHA256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+{"action":"update","actor":{"email":"user-0436@example.com","id":"096370c8-f3ad-4e20-a309-fb4f06ec0a89"},"created_at":"2016-10-26T22:50:14Z","id":"d472a8bb-1a3c-4f78-aad1-995e6d0022ec","data":{"id":"d4714cc8-aa56-4314-817c-0c6a66ff3d41","name":"sample-app-0301"},"previous_data":{},"published_at":null,"resource":"app","sequence":null,"updated_at":"2016-10-26T22:50:14Z","version":"application/vnd.heroku+json; version=3","webhook_metadata":{"attempt":{"id":"8a44f820-2354-489d-9a11-a793cbf49979"},"delivery":{"id":"d244009a-670f-4340-88e9-789a4f9002d5"},"event":{"id":"d472a8bb-1a3c-4f78-aad1-995e6d0022ec","include":"api:app"},"webhook":{"id":"01234567-89ab-cdef-0123-456789abcdef"}}}

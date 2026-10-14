@@ -18,10 +18,11 @@ import {
   isHmacScheme,
   isUnverifiedScheme,
   paymentTimeKey,
+  readIdempotencyPath,
   validateGenericConfig,
 } from './generic-config';
 import { kvHasKey, presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
-import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
+import { EmptyBodyIdempotencyError, IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
 /**
  * S8 (SPEC §4.8, ADR-041 bậc 2): nguồn bên thứ ba mà hub CHƯA có adapter — service tự khai cách xác thực
@@ -137,16 +138,22 @@ export class GenericAdapter implements ProviderAdapter {
     // PK5 (E7): `unverified` — chưa ai verify mà chống trùng theo id của provider thì kẻ biết sourceKey gửi trước một body
     // giả mang id thật là NUỐT được sự kiện thật (DUPLICATE, 200, provider không gửi lại). Khoá luôn ghép băm bytes:
     // chỉ bản trùng ĐÚNG TỪNG BYTE mới là trùng. Không ngẫu nhiên. Đích tự chống trùng nghiệp vụ sau khi verify.
-    if (isUnverifiedScheme(c) && !id) return `generic:${bodyHashKey(req.rawBody)}`;
+    // PK10 (E31): `unverified` + `{bodyHash:true}` = như vắng (E7 giữ nguyên: khoá vốn đã là băm bytes).
+    const unv = isUnverifiedScheme(c);
+    if (unv && (!id || 'bodyHash' in id)) return `generic:${bodyHashKey(req.rawBody)}`;
     if (!id) throw new IdempotencyKeyMissingError('verificationConfig.idempotency');
+    if ('bodyHash' in id) return bodyHashIdempotencyKey(req);
     let v: unknown;
     if ('header' in id) v = headerOf(req, idempotencyHeader(c, req.headers));
-    else v = isObj(req.body) ? req.body[id.field] : isUnverifiedScheme(c) ? bodyObject(req)?.[id.field] : undefined;
+    else if ('path' in id) v = readIdempotencyPath(bodyObject(req), id.path);
+    else v = isObj(req.body) ? req.body[id.field] : unv ? bodyObject(req)?.[id.field] : undefined;
     if (typeof v === 'number' && Number.isFinite(v)) v = String(v);
     if (typeof v !== 'string' || v.length === 0 || v.length > 200) {
+      // PK10 (E31): `path` thiếu giá trị -> băm bytes body (provider gửi lại đúng bytes -> cùng khoá). Không ngẫu nhiên.
+      if ('path' in id) return unv ? `generic:${bodyHashKey(req.rawBody)}` : bodyHashIdempotencyKey(req);
       throw new IdempotencyKeyMissingError('header' in id ? `header ${id.header}` : `field ${id.field}`);
     }
-    return isUnverifiedScheme(c) ? `generic:${v}:${bodyHashKey(req.rawBody)}` : `generic:${v}`;
+    return unv ? `generic:${v}:${bodyHashKey(req.rawBody)}` : `generic:${v}`;
   }
 
   /**
@@ -260,6 +267,8 @@ export class GenericAdapter implements ProviderAdapter {
     if (raw.signatureValid) {
       const id = c.idempotency;
       if (!id) return { ok: false, reason: 'missing_idempotency_key' };
+      // PK10: `bodyHash`/`path` chỉ từ chối khi body rỗng (path thiếu giá trị đã rơi về băm body).
+      if ('bodyHash' in id || 'path' in id) return { ok: false, reason: 'empty_body' };
       return 'header' in id
         ? { ok: false, reason: 'missing_idempotency_key', expectedHeader: idempotencyHeader(c, headers) }
         : { ok: false, reason: 'missing_idempotency_key', expectedField: id.field };
@@ -321,10 +330,16 @@ export class GenericAdapter implements ProviderAdapter {
     }
     // DX1 §2.1 (ngoại lệ duy nhất ở /hooks): người đọc ack của nguồn tuỳ chỉnh là DEV đang cấu hình -> kèm `fix`.
     const status = result.status === 401 ? (ack?.rejectStatus ?? 401) : result.status;
-    const fix = result.message === UNVERIFIED_DISABLED ? UNVERIFIED_DISABLED_FIX : genericAckFix(result.status);
+    const fix =
+      result.message === UNVERIFIED_DISABLED ? UNVERIFIED_DISABLED_FIX : result.message === EMPTY_BODY_ERROR ? EMPTY_BODY_FIX : genericAckFix(result.status);
     return { status, body: { ok: false, error: result.message ?? 'rejected', fix } };
   }
 }
+
+/** PK10 (E31): 422 của nguồn chống trùng theo băm body khi body rỗng. */
+export const EMPTY_BODY_ERROR = 'empty_body';
+export const EMPTY_BODY_FIX =
+  'Empty body: this source deduplicates by hashing the body bytes ("idempotency": {"bodyHash": true} or a "path" fallback), and an empty body has nothing to hash. Use a header or body-field idempotency key, or have the provider send a body.';
 
 /** Gợi ý sửa cho dev cấu hình nguồn tuỳ chỉnh — chỉ theo status, KHÔNG chứa giá trị header/secret/body. */
 export function genericAckFix(status: number): string {
@@ -342,6 +357,16 @@ export function genericAckFix(status: number): string {
  * PK1 (ADR-202): khoá chống trùng mặc định của standard-webhooks là `webhook-id` = "id của bộ header đang dùng" —
  * request Svix mang `svix-id` (cùng ngữ nghĩa message id). Header khoá tự khai khác thì giữ nguyên.
  */
+/**
+ * PK10 (E31, ADR-230): khoá theo băm bytes body (`bodyHash`, và `path` khi thiếu giá trị). Tiền tố `generic:body:` để không
+ * bao giờ trùng với id thật của provider (`generic:<id>`). Body rỗng -> không có byte để băm có nghĩa (mọi request rỗng
+ * thành MỘT khoá, nuốt nhau) -> REJECTED 422 `empty_body`.
+ */
+function bodyHashIdempotencyKey(req: RawWebhookRequest): string {
+  if (req.rawBody.length === 0) throw new EmptyBodyIdempotencyError();
+  return `generic:body:${bodyHashKey(req.rawBody)}`;
+}
+
 function idempotencyHeader(c: GenericConfig, headers: Record<string, unknown>): string {
   const h = (c.idempotency as { header: string } | undefined)?.header ?? '';
   return isStandardWebhooks(c) && h === 'webhook-id' ? swHeaderSet(headers).id : h;

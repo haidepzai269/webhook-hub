@@ -9,5 +9,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng là id nghiệp vụ khác nhau theo sản phẩm (payment_id, capture_id…), không có trường chung — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): header webhook-id chỉ có ở tài liệu cũ (invoice/xenPlatform), không có ở Payments API hiện hành; payment_id dùng chung giữa payment.authorization và payment.capture (path sẽ nuốt sự kiện capture); không xác nhận gửi lại giữ nguyên body. Nguồn: docs.xendit.co/docs/handling-webhooks, docs.xendit.co/apidocs/payment-webhook-notification.md"
 }
