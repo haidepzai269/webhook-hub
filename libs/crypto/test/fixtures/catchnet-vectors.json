@@ -1,0 +1,51 @@
+{
+  "note": "LH3 (ADR-217) — test vector CỐ ĐỊNH cho chữ ký lưới hứng; hub-api (ingest-catchnet.spec) và Worker LH2 cùng kiểm. Secret chỉ để test. signature = v1=hex(HMAC-SHA256(secret, id.received_at.client_ip.mode.METHOD.target)); bodySignature = v1=hex(HMAC-SHA256(secret, id.hex(sha256(body)))). target = path+query THÔ đúng như dòng request gửi tới hub.",
+  "secret": "lh3-test-vector-secret-0123456789abcdef-NOT-A-REAL-KEY",
+  "cases": [
+    {
+      "name": "forward POST, không query",
+      "id": "01JAAAAAAAAAAAAAAAAAAAAAAA",
+      "receivedAt": "1760425200000",
+      "clientIp": "203.0.113.7",
+      "mode": "forward",
+      "method": "POST",
+      "target": "/hooks/stripe/src_stripe_01jaaaaaaaaaaaaaaaaaaaaaaa",
+      "bodyUtf8": "{\"id\":\"evt_1\",\"type\":\"payment_intent.succeeded\"}",
+      "signingString": "01JAAAAAAAAAAAAAAAAAAAAAAA.1760425200000.203.0.113.7.forward.POST./hooks/stripe/src_stripe_01jaaaaaaaaaaaaaaaaaaaaaaa",
+      "signature": "v1=340ccff602ed795641749ff1bf9644b06ec15a4127707e8466bf4a5843a83241",
+      "bodySha256": "e6b21a6ea5eb883761b04d298a82ac16a10f20c0807257a7f91e908150ffa9a0",
+      "bodySigningString": "01JAAAAAAAAAAAAAAAAAAAAAAA.e6b21a6ea5eb883761b04d298a82ac16a10f20c0807257a7f91e908150ffa9a0",
+      "bodySignature": "v1=ed82042f9dde9ef79691010ff0622554fc9736d66a0a96b83a2bb77b45927e2d"
+    },
+    {
+      "name": "replay GET, query thô giữ nguyên percent-encoding",
+      "id": "01JBBBBBBBBBBBBBBBBBBBBBBB",
+      "receivedAt": "1760425260123",
+      "clientIp": "2001:db8::1",
+      "mode": "replay",
+      "method": "GET",
+      "target": "/hooks/generic/src_vnp?vnp_Amount=100000&vnp_OrderInfo=Thanh%20toan%2BDH1&vnp_SecureHash=ab",
+      "bodyUtf8": "",
+      "signingString": "01JBBBBBBBBBBBBBBBBBBBBBBB.1760425260123.2001:db8::1.replay.GET./hooks/generic/src_vnp?vnp_Amount=100000&vnp_OrderInfo=Thanh%20toan%2BDH1&vnp_SecureHash=ab",
+      "signature": "v1=60a8f0f67fbf8c29cd673c7f9b31c18a74119f06424ec30b608a63fbd6682fa5",
+      "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodySigningString": "01JBBBBBBBBBBBBBBBBBBBBBBB.e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodySignature": "v1=f020fd3a3b42f5b19bde8f49d18c3d81c7c2993460b0554af8ea48cbdc872ef5"
+    },
+    {
+      "name": "dấu ? đứng một mình là MỘT PHẦN của target (new URL() bỏ nó -> Worker phải ký đúng chuỗi gửi đi)",
+      "id": "01JCCCCCCCCCCCCCCCCCCCCCCC",
+      "receivedAt": "1760425300000",
+      "clientIp": "198.51.100.20",
+      "mode": "forward",
+      "method": "POST",
+      "target": "/hooks/github/src_gh?",
+      "bodyUtf8": "payload=%7B%7D",
+      "signingString": "01JCCCCCCCCCCCCCCCCCCCCCCC.1760425300000.198.51.100.20.forward.POST./hooks/github/src_gh?",
+      "signature": "v1=76742e465849aae2e2e8b3d23e40a1753edc97fbe3d09c84c28dcd6c1261d2aa",
+      "bodySha256": "c9a9ff8126e94878114d12a11cc665fe257672fcff145d4b658f9c443ad3e945",
+      "bodySigningString": "01JCCCCCCCCCCCCCCCCCCCCCCC.c9a9ff8126e94878114d12a11cc665fe257672fcff145d4b658f9c443ad3e945",
+      "bodySignature": "v1=708aae4334379cfe7eba6698f35da296b6cc74b58de730dd013918cd01d0e40d"
+    }
+  ]
+}

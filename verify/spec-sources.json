@@ -310,6 +310,24 @@
         }
       },
       "note": "SPEC-provider-khac bản 2 §17 (E19) + mục ĐÍNH CHÍNH SAU REVIEW BẢN 2 (ADR-201..210). PK9 = §8 danh mục + identify (trục phụ). PK10 = E31 chống trùng path lồng + bodyHash. PK0 làm E1 (bytes gốc mọi content-type) + E6 phần query/method."
+    },
+    {
+      "ns": "LH",
+      "file": "_bmad-output/planning-artifacts/hub-sap/SPEC-hub-sap.md",
+      "pattern": "`\\[LH:(T\\d+)\\]`",
+      "done": {
+        "checklist": "\\[x\\] \\*\\*(LH[\\w-]*)\\*\\*",
+        "groups": {
+          "LH-URL": "T17",
+          "LH0": "T1,T2",
+          "LH1": "T3",
+          "LH2": "T4-T10",
+          "LH3": "T11-T13,T18-T22",
+          "LH4": "T14",
+          "LH5": "T15,T16"
+        }
+      },
+      "note": "SPEC-hub-sap + mục ĐÍNH CHÍNH H1–H13 (ADR-211..229). Spec không có bảng mã: mã khai báo rải trong thân, mỗi dòng lấy mã đầu, mỗi mã lấy lần xuất hiện đầu. LH-URL = §9 tách HUB_INGEST_PUBLIC_URL ([LH:T17], ADR-211). Spec chưa có checklist `[x] **LHx**` nên chưa mã nào bắt buộc; phòng thêm checklist khi tick story."
     }
   ],
   "inline": [

@@ -33,7 +33,7 @@ export const errors = defineMessages("errors", {
     "errors.api.internal-error": "Lỗi máy chủ hub — thử lại sau.",
     "errors.api.service-unavailable": "Hub tạm thời không phục vụ được — thử lại sau.",
     "errors.api.public-url-required":
-      "Hub chưa có địa chỉ công khai nên nhà cung cấp không gọi vào được. Đặt biến HUB_PUBLIC_URL=https://<hub-api>.onrender.com cho dịch vụ hub-api trên Render (Environment → Add Environment Variable) rồi triển khai lại. Chạy máy cục bộ: dùng đường hầm cloudflared có tên cố định và đặt HUB_PUBLIC_URL là URL https của đường hầm.",
+      "Hub chưa có địa chỉ công khai để nhà cung cấp gọi vào. Đặt biến HUB_INGEST_PUBLIC_URL=https://<url-nhà-cung-cấp-gọi-vào> (lưới hứng workers.dev); không đặt biến này thì hub dùng HUB_PUBLIC_URL=https://<hub-api>.onrender.com. Đặt cho dịch vụ hub-api trên Render (Environment → Add Environment Variable) rồi triển khai lại. Chạy máy cục bộ: dùng đường hầm cloudflared có tên cố định và đặt biến đó là URL https của đường hầm.",
     "errors.api.invalid-api-key": "Khoá API không hợp lệ hoặc đã bị thu hồi.",
     "errors.api.unauthenticated": "Chưa đăng nhập.",
     "errors.api.session-expired": "Phiên đăng nhập đã hết hạn.",
@@ -73,7 +73,7 @@ export const errors = defineMessages("errors", {
     "errors.api.internal-error": "Hub server error — try again later.",
     "errors.api.service-unavailable": "The hub is temporarily unavailable — try again later.",
     "errors.api.public-url-required":
-      "The hub has no public address, so providers cannot reach it. Set HUB_PUBLIC_URL=https://<hub-api>.onrender.com on the hub-api service on Render (Environment → Add Environment Variable) and redeploy. Locally: use a named cloudflared tunnel and set HUB_PUBLIC_URL to the tunnel's https URL.",
+      "The hub has no public address for providers to call. Set HUB_INGEST_PUBLIC_URL=https://<url-providers-call> (the workers.dev catch net); when it is unset the hub uses HUB_PUBLIC_URL=https://<hub-api>.onrender.com. Set it on the hub-api service on Render (Environment → Add Environment Variable) and redeploy. Locally: use a named cloudflared tunnel and set that variable to the tunnel's https URL.",
     "errors.api.invalid-api-key": "The API key is invalid or has been revoked.",
     "errors.api.unauthenticated": "Not signed in.",
     "errors.api.session-expired": "Your session has expired.",

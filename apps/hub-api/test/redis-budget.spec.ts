@@ -100,6 +100,8 @@ function fakeRedis() {
 jest.mock('ioredis', () => jest.fn().mockImplementation(() => fakeRedis()));
 
 import { aesGcmEncrypt } from '@hub/crypto';
+import { createHash, createHmac } from 'crypto';
+import { IngestController } from '../src/modules/ingest/ingest.controller';
 import { IngestService } from '../src/modules/ingest/ingest.service';
 import { RedisService } from '../src/modules/redis/redis.service';
 import { NormalizeConsumer } from '../../hub-worker/src/consumers/normalize.consumer';
@@ -492,6 +494,54 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(channel.ack).toHaveBeenCalled();
     expect(tx.delivery.create).toHaveBeenCalledTimes(1);
     expect(take()).toEqual(['publish']);
+  });
+
+  it('[LH:T11] request qua lưới hứng (header lưới ký đúng, kể cả phát lại) đi ĐÚNG đường ingest: 3 lệnh (EVAL + GET + SET), kiểm chữ ký lưới 0 lệnh', async () => {
+    const FWD = `fwd-budget-${process.pid}-0123456789abcdef`;
+    const prev = process.env.CATCHNET_FORWARD_SECRET;
+    process.env.CATCHNET_FORWARD_SECRET = FWD;
+    try {
+      for (const [mode, id] of [['forward', 777101], ['replay', 777102]] as const) {
+        const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
+        const prisma: any = {
+          findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({
+            id: 'src-sepay', tenantId: TENANT, provider: 'sepay', isActive: true, secrets: [{ id: 's', secretEncrypted: aesGcmEncrypt(API_KEY, MASTER) }],
+          }),
+          tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+          $transaction: jest.fn(async (fn: any) => fn(tx)),
+        };
+        const raw = Buffer.from(JSON.stringify({ ...sepayBody, id }));
+        const target = '/hooks/sepay/src_sepay_main';
+        const cid = `01JBUDGET${id}`;
+        const at = Date.now() - 60_000;
+        const ip = '203.0.113.150';
+        const h = (s: string) => createHmac('sha256', FWD).update(s).digest('hex');
+        const headers: Record<string, string> = {
+          authorization: `Apikey ${API_KEY}`, 'content-type': 'application/json',
+          'x-catchnet-id': cid, 'x-catchnet-received-at': String(at), 'x-catchnet-client-ip': ip, 'x-catchnet-mode': mode,
+          'x-catchnet-signature': `v1=${h(`${cid}.${at}.${ip}.${mode}.POST.${target}`)}`,
+          'x-catchnet-body-signature': `v1=${h(`${cid}.${createHash('sha256').update(raw).digest('hex')}`)}`,
+        };
+        const out: any = {};
+        const res: any = {
+          set: (hs: Record<string, string>) => Object.assign(out, { headers: { ...(out.headers ?? {}), ...hs } }) && res,
+          status: (n: number) => ((out.status = n), res),
+          json: (b: unknown) => ((out.body = b), res),
+          end: () => res,
+          type: () => res,
+          send: (b: unknown) => ((out.body = b), res),
+        };
+        const req: any = { method: 'POST', url: target, originalUrl: target, headers, rawBody: raw, body: JSON.parse(raw.toString()), ip: '198.51.100.7' };
+        await new IngestController(new IngestService(prisma, new RedisService())).handleWebhook('sepay', 'src_sepay_main', req, res, headers);
+        expect([out.status, out.headers?.['x-hub-outcome']]).toEqual([200, 'accepted']);
+        // Đúng là đã đi nhánh lưới (via theo mode) — không phải request thường lọt qua.
+        expect(tx.rawEvent.create.mock.calls[0][0].data.via).toBe(`catchnet-${mode}`);
+        expect(take()).toEqual(['eval', 'get', 'set']);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.CATCHNET_FORWARD_SECRET;
+      else process.env.CATCHNET_FORWARD_SECRET = prev;
+    }
   });
 
   it('X9: POST /v1/p/:project/events đi qua persistAccepted -> ĐÚNG số lệnh như /hooks (EVAL + GET + SET); ApiKeyGuard 0 lệnh', async () => {

@@ -56,7 +56,7 @@ describe('[DX:UX6] (phần a) ingest — ack từ chối đi qua adapter.buildAc
     const { svc } = build('generic', { scheme: 'hmac-sha256', header: 'x-signature', idempotency: { field: 'transactionId' }, eventType: 'bank.tx' });
     const b = '{"soTien":1}';
     const r: any = await svc.ingestWebhook(req('generic', b, { 'x-signature': createHmac('sha256', SECRET).update(b).digest('hex') }));
-    expect(r).toEqual({ status: 422, body: { ok: false, error: 'missing_idempotency_key', fix: expect.stringMatching(/idempotency/) } });
+    expect(r).toEqual({ status: 422, body: { ok: false, error: 'missing_idempotency_key', fix: expect.stringMatching(/idempotency/) }, outcome: 'rejected' });
   });
 
   it('buildAck ném lỗi -> vẫn trả status gốc với body cũ (không 500)', async () => {
@@ -67,6 +67,6 @@ describe('[DX:UX6] (phần a) ingest — ack từ chối đi qua adapter.buildAc
     const { svc } = build('sepay');
     const r = await svc.ingestWebhook(req('sepay', '{"id":1}', { authorization: 'Apikey sai' }));
     spy.mockRestore();
-    expect(r).toEqual({ status: 401, body: { error: 'Chữ ký webhook không hợp lệ (Unauthorized)' } });
+    expect(r).toEqual({ status: 401, body: { error: 'Chữ ký webhook không hợp lệ (Unauthorized)' }, outcome: 'rejected' });
   });
 });

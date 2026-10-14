@@ -19,6 +19,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - Worker coi là "hub vắng" **chỉ khi** gặp timeout, lỗi mạng, hoặc 5xx **mà không** có `x-hub-outcome`, hoặc có `x-hub-outcome: unavailable`. Có outcome khác thì trả nguyên phản hồi cho provider, **không** ghi D1.
   - Worker không chuyển header `x-hub-outcome` ra cho provider.
   - Test `[LH:T18]`: source `rejectStatus: 503` + chữ ký sai → provider nhận 503, D1 rỗng.
+  - Test `[LH:T21]` (LH3, phía hub): mọi nhánh trả lời cố ý của `/hooks/*` mang `x-hub-outcome` đúng giá trị — accepted, duplicate, handshake (GET bắt tay, HEAD `head-ok`), rejected (401, 503 `rejectStatus`, 404, 400 parser, 413, 405, 422), refused (429 cổng phạt, 429 rate limit, 507, cờ unverified tắt); lỗi tạm thời (transaction lỗi, exception) mang `unavailable`. Ghi ở ADR-221.
 
 **H2 (Nặng). Phát lại gặp 429 không được chuyển sang `inbox_dead`.**
 - **Vì sao:** §4.4 viết "4xx → `inbox_dead`". Nhưng hub trả 429 khi vượt rate limit 100/phút/source, và cổng phạt cũng trả 429. Hub vừa thức, phát lại cộng lưu lượng mới vượt trần, thì sự kiện thật thành hàng chết.
@@ -33,6 +34,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - `x-catchnet-signature: v1=HMAC(secret, id.received_at.client_ip.mode.method.path_and_query)`. Không có body. Cổng phạt kiểm chữ ký này để lấy `client_ip`.
   - `x-catchnet-body-signature: v1=HMAC(secret, id.hex(sha256(body)))`. Hub kiểm sau khi parse body: tự tính `sha256(rawBody)`, dựng lại HMAC rồi so bằng `timingSafeEqual`. **Chỉ khi khớp** thì `receivedAt` của lưới mới được dùng làm `ctx.verifyAt`.
   - Chữ ký đầu đúng mà body lệch → bỏ `receivedAt` (verify theo `Date.now()`), vẫn dùng IP đã ký cho hộp phạt.
+- Test `[LH:T22]` (LH3, REVIEW-LH3 TB-1): nginx edge (EG1) KHÔNG kiểm được chữ ký lưới nên không tin `x-catchnet-client-ip`; lưới bật (`CATCHNET_FORWARD_SECRET` ≥ 32 ký tự) → cầu chì + `limit_conn` theo IP của nginx tắt cho `/hooks/*` (khoá rỗng), `/v1/p/*` giữ cầu chì, cảnh báo level 50 nếu `EDGE_IP_FUSE=1`; 429/413/404/503 nginx tự sinh trên `/hooks*` mang `x-hub-outcome` (refused/rejected/rejected/unavailable).
 - **Code có sẵn:** `AdapterContext.verifyAt` đã có (`libs/providers/src/generic.adapter.ts:454`). LH3 chỉ đổ giá trị vào đó, rồi sửa `stripe.adapter.ts:33` truyền `receivedAt` vào `constructEvent` (ADR-174 vẫn đúng: cùng hàm của SDK, chỉ thêm tham số).
 
 **H4 (Trung bình). URL công khai của request phụ thuộc đường nó đi vào.**
@@ -41,6 +43,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - Request có chữ ký lưới hợp lệ (H3) → URL = `HUB_INGEST_PUBLIC_URL` + path + query.
   - Không có → `HUB_PUBLIC_URL` như cũ.
   - Commit §9 (`[LH:T17]`) phải sửa cả hai chỗ trên. Phần chọn base theo header lưới thì làm ở LH3.
+  - Test `[LH:T19]` (LH3, nợ REVIEW-LH-URL L1): có cả hai biến; request có chữ ký lưới hợp lệ → `publicUrl` của adapter (vd `forwardUrl` lưu `__hub_meta.url`) là URL `HUB_INGEST_PUBLIC_URL`; request gọi thẳng, hoặc header lưới sai chữ ký → URL `HUB_PUBLIC_URL`.
 
 **H5 (Trung bình). `raw_events.via` phải phân biệt chuyển tiếp với phát lại.**
 - **Vì sao:** ghi xuyên thì lúc hub sống, mọi request vẫn đi qua Worker. Một giá trị `'catchnet'` làm báo cáo "lưới đã cứu" đếm gấp hàng trăm lần.
@@ -48,6 +51,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - Worker gửi `x-catchnet-mode: forward | replay`. Header này nằm trong chuỗi ký H3.
   - `via` nhận giá trị `'catchnet-forward' | 'catchnet-replay' | NULL`.
   - Nhãn "đã được lưới bảo vệ" (§9) tắt khi gặp một trong hai giá trị. Số "lưới đã cứu" chỉ đếm `catchnet-replay`.
+  - Test `[LH:T20]` (LH3): chữ ký lưới hợp lệ mode `forward` → `raw_events.via='catchnet-forward'`, mode `replay` → `'catchnet-replay'`; chữ ký sai / không có → `via` NULL. `raw_events.received_at` = `x-catchnet-received-at` CHỈ khi chữ ký body khớp; lệch → mặc định DB (giờ hub). Migration chỉ thêm cột `via` + CHECK.
 
 **H6 (Trung bình). Không hứng request bắt tay.**
 - **Vì sao:** khi hub vắng, Worker trả `{"ok":true}` cho GET `hub.challenge` (Meta) hay `url_verification` (Slack). Provider sẽ báo "xác minh URL thất bại", và hub phát lại một handshake thì cũng vô nghĩa.
@@ -444,7 +448,7 @@ CREATE TABLE sources_sync (
 **Luật cho U-A (vì URL `workers.dev` ghép từ tên Worker và subdomain tài khoản):**
 - URL có dạng `https://<tên-worker>.<subdomain-tài-khoản>.workers.dev/hooks/:provider/:sourceKey`. **Đổi tên Worker hoặc đổi subdomain tài khoản = đổi URL của MỌI source.** Chọn một lần, ghi vào ADR-220, coi như bất biến.
 - Tên Worker cố định trong `wrangler.toml` (`name = "hub-hooks"` hoặc tên Admin chọn). Không deploy thêm Worker khác cùng tên cho môi trường khác. Môi trường thử dùng tên riêng (`hub-hooks-staging`).
-- Đã chốt: subdomain tài khoản **`webhook-hub`**, tên Worker **`hub-hooks`** → `https://hub-hooks.webhook-hub.workers.dev`.
+- Đã chốt: subdomain tài khoản **`webhookhub`** (`webhook-hub` đã có người dùng, Admin đổi 2026-10-14), tên Worker **`hub-hooks`** → `https://hub-hooks.webhookhub.workers.dev`.
 - `HUB_INGEST_PUBLIC_URL` = URL `workers.dev` đó. `HUB_ORIGIN_URL` của Worker = URL Render thật.
 - Dev kiểm trước khi bật: PayOS `confirm-webhook` và Stripe tạo endpoint **chấp nhận** URL `*.workers.dev`. Bị từ chối thì ghi §16 và báo phòng, **không** tự đổi phương án.
 
@@ -521,8 +525,43 @@ CREATE TABLE sources_sync (
 - ~~Q1 (§9)~~ **Đã chốt 2026-10-14:** U-C + U-A (`workers.dev`, không mua domain).
 - ~~Q2~~ **Đã chốt 2026-10-14:** giữ 7 ngày.
 - ~~Q3~~ **Đã chốt 2026-10-14:** (a) Shop thay cron ADR-009 bằng `reconcile(refs)`.
-- ~~Q4~~ **Đã chốt 2026-10-14:** Admin tự tạo tài khoản Cloudflare free theo hướng dẫn dev viết vào `KEYS-CAN-LAY.md` (§7c). Subdomain tài khoản = **`webhook-hub`** → URL thật `https://hub-hooks.webhook-hub.workers.dev`, URL nháp `https://hub-hooks-spike.webhook-hub.workers.dev`.
+- ~~Q4~~ **Đã chốt 2026-10-14:** Admin tự tạo tài khoản Cloudflare free theo hướng dẫn dev viết vào `KEYS-CAN-LAY.md` (§7c). Subdomain tài khoản = **`webhookhub`** (`webhook-hub` bị chiếm) → URL thật `https://hub-hooks.webhookhub.workers.dev`, URL nháp `https://hub-hooks-spike.webhookhub.workers.dev`.
+
+## 15b. Checklist story (tick khi review ĐẠT; regex `\[x\] \*\*(LH[\w-]*)\*\*` của `verify:map`)
+
+- ✅ LH-S (spike, không có mã test nên không dùng dạng tick của `verify:map`) — spike Worker nháp: cổng ĐẠT (S1 Stripe, S2 PayOS kênh thật, S3 GitHub, S5 bytes), S6 đạt, S7 mới đo lúc hub thức, S4 SePay hoãn. Kết quả ở `SPIKE-workers-dev.md`
+- [x] **LH-URL** — §9 tách `HUB_INGEST_PUBLIC_URL` (`[LH:T17]`, ADR-211). REVIEW-LH-URL ĐẠT (0 Nặng / 0 TB). Nợ Thấp L1–L6 ghi ở §16
+- [x] **LH3** — REVIEW-LH3-R2 ĐẠT (0 Nặng/0 TB; nợ Thấp R2-L1 limit_conn /hooks nới cho mọi IP → cân nhắc `geo` dải Cloudflare, R2-L2 log khi kẹp hạn + sửa DEPLOYMENT, R2-L4 cảnh báo secret lúc khởi động) · hub nhận request từ lưới (H1, H3, H4, H5): `[LH:T11]`–`[LH:T13]`, `[LH:T18]` (phía hub), `[LH:T19]` (H4, sửa REVIEW-LH-URL L1), `[LH:T20]` (H5), `[LH:T21]` (H1); ADR-217, ADR-221
+- [ ] **LH2** · [ ] **LH0** · [ ] **LH6** · [ ] **LH5** · [ ] **LH1** · [ ] **LH4** · [ ] **LH7**
 
 ## 16. Ghi chú / nợ phát hiện khi code
+
+- **LH-URL (REVIEW-LH-URL, Thấp):**
+  - **L1:** trước LH3, `publicHooksUrl()` dùng base ingest cho mọi request. **Không đặt `HUB_INGEST_PUBLIC_URL` trên Render trước khi LH3 lên.** → **Đã sửa ở LH3** (`[LH:T19]`, ADR-217): base theo đường vào.
+  - **L2:** biến đặt sai thì chỉ nút Kết nối báo 422. Nên kiểm biến lúc khởi động ở production.
+  - **L3:** `connect()`, `connectExisting()` và trường `ingestUrl` của controller chưa có test.
+  - **L4:** `ingestUrl` chưa có trong response PATCH và connect.
+  - **L5:** chữ cũ còn trong `docsVersion` Twilio, `DEPLOYMENT.md:657`, `HUONG-DAN-DEPLOY.md:145`.
+  - **L6:** ADR-220 được nhắc tới nhưng chưa ghi (sẽ ghi ở LH2/§9 khi bật Worker thật).
+  - Message của commit `013caf3` ghi "DỞ DANG", nhưng nội dung đã hoàn tất ở `4430304`.
+- **LH-S:**
+  - Header tới Worker bị viết thường và đổi thứ tự.
+  - Cloudflare tự thêm `cf-*`, `x-real-ip`, `x-forwarded-proto`; LH2 phải bỏ khi chuyển tiếp.
+  - Lần deploy đầu, cron chạy chậm vài phút.
+
+- **LH3 (2026-10-14):**
+  - `[LH:T12]` spec ghi "→ 202"; ack Stripe của hub là **200** `{received:true}` (adapter không khai `successStatus`). Test kiểm 200 + `x-hub-outcome: accepted`.
+  - `[LH:T18]` ở LH3 chỉ là nửa phía hub (503 `rejectStatus` mang `x-hub-outcome: rejected`, cả khi đi qua lưới). Nửa Worker (provider nhận 503, D1 rỗng) thuộc LH2.
+  - 429 (cổng phạt, hộp phạt trong ingest, rate limit) mang `x-hub-outcome: refused`. LH2 phải xét 408/429 **trước** outcome (H2: retry). 507 cũng `refused`: khi phát lại nên retry, LH2 quyết (ADR-221).
+  - `CATCHNET_RETENTION_DAYS` ở hub nhận nguyên 1..30 (sai khuôn → 7). Worker phải dùng cùng giá trị.
+  - Header lưới lặp (mảng) hoặc `x-catchnet-mode` ngoài {forward, replay} → bỏ qua cả bộ header. Worker (LH2) gửi đúng một giá trị mỗi header, `path_and_query` = pathname + search **thô** như URL provider gọi (không decode), METHOD chữ hoa.
+  - `raw_events.via` ghi ở cả dòng REJECTED / bắt tay (để nút "Đã đổi" ở §9 nhận ra request đầu tiên qua lưới kể cả khi chữ ký provider sai).
+- **LH3 sau REVIEW-LH3 (2026-10-14):**
+  - **TB-1 (đã sửa, `[LH:T22]`):** nginx EG1 không kiểm được chữ ký lưới → không đọc `x-catchnet-client-ip`. Lưới bật (secret hợp lệ trong env `hub-all`) → `EDGE_HOOKS_IP_LIMITS=0`: tắt cầu chì + `limit_conn` theo IP cho `/hooks/*`; `/v1/p/*` giữ. 429/413/404/503 nginx tự sinh trên `/hooks*` mang `x-hub-outcome`. Luật ở DEPLOYMENT §3.6 + ADR-217.
+  - **T-1 (lệch H3 có chủ ý):** chữ ký body lệch → ingest coi như gọi thẳng (IP kết nối cho chấm điểm, không via, không `received_at`, URL `HUB_PUBLIC_URL`); cổng phạt vẫn chỉ KIỂM theo IP đã ký. `raw_events.headers` bỏ `x-catchnet-*` trừ `x-catchnet-id`.
+  - **T-2:** `received_at` tương lai ≤ 5 phút. **T-6:** secret < 32 ký tự bị bỏ, giá trị thứ ba bị bỏ, cảnh báo một lần. **T-4:** migration bỏ `VALIDATE` (Prisma chạy cả file trong một transaction — VALIDATE giữ ACCESS EXCLUSIVE suốt lúc quét).
+  - **T-3 (nợ):** `raw_events.received_at` = giờ Worker làm lệch các chỗ coi nó ≈ lúc INSERT: `findOrphanRawEvents` (`received_at < now() − 120s`) có thể báo mồ côi ngay khi phát lại hàng loạt (banner, `normalize.backlog` nháy — tự hết khi normalize chạy); `findRecentRawEventsForInspect` lọc `since` có thể bỏ sót bản phát lại. Đã kẹp `CATCHNET_RETENTION_DAYS ≤ EVENT_RETENTION_DAYS`. Đề xuất sửa (story riêng, có migration): cột `committed_at timestamptz DEFAULT now()` dùng cho mồ côi + Lắng nghe, `received_at` giữ nghĩa "provider gửi".
+  - **T-5 (luật cho LH2):** phản hồi Node `clientError` (431 header > 16KB, 400 request hỏng) không qua Express nên không có `x-hub-outcome`. Worker: 408/429 → retry (H2); 5xx không outcome hoặc `unavailable` → hub vắng; 4xx không outcome khác 404 → retry có hạn rồi `inbox_dead`; 404 hoặc 4xx `rejected`/`refused` → `inbox_dead`.
+  - **T-7:** test vector cố định `libs/crypto/test/fixtures/catchnet-vectors.json` — Worker LH2 phải kiểm cùng file. Worker ký ĐÚNG chuỗi target nó đưa vào `fetch` (`new URL()` bỏ `?` đứng một mình, chuẩn hoá percent-encoding — lệch thì header bị bỏ qua âm thầm).
 
 _(dev ghi vào đây; lệch với tài liệu provider hoặc trang giá Cloudflare thì trang chính thức thắng)_

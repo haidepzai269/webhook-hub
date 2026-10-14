@@ -391,6 +391,9 @@ model RawEvent {
   /// PK5 khoá 2 (E5, ADR-206): false = nhận KHÔNG xác thực (scheme `unverified`). Ghi lúc ingest; normalize chép sang
   /// `events.verified` (không suy từ config hiện tại). `signature_valid` vẫn true ("không sai chữ ký").
   verified        Boolean     @default(true)
+  /// LH3 (H5, ADR-217): đường vào qua lưới hứng — 'catchnet-forward' (chuyển tiếp lúc hub sống) | 'catchnet-replay' (phát
+  /// lại từ D1). NULL = gọi thẳng. CHECK ở migration `20261014150000_raw_events_via`. "Lưới đã cứu" chỉ đếm replay.
+  via             String?     @map("via")
 
   source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   event  Event?

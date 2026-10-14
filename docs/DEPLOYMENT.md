@@ -177,7 +177,7 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 | `EDGE_IP_FUSE` | **tắt** | `1` = bật cầu chì IP (`limit_req`) cho `/hooks/*` và `/v1/p/*`. **Chỉ bật sau khi đã đo IP thật (bên dưới)** — ADR-176 |
 | `EDGE_IP_RATE` | 50 | request/giây/IP của cầu chì (kẹp 1–100000). Phải đủ cho **TỔNG** lưu lượng một provider trên **mọi** tenant (GitHub, PayOS gửi từ chung dải IP) |
 | `EDGE_IP_BURST` | 500 | burst `nodelay` (kẹp 0–1000000) |
-| `EDGE_CONN_PER_IP` | 50 | kết nối đồng thời/IP cho `/hooks/*` (`limit_conn`, luôn bật khi có nginx) |
+| `EDGE_CONN_PER_IP` | 50 | kết nối đồng thời/IP cho `/hooks/*` (`limit_conn`, luôn bật khi có nginx — **trừ khi lưới hứng bật**, xem luật dưới bảng) |
 | `EDGE_TRUSTED_PROXIES` | trống | IP/CIDR tin cậy cho `set_real_ip_from`, cách nhau dấu phẩy/khoảng trắng. Trống = không tin `X-Forwarded-For` (IP = địa chỉ kết nối TCP — trên Render đó là IP proxy, CHUNG cho mọi người) |
 | `EDGE_REAL_IP_RECURSIVE` | `on` | `real_ip_recursive`. `off` = lấy phần tử **cuối** của XFF. Dải quá rộng (`/0`…) BẮT BUỘC `off` |
 | `EDGE_ALLOW_NO_REAL_IP` | tắt | `1` = cho `EDGE_NGINX=1` chạy khi `EDGE_TRUSTED_PROXIES` trống (cố ý, chỉ hợp lý khi KHÔNG có proxy phía trước; cảnh báo level 50). Không đặt thì từ chối khởi động |
@@ -214,6 +214,16 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 | Ngày | Cấu hình real IP | Lượt A `ip` | Lượt B `ip` | `peer` | Kết luận / `EDGE_IP_FUSE` |
 |---|---|---|---|---|---|
 | _chưa đo_ | | | | | cầu chì **tắt** |
+
+**Luật khi bật lưới hứng (LH3, ADR-217, REVIEW-LH3 TB-1):** có `CATCHNET_FORWARD_SECRET` hợp lệ (≥ 32 ký tự) trong env
+của `hub-all` thì `edge.js` đặt `EDGE_HOOKS_IP_LIMITS=0`: **cầu chì `limit_req` và `limit_conn` theo IP của nginx TẮT cho
+`/hooks/*`** (khoá rỗng = không đếm). Lý do: request qua lưới đến từ vài IP egress của Cloudflare — khoá theo IP kết nối là
+khoá CHUNG cả lưới (50 kết nối chậm của kẻ xấu = mọi provider nhận 429 của nginx). nginx không kiểm được chữ ký lưới nên
+**không bao giờ** đọc `x-catchnet-client-ip` (test khoá: template không có `$http_x_catchnet`). Giới hạn theo IP ĐÃ KÝ chỉ có ở
+cổng phạt của hub-api (D3). `/v1/p/*` giữ cầu chì (không đi qua lưới). `EDGE_IP_FUSE=1` + lưới bật → cảnh báo level 50 lúc
+khởi động. Đánh đổi: `/hooks/*` mất lớp chống slowloris theo IP ở nginx (còn `client_body_timeout 10s` + cổng phạt hub-api).
+Phản hồi nginx tự sinh trên `/hooks*` mang `x-hub-outcome` (429 `refused`, 413/404 `rejected`, 503 `unavailable`). Node
+`clientError` (431/400 trước Express) không có header — lưới hứng coi 4xx không outcome theo luật ở ADR-221.
 
 **Kiểm ở local (không cần Render):**
 - L0: `npx jest apps/hub-api/test/edge-nginx.spec.ts` (template, envsubst, regex sourceKey [EG:T3], supervisor [EG:T9] với
@@ -634,6 +644,26 @@ HUB_PUBLIC_URL=          # hub-api: URL https CÔNG KHAI của CHÍNH hub-api, v
                          # URL Vercel, không đuôi /). "Kết nối provider" (SPEC-ket-noi, ADR-138/151) đăng ký
                          # <HUB_PUBLIC_URL>/hooks/<provider>/<sourceKey> tại PayOS/Stripe. Thiếu / localhost / IP nội bộ ->
                          # 422 public_url_required (app vẫn chạy). Đổi domain -> kết nối báo DRIFTED, bấm "Kết nối lại".
+                         # Vẫn là host trong connection string (hubs://<key>@<host>/<project>) và gốc API/console.
+HUB_INGEST_PUBLIC_URL=   # hub-api (ADR-211, SPEC-hub-sap §9): URL provider gọi vào (/hooks/*), tách khỏi HUB_PUBLIC_URL.
+                         # Trống / không đặt -> = HUB_PUBLIC_URL (hành vi cũ, không cần làm gì). Đặt thì MỌI URL ingest
+                         # dùng nó: "Kết nối provider" đăng ký <HUB_INGEST_PUBLIC_URL>/hooks/<provider>/<sourceKey>,
+                         # console hiện URL đó cho dev copy, url của unverified/forwardUrl. Connection string KHÔNG đổi.
+                         # Lưới hứng (ADR-220): https://hub-hooks.webhookhub.workers.dev. Đổi giá trị -> kết nối
+                         # PayOS/Stripe báo DRIFTED public_url_changed, bấm "Kết nối lại". Đặt mà localhost/IP nội bộ
+                         # -> 422 public_url_required (KHÔNG rơi về HUB_PUBLIC_URL).
+                         # LH3 (H4, ADR-217): url của unverified/forwardUrl (provider ký trên URL) theo ĐƯỜNG VÀO —
+                         # request có chữ ký lưới hợp lệ dùng biến này, request đi thẳng Render dùng HUB_PUBLIC_URL.
+                         # Đặt/đổi là thao tác hạ tầng — hỏi Admin.
+CATCHNET_FORWARD_SECRET= # hub-api + Worker secret (LH3, ADR-217): HMAC header lưới hứng (`x-catchnet-signature` không
+                         # body — cổng phạt kiểm để lấy IP client; `x-catchnet-body-signature` — chỉ khi khớp mới dùng
+                         # giờ Worker nhận làm "bây giờ" khi verify Stripe/Standard Webhooks/signed-template). ≥ 32 ký tự
+                         # ngẫu nhiên (`openssl rand -hex 32`) — ngắn hơn bị BỎ (log cảnh báo một lần). Có giá trị hợp lệ
+                         # thì nginx của hub-all tắt cầu chì/limit_conn theo IP cho /hooks/* (§3.6). Xoay khoá: đặt "mới,cũ" (tối đa 2, phân tách `,`) ở hub
+                         # trước, đổi Worker sang mới, rồi bỏ cũ. TRỐNG = tắt hẳn: mọi header x-catchnet-* bị bỏ qua
+                         # (IP Cloudflare bị phạt chung, phát lại Stripe sau 5 phút = 401). Đặt là thao tác hạ tầng — hỏi Admin.
+CATCHNET_RETENTION_DAYS= # hub-api + Worker (LH3): |now − x-catchnet-received-at| tối đa (ngày, nguyên 1..30, mặc định 7).
+                         # Quá hạn -> header lưới bị bỏ qua. PHẢI bằng giá trị của Worker (Worker giữ D1 đúng chừng đó).
 
 # --- KHÔNG BAO GIỜ đặt trên production (hub-api VÀ hub-worker) — chỉ cho stack kiểm chứng / test ---
 # *_FAKE_BASE_URL (PAYOS_/STRIPE_/GITHUB_/GOOGLE_OAUTH_…)  -> NODE_ENV=production + có giá trị: app THOÁT lúc khởi động

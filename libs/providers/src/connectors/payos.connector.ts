@@ -48,7 +48,7 @@ export const payosConnector: ProviderConnector = {
     }
     throw new ConnectorError(
       'webhook_rejected',
-      `PayOS không xác nhận được URL ingest${providerSays(body.desc)}. PayOS gọi thử URL và cần 200: kiểm HUB_PUBLIC_URL công khai, hub-api đang chạy, Checksum Key đúng của kênh này.`,
+      `PayOS không xác nhận được URL ingest${providerSays(body.desc)}. PayOS gọi thử URL và cần 200: kiểm URL ingest công khai (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL), hub-api đang chạy, Checksum Key đúng của kênh này.`,
     );
   },
 };

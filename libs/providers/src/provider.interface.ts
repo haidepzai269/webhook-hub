@@ -22,7 +22,7 @@ export interface AdapterContext {
    */
   projectFlags?: { allowUnverified: boolean };
   /**
-   * PK5 (E6/E18): URL công khai của CHÍNH request này (`HUB_PUBLIC_URL` + `/hooks/<provider>/<sourceKey>` + query gốc), lõi
+   * PK5 (E6/E18): URL công khai của CHÍNH request này (base ingest `HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL` — ADR-211 — + `/hooks/<provider>/<sourceKey>` + query gốc), lõi
    * dựng từ env LÚC NHẬN — không bao giờ từ header `Host` (giả được). `null` khi hub không có URL công khai (localhost / IP
    * nội bộ). Hàm (lười): chỉ adapter cần mới gọi.
    */
