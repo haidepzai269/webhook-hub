@@ -380,6 +380,8 @@ export default function DestinationsPage() {
                 </Field>
               )}
             />
+            {/* UI-MS: hai ô ngắn (khoá ký, giới hạn tốc độ) gộp một hàng — form vừa khung không phải cuộn */}
+            <div className="grid gap-4 sm:grid-cols-2">
             <Controller
               control={form.control}
               name="signingSecret"
@@ -410,6 +412,7 @@ export default function DestinationsPage() {
                 </Field>
               )}
             />
+            </div>
           </FieldGroup>
         </form>
       </FormDialog>

@@ -491,6 +491,8 @@ export default function SourcesPage() {
         description={t("page.sources.form.description")}
         formId="source-form"
         submitting={create.isPending}
+        // UI-MS: nguồn generic có nhiều ô ký -> cỡ lg + 2 cột; provider có sẵn giữ md
+        size={provider === "generic" ? "lg" : "md"}
       >
         <form id="source-form" noValidate autoComplete="off" onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup className="gap-4">
@@ -551,12 +553,14 @@ export default function SourcesPage() {
             />
             )}
             {provider === "generic" && (
+              <div className="grid gap-4 sm:grid-cols-2 sm:[&>[role=note]]:col-span-2">
               <GenericFields
                 control={form.control}
                 scheme={scheme}
                 // PK3: điền nhanh chỉ ghi đè các ô ký (giữ tên, khoá bí mật, khoá chống trùng, kiểu sự kiện).
                 onPreset={(p: TemplatePreset) => form.reset({ ...form.getValues(), ...TEMPLATE_PRESETS[p] }, { keepDefaultValues: true })}
               />
+              </div>
             )}
           </FieldGroup>
         </form>

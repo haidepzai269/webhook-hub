@@ -282,6 +282,8 @@ export default function SubscriptionsPage() {
       >
         <form id="subscription-form" noValidate onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup className="gap-4">
+            {/* UI-MS: tên + đích gộp một hàng — form vừa khung không phải cuộn */}
+            <div className="grid gap-4 sm:grid-cols-2">
             <Controller
               control={form.control}
               name="name"
@@ -329,6 +331,7 @@ export default function SubscriptionsPage() {
                 </Field>
               )}
             />
+            </div>
             <Controller
               control={form.control}
               name="eventTypes"
