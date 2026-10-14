@@ -19,6 +19,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - Worker coi là "hub vắng" **chỉ khi** gặp timeout, lỗi mạng, hoặc 5xx **mà không** có `x-hub-outcome`, hoặc có `x-hub-outcome: unavailable`. Có outcome khác thì trả nguyên phản hồi cho provider, **không** ghi D1.
   - Worker không chuyển header `x-hub-outcome` ra cho provider.
   - Test `[LH:T18]`: source `rejectStatus: 503` + chữ ký sai → provider nhận 503, D1 rỗng.
+  - Test `[LH:T21]` (LH3, phía hub): mọi nhánh trả lời cố ý của `/hooks/*` mang `x-hub-outcome` đúng giá trị — accepted, duplicate, handshake (GET bắt tay, HEAD `head-ok`), rejected (401, 503 `rejectStatus`, 404, 400 parser, 413, 405, 422), refused (429 cổng phạt, 429 rate limit, 507, cờ unverified tắt); lỗi tạm thời (transaction lỗi, exception) mang `unavailable`. Ghi ở ADR-221.
 
 **H2 (Nặng). Phát lại gặp 429 không được chuyển sang `inbox_dead`.**
 - **Vì sao:** §4.4 viết "4xx → `inbox_dead`". Nhưng hub trả 429 khi vượt rate limit 100/phút/source, và cổng phạt cũng trả 429. Hub vừa thức, phát lại cộng lưu lượng mới vượt trần, thì sự kiện thật thành hàng chết.
@@ -41,6 +42,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - Request có chữ ký lưới hợp lệ (H3) → URL = `HUB_INGEST_PUBLIC_URL` + path + query.
   - Không có → `HUB_PUBLIC_URL` như cũ.
   - Commit §9 (`[LH:T17]`) phải sửa cả hai chỗ trên. Phần chọn base theo header lưới thì làm ở LH3.
+  - Test `[LH:T19]` (LH3, nợ REVIEW-LH-URL L1): có cả hai biến; request có chữ ký lưới hợp lệ → `publicUrl` của adapter (vd `forwardUrl` lưu `__hub_meta.url`) là URL `HUB_INGEST_PUBLIC_URL`; request gọi thẳng, hoặc header lưới sai chữ ký → URL `HUB_PUBLIC_URL`.
 
 **H5 (Trung bình). `raw_events.via` phải phân biệt chuyển tiếp với phát lại.**
 - **Vì sao:** ghi xuyên thì lúc hub sống, mọi request vẫn đi qua Worker. Một giá trị `'catchnet'` làm báo cáo "lưới đã cứu" đếm gấp hàng trăm lần.
@@ -48,6 +50,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - Worker gửi `x-catchnet-mode: forward | replay`. Header này nằm trong chuỗi ký H3.
   - `via` nhận giá trị `'catchnet-forward' | 'catchnet-replay' | NULL`.
   - Nhãn "đã được lưới bảo vệ" (§9) tắt khi gặp một trong hai giá trị. Số "lưới đã cứu" chỉ đếm `catchnet-replay`.
+  - Test `[LH:T20]` (LH3): chữ ký lưới hợp lệ mode `forward` → `raw_events.via='catchnet-forward'`, mode `replay` → `'catchnet-replay'`; chữ ký sai / không có → `via` NULL. `raw_events.received_at` = `x-catchnet-received-at` CHỈ khi chữ ký body khớp; lệch → mặc định DB (giờ hub). Migration chỉ thêm cột `via` + CHECK.
 
 **H6 (Trung bình). Không hứng request bắt tay.**
 - **Vì sao:** khi hub vắng, Worker trả `{"ok":true}` cho GET `hub.challenge` (Meta) hay `url_verification` (Slack). Provider sẽ báo "xác minh URL thất bại", và hub phát lại một handshake thì cũng vô nghĩa.
@@ -527,7 +530,7 @@ CREATE TABLE sources_sync (
 
 - ✅ LH-S (spike, không có mã test nên không dùng dạng tick của `verify:map`) — spike Worker nháp: cổng ĐẠT (S1 Stripe, S2 PayOS kênh thật, S3 GitHub, S5 bytes), S6 đạt, S7 mới đo lúc hub thức, S4 SePay hoãn. Kết quả ở `SPIKE-workers-dev.md`
 - [x] **LH-URL** — §9 tách `HUB_INGEST_PUBLIC_URL` (`[LH:T17]`, ADR-211). REVIEW-LH-URL ĐẠT (0 Nặng / 0 TB). Nợ Thấp L1–L6 ghi ở §16
-- [ ] **LH3** — hub nhận request từ lưới (H1, H3, H4, H5). **Phải thêm mã test cho H4** trước khi code: request có chữ ký lưới dùng base ingest; request gọi thẳng dùng `HUB_PUBLIC_URL` (REVIEW-LH-URL L1)
+- [ ] **LH3** — hub nhận request từ lưới (H1, H3, H4, H5): `[LH:T11]`–`[LH:T13]`, `[LH:T18]` (phía hub), `[LH:T19]` (H4, sửa REVIEW-LH-URL L1), `[LH:T20]` (H5), `[LH:T21]` (H1); ADR-217, ADR-221
 - [ ] **LH2** · [ ] **LH0** · [ ] **LH6** · [ ] **LH5** · [ ] **LH1** · [ ] **LH4** · [ ] **LH7**
 
 ## 16. Ghi chú / nợ phát hiện khi code
