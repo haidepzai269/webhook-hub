@@ -16,13 +16,14 @@ export const ALL_SCOPES = [
   'traffic:read', // EG5 (ADR-181): lưu lượng theo source (IP, tỷ lệ sai chữ ký) — chỉ owner + người vận hành (viaOperator)
   'storage:read', // QT4 (SPEC-han-muc-dung-luong §5.5, ADR-184): xem dung lượng + gợi ý dọn — owner, developer, người vận hành
   'storage:write', // QT4/QT5: dọn / xoá hẳn, áp dụng gợi ý, policy dọn tự động, cờ "Giữ lâu" — owner + người vận hành
+  'read:unverified', // PK5 (E4, ADR-206): polling trả event CHƯA xác thực (`?includeUnverified=true`) — chỉ owner cấp cho key
 ] as const;
 export type Scope = (typeof ALL_SCOPES)[number];
 export type MemberRoleName = 'owner' | 'developer' | 'viewer';
 
 const VIEWER: Scope[] = ['read:project', 'read:events'];
 const DEVELOPER: Scope[] = [...VIEWER, 'publish:events', 'manage:endpoints', 'manage:sources', 'replay:deliveries', 'manage:keys', 'storage:read'];
-const OWNER: Scope[] = [...DEVELOPER, 'manage:members', 'manage:project', 'traffic:read', 'storage:write'];
+const OWNER: Scope[] = [...DEVELOPER, 'manage:members', 'manage:project', 'traffic:read', 'storage:write', 'read:unverified'];
 
 export const ROLE_SCOPES: Readonly<Record<MemberRoleName, readonly Scope[]>> = { viewer: VIEWER, developer: DEVELOPER, owner: OWNER };
 
@@ -30,7 +31,7 @@ export const ROLE_SCOPES: Readonly<Record<MemberRoleName, readonly Scope[]>> = {
  * Scope một API key ĐƯỢC cấp. `manage:keys` / `manage:members` / `manage:project` / `read:project` /
  * `replay:deliveries` KHÔNG BAO GIỜ: máy không được tự đúc key hay tự thêm người (chặn leo thang đặc quyền).
  */
-export const KEY_GRANTABLE_SCOPES: readonly Scope[] = ['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'storage:read', 'storage:write'];
+export const KEY_GRANTABLE_SCOPES: readonly Scope[] = ['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'storage:read', 'storage:write', 'read:unverified'];
 
 export function isScope(s: unknown): s is Scope {
   return typeof s === 'string' && (ALL_SCOPES as readonly string[]).includes(s);

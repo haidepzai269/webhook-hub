@@ -62,6 +62,8 @@ export interface Subscription {
   eventTypes: string[];
   template: string | null;
   isActive: boolean;
+  /** PK5 khoá 4 (ADR-206): đích tự đồng ý nhận sự kiện chưa xác thực (nguồn `unverified`). */
+  acceptUnverified?: boolean;
   createdAt: string;
   destination?: Destination;
 }
@@ -92,6 +94,8 @@ export interface HubEvent {
   correlationId: string;
   occurredAt: string;
   receivedAt: string;
+  /** PK5 (E4, ADR-206): false = hub KHÔNG xác thực sự kiện này (nguồn `unverified`). Vắng = true. */
+  verified?: boolean;
   deliveries?: Delivery[];
 }
 

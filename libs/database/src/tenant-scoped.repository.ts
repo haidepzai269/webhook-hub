@@ -509,6 +509,8 @@ export class TenantScopedRepository {
    * `types` và `readTypes` (mẫu wildcard) là hai điều kiện AND. `failedOnly`: có delivery DEAD/RETRYING ở generation
    * MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có]. KQ1: event `probe` (request kiểm tra của provider)
    * không bao giờ trả — vẫn được cấp poll_seq (cursor chỉ là vị trí, không lộ nội dung).
+   * PK5 khoá 4 (E4, ADR-206): event CHƯA xác thực (`verified=false`) không trả, trừ `includeUnverified: true` (controller chỉ
+   * đặt khi key có scope `read:unverified`). Cursor vẫn đi qua chúng (không có lỗ, không lộ nội dung).
    */
   async pollEvents(o: PollEventsOptions): Promise<PolledEvent[]> {
     await this.assignPollSeq();
@@ -524,11 +526,13 @@ export class TenantScopedRepository {
       SELECT e.id, e.poll_seq AS cursor, e.type, e.source, e.source_id AS "sourceId", e.subject,
              -- QT:T20 (ADR-184): event đã "Dọn" -> data null + trimmed true (dòng gầy vẫn trả: cursor không có lỗ).
              CASE WHEN e.trimmed_at IS NULL THEN e.data ELSE NULL END AS data, (e.trimmed_at IS NOT NULL) AS trimmed, e.normalized,
+             e.verified,
              e.correlation_id AS "correlationId", e.occurred_at AS "occurredAt", e.received_at AS "receivedAt"
       FROM "hub"."events" e
       WHERE e.tenant_id = ${this.tenantId}::uuid
         AND e.poll_seq > ${o.after}
         AND NOT e.probe
+        ${o.includeUnverified === true ? Prisma.empty : Prisma.sql`AND e.verified`}
         AND ${typeFilterSql(o.types)} AND ${typeFilterSql(o.readTypes)}
         ${failed}
       ORDER BY e.poll_seq ASC
@@ -701,6 +705,8 @@ export class TenantScopedRepository {
                             AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)`);
       // QT:T20 (ADR-184): event đã "Dọn" không còn nội dung — không replay được (409 `event_trimmed` ở replay đơn).
       conds.push(Prisma.sql`AND e.trimmed_at IS NULL`);
+      // PK5 khoá 4 (E4): event chưa xác thực chỉ replay tới subscription ĐANG bật `accept_unverified` (kiểm lúc replay).
+      conds.push(Prisma.sql`AND (e.verified OR s.accept_unverified)`);
     }
     return this.prisma.$queryRaw<DeadDeliveryRef[]>(Prisma.sql`
       SELECT d.id, d.event_id AS "eventId", d.subscription_id AS "subscriptionId",
@@ -728,7 +734,10 @@ export class TenantScopedRepository {
     const rows = await this.prisma.$queryRaw<{ id: string; dead: boolean; superseded: boolean; replayable: boolean; trimmed: boolean }[]>(Prisma.sql`
       SELECT d.id, d.status = 'DEAD' AS dead, NOT ${notSuperseded} AS superseded,
              (s.archived_at IS NULL AND s.is_active AND EXISTS (SELECT 1 FROM hub.destinations dst WHERE dst.id = s.destination_id
-                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)) AS replayable,
+                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)
+              -- PK5 (E4): event chưa xác thực tới subscription đã tắt acceptUnverified = không còn nơi nhận.
+              AND (s.accept_unverified OR NOT EXISTS (SELECT 1 FROM hub.events e2 WHERE e2.id = d.event_id
+                AND e2.tenant_id = d.tenant_id AND NOT e2.verified))) AS replayable,
              EXISTS (SELECT 1 FROM hub.events e WHERE e.id = d.event_id AND e.tenant_id = d.tenant_id AND e.trimmed_at IS NOT NULL) AS trimmed
       FROM hub.deliveries d
       JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
@@ -2372,6 +2381,8 @@ export interface PollEventsOptions {
   readTypes?: string[];
   failedOnly?: boolean;
   endpointId?: string;
+  /** PK5 (E4): true = trả cả event `verified=false` (key có scope `read:unverified` + `?includeUnverified=true`). */
+  includeUnverified?: boolean;
 }
 
 export interface PolledEvent {
@@ -2387,6 +2398,8 @@ export interface PolledEvent {
   /** QT §5.1 (ADR-184): nội dung đã được dọn — chỉ còn dòng gầy (khoá chống trùng, kiểu, thời gian). */
   trimmed: boolean;
   normalized: boolean;
+  /** PK5 (E4): false = sự kiện từ nguồn `unverified` (hub không xác thực). */
+  verified: boolean;
   correlationId: string;
   occurredAt: Date;
   receivedAt: Date;

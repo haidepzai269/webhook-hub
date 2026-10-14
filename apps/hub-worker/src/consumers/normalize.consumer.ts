@@ -58,6 +58,21 @@ export function assertCanonical(events: NormalizedEvent[], source: string): void
   }
 }
 
+/**
+ * PK5 khoá 3 (SPEC-provider-khac §7.1, E24, ADR-206): raw nhận KHÔNG xác thực (`raw_events.verified=false`) mà adapter phát
+ * kiểu thuộc namespace chuẩn (`payment.*`, `repo.*`, `hub.*`) -> lỗi VĨNH VIỄN (DLQ, 0 event, 0 delivery). Kiểm lần hai sau
+ * `validateGenericConfig` (422 lúc lưu): config bị ép qua DB, hoặc đổi sang scheme có ánh xạ rồi renormalize raw cũ chưa
+ * xác thực (E5) — không bao giờ có `payment.received` chưa xác thực. Chỉ đọc cờ của raw, không đọc config.
+ */
+export function assertUnverifiedNotReserved(events: NormalizedEvent[], verified: boolean, source: string): void {
+  if (verified) return;
+  for (const evt of events) {
+    if (!isReservedType(evt.type)) continue;
+    normalizeSchemaErrors.inc({ source });
+    throw new CanonicalSchemaError(evt.type, 'verified');
+  }
+}
+
 /** Topic outbox cho chặng normalize → delivery (S1-2) — nguồn ở route-event.ts (dùng chung với event của hub, QT4b). */
 export { DELIVERY_REQUESTED_TOPIC };
 
@@ -181,6 +196,9 @@ export class NormalizeConsumer {
       );
       // 3b. Kiểu dành riêng phải đúng khuôn — kiểm TRƯỚC transaction: sai thì không có dòng nào.
       assertCanonical(normalizedEvents, provider);
+      // 3c. PK5 (E5): `verified` CHÉP từ raw (ghi lúc ingest) — không suy từ config hiện tại. Chưa xác thực + kiểu chuẩn -> vĩnh viễn.
+      const verified = (rawEvent as { verified?: boolean }).verified !== false;
+      assertUnverifiedNotReserved(normalizedEvents, verified, provider);
 
       // 4. Event + delivery + outbox `delivery.requested` + processed_messages trong MỘT transaction (S1-2).
       // Không còn publish thẳng sau COMMIT: hoặc tất cả cùng COMMIT, hoặc không có gì — relay lo phần gửi.
@@ -203,6 +221,7 @@ export class NormalizeConsumer {
             data: evt.data,
             normalized: evt.normalized !== false,
             probe: evt.probe === true,
+            verified,
             origin: evt.origin,
             occurredAt: new Date(evt.occurredAt),
             receivedAt: new Date(evt.receivedAt),
@@ -215,7 +234,9 @@ export class NormalizeConsumer {
             continue;
           }
           // QT4b: định tuyến dùng CHUNG với event do hub phát (route-event.ts) — một đường outbox duy nhất.
-          routed.push(...(await routeEventToSubscriptions(tx, repoTx, tenantId, { id: evt.id, type: evt.type, sourceId: sourceId ?? null, correlationId: String(correlationId) }, log)));
+          routed.push(
+            ...(await routeEventToSubscriptions(tx, repoTx, tenantId, { id: evt.id, type: evt.type, sourceId: sourceId ?? null, correlationId: String(correlationId), verified }, log)),
+          );
         }
 
         await tx.processedMessage.create({ data: { consumer: 'normalize', messageId: rawEventId } });

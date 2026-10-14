@@ -105,13 +105,16 @@ export class PrismaService {
     // QT3 (E4, ADR-182): nấc dung lượng JOIN vào CHÍNH câu nạp source (LEFT JOIN project_usage) — +0 lượt DB, +0 câu SQL:
     // trước đây `findUnique + include secrets` = 2 câu (sources, source_secrets); nay = câu sources⋈project_usage + câu
     // secrets (lọc theo sourceKey), vẫn 2 câu trong cùng một lần gửi batch. Không có dòng usage -> level null (= OK).
+    // PK5 (E14, ADR-206): cờ project `allow_unverified_sources` JOIN vào CÙNG câu (khoá 1 của `unverified`) — +0 lượt DB.
     const [, rows, secrets] = await this.client.$transaction([
       this.client.$executeRaw`SELECT set_config('app.rls_system', 'on', true)`,
       this.client.$queryRaw<IngestSourceRow[]>`
         SELECT s.id, s.tenant_id AS "tenantId", s.provider::text AS provider, s.name, s.source_key AS "sourceKey",
                s.is_active AS "isActive", s.verification_config AS "verificationConfig", s.archived_at AS "archivedAt",
-               s.keep_longer AS "keepLonger", s.created_at AS "createdAt", pu.level AS "storageLevel"
+               s.keep_longer AS "keepLonger", s.created_at AS "createdAt", pu.level AS "storageLevel",
+               COALESCE(p.allow_unverified_sources, false) AS "allowUnverified"
         FROM hub.sources s LEFT JOIN hub.project_usage pu ON pu.tenant_id = s.tenant_id
+             LEFT JOIN hub.projects p ON p.id = s.tenant_id
         WHERE s.source_key = ${sourceKey}`,
       this.client.sourceSecret.findMany({
         where: {
@@ -214,6 +217,11 @@ export class PrismaService {
   /** QT7 (§2, §9): operator ghi đè hạn mức của MỘT project (`projects` là bảng gốc, không tenant_id). null = về mặc định env. */
   public setProjectStorageQuota(id: string, storageQuotaMb: number | null, client: PrismaClient | Prisma.TransactionClient = this.client) {
     return client.project.update({ where: { id }, data: { storageQuotaMb } });
+  }
+
+  /** PK5 khoá 1 (E14, ADR-206): bật/tắt nhận nguồn `unverified` của project — người gọi ghi audit CÙNG transaction. */
+  public setProjectAllowUnverified(id: string, allow: boolean, client: PrismaClient | Prisma.TransactionClient = this.client) {
+    return client.project.update({ where: { id }, data: { allowUnverifiedSources: allow } });
   }
 
   public findProjectById(id: string) {
@@ -901,13 +909,14 @@ interface IngestSourceRow {
   keepLonger: boolean;
   createdAt: Date;
   storageLevel: string | null;
+  allowUnverified: boolean;
 }
 
 /**
  * Source nạp ở bước 2 của ingest (cùng hình dạng `Source` của Prisma + secrets còn hiệu lực) kèm `storageLevel` (QT3, E4):
  * nấc dung lượng của project, JOIN trong cùng câu. null = chưa đo (coi như OK).
  */
-export type IngestSource = Source & { secrets: SourceSecret[]; storageLevel: string | null };
+export type IngestSource = Source & { secrets: SourceSecret[]; storageLevel: string | null; allowUnverified: boolean };
 
 /** QT5: một project có policy dọn tự động đang bật (đọc xuyên project cho cleanup job). */
 export interface StorageAutoCleanTarget {

@@ -1,0 +1,6 @@
+# origin: constructed; source: https://www.twilio.com/docs/usage/webhooks/webhooks-security
+POST /webhook HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+X-Twilio-Signature: AAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+CallSid=CA00000000000000000000000000000000&Caller=%2B15555550100&Digits=1234&From=%2B15555550100&To=%2B15555550199

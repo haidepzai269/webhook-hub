@@ -85,6 +85,26 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.scheme.hmac": "HMAC trên nội dung gốc",
     "page.sources.generic.scheme.static-token": "Token tĩnh (tiêu đề, Basic hoặc query)",
     "page.sources.generic.scheme.standard-webhooks": "Standard Webhooks / Svix (webhook-* hoặc svix-*)",
+    // PK5 (SPEC-provider-khac §7, ADR-206): "đích tự kiểm" (scheme unverified)
+    "page.sources.generic.scheme.unverified": "Chưa xác thực — đích tự kiểm chữ ký gốc",
+    "page.sources.generic.unverified.title": "Hub sẽ KHÔNG xác thực nguồn này",
+    "page.sources.generic.unverified.note":
+      "Hub nhận nhờ URL bí mật, giữ nguyên nội dung gốc và gửi kèm tiêu đề chữ ký gốc; nơi nhận phải tự kiểm chữ ký bằng SDK của nhà cung cấp. Chỉ chạy khi chủ dự án bật \"Nhận nguồn chưa xác thực\", và chỉ tới nơi nhận đã tick \"Nhận sự kiện chưa xác thực\". Kiểu sự kiện không được thuộc payment.* / repo.* / hub.*. Tối đa {kb}KB mỗi lần gửi; dung lượng lưu ≈ {factor} lần nội dung.",
+    "page.sources.generic.unverified.forward-headers": "Tiêu đề gửi kèm (chữ ký gốc…)",
+    "page.sources.generic.unverified.forward-headers-hint":
+      "Tối đa {max} tên, cách nhau dấu phẩy, viết thường (VD: x-twilio-signature). Không nhận authorization, cookie, x-hub-*.",
+    "page.sources.generic.unverified.forward-headers-invalid":
+      "Tên tiêu đề sai khuôn, trùng, quá 10, hoặc là tiêu đề bí mật (authorization, cookie, x-api-key, x-hub-*).",
+    "page.sources.generic.unverified.forward-url": "Gửi kèm URL nhận",
+    "page.sources.generic.unverified.forward-url.no": "Không (mặc định)",
+    "page.sources.generic.unverified.forward-url.yes": "Có — nhà cung cấp ký cả URL",
+    "page.sources.generic.unverified.forward-url-hint": "Chỉ bật khi nhà cung cấp ký cả URL (Twilio, Square, Trello, HubSpot v3).",
+    "page.sources.generic.unverified.forward-url-warning":
+      "Cảnh báo: URL chứa khoá nguồn (sourceKey) — chính là bí mật duy nhất của nguồn chưa xác thực. Mọi nơi nhận và mọi lần đọc sự kiện đều thấy nó.",
+    "page.sources.generic.unverified.id-value-hint":
+      "Tuỳ chọn. Hub luôn ghép thêm dấu băm của nội dung: chỉ bản trùng đúng từng byte mới bị coi là trùng. Nơi nhận tự chống trùng nghiệp vụ sau khi kiểm chữ ký.",
+    "page.sources.generic.unverified.secret-forbidden": "Nguồn chưa xác thực không có khoá bí mật — để trống.",
+    "page.sources.generic.unverified.hs-forbidden": "Nguồn chưa xác thực không dùng được hmac-echo hay \"chỉ trả lời sau khi kiểm chữ ký\".",
     "page.sources.generic.header": "Tiêu đề chứa chữ ký / token",
     "page.sources.generic.header-hint": "VD: x-acme-signature (viết thường).",
     "page.sources.generic.header-required": "Nhập tên tiêu đề (a-z, 0-9, -).",
@@ -340,6 +360,26 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.generic.scheme.hmac": "HMAC over the raw body",
     "page.sources.generic.scheme.static-token": "Static token (header, Basic or query)",
     "page.sources.generic.scheme.standard-webhooks": "Standard Webhooks / Svix (webhook-* or svix-*)",
+    // PK5 (SPEC-provider-khac §7, ADR-206): "destination verifies" (scheme unverified)
+    "page.sources.generic.scheme.unverified": "Unverified — the destination checks the original signature",
+    "page.sources.generic.unverified.title": "The hub will NOT verify this source",
+    "page.sources.generic.unverified.note":
+      "The hub accepts requests by the secret URL, keeps the original bytes and forwards the original signature headers; your receiver must verify the signature with the provider SDK. Works only after a project owner turns on \"Accept unverified sources\", and only reaches receivers that ticked \"Accept unverified events\". The event type cannot be payment.* / repo.* / hub.*. At most {kb}KB per request; storage ≈ {factor}× the body.",
+    "page.sources.generic.unverified.forward-headers": "Headers to forward (original signature…)",
+    "page.sources.generic.unverified.forward-headers-hint":
+      "Up to {max} names, comma separated, lowercase (e.g. x-twilio-signature). authorization, cookie and x-hub-* are not allowed.",
+    "page.sources.generic.unverified.forward-headers-invalid":
+      "Header name malformed, duplicated, more than 10, or a secret header (authorization, cookie, x-api-key, x-hub-*).",
+    "page.sources.generic.unverified.forward-url": "Forward the receiving URL",
+    "page.sources.generic.unverified.forward-url.no": "No (default)",
+    "page.sources.generic.unverified.forward-url.yes": "Yes — the provider signs the URL too",
+    "page.sources.generic.unverified.forward-url-hint": "Only when the provider signs the URL as well (Twilio, Square, Trello, HubSpot v3).",
+    "page.sources.generic.unverified.forward-url-warning":
+      "Warning: the URL contains the source key (sourceKey) — the only secret of an unverified source. Every receiver and every reader of the event sees it.",
+    "page.sources.generic.unverified.id-value-hint":
+      "Optional. The hub always appends a hash of the body: only byte-identical copies count as duplicates. The receiver dedups by business id after verifying.",
+    "page.sources.generic.unverified.secret-forbidden": "Unverified sources have no secret — leave it empty.",
+    "page.sources.generic.unverified.hs-forbidden": "Unverified sources cannot use hmac-echo or \"answer only after verifying\".",
     "page.sources.generic.header": "Header carrying the signature / token",
     "page.sources.generic.header-hint": "E.g. x-acme-signature (lowercase).",
     "page.sources.generic.header-required": "Enter the header name (a-z, 0-9, -).",

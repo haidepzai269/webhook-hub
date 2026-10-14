@@ -63,6 +63,10 @@ export const pageDestinations = defineMessages("page.destinations", {
     "page.destinations.endpoint.types": "Kiểu sự kiện trong danh mục",
     "page.destinations.endpoint.extra-placeholder": "Kiểu riêng, cách nhau dấu phẩy (vd invoice.*)",
     "page.destinations.endpoint.sources": "Nguồn (bỏ trống = mọi nguồn của dự án)",
+    // PK5 khoá 4 (ADR-206)
+    "page.destinations.endpoint.accept-unverified": "Nhận sự kiện chưa xác thực",
+    "page.destinations.endpoint.accept-unverified-hint":
+      "Chỉ tick khi nơi nhận tự kiểm chữ ký gốc của nhà cung cấp (data.raw + data.headers, SDK: unwrapUnverified). Không tick: hub không gửi sự kiện chưa xác thực tới đây.",
     "page.destinations.endpoint.saved-close": "Đã lưu khoá ký, đóng",
     "page.destinations.endpoint.creating": "Đang tạo và xác minh…",
     "page.destinations.endpoint.create-failed": "Tạo đích webhook thất bại: {message}",
@@ -138,6 +142,9 @@ export const pageDestinations = defineMessages("page.destinations", {
     "page.destinations.endpoint.types": "Event types (catalog)",
     "page.destinations.endpoint.extra-placeholder": "Custom types, comma-separated (e.g. invoice.*)",
     "page.destinations.endpoint.sources": "Sources (empty = all sources of the project)",
+    "page.destinations.endpoint.accept-unverified": "Accept unverified events",
+    "page.destinations.endpoint.accept-unverified-hint":
+      "Tick only if the receiver verifies the provider's original signature itself (data.raw + data.headers, SDK: unwrapUnverified). Unticked: the hub never sends unverified events here.",
     "page.destinations.endpoint.saved-close": "Secret saved, close",
     "page.destinations.endpoint.creating": "Creating + challenge…",
     "page.destinations.endpoint.create-failed": "Failed to create endpoint: {message}",

@@ -1,7 +1,7 @@
 import { ProviderType } from '@hub/common';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { getMasterKey } from '@hub/database';
-import { GenericConfig, VERIFY_TOKEN_RE, secretProblem, validateGenericConfig } from '@hub/providers';
+import { GenericConfig, UNVERIFIED_SCHEME, VERIFY_TOKEN_RE, secretProblem, validateGenericConfig } from '@hub/providers';
 import { unprocessable } from './service-api.controller';
 
 /** Provider mà người dùng được TẠO source. `api` do hub tạo kèm key (S4) — không tạo tay. */
@@ -10,7 +10,8 @@ export const CREATABLE_PROVIDERS: readonly ProviderType[] = ['github', 'payos', 
 export interface SourceInput {
   provider: ProviderType;
   name: string;
-  secret: string;
+  /** null = source không có secret (PK5 `unverified`, E14) — người gọi KHÔNG tạo SourceSecret. */
+  secret: string | null;
   verificationConfig: GenericConfig | undefined;
 }
 
@@ -26,7 +27,14 @@ export function parseSourceInput(body: any): SourceInput {
   }
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
   if (!name || name.length > 255) unprocessable({ error: 'validation_failed', field: 'name', message: 'name là chuỗi 1–255 ký tự' });
-  if (typeof body?.secret !== 'string' || body.secret.length < 8 || body.secret.length > 512) {
+  // PK5 (E14, ADR-206): `unverified` không có secret — hub không verify gì; nhận secret thì lưu một khoá không ai dùng (và
+  // dev tưởng hub đang kiểm chữ ký). Có secret -> 422.
+  const unverified = provider === 'generic' && isObjLike(body?.verificationConfig) && body.verificationConfig.scheme === UNVERIFIED_SCHEME;
+  if (unverified) {
+    if (body?.secret !== undefined && body?.secret !== null && body?.secret !== '') {
+      unprocessable({ error: 'validation_failed', field: 'secret', message: 'scheme unverified không có secret (hub không verify; đích tự kiểm chữ ký gốc)' });
+    }
+  } else if (typeof body?.secret !== 'string' || body.secret.length < 8 || body.secret.length > 512) {
     unprocessable({ error: 'validation_failed', field: 'secret', message: 'secret là chuỗi 8–512 ký tự' });
   }
   let verificationConfig: GenericConfig | undefined;
@@ -42,13 +50,15 @@ export function parseSourceInput(body: any): SourceInput {
       verificationConfig.handshake.verifyTokenEnc = sealed.verifyTokenEnc;
     }
     // PK2 (ADR-203): secret phải dùng được với config (keyEncoding hex/base64, basic "user:pass") — 422 bây giờ thay vì 401 mãi.
-    const problem = secretProblem(verificationConfig, body.secret);
+    const problem = unverified ? null : secretProblem(verificationConfig, body.secret);
     if (problem) unprocessable({ error: 'validation_failed', field: 'secret', message: problem });
   } else if (body?.verificationConfig !== undefined && body?.verificationConfig !== null) {
     unprocessable({ error: 'validation_failed', field: 'verificationConfig', message: 'chỉ provider generic có verificationConfig' });
   }
-  return { provider, name, secret: body.secret, verificationConfig };
+  return { provider, name, secret: unverified ? null : body.secret, verificationConfig };
 }
+
+const isObjLike = (v: unknown): v is Record<string, any> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * PK4 (E13, ADR-205): token xác minh của `query-echo` (Meta `hub.verify_token`) gửi RÕ lúc tạo source ở

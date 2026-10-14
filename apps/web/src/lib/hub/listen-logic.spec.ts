@@ -8,7 +8,10 @@ import {
   COMMON_REQUEST_HEADER_PREFIXES as SERVER_COMMON_PREFIXES,
   COMMON_REQUEST_HEADERS as SERVER_COMMON_HEADERS,
   ECHO_RESPONDS,
+  FORWARD_HEADERS_FORBIDDEN as SERVER_FORWARD_FORBIDDEN,
+  FORWARD_HEADERS_MAX as SERVER_FORWARD_MAX,
   type GenericConfig,
+  UNVERIFIED_MAX_BODY_BYTES,
   HANDSHAKE_KINDS,
   secretProblem,
   validateGenericConfig,
@@ -23,6 +26,10 @@ import {
   COMMON_REQUEST_HEADERS,
   ECHO_RESPOND_CHOICES,
   buildGenericConfig,
+  FORWARD_HEADERS_FORBIDDEN,
+  FORWARD_HEADERS_MAX,
+  UNVERIFIED_FORM_DEFAULTS,
+  UNVERIFIED_MAX_BODY_KB,
   connectionState,
   diagnosisParts,
   type GenericFormValues,
@@ -115,6 +122,7 @@ const FORM: GenericFormValues = {
   eventType: "acme.invoice.paid",
   ...TEMPLATE_FORM_DEFAULTS,
   ...HANDSHAKE_FORM_DEFAULTS,
+  ...UNVERIFIED_FORM_DEFAULTS,
 };
 
 describe("[PK:T10] (phần d) PK4 console: Lắng nghe hiện \"Đã bắt tay ✓\", SubscribeURL chỉ là link cho dev bấm", () => {
@@ -482,5 +490,43 @@ describe("PK3: form signed-template — điền nhanh + cùng luật server (val
       const server = serverIssues(f, secret).length > 0;
       expect({ f, secret, client }).toEqual({ f, secret, client: server });
     }
+  });
+});
+
+describe("PK5: form \"Chưa xác thực\" (unverified) — cùng luật server (validateUnverified + parseSourceInput)", () => {
+  const U: GenericFormValues = { ...FORM, scheme: "unverified", idValue: "", eventType: "momo.ipn" };
+  it("hằng của web = của server (≤ 10 tiêu đề, danh sách cấm, trần 45KB)", () => {
+    expect(FORWARD_HEADERS_MAX).toBe(SERVER_FORWARD_MAX);
+    expect([...FORWARD_HEADERS_FORBIDDEN]).toEqual([...SERVER_FORWARD_FORBIDDEN]);
+    expect(UNVERIFIED_MAX_BODY_KB * 1024).toBe(UNVERIFIED_MAX_BODY_BYTES);
+  });
+  it("round-trip: form dựng config server nhận nguyên văn (không secret, không header); lỗi form <=> server lỗi", () => {
+    const forms: GenericFormValues[] = [
+      U,
+      { ...U, forwardHeaders: "X-Twilio-Signature, x-request-id", forwardUrl: "yes", idKind: "field", idValue: "transId", ackSuccess: "204" },
+      { ...U, idKind: "header", idValue: "X-Id", hsKind: "head-ok" },
+    ];
+    for (const f of forms) {
+      const built = buildGenericConfig(f);
+      expect(built).not.toHaveProperty("header");
+      const r = validateGenericConfig(built);
+      expect({ built, ok: r.ok }).toEqual({ built, ok: true });
+      expect((r as unknown as { config: Record<string, unknown> }).config).toEqual(built);
+      expect(genericFormIssues(f, "")).toEqual([]);
+    }
+    const bad: [Partial<GenericFormValues>, string][] = [
+      [{ forwardHeaders: "authorization" }, "forwardHeaders"],
+      [{ forwardHeaders: "x-hub-signature" }, "forwardHeaders"],
+      [{ forwardHeaders: Array.from({ length: 11 }, (_, i) => `x-h${i}`).join(",") }, "forwardHeaders"],
+      [{ eventType: "payment.received" }, "eventType"],
+      [{ hsKind: "hmac-echo", hsWhenName: "event", hsWhenEquals: "v", hsTokenField: "t", hsMacField: "m" }, "hsKind"],
+    ];
+    for (const [patch, path] of bad) {
+      const f = { ...U, ...patch };
+      expect({ patch, client: genericFormIssues(f, "").map((i) => i.path) }).toEqual({ patch, client: expect.arrayContaining([path]) });
+      expect({ patch, server: validateGenericConfig(buildGenericConfig(f)).ok }).toEqual({ patch, server: false });
+    }
+    // Secret: unverified không có khoá bí mật (server 422 secret).
+    expect(genericFormIssues(U, "x".repeat(SECRET_MIN)).map((i) => i.issue)).toContain("secret-unverified");
   });
 });

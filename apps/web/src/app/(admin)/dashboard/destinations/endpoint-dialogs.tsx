@@ -108,6 +108,8 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
   const [types, setTypes] = useState<string[]>(["payment.*"]);
   const [extra, setExtra] = useState("");
   const [sourceIds, setSourceIds] = useState<string[]>([]);
+  // PK5 khoá 4 (ADR-206): đích tự đồng ý nhận sự kiện chưa xác thực — mặc định KHÔNG.
+  const [acceptUnverified, setAcceptUnverified] = useState(false);
   const [result, setResult] = useState<CreateEndpointResult | null>(null);
 
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
@@ -120,6 +122,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
       setTypes(["payment.*"]);
       setExtra("");
       setSourceIds([]);
+      setAcceptUnverified(false);
     }
     onOpenChange(o);
   };
@@ -132,7 +135,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
         .filter(Boolean),
     ];
     create.mutate(
-      { name: name.trim(), url: url.trim(), eventTypes, ...(sourceIds.length ? { sourceIds } : {}) },
+      { name: name.trim(), url: url.trim(), eventTypes, ...(sourceIds.length ? { sourceIds } : {}), ...(acceptUnverified ? { acceptUnverified: true } : {}) },
       {
         onSuccess: setResult,
         onError: (e) => toast.error(t("page.destinations.endpoint.create-failed", { message: e.message })),
@@ -217,6 +220,13 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
                   </label>
                 ))}
               </div>
+            </Field>
+            <Field className="gap-1.5">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={acceptUnverified} onChange={(e) => setAcceptUnverified(e.target.checked)} />
+                {t("page.destinations.endpoint.accept-unverified")}
+              </label>
+              <FieldDescription>{t("page.destinations.endpoint.accept-unverified-hint")}</FieldDescription>
             </Field>
           </FieldGroup>
         )}

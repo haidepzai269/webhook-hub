@@ -139,7 +139,9 @@ export class FlowScopedRepository extends TenantScopedRepository {
                  EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text) AS processed,
                  (r.trimmed_at IS NOT NULL) AS raw_trimmed,
                  e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
-                 COALESCE(e.probe, false) AS probe
+                 COALESCE(e.probe, false) AS probe,
+                 -- PK5 (E4): nhãn "Chưa xác thực" — từ raw (có ngay cả khi chưa normalize).
+                 r.verified
           FROM hub.raw_events r
           JOIN hub.sources s ON s.id = r.source_id AND s.tenant_id = ${t}::uuid
           LEFT JOIN hub.events e ON e.raw_event_id = r.id AND e.tenant_id = ${t}::uuid
@@ -149,14 +151,14 @@ export class FlowScopedRepository extends TenantScopedRepository {
           SELECT e.received_at AS x_at, e.id::text AS x_key, NULL::uuid AS raw_id, NULL::text AS raw_status, true AS signature_valid,
                  NULL::uuid AS source_id, NULL::varchar AS source_name, e.source::text AS provider,
                  true AS processed, false AS raw_trimmed, e.id AS event_id, e.type, e.subject, e.normalized, e.origin::text AS origin, e.received_at AS event_at,
-                 e.probe
+                 e.probe, e.verified
           FROM hub.events e WHERE e.tenant_id = ${t}::uuid AND e.raw_event_id IS NULL
         ) e WHERE true ${evConds.length ? Prisma.join(evConds, ' ') : Prisma.empty}
       )
       SELECT to_char(j.x_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS "cursorAt", j.x_key AS "cursorKey",
              j.x_at AS "at", j.raw_id AS "rawId", j.raw_status AS "rawStatus", j.signature_valid AS "signatureValid",
              j.source_id AS "sourceId", j.source_name AS "sourceName", j.provider, j.processed,
-             j.event_id AS "eventId", j.type, j.subject, j.normalized, j.origin, j.event_at AS "eventAt", j.probe,
+             j.event_id AS "eventId", j.type, j.subject, j.normalized, j.origin, j.event_at AS "eventAt", j.probe, j.verified,
              COALESCE(dl.deliveries, '[]'::json) AS deliveries
       -- Sắp + đánh số TRƯỚC khi LATERAL: nested loop giữ thứ tự nên LIMIT dừng sớm, không tính
       -- LATERAL cho cả 10k dòng rồi mới sắp (đo: 800ms → xem ADR-DRAFT EF-6).
@@ -339,6 +341,8 @@ export interface ExecutionRow {
   eventAt: Date | null;
   /** events.probe (ADR-159) — false với raw không sinh event. */
   probe: boolean;
+  /** PK5 (E4): raw_events.verified (dòng chỉ có event: events.verified). false = nguồn `unverified`. */
+  verified?: boolean;
   deliveries: any[];
 }
 

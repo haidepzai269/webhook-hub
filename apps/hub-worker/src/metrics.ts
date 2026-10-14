@@ -17,6 +17,16 @@ export const normalizeSchemaErrors = new Counter({
   registers: [workerRegistry],
 });
 
+/**
+ * PK5 khoá 4 (SPEC-provider-khac §7.1, ADR-206): sự kiện CHƯA xác thực (`verified=false`) khớp một subscription không bật
+ * `acceptUnverified` -> router không tạo delivery, đếm ở đây (mỗi cặp event × subscription bị bỏ).
+ */
+export const unverifiedSkipped = new Counter({
+  name: 'hub_unverified_skipped_total',
+  help: 'Số cặp (event chưa xác thực, subscription không acceptUnverified) router bỏ qua — không tạo delivery',
+  registers: [workerRegistry],
+});
+
 /** Kết quả mỗi lần gửi đã ghi DB: SUCCEEDED / RETRYING / DEAD (không tính lần hoãn vì circuit). */
 export const deliveriesTotal = new Counter({
   name: 'hub_deliveries_total',

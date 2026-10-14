@@ -393,6 +393,70 @@ export const CATALOG_DATA: CatalogEntry[] = [
     ]
   },
   {
+    "id": "momo",
+    "name": "MoMo",
+    "aliases": [
+      "momo",
+      "ví momo",
+      "vi momo",
+      "momo ipn"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "json-object",
+        "required": [
+          "partnerCode",
+          "orderId",
+          "requestId",
+          "amount",
+          "resultCode",
+          "transId",
+          "signature"
+        ],
+        "optional": [
+          "orderInfo",
+          "orderType",
+          "message",
+          "payType",
+          "responseTime",
+          "extraData"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "unverified",
+        "idempotency": {
+          "field": "transId"
+        },
+        "eventType": "momo.ipn",
+        "ack": {
+          "successStatus": 204
+        }
+      }
+    },
+    "fields": [],
+    "secretSource": null,
+    "docs": "https://developers.momo.vn/v3/docs/payment/api/result-handling/notification",
+    "docsVersion": "v3. Chữ ký HMAC-SHA256 trên các trường ĐÃ PARSE (S5, accessKey ở cấu hình, không có trong body) -> hub không verify (unverified, PK5): shop tự kiểm `signature` bằng SDK MoMo sau unwrapUnverified. IPN đòi 204 trong 15 giây (đối chiếu 2026-10-14). Khoá chống trùng của hub = transId + băm body (E7); shop chống trùng nghiệp vụ theo transId sau khi verify.",
+    "confidence": "cao",
+    "sources": [
+      "https://developers.momo.vn/v3/docs/payment/api/result-handling/notification",
+      "https://developers.momo.vn/v3/docs/payment/api/wallet/onetime"
+    ]
+  },
+  {
     "id": "paddle",
     "name": "Paddle Billing",
     "aliases": [
@@ -1092,6 +1156,55 @@ export const CATALOG_DATA: CatalogEntry[] = [
     "confidence": "cao",
     "sources": [
       "https://core.telegram.org/bots/api#setwebhook"
+    ]
+  },
+  {
+    "id": "twilio",
+    "name": "Twilio",
+    "aliases": [
+      "twilio"
+    ],
+    "group": null,
+    "fingerprint": {
+      "method": "POST",
+      "headers": {
+        "required": [
+          "x-twilio-signature"
+        ],
+        "optional": []
+      },
+      "userAgent": null,
+      "body": {
+        "format": "form",
+        "required": [],
+        "optional": [
+          "CallSid",
+          "From",
+          "To"
+        ]
+      },
+      "query": {
+        "required": [],
+        "optional": []
+      }
+    },
+    "handler": {
+      "config": {
+        "scheme": "unverified",
+        "forwardHeaders": [
+          "x-twilio-signature"
+        ],
+        "forwardUrl": true,
+        "eventType": "twilio.webhook"
+      }
+    },
+    "fields": [],
+    "secretSource": null,
+    "docs": "https://www.twilio.com/docs/usage/webhooks/webhooks-security",
+    "docsVersion": "X-Twilio-Signature = HMAC-SHA1 (khoá = Auth Token) trên URL đầy đủ + tham số POST sắp a→z (S6) -> hub không verify (unverified + forwardUrl, PK5): shop dùng twilio.validateRequest(authToken, sig, data.url, params từ data.raw). Cần HUB_PUBLIC_URL công khai (không có -> data.url null). Tham số thay đổi theo kênh/sự kiện (tài liệu nói rõ) -> fingerprint body chỉ optional; không khai khoá chống trùng (chỉ băm body, E7). Webhook voice/SMS muốn trả TwiML đồng bộ là S10 — hub chỉ trả 200 rỗng.",
+    "confidence": "cao",
+    "sources": [
+      "https://www.twilio.com/docs/usage/webhooks/webhooks-security"
     ]
   },
   {

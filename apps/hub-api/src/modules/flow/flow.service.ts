@@ -189,6 +189,8 @@ export class FlowService {
         subject: r.subject,
         /** events.probe (ADR-159): request kiểm tra kết nối do ADAPTER đánh dấu — UI không phải đoán theo tên kiểu. */
         probe: r.probe === true,
+        /** PK5 (E4, ADR-206): nhãn "Chưa xác thực" ở danh sách sự kiện — hub không xác thực nguồn này. */
+        verified: r.verified !== false,
         status: f.executionStatus,
         summary: f.summary,
         failedAt: f.failedAt,

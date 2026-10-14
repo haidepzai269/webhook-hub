@@ -12,6 +12,11 @@ import {
   AFTER_VERIFY_CHOICES,
   ECHO_RESPOND_CHOICES,
   ALGO_IN_PREFIX,
+  FORWARD_HEADERS_MAX,
+  FORWARD_URL_CHOICES,
+  UNVERIFIED_MAX_BODY_KB,
+  UNVERIFIED_SCHEME,
+  UNVERIFIED_STORAGE_FACTOR,
   GENERIC_SCHEMES,
   type GenericFormValues,
   HANDSHAKE_CHOICES,
@@ -43,6 +48,11 @@ const SCHEME_KEY: Record<GenericFormValues["scheme"], MessageKey> = {
   "signed-template": "page.sources.generic.scheme.signed-template",
   "static-token": "page.sources.generic.scheme.static-token",
   "standard-webhooks": "page.sources.generic.scheme.standard-webhooks",
+  unverified: "page.sources.generic.scheme.unverified",
+};
+const FORWARD_URL_KEY: Record<GenericFormValues["forwardUrl"], MessageKey> = {
+  no: "page.sources.generic.unverified.forward-url.no",
+  yes: "page.sources.generic.unverified.forward-url.yes",
 };
 const ALGO_KEY: Record<GenericFormValues["algo"], MessageKey> = {
   sha256: "page.sources.generic.algo.sha256",
@@ -107,7 +117,23 @@ function SelectField({
   hint,
 }: {
   control: Control<SourceFormValues>;
-  name: "scheme" | "algo" | "encoding" | "keyEncoding" | "location" | "idKind" | "sigMode" | "kvSep" | "timestampFormat" | "hsKind" | "hsWhenKind" | "hsAfterVerify" | "hsRespond" | "ackSuccess" | "ackReject";
+  name:
+    | "scheme"
+    | "algo"
+    | "encoding"
+    | "keyEncoding"
+    | "location"
+    | "idKind"
+    | "sigMode"
+    | "kvSep"
+    | "timestampFormat"
+    | "hsKind"
+    | "hsWhenKind"
+    | "hsAfterVerify"
+    | "hsRespond"
+    | "ackSuccess"
+    | "ackReject"
+    | "forwardUrl";
   label: string;
   options: readonly { value: string; label: string }[];
   hint?: string;
@@ -171,7 +197,8 @@ function TextField({
     | "hsTokenParent"
     | "hsTokenField"
     | "hsMacField"
-    | "hsUrlField";
+    | "hsUrlField"
+    | "forwardHeaders";
   id: string;
   label: string;
   placeholder: string;
@@ -220,6 +247,8 @@ export function GenericFields({
   const kvTimestamp = useWatch({ control, name: "kvTimestamp" });
   const sw = scheme === "standard-webhooks";
   const tpl = scheme === "signed-template";
+  const unv = scheme === UNVERIFIED_SCHEME;
+  const forwardUrl = useWatch({ control, name: "forwardUrl" });
   const v = { scheme, algo, location, sigMode };
   const hasTs = tpl && template.includes("{timestamp}");
   const tsInKv = sigMode === "kv" && kvTimestamp.trim() !== "";
@@ -237,6 +266,35 @@ export function GenericFields({
         label={t("page.sources.generic.scheme")}
         options={GENERIC_SCHEMES.map((s) => ({ value: s, label: t(SCHEME_KEY[s]) }))}
       />
+      {unv && (
+        // PK5 (SPEC-provider-khac §7, ADR-206): bốn khoá phải nói rõ TRƯỚC khi tạo — hub không xác thực, project phải bật cờ,
+        // đích phải tự bật nhận và tự verify chữ ký gốc; trần 45KB (E17); dung lượng ≈ 2,33× body (E26).
+        <div role="note" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <p className="font-medium">{t("page.sources.generic.unverified.title")}</p>
+          <p className="text-muted-foreground mt-1">
+            {t("page.sources.generic.unverified.note", { kb: UNVERIFIED_MAX_BODY_KB, factor: UNVERIFIED_STORAGE_FACTOR.toLocaleString() })}
+          </p>
+        </div>
+      )}
+      {unv && (
+        <TextField
+          control={control}
+          name="forwardHeaders"
+          id="src-forward-headers"
+          label={t("page.sources.generic.unverified.forward-headers")}
+          placeholder="x-twilio-signature"
+          hint={t("page.sources.generic.unverified.forward-headers-hint", { max: FORWARD_HEADERS_MAX })}
+        />
+      )}
+      {unv && (
+        <SelectField
+          control={control}
+          name="forwardUrl"
+          label={t("page.sources.generic.unverified.forward-url")}
+          options={FORWARD_URL_CHOICES.map((c) => ({ value: c, label: t(FORWARD_URL_KEY[c]) }))}
+          hint={t(forwardUrl === "yes" ? "page.sources.generic.unverified.forward-url-warning" : "page.sources.generic.unverified.forward-url-hint")}
+        />
+      )}
       {tpl && (
         <Field className="gap-1.5">
           <FieldLabel>{t("page.sources.generic.preset")}</FieldLabel>
@@ -440,7 +498,7 @@ export function GenericFields({
         id="src-id"
         label={t("page.sources.generic.id-value")}
         placeholder={sw ? "" : "transId"}
-        hint={t(sw ? "page.sources.generic.id-value-hint-sw" : "page.sources.generic.id-value-hint")}
+        hint={t(sw ? "page.sources.generic.id-value-hint-sw" : unv ? "page.sources.generic.unverified.id-value-hint" : "page.sources.generic.id-value-hint")}
       />
       <TextField
         control={control}

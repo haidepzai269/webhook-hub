@@ -27,6 +27,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { RedactSecretsInterceptor } from './redact-secrets.interceptor';
 import { RequestWithPrincipal } from '../service-api/principal';
 import { hubError } from '../errors/hub-error';
+import { parseAcceptUnverified } from './accept-unverified';
 import { assertSourceLimit, isOperatorRequest } from '../console/source-limit';
 import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from '../console/source-key';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
@@ -172,12 +173,8 @@ export class ApiController {
         sourceKey,
         isActive: true,
         ...(input.verificationConfig ? { verificationConfig: input.verificationConfig as any } : {}),
-        secrets: {
-          create: {
-            secretEncrypted: aesGcmEncrypt(input.secret, masterKey),
-            version: 1,
-          },
-        },
+        // PK5 (E14): `unverified` không có secret -> không tạo SourceSecret.
+        ...(input.secret !== null ? { secrets: { create: { secretEncrypted: aesGcmEncrypt(input.secret, masterKey), version: 1 } } } : {}),
       } as any);
       await repo.createAuditLog({
         action: 'source.create',
@@ -366,6 +363,7 @@ export class ApiController {
   async createSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     if (typeof body?.destinationId !== 'string' || !UUID_RE.test(body.destinationId)) throw new NotFoundException('Destination không tồn tại');
     const eventTypes = parseEventTypes(body?.eventTypes);
+    const acceptUnverified = parseAcceptUnverified(body?.acceptUnverified);
     return this.withAudit(tenantId, async (txRepo) => {
       // ADR-161 (T2): khoá cấu hình luồng rồi mới kiểm đích + nguồn TRONG transaction — không gắn được subscription vào
       // đích/source vừa bị lưu trữ song song.
@@ -383,13 +381,21 @@ export class ApiController {
         sourceIds,
         template: body.template,
         isActive: true,
+        // PK5 khoá 4: đích tự đồng ý nhận sự kiện chưa xác thực (mặc định không).
+        ...(acceptUnverified !== undefined ? { acceptUnverified } : {}),
       });
       await txRepo.createAuditLog({
         action: 'subscription.create',
         entityType: 'subscription',
         entityId: created.id,
         actor,
-        metadata: { name: created.name, destinationId: created.destinationId, eventTypes: created.eventTypes, sourceIds: created.sourceIds },
+        metadata: {
+          name: created.name,
+          destinationId: created.destinationId,
+          eventTypes: created.eventTypes,
+          sourceIds: created.sourceIds,
+          ...(acceptUnverified ? { acceptUnverified: true } : {}),
+        },
       });
       return created;
     });
@@ -404,8 +410,11 @@ export class ApiController {
     if (typeof body?.isActive === 'boolean') data.isActive = body.isActive;
     if (body?.template !== undefined) data.template = body.template === null ? null : String(body.template);
     if (body?.eventTypes !== undefined) data.eventTypes = parseEventTypes(body.eventTypes);
+    // PK5 khoá 4: bật/tắt "Nhận sự kiện chưa xác thực" — audit ghi giá trị mới (không bí mật).
+    const acceptUnverified = parseAcceptUnverified(body?.acceptUnverified);
+    if (acceptUnverified !== undefined) data.acceptUnverified = acceptUnverified;
     const wantsSourceIds = body?.sourceIds !== undefined;
-    if (Object.keys(data).length === 0 && !wantsSourceIds) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes, sourceIds)');
+    if (Object.keys(data).length === 0 && !wantsSourceIds) throw new BadRequestException('Không có trường nào để sửa (name, isActive, template, eventTypes, sourceIds, acceptUnverified)');
     return this.withAudit(tenantId, async (repo) => {
       // ADR-161 (T2): kiểm nguồn TRONG transaction, sau khoá cấu hình luồng.
       await repo.lockFlowConfig();
@@ -418,7 +427,7 @@ export class ApiController {
         entityId: id,
         actor,
         reason: optionalReason(body?.reason),
-        metadata: { fields: Object.keys(data) },
+        metadata: { fields: Object.keys(data), ...(acceptUnverified !== undefined ? { acceptUnverified } : {}) },
       });
       return u;
     });
@@ -659,6 +668,14 @@ export class ApiController {
     // ADR-163: subscription đang tắt cũng không nhận — cùng điều kiện `replayableOnly` của replay hàng loạt.
     if ((delivery.subscription as { isActive?: boolean } | undefined)?.isActive === false) {
       throw hubError('subscription_inactive', { field: 'subscriptionId' }, 'Subscription đang tắt — bật lại subscription rồi replay');
+    }
+    // PK5 khoá 4 (E4, ADR-206): event CHƯA xác thực chỉ tới subscription đang bật `acceptUnverified` — kiểm LẠI lúc replay
+    // (cờ có thể đã tắt sau khi delivery được tạo). Cùng điều kiện `replayableOnly` của replay hàng loạt.
+    if (
+      (delivery.event as { verified?: boolean } | undefined)?.verified === false &&
+      (delivery.subscription as { acceptUnverified?: boolean } | undefined)?.acceptUnverified !== true
+    ) {
+      throw hubError('unverified_not_accepted', { field: 'subscriptionId' }, 'Subscription không nhận sự kiện chưa xác thực — bật "Nhận sự kiện chưa xác thực" rồi replay');
     }
 
     // Chỉ replay bản MỚI NHẤT: bản đã bị replay rồi (có generation cao hơn) mà replay tiếp

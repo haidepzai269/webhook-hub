@@ -301,6 +301,24 @@ curl -si $HUB/hooks/generic/$SOURCE_KEY -H 'content-type: application/json' -d '
 **414.** Chuỗi query của URL `/hooks/*` dài quá 8KB. Hub chặn trước khi đọc nguồn (0 truy vấn DB).
 **Sửa:** gửi query ngắn hơn 8KB. Nhà cung cấp đặt token trong query thì nên chuyển sang tiêu đề.
 
+## source_unverified_disabled
+
+**401** (hoặc `ack.rejectStatus` của nguồn: 403/503). Nguồn có scheme `unverified` (hub nhận mà **không** xác thực, đích tự kiểm — SPEC-provider-khac §7, ADR-206) nhưng project chưa bật "Nhận nguồn chưa xác thực". Hub **không** ghi DB, **không** phạt điểm IP, không tính vào lưu lượng.
+**Sửa:** owner của project bật "Nhận nguồn chưa xác thực" ở console (Project → cài đặt), hoặc đổi nguồn sang scheme hub verify được (`hmac`, `static-token`, `standard-webhooks`, `signed-template`).
+```bash
+curl -si $HUB/hooks/generic/$SOURCE_KEY -H 'content-type: application/json' -d '{"transId":"1"}'
+```
+
+## unverified_body_too_large
+
+**413.** Body gửi vào nguồn `unverified` lớn hơn 45KB. Sự kiện chưa xác thực mang nguyên bytes gốc dạng base64 (`data.raw`, to ×4/3) và phải lọt trần gửi 64KB của worker — nhận rồi giao mãi không được thì tệ hơn từ chối ngay (E17). Hub không ghi DB, không phạt điểm.
+**Sửa:** giảm payload ở phía nhà cung cấp (chọn ít trường / ít sự kiện mỗi lần), hoặc dùng scheme hub verify được (trần 1MB).
+
+## unverified_not_accepted
+
+**409.** Replay một delivery của sự kiện **chưa xác thực** (`verified: false`) tới subscription đã tắt "Nhận sự kiện chưa xác thực". Hub kiểm lại cờ này **lúc replay** (khoá 4, E4).
+**Sửa:** bật "Nhận sự kiện chưa xác thực" trên subscription (đích phải tự verify chữ ký gốc của nhà cung cấp qua `data.raw` + `data.headers` + `data.url`) rồi replay lại.
+
 ## source_inactive
 
 **409.** Source `api` mà key dùng để publish đang bị tắt.

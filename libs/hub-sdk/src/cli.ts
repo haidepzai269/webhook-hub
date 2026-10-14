@@ -219,6 +219,9 @@ async function listen(args: string[], io: CliIO): Promise<number> {
     return 1;
   }
   io.out(`Connected to project "${me.project.slug}" as service "${me.serviceName}" (key ${masked})`);
+  // PK5 (E4): key có scope `read:unverified` (owner cấp) thì listen nhận cả sự kiện chưa xác thực, gắn nhãn [unverified].
+  const includeUnverified = me.scopes.includes('read:unverified');
+  if (includeUnverified) io.out('This key has scope "read:unverified": unverified events are forwarded too, labelled [unverified] — verify the provider signature yourself (unwrapUnverified).');
 
   let secret: string = values.secret ?? io.env.HUB_LISTEN_SECRET ?? '';
   if (!secret) {
@@ -266,7 +269,7 @@ async function listen(args: string[], io: CliIO): Promise<number> {
   while (!signal?.aborted) {
     let page: { events: HubEvent[]; nextCursor: string };
     try {
-      page = await client.poll({ after: cursor, types, wait: 20, limit: 100 });
+      page = await client.poll({ after: cursor, types, wait: 20, limit: 100, ...(includeUnverified ? { includeUnverified: true } : {}) });
       backoff = 0;
     } catch (e: any) {
       if (signal?.aborted) break;
@@ -286,7 +289,8 @@ async function listen(args: string[], io: CliIO): Promise<number> {
     for (const ev of page.events) {
       const r = await forwardEvent(target.toString(), ev, secret, fwdFetch);
       forwarded++;
-      const head = `${hhmmss()}  ${ev.type}  ${ev.id}  →`;
+      // PK5 (E4): nhãn cho sự kiện chưa xác thực — app local phải tự verify chữ ký gốc (unwrapUnverified).
+      const head = `${hhmmss()}  ${ev.type}${ev.verified === false ? ' [unverified]' : ''}  ${ev.id}  →`;
       if (r.error === 'econnrefused') {
         failed++;
         io.err(`${head} Cannot reach ${target.toString()} — is your app running?`);

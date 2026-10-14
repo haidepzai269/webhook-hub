@@ -13,6 +13,7 @@ import { EndpointService, endpointUrl, parseEndpointUrl, parseGivenSecret, publi
 import { WindowLimiter, parseEventTypes422, publicSubscription } from '../service-api/service-resources.controller';
 import { unprocessable } from '../service-api/service-api.controller';
 import { hubError } from '../errors/hub-error';
+import { parseAcceptUnverified } from '../api/accept-unverified';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -77,13 +78,21 @@ export class ConsoleEndpointsController {
     const url = parseEndpointUrl(body?.url);
     const eventTypes = parseConsoleEventTypes(body?.eventTypes);
     const given = parseGivenSecret(body?.signingSecret);
+    const acceptUnverified = parseAcceptUnverified(body?.acceptUnverified);
     const actor = `user:${userId}`;
     const r = await this.endpoints.create(tenantId, { name, url, signingSecret: given, createdByKeyId: null }, actor, async (repo, d) => {
       // ADR-161 (T2): khoá cấu hình luồng trước khi kiểm nguồn — không ghim vào source vừa bị lưu trữ song song.
       await repo.lockFlowConfig();
       const sourceIds = await ownSourceIds(repo, body?.sourceIds);
-      const s = await repo.createSubscription({ destinationId: d.id, name, eventTypes, sourceIds, isActive: true });
-      await repo.createAuditLog({ action: 'subscription.create', entityType: 'subscription', entityId: s.id, actor, metadata: { name, destinationId: d.id, eventTypes, sourceIds } });
+      // PK5 khoá 4: tick "Nhận sự kiện chưa xác thực" lúc tạo endpoint (mặc định không).
+      const s = await repo.createSubscription({ destinationId: d.id, name, eventTypes, sourceIds, isActive: true, ...(acceptUnverified ? { acceptUnverified } : {}) });
+      await repo.createAuditLog({
+        action: 'subscription.create',
+        entityType: 'subscription',
+        entityId: s.id,
+        actor,
+        metadata: { name, destinationId: d.id, eventTypes, sourceIds, ...(acceptUnverified ? { acceptUnverified: true } : {}) },
+      });
       return s;
     });
     return {

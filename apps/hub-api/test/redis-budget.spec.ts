@@ -450,6 +450,50 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     }
   });
 
+  it('[PK:T14] (phần e) PK5 nguồn unverified: nhận = 3 lệnh như mọi nguồn (EVAL + GET + SET), cờ tắt / 413 = 0 lệnh; normalize bỏ subscription không acceptUnverified = vẫn 1 PUBLISH', async () => {
+    const UNV = { scheme: 'unverified', eventType: 'momo.ipn', idempotency: { field: 'transId' } };
+    const ingest = async (allowUnverified: boolean, body: string) => {
+      const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
+      const prisma: any = {
+        findSourceBySourceKeyForIngest: jest.fn().mockResolvedValue({ id: 'src-u', tenantId: TENANT, provider: 'generic', isActive: true, verificationConfig: UNV, allowUnverified, secrets: [] }),
+        tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+        $transaction: jest.fn(async (fn: any) => fn(tx)),
+      };
+      return new IngestService(prisma, new RedisService()).ingestWebhook({
+        provider: 'generic', sourceKey: 'src_generic_unv', headers: {}, rawBody: Buffer.from(body), body: JSON.parse(body), method: 'POST', query: '',
+      });
+    };
+    expect((await ingest(true, '{"transId":"T1"}')).status).toBe(200);
+    expect(take()).toEqual(['eval', 'get', 'set']);
+    expect((await ingest(false, '{"transId":"T2"}')).status).toBe(401);
+    expect(take()).toEqual([]);
+    expect((await ingest(true, JSON.stringify({ transId: 'T3', pad: 'x'.repeat(60 * 1024) }))).status).toBe(413);
+    expect(take()).toEqual([]);
+
+    // normalize: raw verified=false, 2 subscription khớp (1 bật acceptUnverified) -> 1 delivery, vẫn đúng 1 PUBLISH (bỏ qua là trong bộ nhớ).
+    const subs = [{ id: 'sub-off', destination: { id: 'd0', name: 'd0', type: 'webhook' } }, { id: 'sub-on', acceptUnverified: true, destination: { id: 'd1', name: 'd1', type: 'webhook' } }];
+    const tx = {
+      event: { create: jest.fn(async ({ data }: any) => data) },
+      subscription: { findMany: jest.fn().mockResolvedValue(subs) },
+      delivery: { create: jest.fn(async ({ data }: any) => ({ ...data, id: 'del-u' })) },
+      outbox: { create: jest.fn() },
+      processedMessage: { create: jest.fn() },
+    };
+    const raw = '{"transId":"T1"}';
+    const prisma: any = {
+      forTenant: () => ({ findRawEventById: async () => ({ id: RAW, verified: false, headers: {}, body: JSON.parse(raw), bodyRaw: Buffer.from(raw), contentType: 'application/json', source: { verificationConfig: UNV } }) }),
+      processedMessage: { findUnique: jest.fn().mockResolvedValue(null) },
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      $transaction: jest.fn(async (fn: any) => fn(tx)),
+    };
+    const channel: any = { ack: jest.fn(), nack: jest.fn(), sendToQueue: jest.fn() };
+    const payload = { rawEventId: RAW, sourceId: 'src-u', tenantId: TENANT, provider: 'generic', correlationId: 'c' };
+    await new NormalizeConsumer(prisma).handleMessage({ content: Buffer.from(JSON.stringify(payload)), properties: { headers: {} } } as any, channel);
+    expect(channel.ack).toHaveBeenCalled();
+    expect(tx.delivery.create).toHaveBeenCalledTimes(1);
+    expect(take()).toEqual(['publish']);
+  });
+
   it('X9: POST /v1/p/:project/events đi qua persistAccepted -> ĐÚNG số lệnh như /hooks (EVAL + GET + SET); ApiKeyGuard 0 lệnh', async () => {
     const tx = { rawEvent: { create: jest.fn().mockResolvedValue({ id: RAW }) }, outbox: { create: jest.fn() } };
     const prisma: any = {

@@ -33,6 +33,9 @@ import {
   ECHO_RESPOND_CHOICES,
   ACK_SUCCESS_CHOICES,
   buildGenericConfig,
+  FORWARD_URL_CHOICES,
+  UNVERIFIED_FORM_DEFAULTS,
+  UNVERIFIED_SCHEME,
   GENERIC_SCHEMES,
   type GenericFormIssue,
   genericFormIssues,
@@ -144,6 +147,9 @@ const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
   "hs-field-invalid": "page.sources.generic.hs.field-invalid",
   "hs-header-invalid": "page.sources.generic.hs.header-invalid",
   "hs-conflict": "page.sources.generic.hs.conflict",
+  "forward-headers-invalid": "page.sources.generic.unverified.forward-headers-invalid",
+  "secret-unverified": "page.sources.generic.unverified.secret-forbidden",
+  "hs-unverified": "page.sources.generic.unverified.hs-forbidden",
 };
 
 /**
@@ -156,8 +162,11 @@ const makeSchema = (t: TranslateFn) =>
     .object({
       provider: z.enum(PROVIDERS),
       name: z.string().trim().min(1, t("page.sources.form.name-required")).max(255),
-      secret: z.string().min(SECRET_MIN, t("page.sources.form.secret-min")).max(SECRET_MAX, t("page.sources.form.secret-max")),
+      // PK5 (E14): `unverified` không có secret — độ dài tối thiểu kiểm ở superRefine (mọi nguồn khác vẫn 8–512).
+      secret: z.string().max(SECRET_MAX, t("page.sources.form.secret-max")),
       scheme: z.enum(GENERIC_SCHEMES),
+      forwardHeaders: z.string(),
+      forwardUrl: z.enum(FORWARD_URL_CHOICES),
       header: z.string(),
       encoding: z.enum(["hex", "base64"]),
       algo: z.enum(HMAC_ALGO_CHOICES),
@@ -199,6 +208,8 @@ const makeSchema = (t: TranslateFn) =>
       ackReject: z.enum(ACK_REJECT_CHOICES),
     })
     .superRefine(({ provider, name: _n, secret, ...v }, ctx) => {
+      const unverified = provider === "generic" && v.scheme === UNVERIFIED_SCHEME;
+      if (!unverified && secret.length < SECRET_MIN) ctx.addIssue({ code: "custom", path: ["secret"], message: t("page.sources.form.secret-min") });
       if (provider !== "generic") return;
       for (const { path, issue } of genericFormIssues(v, secret)) {
         ctx.addIssue({ code: "custom", path: [path], message: t(ISSUE_KEY[issue]) });
@@ -367,6 +378,7 @@ export default function SourcesPage() {
       eventType: "",
       ...TEMPLATE_FORM_DEFAULTS,
       ...HANDSHAKE_FORM_DEFAULTS,
+      ...UNVERIFIED_FORM_DEFAULTS,
     },
   });
   // useWatch thay vì form.watch: React Compiler memo hoá form.watch → gợi ý không đổi theo provider.
@@ -374,8 +386,17 @@ export default function SourcesPage() {
   const scheme = useWatch({ control: form.control, name: "scheme" });
 
   // PK1: chỉ generic gửi `verificationConfig` (dựng từ các ô tay); provider khác giữ đúng body cũ.
+  // PK5 (E14): nguồn `unverified` không gửi secret (server 422 nếu có).
+  const unverified = provider === "generic" && scheme === UNVERIFIED_SCHEME;
   const onSubmit = ({ provider: p, name, secret, ...generic }: Values) =>
-    create.mutateAsync({ provider: p, name, secret, ...(p === "generic" ? { verificationConfig: buildGenericConfig(generic) } : {}) }).then(
+    create
+      .mutateAsync({
+        provider: p,
+        name,
+        ...(p === "generic" && generic.scheme === UNVERIFIED_SCHEME ? {} : { secret }),
+        ...(p === "generic" ? { verificationConfig: buildGenericConfig(generic) } : {}),
+      })
+      .then(
       (src) => {
         toast.success(t("page.sources.toast.created", { name: src.name }), {
           description: t("page.sources.toast.created-url", {
@@ -487,6 +508,7 @@ export default function SourcesPage() {
                 </Field>
               )}
             />
+            {!unverified && (
             <Controller
               control={form.control}
               name="secret"
@@ -504,6 +526,7 @@ export default function SourcesPage() {
                 </Field>
               )}
             />
+            )}
             {provider === "generic" && (
               <GenericFields
                 control={form.control}

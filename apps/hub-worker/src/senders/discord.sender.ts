@@ -2,6 +2,7 @@ import { DestinationSender, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent } from '@hub/common';
 import { createSsrfSafeAxiosConfig } from '@hub/crypto';
 import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
+import { withUnverifiedLabel } from './unverified-label';
 
 export class DiscordSender implements DestinationSender {
   readonly type: DestinationType = 'discord';
@@ -21,7 +22,8 @@ export class DiscordSender implements DestinationSender {
     }
 
     const payload = {
-      content: renderedContent || `[Webhook Hub] Nhận sự kiện ${event.type} từ ${event.source}`,
+      // PK5 (E4): sự kiện chưa xác thực luôn mang tiền tố "[Chưa xác thực]" — kể cả khi template tự dựng nội dung.
+      content: withUnverifiedLabel(event, renderedContent || `[Webhook Hub] Nhận sự kiện ${event.type} từ ${event.source}`),
       embeds: [
         {
           title: `Sự kiện: ${event.type}`,

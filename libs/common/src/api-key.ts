@@ -7,7 +7,9 @@ import { createHash, randomBytes } from 'crypto';
  * key có entropy 256 bit nên không cần bcrypt/argon2 (không đoán ngược được bằng từ điển), và tra theo
  * hash là một truy vấn index thay vì so từng dòng.
  */
-export const API_SCOPES = ['publish:events', 'read:events', 'manage:endpoints', 'manage:sources'] as const;
+export const API_SCOPES = ['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'read:unverified'] as const;
+/** PK5 (E4, ADR-206): scope key chỉ OWNER cấp được (người tạo key phải tự có scope đó) — có audit qua `api_key.created`. */
+export const OWNER_GRANTED_API_SCOPES: readonly ApiScope[] = ['read:unverified'];
 export type ApiScope = (typeof API_SCOPES)[number];
 
 export type ProjectEnvironment = 'test' | 'live';

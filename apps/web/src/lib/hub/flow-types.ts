@@ -60,6 +60,8 @@ export interface ExecutionItem {
    * Tuỳ chọn: server cũ không gửi -> UI rớt về phỏng đoán theo tên kiểu (event-notes.expectedProbe).
    */
   probe?: boolean;
+  /** PK5 (E4, ADR-206): false = hub KHÔNG xác thực (nguồn `unverified`) — UI gắn nhãn "Chưa xác thực". Vắng = true. */
+  verified?: boolean;
   status: ExecutionStatus;
   summary: FlowSummaryDot[];
   failedAt: FlowFailedAt | null;

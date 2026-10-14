@@ -17,6 +17,7 @@ Body hub gửi tới đích webhook (`apps/hub-worker/src/senders/webhook.sender
   "sourceId": "9b5c…",         // id source CỤ THỂ trong project (R-1, ADR-094) — so với sourceIds đã ghim để tin nguồn
   "subject": "payment:92704",  // payment:<providerTxnId> | repo:<fullName>
   "normalized": true,          // true = data theo catalog dưới đây; false = data = { raw }
+  "verified": true,            // PK5: false = hub KHÔNG xác thực (nguồn unverified) — đích tự kiểm chữ ký gốc (luật 11)
   "data": { … },
   "occurredAt": "2026-10-10T07:02:37.000Z",
   "receivedAt": "2026-10-10T07:02:38.120Z",
@@ -53,6 +54,13 @@ Body hub gửi tới đích webhook (`apps/hub-worker/src/senders/webhook.sender
    `payos.webhook_test` — request PayOS bắn lúc `confirm-webhook`, nhận bằng bộ mẫu cố định của tài liệu PayOS
    (`orderCode 123` + `description "VQRIO123"` + `reference "TF230204212323"`, khớp đủ cả ba). PayOS đổi bộ mẫu →
    quay về `payment.received` như giao dịch thường (service tự lọc theo mã đơn của mình).
+11. **Sự kiện chưa xác thực (`verified: false`, PK5/ADR-206):** nguồn scheme `unverified` — hub nhận nhờ URL bí mật và
+   **không** kiểm chữ ký. `type` là kiểu riêng của nguồn (không bao giờ thuộc `payment.*`/`repo.*`/`hub.*` — 422 lúc lưu,
+   lỗi normalize vĩnh viễn nếu lọt), `normalized: false`, `data` khuôn cố định
+   `{ raw: <base64 bytes gốc>, contentType, headers: { <forwardHeaders> }, url?: <URL công khai lúc nhận>, method }`
+   (`url` chỉ khi nguồn bật `forwardUrl`). Chỉ tới subscription bật `acceptUnverified`; polling chỉ trả khi
+   `?includeUnverified=true` + scope `read:unverified`. Đích dùng `unwrapUnverified` (`@hub/sdk`) rồi verify bằng SDK
+   của provider, chống trùng nghiệp vụ SAU khi verify.
    `github.ping` — GitHub bắn khi tạo/sửa webhook (`X-GitHub-Event: ping`, ADR-162).
 
 ## 3. Miền thanh toán

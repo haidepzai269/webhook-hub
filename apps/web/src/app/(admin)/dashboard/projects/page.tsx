@@ -19,7 +19,7 @@ import { HubApiError } from "@/lib/hub/client";
 import { type ProjectSummary, useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { useIsOperator } from "@/lib/hub/me-store";
 import { projectCreateError, slugFromName } from "@/lib/hub/keys-logic";
-import { useCreateProject } from "@/lib/hub/project-queries";
+import { useCreateProject, useSetUnverifiedSources, useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useSetStorageQuota } from "@/lib/hub/storage-queries";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
@@ -81,6 +81,49 @@ function QuotaOverride({ projectId, name, value }: { projectId: string; name: st
         {t("page.storage.quota.save")}
       </Button>
     </form>
+  );
+}
+
+/**
+ * PK5 khoá 1 (SPEC-provider-khac §7.1, E14, E26, ADR-206): "Nhận nguồn chưa xác thực" của project đang chọn. Chỉ owner (hoặc
+ * người vận hành) bật/tắt — server kiểm `manage:project` và ghi audit. Tắt: mọi nguồn `unverified` bị từ chối ngay, không lưu.
+ */
+function UnverifiedSourcesSetting({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
+  const t = useT();
+  const q = useUnverifiedSources(projectId);
+  const save = useSetUnverifiedSources(projectId);
+  const on = q.data?.allowUnverifiedSources === true;
+  return (
+    <section className="mt-6 flex flex-col gap-2 rounded-md border p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="font-medium text-sm">{t("page.projects.unverified.title")}</p>
+          <p className="text-muted-foreground text-xs">{t("page.projects.unverified.hint")}</p>
+        </div>
+        <Badge variant={on ? "outline" : "secondary"} className={on ? "border-amber-500/50 text-amber-700 dark:text-amber-400" : undefined}>
+          {t(on ? "page.projects.unverified.on" : "page.projects.unverified.off")}
+        </Badge>
+      </div>
+      {canEdit ? (
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={q.isLoading || save.isPending}
+            onClick={() =>
+              save.mutate(!on, {
+                onSuccess: (r) => toast.success(t(r.allowUnverifiedSources ? "page.projects.unverified.enabled" : "page.projects.unverified.disabled")),
+                onError: (err) => toast.error(err instanceof HubApiError ? err.message : String(err)),
+              })
+            }
+          >
+            {t(on ? "page.projects.unverified.turn-off" : "page.projects.unverified.turn-on")}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-xs">{t("page.projects.unverified.owner-only")}</p>
+      )}
+    </section>
   );
 }
 
@@ -198,6 +241,12 @@ export default function ProjectsPage() {
           ))}
         </TableBody>
       </Table>
+      {projectId && (data ?? []).some((p) => p.id === projectId) && (
+        <UnverifiedSourcesSetting
+          projectId={projectId}
+          canEdit={operator || (data ?? []).find((p) => p.id === projectId)?.role === "owner"}
+        />
+      )}
 
       <Dialog open={open} onOpenChange={close}>
         <AdminDialogContent className="sm:max-w-lg">

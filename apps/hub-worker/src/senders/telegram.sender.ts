@@ -2,6 +2,7 @@ import { DestinationSender, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent } from '@hub/common';
 import { createSsrfSafeAxiosConfig } from '@hub/crypto';
 import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
+import { withUnverifiedLabel } from './unverified-label';
 
 export class TelegramSender implements DestinationSender {
   readonly type: DestinationType = 'telegram';
@@ -25,7 +26,8 @@ export class TelegramSender implements DestinationSender {
       return { status: 400, error: `SSRF Guard: ${err.message}`, durationMs: 0 };
     }
 
-    const text = renderedContent || `[Webhook Hub] Sự kiện: ${event.type}\nID: ${event.id}\nNguồn: ${event.source}`;
+    // PK5 (E4): sự kiện chưa xác thực luôn mang tiền tố "[Chưa xác thực]" — kể cả khi template tự dựng nội dung.
+    const text = withUnverifiedLabel(event, renderedContent || `[Webhook Hub] Sự kiện: ${event.type}\nID: ${event.id}\nNguồn: ${event.source}`);
     // Văn bản THUẦN (S1-7, ADR-042): không đặt parse_mode. Với Markdown, một dấu '_' hay '*' lẻ trong
     // dữ liệu (tên repo, nội dung chuyển khoản) làm Telegram trả 400 -> non-retryable -> DEAD.
     const payload = {
