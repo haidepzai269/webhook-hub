@@ -158,7 +158,10 @@ Tách ra mua được ba thứ:
 2a. Hộp phạt theo cặp (IP, sourceKey): cặp đang bị phạt vì ký sai liên tục -> 429 -> DỪNG (0 HMAC, 0 Redis)
 2b. (LH3) Chữ ký body của lưới `x-catchnet-body-signature` = HMAC(id.hex(sha256(rawBody))) khớp -> received_at của
     Worker = "bây giờ" khi verify (`ctx.verifyAt`: Stripe `constructEvent(receivedAt)`, Standard Webhooks `nowSec`,
-    signed-template) và = raw_events.received_at. Lệch -> verify theo Date.now(), vẫn giữ IP đã ký.
+    signed-template) và = raw_events.received_at. Lệch -> ingest coi như gọi thẳng (IP kết nối, Date.now(), không via) —
+    cổng phạt (trước body) chỉ KIỂM theo IP đã ký. Hạn: quá khứ ≤ CATCHNET_RETENTION_DAYS, tương lai ≤ 5 phút.
+    raw_events.headers bỏ x-catchnet-* (trừ id). nginx EG1 không đọc header lưới; lưới bật -> tắt cầu chì/limit_conn
+    theo IP của nginx cho /hooks/* (DEPLOYMENT §3.6).
     raw_events.via = catchnet-forward | catchnet-replay (NULL = gọi thẳng). URL công khai của request (`ctx.publicUrl`)
     theo đường vào: qua lưới -> HUB_INGEST_PUBLIC_URL, gọi thẳng -> HUB_PUBLIC_URL (H4).
 3.  Giải mã secrets · adapter.verify(rawBytes, headers, secrets[])

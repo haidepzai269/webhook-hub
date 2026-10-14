@@ -34,6 +34,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
   - `x-catchnet-signature: v1=HMAC(secret, id.received_at.client_ip.mode.method.path_and_query)`. Không có body. Cổng phạt kiểm chữ ký này để lấy `client_ip`.
   - `x-catchnet-body-signature: v1=HMAC(secret, id.hex(sha256(body)))`. Hub kiểm sau khi parse body: tự tính `sha256(rawBody)`, dựng lại HMAC rồi so bằng `timingSafeEqual`. **Chỉ khi khớp** thì `receivedAt` của lưới mới được dùng làm `ctx.verifyAt`.
   - Chữ ký đầu đúng mà body lệch → bỏ `receivedAt` (verify theo `Date.now()`), vẫn dùng IP đã ký cho hộp phạt.
+- Test `[LH:T22]` (LH3, REVIEW-LH3 TB-1): nginx edge (EG1) KHÔNG kiểm được chữ ký lưới nên không tin `x-catchnet-client-ip`; lưới bật (`CATCHNET_FORWARD_SECRET` ≥ 32 ký tự) → cầu chì + `limit_conn` theo IP của nginx tắt cho `/hooks/*` (khoá rỗng), `/v1/p/*` giữ cầu chì, cảnh báo level 50 nếu `EDGE_IP_FUSE=1`; 429/413/404/503 nginx tự sinh trên `/hooks*` mang `x-hub-outcome` (refused/rejected/rejected/unavailable).
 - **Code có sẵn:** `AdapterContext.verifyAt` đã có (`libs/providers/src/generic.adapter.ts:454`). LH3 chỉ đổ giá trị vào đó, rồi sửa `stripe.adapter.ts:33` truyền `receivedAt` vào `constructEvent` (ADR-174 vẫn đúng: cùng hàm của SDK, chỉ thêm tham số).
 
 **H4 (Trung bình). URL công khai của request phụ thuộc đường nó đi vào.**
@@ -555,5 +556,12 @@ CREATE TABLE sources_sync (
   - `CATCHNET_RETENTION_DAYS` ở hub nhận nguyên 1..30 (sai khuôn → 7). Worker phải dùng cùng giá trị.
   - Header lưới lặp (mảng) hoặc `x-catchnet-mode` ngoài {forward, replay} → bỏ qua cả bộ header. Worker (LH2) gửi đúng một giá trị mỗi header, `path_and_query` = pathname + search **thô** như URL provider gọi (không decode), METHOD chữ hoa.
   - `raw_events.via` ghi ở cả dòng REJECTED / bắt tay (để nút "Đã đổi" ở §9 nhận ra request đầu tiên qua lưới kể cả khi chữ ký provider sai).
+- **LH3 sau REVIEW-LH3 (2026-10-14):**
+  - **TB-1 (đã sửa, `[LH:T22]`):** nginx EG1 không kiểm được chữ ký lưới → không đọc `x-catchnet-client-ip`. Lưới bật (secret hợp lệ trong env `hub-all`) → `EDGE_HOOKS_IP_LIMITS=0`: tắt cầu chì + `limit_conn` theo IP cho `/hooks/*`; `/v1/p/*` giữ. 429/413/404/503 nginx tự sinh trên `/hooks*` mang `x-hub-outcome`. Luật ở DEPLOYMENT §3.6 + ADR-217.
+  - **T-1 (lệch H3 có chủ ý):** chữ ký body lệch → ingest coi như gọi thẳng (IP kết nối cho chấm điểm, không via, không `received_at`, URL `HUB_PUBLIC_URL`); cổng phạt vẫn chỉ KIỂM theo IP đã ký. `raw_events.headers` bỏ `x-catchnet-*` trừ `x-catchnet-id`.
+  - **T-2:** `received_at` tương lai ≤ 5 phút. **T-6:** secret < 32 ký tự bị bỏ, giá trị thứ ba bị bỏ, cảnh báo một lần. **T-4:** migration bỏ `VALIDATE` (Prisma chạy cả file trong một transaction — VALIDATE giữ ACCESS EXCLUSIVE suốt lúc quét).
+  - **T-3 (nợ):** `raw_events.received_at` = giờ Worker làm lệch các chỗ coi nó ≈ lúc INSERT: `findOrphanRawEvents` (`received_at < now() − 120s`) có thể báo mồ côi ngay khi phát lại hàng loạt (banner, `normalize.backlog` nháy — tự hết khi normalize chạy); `findRecentRawEventsForInspect` lọc `since` có thể bỏ sót bản phát lại. Đã kẹp `CATCHNET_RETENTION_DAYS ≤ EVENT_RETENTION_DAYS`. Đề xuất sửa (story riêng, có migration): cột `committed_at timestamptz DEFAULT now()` dùng cho mồ côi + Lắng nghe, `received_at` giữ nghĩa "provider gửi".
+  - **T-5 (luật cho LH2):** phản hồi Node `clientError` (431 header > 16KB, 400 request hỏng) không qua Express nên không có `x-hub-outcome`. Worker: 408/429 → retry (H2); 5xx không outcome hoặc `unavailable` → hub vắng; 4xx không outcome khác 404 → retry có hạn rồi `inbox_dead`; 404 hoặc 4xx `rejected`/`refused` → `inbox_dead`.
+  - **T-7:** test vector cố định `libs/crypto/test/fixtures/catchnet-vectors.json` — Worker LH2 phải kiểm cùng file. Worker ký ĐÚNG chuỗi target nó đưa vào `fetch` (`new URL()` bỏ `?` đứng một mình, chuẩn hoá percent-encoding — lệch thì header bị bỏ qua âm thầm).
 
 _(dev ghi vào đây; lệch với tài liệu provider hoặc trang giá Cloudflare thì trang chính thức thắng)_
