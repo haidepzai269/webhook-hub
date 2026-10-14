@@ -1,4 +1,5 @@
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac } from 'crypto';
+import { timingSafeCompare } from '@hub/crypto';
 import type { IncomingMessage } from 'http';
 import * as net from 'net';
 
@@ -71,13 +72,14 @@ function one(headers: CatchnetHeaders, name: string): string | null {
   return typeof v === 'string' ? v : null; // mảng (header lặp) -> không nhận
 }
 
-/** So hex chữ ký với từng secret bằng timingSafeEqual; KHÔNG dừng sớm (thời gian không lộ secret nào khớp). */
+/**
+ * So hex chữ ký với từng secret bằng `timingSafeCompare` (@hub/crypto: kiểm độ dài rồi `crypto.timingSafeEqual`);
+ * KHÔNG dừng sớm (thời gian không lộ secret nào khớp).
+ */
 function matchesAny(given: string, secrets: string[], data: string): boolean {
-  const g = Buffer.from(given, 'utf8');
   let ok = false;
   for (const secret of secrets) {
-    const expected = Buffer.from(createHmac('sha256', secret).update(data).digest('hex'), 'utf8');
-    if (g.length === expected.length && timingSafeEqual(g, expected)) ok = true;
+    if (timingSafeCompare(given, createHmac('sha256', secret).update(data).digest('hex'))) ok = true;
   }
   return ok;
 }
