@@ -863,4 +863,4 @@ Mục §8 (danh mục + `identify`) mang mã story **PK9** để checklist bắt
 - [ ] **PK6** — chế độ thu + kích hoạt
 - [ ] **PK7** — form "Provider khác"
 - [ ] **PK8** — giấy + nghiệm thu §13
-- [ ] **PK10** — chống trùng `path` lồng + `bodyHash` (E31) + nạp thêm danh mục
+- [x] **PK10** — chống trùng `path` lồng + `bodyHash` (E31) + nạp thêm danh mục — review R2 ĐẠT (REVIEW-PK10-R2: 0 Nặng/0 TB; Thấp L-1 engines node≥22, L-2 chẩn đoán lệch fingerprint, L-3 thứ tự diagnose → nợ)
