@@ -18,3 +18,4 @@ export * from './http-outcome';
 export * from './alerts';
 export * from './traffic';
 export * from './storage';
+export * from './log-throttle';

@@ -10,5 +10,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): JSON SIM không có id sự kiện/lần giao; body có retryCount (đếm lần gửi) nên băm body đổi theo lần gửi -> bodyHash sai. Nguồn: developers.docusign.com/platform/webhooks/connect/json-sim-event-model/"
 }

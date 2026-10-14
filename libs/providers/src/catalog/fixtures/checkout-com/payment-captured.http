@@ -1,0 +1,6 @@
+# origin: constructed; source: https://www.checkout.com/docs/developer-resources/webhooks/webhook-event-types/payment_captured
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Cko-Signature: 0000000000000000000000000000000000000000000000000000000000000000
+
+{"id":"evt_fkfqht6yonme7bk7jawrgzbbxq","source":"gwc_notifier1","type":"payment_captured","timestamp":"2023-05-24T09:12:32.357+00:00","version":"1.0.29","data":{"id":"pay_vti5layihapu5bhbn5tjtk6eem","action_id":"act_uqlj3642dyyuroivzdwfg2fysq","reference":"ORD-5023-4E89","amount":20,"processed_on":"2023-05-24T09:12:27.4695512Z","response_code":"10000","response_summary":"Approved","currency":"EUR","trigger":"manual"},"_links":{"self":{"href":"https://flow.cko-qa.ckotech.co/workflows/events/evt_fkfqht6yonme7bk7jawrgzbbxq"}}}

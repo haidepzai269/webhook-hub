@@ -1,0 +1,69 @@
+{
+  "id": "circleci",
+  "name": "CircleCI",
+  "aliases": [
+    "circleci",
+    "circle ci"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "circleci-event-type"
+      ],
+      "optional": [
+        "circleci-signature"
+      ]
+    },
+    "userAgent": "^CircleCI-Webhook/",
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "type",
+        "happened_at",
+        "webhook"
+      ],
+      "optional": [
+        "project",
+        "organization",
+        "pipeline",
+        "workflow",
+        "job"
+      ]
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "circleci-signature",
+      "prefix": "v1=",
+      "algo": "sha256",
+      "encoding": "hex",
+      "idempotency": {
+        "field": "id"
+      },
+      "eventType": "circleci.event"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret của webhook CircleCI (Project Settings → Webhooks). Bắt buộc đặt: không có secret thì CircleCI không gửi circleci-signature",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://circleci.com/docs/guides/integration/outbound-webhooks/",
+  "docsVersion": "Guide last_updated 2026-10-07, reference 2026-09-28 (đối chiếu 2026-10-14). circleci-signature là danh sách 'v1=…,v2=…'; hiện chỉ có v1 — config tiền tố tĩnh 'v1=' sẽ trượt nếu CircleCI thêm v2 vào cùng header. Khoá chống trùng id: 'ID used to uniquely identify each event … the client can use this to deduplicate events'.",
+  "confidence": "cao",
+  "sources": [
+    "https://circleci.com/docs/guides/integration/outbound-webhooks/",
+    "https://circleci.com/docs/reference/outbound-webhooks-reference/"
+  ]
+}

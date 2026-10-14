@@ -9,5 +9,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng tài liệu không nêu — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): tài liệu không có payload mẫu dạng chữ (chỉ ảnh), không nêu id sự kiện, không nói gửi lại giữ nguyên body; org_id/topic không rõ là header hay body. Nguồn: docs.haravan.com/docs/tutorials/webhooks/private-webhook/"
 }

@@ -305,10 +305,11 @@
           "PK6": "T24-T31,T34",
           "PK7": "T32",
           "PK8": "T39",
-          "PK9": "T19-T23"
+          "PK9": "T19-T23",
+          "PK10": "T40,T41"
         }
       },
-      "note": "SPEC-provider-khac bản 2 §17 (E19) + mục ĐÍNH CHÍNH SAU REVIEW BẢN 2 (ADR-201..210). PK9 = §8 danh mục + identify (trục phụ). PK0 làm E1 (bytes gốc mọi content-type) + E6 phần query/method."
+      "note": "SPEC-provider-khac bản 2 §17 (E19) + mục ĐÍNH CHÍNH SAU REVIEW BẢN 2 (ADR-201..210). PK9 = §8 danh mục + identify (trục phụ). PK10 = E31 chống trùng path lồng + bodyHash. PK0 làm E1 (bytes gốc mọi content-type) + E6 phần query/method."
     }
   ],
   "inline": [

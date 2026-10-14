@@ -10,5 +10,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng event.id (lồng, \"chưa xác minh\") — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): trang tài liệu chính thức (docs.cdp.coinbase.com/commerce/…webhooks-security, webhooks-fields) trả 404; chỉ còn SDK đã lưu trữ (github.com/coinbase/coinbase-commerce-node) — không đối chiếu được trên tài liệu đang sống. Body có attempt_number/scheduled_for (đổi theo lần gửi) nên không bodyHash; event.id là ứng viên path khi tài liệu xác minh lại."
 }

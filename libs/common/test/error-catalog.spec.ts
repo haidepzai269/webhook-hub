@@ -42,6 +42,18 @@ describe('[DX] catalog lỗi (DX1)', () => {
     expect(missing).toEqual([]);
   });
 
+  it('review PK10 TB-1: mã lỗi chống trùng của adapter (`/hooks`: missing_idempotency_key, empty_body) có trong catalog + ERRORS.md', () => {
+    const src = read('libs/providers/src/errors.ts');
+    const codes = new Set<string>();
+    for (const m of src.matchAll(/readonly code(?::[^=]+)?=\s*'([a-z][a-z0-9_]*)'/g)) codes.add(m[1]);
+    for (const m of src.matchAll(/readonly code:\s*([^=]+)=/g)) for (const c of m[1].matchAll(/'([a-z][a-z0-9_]*)'/g)) codes.add(c[1]);
+    expect([...codes].sort()).toEqual(expect.arrayContaining(['empty_body', 'missing_idempotency_key']));
+    expect([...codes].filter((c) => !isHubErrorCode(c))).toEqual([]);
+    const def = (ERROR_CATALOG as unknown as Record<string, { status: number; fix: (p: Record<string, unknown>) => string } | undefined>).empty_body;
+    expect(def?.status).toBe(422);
+    expect(def?.fix({})).toMatch(/bodyHash/);
+  });
+
   it('[DX:UX4] (phần c) fix chỉ dựng từ tham số khai báo; tham số lạ (key/secret) không lọt vào fix', () => {
     for (const [code, def] of Object.entries(ERROR_CATALOG)) {
       const fix = (def.fix as (p: Record<string, unknown>) => string)({ apiKey: 'hk_test_SECRETKEY', secret: 's3cr3t', body: '{"a":1}' });

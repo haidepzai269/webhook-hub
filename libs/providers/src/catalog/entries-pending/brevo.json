@@ -10,5 +10,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): không ký body; Bearer token đặt qua API nhưng tài liệu không nêu header mang token; id trong body là id webhook (không phải sự kiện), chỉ webhook coupon có event_id; không xác nhận gửi lại giữ nguyên body. Nguồn: developers.brevo.com/docs/secured-webhooks, transactional-webhooks"
 }
