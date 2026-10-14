@@ -110,13 +110,13 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
   };
 
   return (
-    <div className="flex max-h-[min(560px,calc(100vh-6rem))] flex-col">
+    <div className="flex max-h-[min(560px,calc(100dvh-6rem))] flex-col">
       <div className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
         <h2 className="font-semibold text-sm">{t("alerts.bell.label")}</h2>
         {openCount > 0 && <span className="text-muted-foreground text-xs">{t("alerts.bell.subtitle", { count: openCount })}</span>}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-area min-h-0 flex-1">
         {status !== "ready" && <p className="px-4 py-6 text-center text-muted-foreground text-sm">{t(STATUS_TEXT[status])}</p>}
         {status === "ready" && groups.length === 0 && <EmptyState />}
         {status === "ready" &&
