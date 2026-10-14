@@ -523,6 +523,26 @@ CREATE TABLE sources_sync (
 - ~~Q3~~ **Đã chốt 2026-10-14:** (a) Shop thay cron ADR-009 bằng `reconcile(refs)`.
 - ~~Q4~~ **Đã chốt 2026-10-14:** Admin tự tạo tài khoản Cloudflare free theo hướng dẫn dev viết vào `KEYS-CAN-LAY.md` (§7c). Subdomain tài khoản = **`webhookhub`** (`webhook-hub` bị chiếm) → URL thật `https://hub-hooks.webhookhub.workers.dev`, URL nháp `https://hub-hooks-spike.webhookhub.workers.dev`.
 
+## 15b. Checklist story (tick khi review ĐẠT; regex `\[x\] \*\*(LH[\w-]*)\*\*` của `verify:map`)
+
+- ✅ LH-S (spike, không có mã test nên không dùng dạng tick của `verify:map`) — spike Worker nháp: cổng ĐẠT (S1 Stripe, S2 PayOS kênh thật, S3 GitHub, S5 bytes), S6 đạt, S7 mới đo lúc hub thức, S4 SePay hoãn. Kết quả ở `SPIKE-workers-dev.md`
+- [x] **LH-URL** — §9 tách `HUB_INGEST_PUBLIC_URL` (`[LH:T17]`, ADR-211). REVIEW-LH-URL ĐẠT (0 Nặng / 0 TB). Nợ Thấp L1–L6 ghi ở §16
+- [ ] **LH3** — hub nhận request từ lưới (H1, H3, H4, H5). **Phải thêm mã test cho H4** trước khi code: request có chữ ký lưới dùng base ingest; request gọi thẳng dùng `HUB_PUBLIC_URL` (REVIEW-LH-URL L1)
+- [ ] **LH2** · [ ] **LH0** · [ ] **LH6** · [ ] **LH5** · [ ] **LH1** · [ ] **LH4** · [ ] **LH7**
+
 ## 16. Ghi chú / nợ phát hiện khi code
+
+- **LH-URL (REVIEW-LH-URL, Thấp):**
+  - **L1:** trước LH3, `publicHooksUrl()` dùng base ingest cho mọi request. **Không đặt `HUB_INGEST_PUBLIC_URL` trên Render trước khi LH3 lên.**
+  - **L2:** biến đặt sai thì chỉ nút Kết nối báo 422. Nên kiểm biến lúc khởi động ở production.
+  - **L3:** `connect()`, `connectExisting()` và trường `ingestUrl` của controller chưa có test.
+  - **L4:** `ingestUrl` chưa có trong response PATCH và connect.
+  - **L5:** chữ cũ còn trong `docsVersion` Twilio, `DEPLOYMENT.md:657`, `HUONG-DAN-DEPLOY.md:145`.
+  - **L6:** ADR-220 được nhắc tới nhưng chưa ghi (sẽ ghi ở LH2/§9 khi bật Worker thật).
+  - Message của commit `013caf3` ghi "DỞ DANG", nhưng nội dung đã hoàn tất ở `4430304`.
+- **LH-S:**
+  - Header tới Worker bị viết thường và đổi thứ tự.
+  - Cloudflare tự thêm `cf-*`, `x-real-ip`, `x-forwarded-proto`; LH2 phải bỏ khi chuyển tiếp.
+  - Lần deploy đầu, cron chạy chậm vài phút.
 
 _(dev ghi vào đây; lệch với tài liệu provider hoặc trang giá Cloudflare thì trang chính thức thắng)_
