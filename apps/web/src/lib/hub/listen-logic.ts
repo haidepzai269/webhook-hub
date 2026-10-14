@@ -1,5 +1,6 @@
 // PK1 (SPEC-provider-khac §3, ADR-202): logic thuần của tab "Lắng nghe" và form tay "Nhà cung cấp khác" (generic).
 // Không import React — test bằng jest ở gốc repo.
+import type { MessageKey } from "../i18n/dictionary";
 
 /** Chẩn đoán của adapter (khuôn `Diagnosis` của @hub/providers) — chỉ TÊN header/trường, không bao giờ giá trị. */
 export interface InspectDiagnosis {
@@ -34,7 +35,13 @@ export interface InspectRow {
 export type ConnectionState =
   | { kind: "waiting" }
   | { kind: "handshaken"; handshake: InspectHandshake }
-  | { kind: "connected"; lastFailure: InspectDiagnosis | null; handshake: InspectHandshake | null }
+  | {
+      kind: "connected";
+      lastFailure: InspectDiagnosis | null;
+      handshake: InspectHandshake | null;
+      /** PK5 khoá 2 (REVIEW-PK5 TB-1): request đã nhận là của nguồn `unverified` — nhận được, nhưng KHÔNG "hợp lệ ✓". */
+      unverified: boolean;
+    }
   | { kind: "failing"; diagnosis: InspectDiagnosis };
 
 /** PK4: dòng REJECTED của bắt tay KHÔNG phải trượt (E8) — nó là "đã bắt tay". */
@@ -52,9 +59,15 @@ export function connectionState(rows: InspectRow[] | undefined): ConnectionState
   const list = rows ?? [];
   const hsRow = list.find(isHandshakeRow);
   const handshake = hsRow ? (hsRow.handshake ?? { kind: "unknown" }) : null;
-  if (list.some((r) => r.status === "ACCEPTED")) {
+  const accepted = list.find((r) => r.status === "ACCEPTED");
+  if (accepted) {
     const latest = list[0];
-    return { kind: "connected", lastFailure: latest?.status === "REJECTED" && !isHandshakeRow(latest) ? latest.diagnosis : null, handshake };
+    return {
+      kind: "connected",
+      lastFailure: latest?.status === "REJECTED" && !isHandshakeRow(latest) ? latest.diagnosis : null,
+      handshake,
+      unverified: accepted.diagnosis?.reason === "unverified",
+    };
   }
   const rejected = list.find((r) => r.status === "REJECTED");
   if (rejected && isHandshakeRow(rejected)) return { kind: "handshaken", handshake: handshake! };
@@ -80,6 +93,26 @@ export function isSnsSubscribeUrl(url: string): boolean {
     return false;
   }
 }
+
+/**
+ * Câu i18n cho từng lý do chẩn đoán của adapter. PK5 (REVIEW-PK5 TB-1): `unverified` (ACCEPTED của nguồn chưa xác thực) có
+ * câu riêng — KHÔNG BAO GIỜ rơi về "hợp lệ" (`ok`). Lý do lạ -> "unknown".
+ */
+export const LISTEN_REASON_KEYS: Record<string, MessageKey> = {
+  ok: "page.sources.listen.reason.ok",
+  unverified: "page.sources.listen.reason.unverified",
+  missing_header: "page.sources.listen.reason.missing-header",
+  signature_mismatch: "page.sources.listen.reason.signature-mismatch",
+  token_mismatch: "page.sources.listen.reason.token-mismatch",
+  timestamp_out_of_range: "page.sources.listen.reason.timestamp-out-of-range",
+  missing_kv_key: "page.sources.listen.reason.missing-kv-key",
+  missing_idempotency_key: "page.sources.listen.reason.missing-idempotency-key",
+  mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
+  mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",
+  config_invalid: "page.sources.listen.reason.config-invalid",
+  handshake: "page.sources.listen.reason.handshake",
+};
+export const listenReasonKey = (reason: string): MessageKey => LISTEN_REASON_KEYS[reason] ?? "page.sources.listen.reason.unknown";
 
 /** Tách chẩn đoán thành lý do + tên header/trường để dựng câu i18n. Không có lý do -> "unknown". */
 export function diagnosisParts(d: InspectDiagnosis): { reason: string; name: string | null; candidates: string[] } {

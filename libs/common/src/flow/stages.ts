@@ -61,6 +61,10 @@ export const REASON_CODES = {
   subscription_inactive: 'Subscription khớp kiểu nhưng đang tắt',
   endpoint_unverified: 'Endpoint chưa xác minh (challenge)',
   source_filtered: 'Subscription không nhận từ source này',
+  /** PK5 (khoá 2, ADR-206): nguồn `unverified` — hub KHÔNG kiểm chữ ký; không bao giờ là "hợp lệ". */
+  unverified_source: 'Nguồn chưa xác thực — hub không kiểm chữ ký, nơi nhận phải tự kiểm chữ ký gốc',
+  /** PK5 (khoá 4): event chưa xác thực chỉ tới subscription đã bật "nhận sự kiện chưa xác thực". */
+  unverified_not_accepted: 'Subscription chưa bật nhận sự kiện chưa xác thực',
   http_5xx: 'Đích trả lỗi máy chủ (5xx)',
   http_4xx: 'Đích từ chối (4xx) — lỗi cấu hình, không thử lại',
   http_408: 'Đích hết thời gian chờ (408)',

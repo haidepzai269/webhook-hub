@@ -108,6 +108,11 @@ export interface Diagnosis {
     | 'mapping_field_missing'
     | 'mapping_field_invalid'
     | 'config_invalid'
+    /**
+     * PK5 khoá 2 (REVIEW-PK5 TB-1): ACCEPTED của nguồn `unverified` — đã NHẬN nhưng hub không kiểm chữ ký. `ok: true`
+     * (kết nối thông) nhưng console KHÔNG được ghi "hợp lệ".
+     */
+    | 'unverified'
     /** PK4: dòng bắt tay (inspect gắn, không phải adapter). */
     | 'handshake';
   expectedHeader?: string;

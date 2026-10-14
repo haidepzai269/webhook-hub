@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -39,7 +40,11 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
     <Sheet open={open && Boolean(eventId)} onOpenChange={(o) => !o && onClose()}>
       <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle className="font-mono text-base">{ev?.type ?? t("page.events.sheet.title")}</SheetTitle>
+          <SheetTitle className="flex items-center gap-2 font-mono text-base">
+            {ev?.type ?? t("page.events.sheet.title")}
+            {/* PK5 khoá 2: nhãn "Chưa xác thực" ở mọi nơi có event. */}
+            <UnverifiedBadge of={ev} />
+          </SheetTitle>
           <SheetDescription>
             {t("page.events.sheet.description")}
           </SheetDescription>

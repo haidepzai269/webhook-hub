@@ -231,3 +231,53 @@ describe('[PK5] vòng tròn Twilio qua unverified', () => {
     expect(twilioVerify(authToken, { ...u, url: 'https://evil.com/hooks/generic/src_generic_unv' })).toBe(false);
   });
 });
+
+/** REVIEW-PK5 thấp T-1 / T-2 / T-3 qua IngestService thật. */
+describe('[PK5] review — bắt tay khi cờ tắt, "cặp tốt", trần phong bì', () => {
+  const HS = { ...BASE, handshake: { kind: 'body-echo', when: { field: 'type', equals: 'url_verification' }, echo: { field: 'challenge' } } };
+  const hsBody = '{"type":"url_verification","challenge":"abc123"}';
+
+  it('[PK:T14] (phần g) T-1: cờ project TẮT -> bắt tay của nguồn unverified bị từ chối như sự kiện: không trả lời echo, 0 ghi (kể cả dòng bắt tay), không phạt', async () => {
+    const off = build(HS, false);
+    const r = await off.svc.ingestWebhook(req(hsBody));
+    expect(r.status).toBe(401);
+    expect(r.body).toMatchObject({ error: 'source_unverified_disabled' });
+    expect(JSON.stringify(r.body)).not.toContain('abc123');
+    expect(off.prisma.tenantTx).not.toHaveBeenCalled();
+    expect(off.tx.rawEvent.create).not.toHaveBeenCalled();
+    expect(off.bad).not.toHaveBeenCalled();
+    // Cờ BẬT: bắt tay chạy như PK4 (trả lại challenge).
+    const on = build(HS, true);
+    const ok = await on.svc.ingestWebhook(req(hsBody));
+    expect(ok.status).toBe(200);
+    expect(ok.body).toBe('abc123');
+  });
+
+  it('[PK:T14] (phần h) T-2: nhận request unverified KHÔNG đánh dấu "cặp tốt" (markGood chỉ khi chữ ký được kiểm thật)', async () => {
+    const t = build(BASE, true);
+    const good = jest.spyOn(t.svc.penalty, 'markGood');
+    const r = await t.svc.ingestWebhook(req('{"transId":"T1"}'));
+    expect(r.status).toBe(200);
+    expect(good).not.toHaveBeenCalled();
+  });
+
+  it('[PK:T38] (phần e) T-3: body < 45KB nhưng phong bì (base64 + url + header gửi kèm) > 64KB -> 413, 0 ghi; cùng body không gửi url -> nhận', async () => {
+    const body = Buffer.alloc(44 * 1024, 0x61);
+    const longQuery = `q=${'x'.repeat(8000)}`;
+    const withUrl = build({ ...BASE, forwardUrl: true }, true);
+    const r = await withUrl.svc.ingestWebhook(req(body, { parse: false, contentType: 'text/plain', query: longQuery }));
+    expect(r.status).toBe(413);
+    expect(r.body).toMatchObject({ error: 'unverified_body_too_large', fix: expect.stringMatching(/URL and headers/) });
+    expect(withUrl.tx.rawEvent.create).not.toHaveBeenCalled();
+    expect(withUrl.bad).not.toHaveBeenCalled();
+    expect(withUrl.redisCalls()).toBe(0);
+    // Header gửi kèm cũng tính: 5 × ~1KB đẩy phong bì quá 64KB.
+    const names = ['x-a', 'x-b', 'x-c', 'x-d', 'x-e'];
+    const fat = build({ ...BASE, forwardHeaders: names }, true);
+    const headers = Object.fromEntries(names.map((n) => [n, 'v'.repeat(1000)]));
+    expect((await fat.svc.ingestWebhook(req(body, { parse: false, contentType: 'text/plain', headers }))).status).toBe(413);
+    // Không url, không header: 44KB vẫn lọt.
+    const plain = build(BASE, true);
+    expect((await plain.svc.ingestWebhook(req(body, { parse: false, contentType: 'text/plain', query: longQuery }))).status).toBe(200);
+  });
+});

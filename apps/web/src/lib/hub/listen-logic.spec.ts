@@ -80,13 +80,13 @@ describe("[PK:T5] trạng thái kết nối: chờ -> ✓ khi có ACCEPTED đầ
     const failing = [row("r1", "REJECTED", { ok: false, reason: "signature_mismatch", expectedHeader: "x-signature" })];
     expect(connectionState(failing).kind).toBe("failing");
     const after = [row("r2", "ACCEPTED", { ok: true, reason: "ok" }, "2026-10-13T10:00:05Z"), ...failing];
-    expect(connectionState(after)).toEqual({ kind: "connected", lastFailure: null, handshake: null });
+    expect(connectionState(after)).toEqual({ kind: "connected", lastFailure: null, handshake: null, unverified: false });
   });
 
   it("đã ✓ mà request mới nhất trượt -> vẫn ✓, kèm lần trượt gần nhất để dev thấy", () => {
     const d = { ok: false, reason: "token_mismatch", expectedHeader: "x-token" } as const;
     const rows = [row("r3", "REJECTED", d, "2026-10-13T10:00:09Z"), row("r2", "ACCEPTED", { ok: true, reason: "ok" }, "2026-10-13T10:00:05Z")];
-    expect(connectionState(rows)).toEqual({ kind: "connected", lastFailure: d, handshake: null });
+    expect(connectionState(rows)).toEqual({ kind: "connected", lastFailure: d, handshake: null, unverified: false });
   });
 
   it("DUPLICATE không phải bằng chứng nối được; ACCEPTED có lỗi ánh xạ vẫn là ✓ (request đã vào)", () => {
@@ -134,7 +134,7 @@ describe("[PK:T10] (phần d) PK4 console: Lắng nghe hiện \"Đã bắt tay �
     const bad = row("r2", "REJECTED", { ok: false, reason: "signature_mismatch", expectedHeader: "x-sig" }, "2026-10-13T10:00:02Z");
     expect(connectionState([bad, h]).kind).toBe("failing");
     const acc = row("a3", "ACCEPTED", { ok: true, reason: "ok" }, "2026-10-13T10:00:03Z");
-    expect(connectionState([acc, bad, h])).toEqual({ kind: "connected", lastFailure: null, handshake: { kind: "query-echo" } });
+    expect(connectionState([acc, bad, h])).toEqual({ kind: "connected", lastFailure: null, handshake: { kind: "query-echo" }, unverified: false });
     // Dòng mới nhất là bắt tay lặp lại (Zoom 72 giờ) -> không phải "request mới nhất trượt".
     expect(connectionState([hs("h4", { kind: "hmac-echo" }, "2026-10-13T10:00:04Z"), acc])).toMatchObject({ kind: "connected", lastFailure: null });
   });

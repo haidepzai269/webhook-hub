@@ -876,7 +876,7 @@ export class ApiController {
       count: refs.length,
       batchId,
       items,
-      // ADR-163 (M1): id đã xem trước nhưng KHÔNG replay — vì sao (not_found | not_dead | already_replayed | destination_unavailable).
+      // ADR-163 (M1): id đã xem trước nhưng KHÔNG replay — vì sao (not_found | not_dead | already_replayed | destination_unavailable | unverified_not_accepted | event_trimmed).
       skipped: { count: skipped.length, byReason: skippedByReason, items: skipped },
     };
   }

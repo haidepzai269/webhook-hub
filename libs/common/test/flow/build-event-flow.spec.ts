@@ -356,3 +356,48 @@ describe('buildEventFlow — ánh xạ trạng thái DB → chặng', () => {
     expect(f.summary.slice(0, 3).map((d) => d.status)).toEqual(['pending', 'pending', 'pending']);
   });
 });
+
+describe('PK5 khoá 2 + khoá 4 — hành trình của sự kiện chưa xác thực (REVIEW-PK5 TB-1)', () => {
+  const unverifiedRaw = () => raw({ provider: 'generic', sourceName: 'MoMo', verified: false });
+
+  it('[PK:T16] (phần d) raw verified=false: chặng Xác thực KHÔNG "hợp lệ", không xanh — warning + lý do unverified_source', () => {
+    const f = flow({ raw: unverifiedRaw(), event: event({ type: 'momo.ipn', source: 'generic' }), deliveries: [delivery()] });
+    const v = f.stages.find((s) => s.key === 'verified')!;
+    expect(v.status).toBe('warning');
+    expect(v.title).not.toMatch(/hợp lệ/);
+    expect(v.title).toContain('Chưa xác thực');
+    expect(v.reason?.code).toBe('unverified_source');
+    expect(v.detail).toEqual({ verified: false });
+    // Đường ống mini của danh sách cũng không tô xanh chặng này.
+    expect(f.summary.find((d) => d.stage === 'verified')?.status).toBe('warning');
+    // Không phải lỗi: hành trình vẫn chạy tiếp và vẫn có thể thành công.
+    expect(f.stages.map((s) => s.key)).toContain('routed');
+    expect(f.executionStatus).toBe('succeeded');
+    expect(f.failedAt).toBeNull();
+  });
+
+  it('[PK:T16] (phần e) raw verified vắng/true: chặng Xác thực vẫn "hợp lệ" như cũ', () => {
+    expect(flow({ raw: raw({ verified: true }) }).stages[1]).toMatchObject({ status: 'ok', title: 'Chữ ký PayOS hợp lệ' });
+    expect(flow({}).stages[1].status).toBe('ok');
+  });
+
+  it('[PK:T16] (phần f) classifySkippedSubscriptions: event chưa xác thực + subscription chưa bật acceptUnverified -> unverified_not_accepted', () => {
+    const candidates = [
+      { id: 'accepts', name: 'nhận', eventTypes: ['*'], isActive: true, acceptUnverified: true },
+      { id: 'refuses', name: 'không nhận', eventTypes: ['*'], isActive: true, acceptUnverified: false },
+      { id: 'legacy', name: 'cột vắng', eventTypes: ['*'], isActive: true },
+      { id: 'off', name: 'tắt', eventTypes: ['*'], isActive: false, acceptUnverified: false },
+    ];
+    expect(classifySkippedSubscriptions(candidates, [], 'src-1', false).map((s) => [s.id, s.reason])).toEqual([
+      ['refuses', 'unverified_not_accepted'],
+      ['legacy', 'unverified_not_accepted'],
+      ['off', 'subscription_inactive'],
+    ]);
+    // Event đã xác thực: acceptUnverified không liên quan (mặc định của tham số = true, đường cũ không đổi).
+    expect(classifySkippedSubscriptions(candidates, [], 'src-1').map((s) => s.id)).toEqual(['off']);
+    const skipped = classifySkippedSubscriptions(candidates.slice(1, 2), [], 'src-1', false);
+    const r = flow({ raw: unverifiedRaw(), deliveries: [], skippedSubscriptions: skipped }).stages.find((s) => s.key === 'routed')!;
+    expect(r.reason?.code).toBe('unverified_not_accepted');
+    expect(REASON_CODES.unverified_not_accepted).toContain('chưa xác thực');
+  });
+});

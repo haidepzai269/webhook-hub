@@ -762,6 +762,28 @@ export const isForbiddenForwardHeader = (h: string): boolean => FORWARD_HEADERS_
  * nhận rồi giao mãi không được.
  */
 export const UNVERIFIED_MAX_BODY_BYTES = 45 * 1024;
+/**
+ * Review PK5 T-3: trần 45KB chỉ tính body — `data.url` (query thô tới 8KB, E27) và `data.headers` (≤ 10 header) cũng nằm
+ * trong phong bì. Ước lượng phong bì webhook (`toWebhookBody`) phải ≤ trần gửi 64KB (`SEND_MAX_BYTES` của worker), không thì
+ * request được ACK (BB-3) nhưng delivery DEAD vĩnh viễn. Vượt -> 413 lúc ingest như E17.
+ */
+export const UNVERIFIED_ENVELOPE_MAX_BYTES = 64 * 1024;
+/** Phần cố định của phong bì: id, type (≤128), source, sourceId, contentType, method, mốc thời gian, tên khoá JSON. */
+export const UNVERIFIED_ENVELOPE_FIXED_BYTES = 1024;
+/** Phần cố định của `data.url` ngoài query: `PUBLIC_HOOKS_BASE_URL` + `/hooks/generic/<sourceKey>`. */
+export const UNVERIFIED_URL_BASE_BYTES = 512;
+
+/**
+ * Ước lượng (trên, không thấp hơn thật) số byte phong bì webhook của một event `unverified`: base64 của body + URL (chỉ khi
+ * `forwardUrl`; query tính theo độ dài JSON đã thoát) + mọi header gửi kèm có mặt (tên + giá trị JSON) + phần cố định.
+ */
+export function estimateUnverifiedEnvelopeBytes(o: { bodyBytes: number; query: string | null; forwardHeaders: Record<string, string> }): number {
+  const base64 = 4 * Math.ceil(o.bodyBytes / 3);
+  const url = o.query === null ? 0 : UNVERIFIED_URL_BASE_BYTES + JSON.stringify(o.query).length;
+  let headers = 0;
+  for (const [k, v] of Object.entries(o.forwardHeaders)) headers += JSON.stringify(k).length + JSON.stringify(v).length + 2;
+  return UNVERIFIED_ENVELOPE_FIXED_BYTES + base64 + url + headers;
+}
 /** Trường cấp một không có ở `unverified` (không verify, không ánh xạ — `data` khuôn cố định). */
 const UNVERIFIED_FORBIDDEN_FIELDS = [
   'header',

@@ -575,7 +575,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       return { status: 429, body: { error: 'Vượt quá tần suất cho phép (Rate limit)' } };
     }
     // EG2 (đính chính ADR-177): ký đúng VÀ qua rate limit -> nhớ "cặp tốt" (bộ nhớ, 0 I/O). Request bị 429 không được tính.
-    this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey, source.tenantId), undefined);
+    // Review PK5 T-2: "cặp tốt" nghĩa là KÝ ĐÚNG — request `unverified` (không ai kiểm chữ ký) không được nâng ngưỡng phạt.
+    if (verdict.verified) this.penaltySafe(() => this.penalty.markGood(req.ip, req.sourceKey, source.tenantId), undefined);
 
     // 4. Trích xuất Idempotency Key, rồi bước 5–7 qua lõi dùng chung (S4)
     let idempotencyKey: string;

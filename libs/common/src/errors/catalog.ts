@@ -199,7 +199,7 @@ export const ERROR_CATALOG = {
     status: 413,
     message: 'The body is too large for an unverified source.',
     fix: () =>
-      'Unverified sources accept at most 45KB per request: the raw body is forwarded base64-encoded and must fit the 64KB delivery limit. Ask the provider for smaller payloads, or use a scheme the hub verifies.',
+      'Unverified sources accept at most 45KB per request: the raw body is forwarded base64-encoded, together with the forwarded URL and headers, and must fit the 64KB delivery limit. Ask the provider for smaller payloads (or a shorter query string), or use a scheme the hub verifies.',
   },
   unverified_not_accepted: {
     status: 409,

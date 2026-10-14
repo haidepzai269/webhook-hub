@@ -22,7 +22,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
+import { useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
+import { isUnverifiedSource, unverifiedSourceBlocked } from "@/lib/hub/unverified";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
@@ -231,7 +233,13 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     id: "name",
     header: t("common.name"),
     accessorFn: (s) => s.name,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    cell: ({ row }) => (
+      <div className="min-w-0">
+        <span className="font-medium">{row.original.name}</span>
+        {/* Review PK5 T-9: request bị từ chối khi cờ project tắt không vào lưu lượng / Lắng nghe — cảnh báo ngay cạnh nguồn. */}
+        <UnverifiedBlockedNote source={row.original} />
+      </div>
+    ),
     enableHiding: false,
   },
   {
@@ -310,6 +318,19 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     ),
   },
 ];
+
+/** Review PK5 T-9: nguồn `unverified` ở project chưa bật "Nhận nguồn chưa xác thực" — mọi request đang bị từ chối, không ghi. */
+function UnverifiedBlockedNote({ source }: { source: Source }) {
+  const t = useT();
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  const flag = useUnverifiedSources(isUnverifiedSource(source) ? projectId : null);
+  if (!unverifiedSourceBlocked(source, flag.data?.allowUnverifiedSources)) return null;
+  return (
+    <p role="note" className="mt-1 max-w-xs whitespace-normal text-amber-700 text-xs dark:text-amber-400">
+      {t("page.sources.unverified-blocked")}
+    </p>
+  );
+}
 
 function KeepLongerCell({ source }: { source: Source }) {
   const t = useT();

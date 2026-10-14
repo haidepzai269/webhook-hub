@@ -68,7 +68,7 @@ describeDb('[PK5] nguồn unverified trên Postgres', () => {
     ]);
   });
 
-  it('[PK:T36] (phần f) replay hàng loạt: DEAD của event chưa xác thực tới subscription TẮT accept_unverified bị loại (lý do destination_unavailable); bật thì vào tập', async () => {
+  it('[PK:T36] (phần f) replay hàng loạt: DEAD của event chưa xác thực tới subscription TẮT accept_unverified bị loại (lý do riêng unverified_not_accepted — review PK5 T-7); bật thì vào tập', async () => {
     const dst = await raw.destination.create({ data: { tenantId: tenant, name: 'shop', type: 'webhook', configEncrypted: 'x', verification: 'VERIFIED' } as any });
     const subOff = await raw.subscription.create({ data: { tenantId: tenant, destinationId: dst.id, name: 'off', eventTypes: ['*'] } });
     const subOn = await raw.subscription.create({ data: { tenantId: tenant, destinationId: dst.id, name: 'on', eventTypes: ['*'], acceptUnverified: true } });
@@ -77,7 +77,7 @@ describeDb('[PK5] nguồn unverified trên Postgres', () => {
     const dOn = await raw.delivery.create({ data: { tenantId: tenant, eventId: ev.id, subscriptionId: subOn.id, status: 'DEAD' } });
     const refs = await repo().findDeadDeliveryRefs({ ids: [dOff.id, dOn.id], replayableOnly: true }, 100);
     expect(refs.map((r) => r.id)).toEqual([dOn.id]);
-    expect(await repo().findReplaySkipReasons([dOff.id])).toEqual([{ id: dOff.id, reason: 'destination_unavailable' }]);
+    expect(await repo().findReplaySkipReasons([dOff.id])).toEqual([{ id: dOff.id, reason: 'unverified_not_accepted' }]);
   });
 
   it('[PK:T37] (phần c) cảnh báo source.signature_failing: 20 raw ACCEPTED verified=false (signature_valid=true) -> invalid = 0', async () => {

@@ -127,6 +127,8 @@ export interface Source {
   secretVersions?: number;
   /** QT5/QT7 (E1): cờ "Giữ lâu" do user tự gắn — không gợi ý/không dọn tự động, còn nhận tới 110% khi LOCKED. */
   keepLonger?: boolean;
+  /** Cấu hình xác thực công khai (server đã bỏ phần bí mật) — đọc `scheme` (PK5: `unverified`). */
+  verificationConfig?: unknown;
 }
 
 export interface HealthDependency {
@@ -239,7 +241,8 @@ export interface ReplayBulkSampleRow {
 }
 
 /** ADR-163: lý do một id đã xem trước không được replay lúc chạy thật. */
-export type ReplaySkipReason = "not_found" | "not_dead" | "already_replayed" | "destination_unavailable";
+/** PK5 T-7: + `unverified_not_accepted` (event chưa xác thực, subscription tắt "Nhận sự kiện chưa xác thực"). */
+export type ReplaySkipReason = "not_found" | "not_dead" | "already_replayed" | "destination_unavailable" | "unverified_not_accepted";
 
 export type ReplayBulkResult =
   | {

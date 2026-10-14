@@ -1,5 +1,6 @@
 import { HttpException } from '@nestjs/common';
 import { ROLE_SCOPES } from '@hub/common';
+import { replaySkipReasonOf } from '@hub/database';
 import { ServiceResourcesController } from '../src/modules/service-api/service-resources.controller';
 import { ApiController } from '../src/modules/api/api.controller';
 import { ProjectsController } from '../src/modules/console/projects.controller';
@@ -134,5 +135,19 @@ describe('[PK5] scope read:unverified (owner cấp) + cờ project (owner, audit
     for (const body of [{}, { allowUnverifiedSources: 'true' }, { allowUnverifiedSources: true, extra: 1 }]) {
       expect((await errOf(ctrl.setUnverifiedSources('user:u1', PA, body))).status).toBe(422);
     }
+  });
+});
+
+describe('[PK5] replay hàng loạt — lý do bỏ qua riêng (review PK5 T-7)', () => {
+  const base = { id: 'd', dead: true, superseded: false, replayable: true, unverifiedBlocked: false, trimmed: false };
+  it('[PK:T36] (phần g) event chưa xác thực tới subscription tắt acceptUnverified -> unverified_not_accepted (không phải destination_unavailable); thứ tự kiểm giữ nguyên', () => {
+    expect(replaySkipReasonOf({ ...base, unverifiedBlocked: true })).toBe('unverified_not_accepted');
+    // Đích/subscription hỏng vẫn thắng (sửa đích trước, rồi mới tới cờ).
+    expect(replaySkipReasonOf({ ...base, replayable: false, unverifiedBlocked: true })).toBe('destination_unavailable');
+    expect(replaySkipReasonOf({ ...base, unverifiedBlocked: true, trimmed: true })).toBe('unverified_not_accepted');
+    expect(replaySkipReasonOf({ ...base, trimmed: true })).toBe('event_trimmed');
+    expect(replaySkipReasonOf(undefined)).toBe('not_found');
+    expect(replaySkipReasonOf({ ...base, dead: false })).toBe('not_dead');
+    expect(replaySkipReasonOf({ ...base, superseded: true })).toBe('already_replayed');
   });
 });

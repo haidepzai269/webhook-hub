@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { HubColumn } from "@/components/admin/data-table";
 import { DeliveryStatusBadge } from "@/components/admin/status-badge";
+import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
 import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
@@ -83,7 +84,11 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
     accessorFn: (d) => d.event?.type ?? "",
     cell: ({ row }) => (
       <div className="min-w-0">
-        <div className="font-mono text-xs">{row.original.event?.type ?? "—"}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-mono text-xs">{row.original.event?.type ?? "—"}</span>
+          {/* PK5 khoá 2: lượt giao của sự kiện chưa xác thực mang nhãn (cả ở DLQ — dùng chung cột). */}
+          <UnverifiedBadge of={row.original.event} />
+        </div>
         <div className="font-mono text-[11px] text-muted-foreground" title={row.original.eventId}>
           {shortId(row.original.eventId, 12)}
         </div>

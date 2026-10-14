@@ -47,6 +47,11 @@ export interface FlowRawInput {
   bodyBytes?: number | null;
   /** Có `processed_messages(consumer='normalize', message_id=raw.id)` — adapter đã chạy xong. */
   normalizeProcessed: boolean;
+  /**
+   * PK5 khoá 2 (ADR-206): `raw_events.verified`. `false` = nguồn `unverified` — hub KHÔNG kiểm chữ ký, nên chặng
+   * `verified` không bao giờ là "hợp lệ" (status `warning`, lý do `unverified_source`). Vắng = true (đường cũ).
+   */
+  verified?: boolean;
 }
 
 export interface FlowEventInput {
@@ -104,7 +109,7 @@ export interface FlowSkippedSubscriptionInput {
   id: string;
   name: string;
   eventTypes: string[];
-  reason: Extract<ReasonCode, 'subscription_inactive' | 'endpoint_unverified' | 'source_filtered'>;
+  reason: Extract<ReasonCode, 'subscription_inactive' | 'endpoint_unverified' | 'source_filtered' | 'unverified_not_accepted'>;
 }
 
 /**
@@ -120,17 +125,21 @@ export interface FlowCandidateSubscriptionInput {
   sourceIds?: string[] | null;
   /** `destinations.verification` (đa service). undefined = chưa có cột → coi như đã xác minh. */
   destinationVerification?: 'PENDING' | 'VERIFIED' | 'FAILED' | null;
+  /** PK5 khoá 4: `subscriptions.accept_unverified`. undefined = coi như false (mặc định của cột). */
+  acceptUnverified?: boolean | null;
 }
 
 /**
  * Chặng `routed` tự tính lúc đọc (SPEC §6A): subscription khớp type mà KHÔNG có delivery → bỏ qua kèm
  * lý do theo TRẠNG THÁI HIỆN TẠI của cấu hình (không phải trạng thái lúc event tới — UI ghi rõ nhãn này).
- * Thứ tự ưu tiên: tắt → endpoint chưa xác minh → lọc theo source.
+ * Thứ tự ưu tiên: tắt → endpoint chưa xác minh → lọc theo source → (PK5) chưa bật nhận sự kiện chưa xác thực.
+ * Chỉ event chưa xác thực (`eventVerified=false`) mới xét `acceptUnverified` — cùng luật với router (`route-event.ts`).
  */
 export function classifySkippedSubscriptions(
   candidates: FlowCandidateSubscriptionInput[],
   deliveredSubscriptionIds: Iterable<string>,
   eventSourceId: string | null | undefined,
+  eventVerified = true,
 ): FlowSkippedSubscriptionInput[] {
   const delivered = new Set(deliveredSubscriptionIds);
   const out: FlowSkippedSubscriptionInput[] = [];
@@ -140,6 +149,7 @@ export function classifySkippedSubscriptions(
     if (!c.isActive) r = 'subscription_inactive';
     else if (c.destinationVerification && c.destinationVerification !== 'VERIFIED') r = 'endpoint_unverified';
     else if (c.sourceIds && c.sourceIds.length > 0 && eventSourceId && !c.sourceIds.includes(eventSourceId)) r = 'source_filtered';
+    else if (!eventVerified && c.acceptUnverified !== true) r = 'unverified_not_accepted';
     if (r) out.push({ id: c.id, name: c.name, eventTypes: c.eventTypes, reason: r });
   }
   return out;
@@ -547,16 +557,32 @@ export function buildEventFlow(input: EventFlowInput): EventFlow {
       });
       terminal = true;
     } else {
-      drafts.push({
-        id: 'verified',
-        key: 'verified',
-        status: 'ok',
-        startedAt: at,
-        endedAt: at,
-        durationMs: 0,
-        title: raw.provider === 'api' ? 'API key hợp lệ' : `${credentialLabel(raw.provider)} ${prov} hợp lệ`,
-        detail: { signatureValid: true },
-      });
+      drafts.push(
+        raw.verified === false
+          ? {
+              // PK5 khoá 2 (ADR-206): hub KHÔNG kiểm chữ ký nguồn `unverified` — không bao giờ ghi "hợp lệ" / tô xanh.
+              id: 'verified',
+              key: 'verified',
+              status: 'warning',
+              startedAt: at,
+              endedAt: at,
+              durationMs: 0,
+              title: 'Chưa xác thực — đích tự kiểm chữ ký',
+              subtitle: 'hub không kiểm chữ ký nguồn này',
+              reason: reason('unverified_source'),
+              detail: { verified: false },
+            }
+          : {
+              id: 'verified',
+              key: 'verified',
+              status: 'ok',
+              startedAt: at,
+              endedAt: at,
+              durationMs: 0,
+              title: raw.provider === 'api' ? 'API key hợp lệ' : `${credentialLabel(raw.provider)} ${prov} hợp lệ`,
+              detail: { signatureValid: true },
+            },
+      );
       if (raw.status === 'DUPLICATE') {
         drafts.push({
           id: 'persisted',

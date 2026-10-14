@@ -32,6 +32,8 @@ export interface EventFlowResponse extends EventFlow {
     receivedAt: string;
     /** QT7 (§5.1): event đã "Dọn" — không xem lại nội dung, không Replay (server bỏ hành động replay). */
     trimmedAt?: string | null;
+    /** PK5 khoá 2 (ADR-206): false = hub KHÔNG xác thực nguồn này. Vắng = true (server cũ). */
+    verified?: boolean;
   } | null;
   raw: {
     id: string;
@@ -41,6 +43,8 @@ export interface EventFlowResponse extends EventFlow {
     sourceId: string;
     sourceName: string;
     receivedAt: string;
+    /** PK5 khoá 2: `raw_events.verified`. */
+    verified?: boolean;
   } | null;
 }
 

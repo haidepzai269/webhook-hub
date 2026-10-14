@@ -311,12 +311,12 @@ curl -si $HUB/hooks/generic/$SOURCE_KEY -H 'content-type: application/json' -d '
 
 ## unverified_body_too_large
 
-**413.** Body gửi vào nguồn `unverified` lớn hơn 45KB. Sự kiện chưa xác thực mang nguyên bytes gốc dạng base64 (`data.raw`, to ×4/3) và phải lọt trần gửi 64KB của worker — nhận rồi giao mãi không được thì tệ hơn từ chối ngay (E17). Hub không ghi DB, không phạt điểm.
+**413.** Body gửi vào nguồn `unverified` lớn hơn 45KB, **hoặc** phong bì ước lượng (body base64 + `data.url` khi `forwardUrl` + các tiêu đề gửi kèm) vượt 64KB (review PK5 T-3). Sự kiện chưa xác thực mang nguyên bytes gốc dạng base64 (`data.raw`, to ×4/3) và phải lọt trần gửi 64KB của worker — nhận rồi giao mãi không được thì tệ hơn từ chối ngay (E17). Hub không ghi DB, không phạt điểm.
 **Sửa:** giảm payload ở phía nhà cung cấp (chọn ít trường / ít sự kiện mỗi lần), hoặc dùng scheme hub verify được (trần 1MB).
 
 ## unverified_not_accepted
 
-**409.** Replay một delivery của sự kiện **chưa xác thực** (`verified: false`) tới subscription đã tắt "Nhận sự kiện chưa xác thực". Hub kiểm lại cờ này **lúc replay** (khoá 4, E4).
+**409.** Replay một delivery của sự kiện **chưa xác thực** (`verified: false`) tới subscription đã tắt "Nhận sự kiện chưa xác thực". Hub kiểm lại cờ này **lúc replay** (khoá 4, E4). Replay **hàng loạt** không trả 409 cho cả lô: delivery như vậy bị bỏ qua với lý do `unverified_not_accepted` trong `skipped.byReason` (review PK5 T-7).
 **Sửa:** bật "Nhận sự kiện chưa xác thực" trên subscription (đích phải tự verify chữ ký gốc của nhà cung cấp qua `data.raw` + `data.headers` + `data.url`) rồi replay lại.
 
 ## source_inactive

@@ -59,6 +59,14 @@ export const RETRY_TIER_TTLS_MS = RETRY_TIERS.map((t) => t.ttlMs);
 
 type EventRow = NonNullable<Awaited<ReturnType<FlowScopedRepository['findEventForFlow']>>>;
 
+/**
+ * PK5 khoá 2 (ADR-206): hành trình "chưa xác thực" khi raw HOẶC event mang `verified=false` (event chép từ raw lúc
+ * normalize; dòng chỉ có raw thì đọc raw). Vắng cột (dữ liệu cũ) = đã xác thực.
+ */
+export function verifiedOf(event: { verified?: boolean | null } | null, raw: { verified?: boolean | null } | null): boolean {
+  return event?.verified !== false && raw?.verified !== false;
+}
+
 export function toDeliveryInputs(event: EventRow): FlowDeliveryInput[] {
   return event.deliveries.map((d) => ({
     id: d.id,
@@ -155,6 +163,8 @@ export class FlowService {
               sourceId: r.sourceId ?? '',
               sourceName: r.sourceName ?? '',
               normalizeProcessed: r.processed,
+              // PK5 khoá 2: chấm "Xác thực" của đường ống mini không xanh cho nguồn chưa xác thực.
+              verified: r.verified !== false,
             }
           : null,
         event: r.eventId
@@ -244,6 +254,8 @@ export class FlowService {
       (event?.deliveries ?? []).map((d) => d.subscriptionId),
       // events.source_id (S5) — có cả với event không còn raw_event.
       raw?.sourceId ?? event?.sourceId ?? null,
+      // PK5 khoá 4: event chưa xác thực -> subscription chưa bật acceptUnverified có lý do riêng.
+      verifiedOf(event, raw),
     );
     const input: EventFlowInput = {
       raw: raw
@@ -261,6 +273,7 @@ export class FlowService {
             body: raw.body,
             bodyBytes: raw.bodyBytes,
             normalizeProcessed: raw.normalizeProcessed,
+            verified: verifiedOf(event, raw),
           }
         : null,
       event: event
@@ -304,6 +317,8 @@ export class FlowService {
             receivedAt: event.receivedAt,
             // QT7: "Nội dung đã được dọn ngày X" — null = chưa dọn.
             trimmedAt,
+            // PK5 khoá 2 (ADR-206): nhãn "Chưa xác thực" ở trang chi tiết.
+            verified: verifiedOf(event, raw),
           }
         : null,
       raw: raw
@@ -315,6 +330,7 @@ export class FlowService {
             sourceId: raw.sourceId,
             sourceName: raw.sourceName,
             receivedAt: raw.receivedAt,
+            verified: verifiedOf(event, raw),
           }
         : null,
       ...flow,

@@ -196,6 +196,12 @@ export const pageSources = defineMessages("page.sources", {
       "10 request gần nhất tới nguồn này, làm mới mỗi 2 giây. Chỉ hiện tên tiêu đề/trường, không bao giờ hiện giá trị.",
     "page.sources.listen.waiting": "Chờ request đầu tiên… Dán URL webhook vào nhà cung cấp rồi gửi thử.",
     "page.sources.listen.connected": "Đã nhận request đầu tiên ✓",
+    // PK5 khoá 2 (REVIEW-PK5 TB-1): nguồn chưa xác thực — nhận được nhưng KHÔNG "hợp lệ".
+    "page.sources.listen.connected-unverified": "Đã nhận request đầu tiên — CHƯA xác thực (nơi nhận tự kiểm chữ ký gốc)",
+    "page.sources.listen.reason.unverified": "đã nhận, chưa xác thực — hub không kiểm chữ ký, nơi nhận tự kiểm",
+    // Review PK5 T-9: request vào nguồn chưa xác thực bị từ chối mà không ghi gì khi project chưa bật cờ.
+    "page.sources.unverified-blocked":
+      "Dự án chưa bật \"Nhận nguồn chưa xác thực\" — mọi request vào nguồn này đang bị từ chối và không được ghi lại. Chủ dự án bật ở trang Dự án.",
     "page.sources.listen.failing": "Trượt: {reason}",
     "page.sources.listen.last-failure": "Request mới nhất trượt: {reason}",
     "page.sources.listen.candidates": "tiêu đề gửi kèm: {names}",
@@ -470,6 +476,10 @@ export const pageSources = defineMessages("page.sources", {
       "The 10 most recent requests to this source, refreshed every 2 seconds. Only header/field names, never values.",
     "page.sources.listen.waiting": "Waiting for the first request… Paste the webhook URL into the provider and send a test.",
     "page.sources.listen.connected": "First request received ✓",
+    "page.sources.listen.connected-unverified": "First request received — NOT verified (the receiver checks the original signature)",
+    "page.sources.listen.reason.unverified": "received, not verified — the hub does not check the signature, the receiver does",
+    "page.sources.unverified-blocked":
+      "This project has not turned on \"Accept unverified sources\" — every request to this source is refused and nothing is recorded. A project owner turns it on in Projects.",
     "page.sources.listen.failing": "Failing: {reason}",
     "page.sources.listen.last-failure": "Latest request failed: {reason}",
     "page.sources.listen.candidates": "headers sent: {names}",

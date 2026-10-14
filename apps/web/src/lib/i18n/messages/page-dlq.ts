@@ -14,6 +14,8 @@ export const pageDlq = defineMessages("page.dlq", {
     "page.dlq.skip.not-dead": "không còn ở trạng thái hỏng hẳn",
     "page.dlq.skip.already-replayed": "đã được phát lại",
     "page.dlq.skip.destination-unavailable": "đích/đăng ký nhận đã xoá hoặc đang ngắt",
+    // PK5 T-7 (ADR-206): sự kiện chưa xác thực, đăng ký nhận đã tắt "Nhận sự kiện chưa xác thực".
+    "page.dlq.skip.unverified-not-accepted": "sự kiện chưa xác thực, đăng ký nhận chưa bật nhận loại này",
     "page.dlq.age.1h": "Trong 1 giờ qua",
     "page.dlq.age.24h": "Trong 24 giờ qua",
     "page.dlq.age.7d": "Trong 7 ngày qua",
@@ -76,6 +78,7 @@ export const pageDlq = defineMessages("page.dlq", {
     "page.dlq.skip.not-dead": "no longer dead",
     "page.dlq.skip.already-replayed": "already replayed",
     "page.dlq.skip.destination-unavailable": "destination/subscription deleted or disabled",
+    "page.dlq.skip.unverified-not-accepted": "unverified event, subscription does not accept unverified events",
     "page.dlq.age.1h": "Last hour",
     "page.dlq.age.24h": "Last 24 hours",
     "page.dlq.age.7d": "Last 7 days",

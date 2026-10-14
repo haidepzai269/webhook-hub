@@ -23,7 +23,7 @@ export class FlowScopedRepository extends TenantScopedRepository {
     const rows = await this.db.$queryRaw<FlowRawRow[]>(Prisma.sql`
       SELECT r.id, r.status::text AS status, r.signature_valid AS "signatureValid", r.received_at AS "receivedAt",
              r.content_type AS "contentType", r.idempotency_key AS "idempotencyKey", r.headers, r.body,
-             octet_length(r.body_raw) AS "bodyBytes",
+             octet_length(r.body_raw) AS "bodyBytes", r.verified,
              s.id AS "sourceId", s.name AS "sourceName", s.provider::text AS provider,
              EXISTS (SELECT 1 FROM hub.processed_messages p
                      WHERE p.consumer = 'normalize' AND p.message_id = r.id::text) AS "normalizeProcessed"
@@ -294,7 +294,8 @@ export class FlowScopedRepository extends TenantScopedRepository {
       // ADR-161: subscription đã lưu trữ không còn trong cấu hình hiện tại → không liệt kê là "bỏ qua".
       where: { tenantId: this.tenantId, archivedAt: null, eventTypes: { hasSome: eventTypeCandidates(eventType) }, createdAt: { lte: existedAt } },
       // F7 (§6A): source_ids + destinations.verification của đợt đa service. ADR-161: + destinations.is_active.
-      select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, destination: { select: { verification: true, isActive: true } } },
+      // PK5 khoá 4: + accept_unverified — lý do `unverified_not_accepted` cho event chưa xác thực.
+      select: { id: true, name: true, eventTypes: true, isActive: true, sourceIds: true, acceptUnverified: true, destination: { select: { verification: true, isActive: true } } },
     });
   }
 }
@@ -365,4 +366,6 @@ export interface FlowRawRow {
   sourceName: string;
   provider: string;
   normalizeProcessed: boolean;
+  /** PK5 khoá 2 (ADR-206): false = nguồn `unverified` (hub không kiểm chữ ký). */
+  verified: boolean;
 }

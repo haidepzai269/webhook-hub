@@ -6,30 +6,25 @@ import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/hub/format";
-import { connectionState, diagnosisParts, type InspectDiagnosis, isSnsSubscribeUrl, pendingSubscribeUrl, subscribeTopicArn } from "@/lib/hub/listen-logic";
+import {
+  connectionState,
+  diagnosisParts,
+  type InspectDiagnosis,
+  isSnsSubscribeUrl,
+  listenReasonKey,
+  pendingSubscribeUrl,
+  subscribeTopicArn,
+} from "@/lib/hub/listen-logic";
 import { useSourceInspect } from "@/lib/hub/queries";
 import type { Source } from "@/lib/hub/types";
-import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
-const REASON_KEY: Record<string, MessageKey> = {
-  ok: "page.sources.listen.reason.ok",
-  missing_header: "page.sources.listen.reason.missing-header",
-  signature_mismatch: "page.sources.listen.reason.signature-mismatch",
-  token_mismatch: "page.sources.listen.reason.token-mismatch",
-  timestamp_out_of_range: "page.sources.listen.reason.timestamp-out-of-range",
-  missing_kv_key: "page.sources.listen.reason.missing-kv-key",
-  missing_idempotency_key: "page.sources.listen.reason.missing-idempotency-key",
-  mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
-  mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",
-  config_invalid: "page.sources.listen.reason.config-invalid",
-  handshake: "page.sources.listen.reason.handshake",
-};
 
 /** Câu chẩn đoán — chỉ TÊN header/trường (API không bao giờ trả giá trị). */
 function reasonText(t: TranslateFn, d: InspectDiagnosis): string {
   const p = diagnosisParts(d);
-  const base = t(REASON_KEY[p.reason] ?? "page.sources.listen.reason.unknown", { name: p.name ?? "" });
+  const base = t(listenReasonKey(p.reason), { name: p.name ?? "" });
   return p.candidates.length ? `${base} (${t("page.sources.listen.candidates", { names: p.candidates.join(", ") })})` : base;
 }
 
@@ -74,7 +69,12 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
         {state.kind === "handshaken" && <span className="font-medium text-emerald-600">{t("page.sources.listen.handshaken")}</span>}
         {state.kind === "connected" && (
           <>
-            <span className="font-medium text-emerald-600">{t("page.sources.listen.connected")}</span>
+            {/* PK5 khoá 2 (REVIEW-PK5 TB-1): nguồn chưa xác thực — đã nhận, nhưng không xanh / không "✓ hợp lệ". */}
+            {state.unverified ? (
+              <span className="font-medium text-amber-700 dark:text-amber-400">{t("page.sources.listen.connected-unverified")}</span>
+            ) : (
+              <span className="font-medium text-emerald-600">{t("page.sources.listen.connected")}</span>
+            )}
             {state.lastFailure && (
               <p className="mt-1 text-muted-foreground">{t("page.sources.listen.last-failure", { reason: reasonText(t, state.lastFailure) })}</p>
             )}

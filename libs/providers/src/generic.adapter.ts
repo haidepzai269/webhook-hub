@@ -10,8 +10,10 @@ import {
   HandshakeWhen,
   HmacAlgo,
   MappingValue,
+  UNVERIFIED_ENVELOPE_MAX_BYTES,
   UNVERIFIED_MAX_BODY_BYTES,
   decodeHmacKey,
+  estimateUnverifiedEnvelopeBytes,
   hmacParams,
   isHmacScheme,
   isUnverifiedScheme,
@@ -72,8 +74,12 @@ export class GenericAdapter implements ProviderAdapter {
    * Echo chỉ trả `^[\x21-\x7E]{1,256}$` dạng `text/plain; charset=utf-8` (E27), hoặc JSON `{<field>: echo}` khi `respond: 'json'`.
    */
   handshake(req: RawWebhookRequest, secrets: string[], ctx: AdapterContext | undefined, phase: HandshakePhase): HandshakeOutcome | null {
-    const h = configOf(ctx)?.handshake;
+    const c = configOf(ctx);
+    const h = c?.handshake;
     if (!h) return null;
+    // Review PK5 T-1 (khoá 1, §7.1 "tắt cờ… không ghi"): nguồn `unverified` ở project chưa bật cờ -> KHÔNG bắt tay (không trả
+    // lời, không ghi dòng). null -> lõi đi verify -> refusal `source_unverified_disabled` như mọi sự kiện, 0 ghi, không phạt.
+    if (c && isUnverifiedScheme(c) && ctx?.projectFlags?.allowUnverified !== true) return null;
     const method = req.method ?? 'POST';
     if (phase === 'after-verify') {
       if (method !== 'POST') return null;
@@ -248,6 +254,8 @@ export class GenericAdapter implements ProviderAdapter {
     if (!c) return { ok: false, reason: 'config_invalid' };
     const headers = isObj(raw.headers) ? raw.headers : {};
     const has = (h: string) => typeof headers[h] === 'string' || Array.isArray(headers[h]);
+    // PK5 khoá 2 (REVIEW-PK5 TB-1): nhận được nhưng KHÔNG xác thực — không bao giờ là 'ok' ("hợp lệ").
+    if (raw.status === 'ACCEPTED' && isUnverifiedScheme(c)) return { ok: true, reason: 'unverified' };
     if (raw.status === 'ACCEPTED') return c.mapping ? this.diagnoseMapping(raw, c) : { ok: true, reason: 'ok' };
     if (raw.signatureValid) {
       const id = c.idempotency;
@@ -560,7 +568,7 @@ const UNVERIFIED_DISABLED_FIX =
   'This project does not accept unverified sources. A project owner turns on "Accept unverified sources" in the console (Project settings), or change this source to a scheme the hub verifies.';
 /** E17: body của source `unverified` quá trần gửi. */
 export const UNVERIFIED_TOO_LARGE = 'unverified_body_too_large';
-const UNVERIFIED_TOO_LARGE_FIX = `Unverified sources accept at most ${UNVERIFIED_MAX_BODY_BYTES / 1024}KB per request (the raw body is forwarded base64-encoded and must fit the 64KB delivery limit). Ask the provider for smaller payloads, or use a scheme the hub verifies.`;
+const UNVERIFIED_TOO_LARGE_FIX = `Unverified sources accept at most ${UNVERIFIED_MAX_BODY_BYTES / 1024}KB per request: the raw body is forwarded base64-encoded, together with the forwarded URL and headers, and must fit the 64KB delivery limit. Ask the provider for smaller payloads (or a shorter query string), or use a scheme the hub verifies.`;
 
 /**
  * PK5 (khoá 1, E14, E17): cờ project tắt -> từ chối KHÔNG phải vì chữ ký sai (lõi không lưu mẫu, không phạt — kẻ biết
@@ -568,7 +576,17 @@ const UNVERIFIED_TOO_LARGE_FIX = `Unverified sources accept at most ${UNVERIFIED
  */
 function verifyUnverified(req: RawWebhookRequest, ctx?: AdapterContext): VerifyResult {
   if (ctx?.projectFlags?.allowUnverified !== true) return { ok: false, refusal: { status: 401, error: UNVERIFIED_DISABLED, fix: UNVERIFIED_DISABLED_FIX } };
-  if (req.rawBody.length > UNVERIFIED_MAX_BODY_BYTES) return { ok: false, refusal: { status: 413, error: UNVERIFIED_TOO_LARGE, fix: UNVERIFIED_TOO_LARGE_FIX } };
+  const tooLarge: VerifyResult = { ok: false, refusal: { status: 413, error: UNVERIFIED_TOO_LARGE, fix: UNVERIFIED_TOO_LARGE_FIX } };
+  if (req.rawBody.length > UNVERIFIED_MAX_BODY_BYTES) return tooLarge;
+  // Review PK5 T-3: cả phong bì (base64 + url + header gửi kèm) phải lọt trần gửi 64KB — không thì ACK rồi DEAD mãi.
+  const c = configOf(ctx);
+  const forwarded: Record<string, string> = {};
+  for (const h of c?.forwardHeaders ?? []) {
+    const v = headerOf(req, h);
+    if (v !== null) forwarded[h] = v;
+  }
+  const est = estimateUnverifiedEnvelopeBytes({ bodyBytes: req.rawBody.length, query: c?.forwardUrl ? (req.query ?? '') : null, forwardHeaders: forwarded });
+  if (est > UNVERIFIED_ENVELOPE_MAX_BYTES) return tooLarge;
   return { ok: true, verified: false };
 }
 

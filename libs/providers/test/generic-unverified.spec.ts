@@ -1,4 +1,5 @@
-import { GenericAdapter, UNVERIFIED_MAX_BODY_BYTES, validateGenericConfig, verdictOf } from '../src';
+import { GenericAdapter, UNVERIFIED_MAX_BODY_BYTES, estimateUnverifiedEnvelopeBytes, validateGenericConfig, verdictOf } from '../src';
+import { toWebhookBody } from '@hub/common';
 import type { AdapterContext } from '../src';
 
 /**
@@ -184,5 +185,36 @@ describe('[PK5] unverified — data khuôn cố định (E6/E18)', () => {
     expect(evt.data.url).toBe('https://hub.example.com/hooks/generic/src_generic_u?x=1');
     const [noUrl] = a.normalize(stored, nctx(BASE));
     expect(noUrl.data).not.toHaveProperty('url');
+  });
+});
+
+describe('[PK5] review — T-1 bắt tay, T-3 ước lượng phong bì, TB-1 chẩn đoán', () => {
+  it('[PK:T14] (phần i) T-1: handshake() của nguồn unverified trả null khi cờ project tắt/vắng (lõi đi verify -> từ chối); bật thì echo', () => {
+    const hs = { ...BASE, handshake: { kind: 'body-echo', when: { field: 'type', equals: 'v' }, echo: { field: 'challenge' } } };
+    const r = req('{"type":"v","challenge":"c1"}');
+    expect(a.handshake(r, [], ctx(hs, false), 'before-verify')).toBeNull();
+    expect(a.handshake(r, [], { verificationConfig: hs }, 'before-verify')).toBeNull();
+    expect(a.handshake(r, [], ctx(hs, true), 'before-verify')).toMatchObject({ kind: 'respond' });
+  });
+
+  it('[PK:T38] (phần f) T-3: ước lượng không bao giờ thấp hơn phong bì thật (toWebhookBody) — có url + header gửi kèm', () => {
+    const vc = { ...BASE, forwardUrl: true, forwardHeaders: ['x-sig', 'x-ts'] };
+    for (const size of [0, 1, 1000, 30_000, UNVERIFIED_MAX_BODY_BYTES]) {
+      const body = Buffer.alloc(size, 0x22); // `"` — JSON thoát không ảnh hưởng base64, nhưng thử trường hợp xấu cho header
+      const BS = String.fromCharCode(92); // `\` — ký tự JSON phải thoát (×2)
+      const query = `a=${'%22'.repeat(500)}&b=${BS.repeat(200)}`;
+      const headers = { 'x-sig': `"${BS}`.repeat(300), 'x-ts': '1700000000' };
+      const url = `https://hub.example.com/hooks/generic/${'k'.repeat(40)}?${query}`;
+      const r = { ...req(body, { parse: false, headers: { ...headers, __hub_meta: { method: 'POST', url } } }), query };
+      const [evt] = a.normalize(r, { tenantId: 't', sourceId: '00000000-0000-4000-8000-000000000000', correlationId: 'c', rawEventId: 'r', verificationConfig: vc });
+      const actual = Buffer.byteLength(toWebhookBody({ ...evt, id: '01JAAAAAAAAAAAAAAAAAAAAAAA', verified: false }));
+      const est = estimateUnverifiedEnvelopeBytes({ bodyBytes: size, query, forwardHeaders: headers });
+      expect([size, est >= actual]).toEqual([size, true]);
+    }
+  });
+
+  it('[PK:T16] (phần j) TB-1: diagnose ACCEPTED của nguồn unverified = reason "unverified" (không bao giờ "ok"/"hợp lệ")', () => {
+    const stored = { status: 'ACCEPTED', signatureValid: true, headers: {}, body: {}, receivedAt: new Date() };
+    expect(a.diagnose(stored, ctx(BASE))).toEqual({ ok: true, reason: 'unverified' });
   });
 });

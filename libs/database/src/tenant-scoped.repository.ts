@@ -510,7 +510,9 @@ export class TenantScopedRepository {
    * MỚI NHẤT của cặp (event, subscription) [tới `endpointId` nếu có]. KQ1: event `probe` (request kiểm tra của provider)
    * không bao giờ trả — vẫn được cấp poll_seq (cursor chỉ là vị trí, không lộ nội dung).
    * PK5 khoá 4 (E4, ADR-206): event CHƯA xác thực (`verified=false`) không trả, trừ `includeUnverified: true` (controller chỉ
-   * đặt khi key có scope `read:unverified`). Cursor vẫn đi qua chúng (không có lỗ, không lộ nội dung).
+   * đặt khi key có scope `read:unverified`). Chúng vẫn được cấp poll_seq (không lộ nội dung) và trang có event trả về thì
+   * cursor đi qua chúng; nhưng trang RỖNG thì controller trả `nextCursor = after` — cursor KHÔNG nhảy qua đoạn bị lọc
+   * (review PK5 T-5: đuôi toàn event bị lọc bị quét lại mỗi vòng; như `types`/`readTypes` có sẵn — nợ ghi SPEC §16).
    */
   async pollEvents(o: PollEventsOptions): Promise<PolledEvent[]> {
     await this.assignPollSeq();
@@ -731,34 +733,21 @@ export class TenantScopedRepository {
    */
   async findReplaySkipReasons(ids: string[]): Promise<{ id: string; reason: ReplaySkipReason }[]> {
     if (ids.length === 0) return [];
-    const rows = await this.prisma.$queryRaw<{ id: string; dead: boolean; superseded: boolean; replayable: boolean; trimmed: boolean }[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<ReplaySkipRow[]>(Prisma.sql`
       SELECT d.id, d.status = 'DEAD' AS dead, NOT ${notSuperseded} AS superseded,
              (s.archived_at IS NULL AND s.is_active AND EXISTS (SELECT 1 FROM hub.destinations dst WHERE dst.id = s.destination_id
-                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)
-              -- PK5 (E4): event chưa xác thực tới subscription đã tắt acceptUnverified = không còn nơi nhận.
-              AND (s.accept_unverified OR NOT EXISTS (SELECT 1 FROM hub.events e2 WHERE e2.id = d.event_id
-                AND e2.tenant_id = d.tenant_id AND NOT e2.verified))) AS replayable,
+                AND dst.tenant_id = s.tenant_id AND dst.archived_at IS NULL AND dst.is_active)) AS replayable,
+             -- PK5 (E4) + review PK5 T-7: event chưa xác thực tới subscription đã tắt acceptUnverified — lý do RIÊNG
+             -- (người dùng đi bật cờ của subscription, không đi kiểm đích).
+             (NOT s.accept_unverified AND EXISTS (SELECT 1 FROM hub.events e2 WHERE e2.id = d.event_id
+                AND e2.tenant_id = d.tenant_id AND NOT e2.verified)) AS "unverifiedBlocked",
              EXISTS (SELECT 1 FROM hub.events e WHERE e.id = d.event_id AND e.tenant_id = d.tenant_id AND e.trimmed_at IS NOT NULL) AS trimmed
       FROM hub.deliveries d
       JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
       WHERE d.tenant_id = ${this.tenantId}::uuid AND d.id = ANY(${ids}::uuid[])
     `);
     const byId = new Map(rows.map((r) => [r.id, r]));
-    return ids.map((id) => {
-      const r = byId.get(id);
-      const reason: ReplaySkipReason = !r
-        ? 'not_found'
-        : !r.dead
-          ? 'not_dead'
-          : r.superseded
-            ? 'already_replayed'
-            : !r.replayable
-              ? 'destination_unavailable'
-              : r.trimmed
-                ? 'event_trimmed'
-                : 'already_replayed';
-      return { id, reason };
-    });
+    return ids.map((id) => ({ id, reason: replaySkipReasonOf(byId.get(id)) }));
   }
 
   /**
@@ -2286,8 +2275,34 @@ export interface DeadDeliveryFilter {
   ids?: string[];
 }
 
-/** ADR-163: vì sao một id đã xem trước KHÔNG được replay lúc chạy thật. */
-export type ReplaySkipReason = 'not_found' | 'not_dead' | 'already_replayed' | 'destination_unavailable' | 'event_trimmed';
+/** ADR-163: vì sao một id đã xem trước KHÔNG được replay lúc chạy thật. PK5 T-7: + `unverified_not_accepted`. */
+export type ReplaySkipReason = 'not_found' | 'not_dead' | 'already_replayed' | 'destination_unavailable' | 'unverified_not_accepted' | 'event_trimmed';
+
+/** Một dòng kiểm của `findReplaySkipReasons`. */
+export interface ReplaySkipRow {
+  id: string;
+  dead: boolean;
+  superseded: boolean;
+  /** subscription/đích chưa lưu trữ và đang bật. */
+  replayable: boolean;
+  /** PK5 (E4): event `verified=false` và subscription đã tắt `accept_unverified`. */
+  unverifiedBlocked: boolean;
+  trimmed: boolean;
+}
+
+/**
+ * ADR-163: lý do bỏ qua theo ĐÚNG thứ tự kiểm của `findDeadDeliveryRefs({replayableOnly})`. Thuần — test L0 không cần DB.
+ * Review PK5 T-7: event chưa xác thực tới subscription tắt `acceptUnverified` có lý do riêng `unverified_not_accepted`.
+ */
+export function replaySkipReasonOf(r: ReplaySkipRow | undefined): ReplaySkipReason {
+  if (!r) return 'not_found';
+  if (!r.dead) return 'not_dead';
+  if (r.superseded) return 'already_replayed';
+  if (!r.replayable) return 'destination_unavailable';
+  if (r.unverifiedBlocked) return 'unverified_not_accepted';
+  if (r.trimmed) return 'event_trimmed';
+  return 'already_replayed';
+}
 
 /**
  * ADR-163: "loại lỗi" của delivery DEAD theo HTTP status của lần thử CUỐI (worker chỉ đặt DEAD sau một attempt):
