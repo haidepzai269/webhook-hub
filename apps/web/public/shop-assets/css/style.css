@@ -38,13 +38,7 @@ a {
 img {
   max-width: 100%;
 }
-::-webkit-scrollbar {
-  width: 5px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--primary);
-  border-radius: 10px;
-}
+/* Thanh cuộn: dùng kiểu chung src/styles/scrollbar.css (import ở (shop)/layout.tsx) */
 
 /* ===================== TOP BAR ===================== */
 #topbar {
@@ -2056,12 +2050,6 @@ footer {
   position: relative;
   display: flex;
   flex-wrap: wrap;
-}
-.mpbox::-webkit-scrollbar {
-  width: 3px;
-}
-.mpbox::-webkit-scrollbar-thumb {
-  background: var(--primary);
 }
 .mpbox .mpimg {
   width: 44%;

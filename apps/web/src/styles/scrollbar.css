@@ -1,0 +1,69 @@
+/*
+ * Thanh cuộn dùng chung — MỘT chỗ duy nhất cho cả web (admin import qua globals.css, storefront import ở (shop)/layout.tsx).
+ * Áp cho MỌI vùng cuộn (trang, modal, sheet, bảng cuộn ngang, popover) — trang không tự viết CSS thanh cuộn riêng.
+ *
+ * - Mảnh ~6px, track trong suốt, màu dịu lấy từ token theme (--muted-foreground → tự đổi theo sáng/tối/preset).
+ * - Hover thumb: đậm hơn và nở ra ~10px. WebKit/Blink không cho đổi bề rộng thanh cuộn khi hover, nên rãnh luôn 10px và
+ *   thumb vẽ 6px nhờ viền trong suốt 2px (background-clip: content-box); hover bỏ viền → 10px.
+ * - Firefox chỉ có `scrollbar-width: thin` + `scrollbar-color` (không có hover theo thumb, không nở) — đặt trong
+ *   `@supports not selector(::-webkit-scrollbar)` vì Chrome ≥121 thấy `scrollbar-color` là BỎ QUA toàn bộ ::-webkit-scrollbar.
+ * - Shop không có token --muted-foreground → dùng màu dự phòng xám dịu; muốn màu riêng thì đặt --scrollbar-base.
+ *
+ * `.scroll-area`: lớp cho vùng cuộn bên trong (thân modal/sheet, danh sách trong popover): tự cuộn khi tràn và không kéo
+ * cuộn trang nền khi chạm đáy (overscroll-behavior: contain).
+ */
+
+@layer base {
+  :root {
+    --scrollbar-size: 10px;
+    --scrollbar-inset: 2px;
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in oklab, var(--scrollbar-base, var(--muted-foreground, #8a8a8a)) 45%, transparent)
+        transparent;
+    }
+  }
+
+  ::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    min-width: 32px;
+    border: var(--scrollbar-inset) solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+    background-color: color-mix(in oklab, var(--scrollbar-base, var(--muted-foreground, #8a8a8a)) 40%, transparent);
+    transition:
+      background-color 0.2s ease,
+      border-width 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    border-width: 0;
+    background-color: color-mix(in oklab, var(--scrollbar-base, var(--muted-foreground, #8a8a8a)) 80%, transparent);
+  }
+
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+}
+
+@layer components {
+  .scroll-area {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
