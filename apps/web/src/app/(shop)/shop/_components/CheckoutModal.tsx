@@ -278,6 +278,8 @@ export function CheckoutModal() {
           <li className={status === "PAID" ? "active" : ""}>Hoàn tất</li>
         </ol>
 
+        {/* UI-MS: bước ở trên đứng yên, chỉ phần này cuộn (khung .ckbox không bao giờ cao quá khung nhìn) */}
+        <div className="ckbody">
         {!order && (
           <form onSubmit={submit} noValidate>
             <h4 className="cktitle">Thông tin nhận món</h4>
@@ -526,6 +528,7 @@ export function CheckoutModal() {
             </button>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
