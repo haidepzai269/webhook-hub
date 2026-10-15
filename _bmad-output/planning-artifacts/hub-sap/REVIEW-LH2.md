@@ -254,3 +254,32 @@ Với các request đó Worker **tệ hơn** gọi thẳng.
   - TB-4: sửa H12, §15b và DEPLOYMENT.
 - Chạy `LH2-VIEC-MAY-CONG-TY.md` (đã bổ sung các bước ở L11) ở máy công ty và ghi số vào §16.
 - Mục Thấp ghi vào §16 làm nợ; nên sửa luôn L1–L3 vì mỗi mục chỉ vài dòng.
+
+---
+
+## Phản hồi của dev (Amelia, 2026-10-15)
+
+| Mục | Xử lý | Bằng chứng |
+|---|---|---|
+| TB-1 | Mạch chỉ áp cho request hứng được (`getSource` + `catchable` trước); không hứng được thì chuyển tiếp như thường | `[LH:T5] (phần d)` |
+| TB-2 | `inbox_count` thêm `bytes` + khoá `#dead`, `day:<n>` (trigger). Trần `MAX_BYTES` 300 MB (gồm dead), `MAX_KEY_BYTES` 50 MB, `MAX_ROWS` 15.000, `MAX_PER_DAY` 5.000. Số liệu gói free tra 2026-10-15 trên developers.cloudflare.com, ghi ở ADR-224 | `[LH:T10] (phần c)` |
+| TB-3 | Cron 3 bước: chọn id + `length(body)` theo index → lease cả lô +5 phút (một câu) → nạp body từng dòng. Lô ≤ 10 dòng (3 + 4×10 = 43 < 50 truy vấn D1/subrequest), ≤ 2 MB body. Nhánh `catch` đã được lease che | `[LH:T8] (phần d/f/g)`; bước đo workerd ở `LH2-VIEC-MAY-CONG-TY.md` §3b |
+| TB-4 | LH2b vào H12 (trước LH6), §15b, DEPLOYMENT §3.6, ADR-214/215, `wrangler.toml`. Chưa code LH2b | — |
+| L1 | `changes > 0` | test máy công ty §3b |
+| L2 | `safeHookTarget`: chặn `..`/`%2e`/`%2f`/`%5c` trên target thô **và** bản WHATWG, chỉ cho `/hooks/` → 404 | `[LH:T10] (phần d)` |
+| L3 | 2xx không outcome = cấu hình sai: chuyển tiếp coi là hub vắng, phát lại retry (không xoá), log `catchnet_misconfigured` | `[LH:T18] (phần a)`, `[LH:T8] (phần a/h)` |
+| L4 | Log một lần/isolate khi chuyển tiếp không ký; `/_health` có `signing` | — |
+| L5 | Luật `CATCHNET_RETENTION_DAYS` ≤ `EVENT_RETENTION_DAYS` ở DEPLOYMENT §3.6 + ADR-214 | — |
+| L6 | Resync rỗng + `final` dọn key cũ hơn lượt đó | `[LH:T7] (phần c)` |
+| L7 | `%` hỏng → 422; body chunked đọc có trần 1 MB | `[LH:T7] (phần c)`, `[LH:T10] (phần e)` |
+| L8 | Ghi vào đánh đổi ADR-216 | — |
+| L9 | Thêm bước đo `ip` của request gọi thẳng vào DEPLOYMENT §3.6 | việc Admin trên Render |
+| L10 | TEST-MAP lấy lại bản master, chỉ chèn 18 dòng `LH:*` | `git diff eb7eebc -- docs/TEST-MAP.md` |
+| L11 | ADR-214 còn 3 dòng; thêm bước WHATWG/`%2e%2e`/cron/`meta.changes` vào file máy công ty | — |
+
+**Còn nợ:** CPU/bộ nhớ thật của một lượt cron chỉ đo được trên workerd (máy công ty). ADR-220 ghi khi bật Worker. Code LH2b chưa làm.
+
+**Thay đổi so với bản cũ:**
+- Batch mặc định giảm từ 25 xuống 10/lượt, nên 5.000 dòng mất khoảng 8,3 giờ.
+- Dòng mới thêm cột `bytes`; `/_admin/stats` có thêm `pendingBytes`, `deadBytes`, `caughtToday`.
+- Migration `0001` sửa tại chỗ. Chấp nhận được vì chưa áp lên D1 thật nào.

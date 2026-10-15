@@ -100,14 +100,16 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
 | 2 | LH-S spike (cổng) | Admin có tài khoản Cloudflare; Admin có mặt lúc S2 PayOS |
 | 3 | LH3 (H1 header outcome, H3, H4, H5) | LH-S đạt |
 | 4 | LH2 Worker + D1 + phát lại (H2, H6, H10) | LH3 |
+| 4b | **LH2b** hub-api đẩy `sources_sync` (§4.5: PUT khi tạo/sửa/lưu trữ source, resync lúc khởi động + mỗi 10 phút, ack từ `buildAck`) | LH2 |
 | 5 | LH0 sổ khoảng hở (H9) | — (có migration) |
-| 6 | LH6 chaos LOCAL | LH2, LH3 |
+| 6 | LH6 chaos LOCAL | LH2, **LH2b**, LH3 |
 | 7 | LH5 reconcile PayOS + Shop bỏ cron (H8) | — |
 | 8 | LH1 `recovery` + nhãn 🛡️ | PK10 đã gộp (cùng sửa `catalog.data.ts`) |
 | 9 | LH4 backfill Stripe | LH0 |
 | 10 | LH7 giấy | tất cả |
 
 - Story có migration (LH0, LH3 thêm `raw_events.via`) đặt timestamp **sau** `20261014090000_unverified_sources`.
+- **Cổng LH2b (REVIEW-LH2 TB-4):** KHÔNG deploy Worker thật và KHÔNG trỏ source nào vào `workers.dev` (không đặt `HUB_INGEST_PUBLIC_URL`) trước khi LH2b review ĐẠT. `sources_sync` rỗng thì mọi request lúc hub vắng nhận 503 — Worker tệ hơn gọi thẳng Render.
 - Bật Worker thật `hub-hooks` (`wrangler deploy` tên thật, đặt secret, đổi `HUB_INGEST_PUBLIC_URL` trên Render) là thao tác hạ tầng: **hỏi Admin từng lần**.
 
 **H13. Còn đúng, đã kiểm.**
@@ -532,7 +534,7 @@ CREATE TABLE sources_sync (
 - ✅ LH-S (spike, không có mã test nên không dùng dạng tick của `verify:map`) — spike Worker nháp: cổng ĐẠT (S1 Stripe, S2 PayOS kênh thật, S3 GitHub, S5 bytes), S6 đạt, S7 mới đo lúc hub thức, S4 SePay hoãn. Kết quả ở `SPIKE-workers-dev.md`
 - [x] **LH-URL** — §9 tách `HUB_INGEST_PUBLIC_URL` (`[LH:T17]`, ADR-211). REVIEW-LH-URL ĐẠT (0 Nặng / 0 TB). Nợ Thấp L1–L6 ghi ở §16
 - [x] **LH3** — REVIEW-LH3-R2 ĐẠT (0 Nặng/0 TB; nợ Thấp R2-L1 limit_conn /hooks nới cho mọi IP → cân nhắc `geo` dải Cloudflare, R2-L2 log khi kẹp hạn + sửa DEPLOYMENT, R2-L4 cảnh báo secret lúc khởi động) · hub nhận request từ lưới (H1, H3, H4, H5): `[LH:T11]`–`[LH:T13]`, `[LH:T18]` (phía hub), `[LH:T19]` (H4, sửa REVIEW-LH-URL L1), `[LH:T20]` (H5), `[LH:T21]` (H1); ADR-217, ADR-221
-- [ ] **LH2** · [ ] **LH0** · [ ] **LH6** · [ ] **LH5** · [ ] **LH1** · [ ] **LH4** · [ ] **LH7**
+- [ ] **LH2** (phần Worker; tick khi review ĐẠT) · [ ] **LH2b** (hub đẩy `sources_sync` — CỔNG: chưa ĐẠT thì không deploy Worker, không trỏ source vào `workers.dev`; phải xong trước LH6) · [ ] **LH0** · [ ] **LH6** · [ ] **LH5** · [ ] **LH1** · [ ] **LH4** · [ ] **LH7**
 
 ## 16. Ghi chú / nợ phát hiện khi code
 
@@ -571,3 +573,8 @@ _(dev ghi vào đây; lệch với tài liệu provider hoặc trang giá Cloudf
   - **Lệch spec có chủ ý:** phát lại lấy theo `next_at` (index) thay vì sort `received_at` — sort cả hàng 5.000 dòng mỗi phút ≈ 7,2M rows read/ngày > quota free 5M. Lần đầu `next_at = received_at` nên thứ tự gần như cũ.
   - **D1:** trần dòng/BLOB ~2MB (theo hiểu biết, CHƯA tra lại trang Cloudflare trong phiên này) → body ≤ 1MB + header vừa. D1 trả BLOB dạng mảng số → `toBytes()` chuẩn hoá. Body rỗng (GET) lưu `X''` không NULL.
   - **Nợ:** (1) **phía hub đẩy `sources_sync`** (§4.5: `PUT /_admin/sources/:key` khi tạo/sửa/lưu trữ source, resync lúc khởi động + mỗi 10 phút, ack từ `buildAck`) CHƯA làm — chưa có thì Worker luôn 503 khi hub vắng (an toàn, nhưng lưới chưa cứu gì). Đề xuất story LH2b. (2) Chưa chạy workerd thật (`wrangler dev --local` + D1 local) — việc máy công ty, xem `LH2-VIEC-MAY-CONG-TY.md`. (3) `outage_gaps (source='catchnet')` (H9) chưa báo từ Worker — thuộc LH0. (4) Metric `catchnet_overflow` chỉ là dòng log JSON (Workers không có Prometheus).
+  - **Sau REVIEW-LH2 (2026-10-15):**
+    - TB-1: mạch 30s chỉ áp cho request hứng được; không hứng được thì vẫn chuyển tiếp. TB-2/TB-3: trần byte/ngày + cron có lease, số liệu gói free tra trang chính thức ngày 2026-10-15 (ADR-224): D1 50 truy vấn/invocation, 500 MB/DB, 2 MB/dòng, 5M đọc + 100k ghi/ngày; Workers 50 subrequest, CPU 10 ms, 128 MB. Batch phát lại hạ 25 → **10**/lượt (`CATCHNET_REPLAY_BATCH` kẹp 1..10).
+    - TB-4: LH2b vào bảng H12 (trước LH6) + §15b + DEPLOYMENT §3.6 + ADR-214/215 (cổng).
+    - L1 `changes > 0`; L2 chặn `..`/`%2e`/`%2f`/`%5c` trên target thô + bản chuẩn hoá → 404; L3 2xx không outcome = cấu hình sai (không ack từ hub, phát lại không xoá); L4 log chuyển tiếp không ký + `/_health.signing`; L5 luật hạn giữ ở DEPLOYMENT; L6 resync rỗng dọn key; L7 `%` hỏng → 422, body chunked đọc có trần; L8 ghi vào ADR-216; L9 bước đo `$remote_addr` của request gọi thẳng ở DEPLOYMENT; L10 TEST-MAP giữ trạng thái master, chỉ chèn dòng LH; L11 ADR-214 viết lại 3 dòng.
+    - Còn nợ: CPU/bộ nhớ thật của một lượt cron (BLOB dạng mảng số) chỉ đo được trên workerd — máy công ty. ADR-220 ghi khi bật Worker.
