@@ -283,3 +283,187 @@ Với các request đó Worker **tệ hơn** gọi thẳng.
 - Batch mặc định giảm từ 25 xuống 10/lượt, nên 5.000 dòng mất khoảng 8,3 giờ.
 - Dòng mới thêm cột `bytes`; `/_admin/stats` có thêm `pendingBytes`, `deadBytes`, `caughtToday`.
 - Migration `0001` sửa tại chỗ. Chấp nhận được vì chưa áp lên D1 thật nào.
+
+---
+
+## Lượt 2 (Winston, 2026-10-15)
+
+**Phạm vi:** `c54b575` (code) + `79e4c0a` (giấy), diff `0654b6f..79e4c0a`.
+
+**Đã chạy (máy nhà):**
+- `apps/catchnet`: `npx vitest run` → 3 file, **31/31 pass**. `npx tsc -p tsconfig.json --noEmit` → exit 0.
+- Thử `safeHookTarget` trên Node: chép đúng logic + `requestTarget`, chạy 15 target (kết quả ở mục L2).
+- Tra trang chính thức ngày 2026-10-15:
+  - `developers.cloudflare.com/workers/platform/limits/`
+  - `developers.cloudflare.com/d1/platform/limits/`
+  - `developers.cloudflare.com/d1/platform/pricing/`
+
+### Kết luận lượt 2: **CHƯA ĐẠT** — 0 Nặng · 1 TB (TB-2 còn hở một nửa) · 6 Thấp mới
+
+Đã đóng: TB-1, TB-3, TB-4. TB-2 mới đóng phần *body*. Trần byte chưa tính header và target, mà hai phần này lớn gấp nhiều lần mức dự phòng.
+
+### Từng TB
+
+**TB-1: ĐÓNG.**
+- `handleHook` chỉ bỏ qua bước chuyển tiếp khi đủ ba điều kiện:
+  - `canCatch`, tức có secret và path khớp `HOOK_RE`;
+  - mạch đang mở;
+  - `lookup` trả về một source hứng được.
+- Mọi trường hợp khác vẫn chuyển tiếp như thường:
+  - key chưa sync;
+  - provider lệch;
+  - GET bắt tay;
+  - D1 lỗi lúc tra (`'error'`). Khi đó Worker vẫn chuyển tiếp, và nếu hub vắng thì tra lại ở nhánh hứng.
+- **Key chưa sync + mạch mở + hub sống:** nhận phản hồi thật của hub, không còn 503 oan. Có test `[LH:T5] (phần d)`.
+- **Key đã sync + hub chậm một lần:** trong 30s Worker ghi D1 rồi ack, cron phát lại sau khoảng 1–2 phút. Sự kiện đến trễ chứ không mất, đúng §4.1.
+- Hai điểm nhỏ, chấp nhận được:
+  - Một lần chuyển tiếp thành công (từ request không hứng được) **không** đóng mạch sớm.
+  - Request không hứng được tốn thêm 1 lần đọc D1 khi mạch mở.
+
+**TB-2: CHƯA ĐÓNG HẾT.** Phần đã đúng:
+- **Không race giữa các isolate.** D1 là một SQLite ghi tuần tự, nên `INSERT … SELECT … WHERE` cùng trigger chạy nguyên tử trong một câu. Điều kiện có `+ ?12 <= max`, nên vượt trần là **0 byte**, không phải "vượt một ít".
+- **Trigger không lệch:**
+  - Không có chỗ nào `UPDATE body`/`source_key`. `leaseRows`/`markRetry` chỉ đụng `next_at`/`attempts`/`last_*`.
+  - `moveDead` bỏ `INSERT OR REPLACE`. Đúng: REPLACE xoá ngầm mà không kích trigger DELETE khi `recursive_triggers` tắt.
+  - Ca `expired` đi qua `moveDead`, nên trừ ở `inbox` và cộng ở `#dead`.
+  - `purgeDead` kích `inbox_dead_count_del`.
+- **Khoá ngày:**
+  - Câu kiểm và trigger cùng dùng `CAST(x / 86400000 AS INTEGER)`, nên D1 bind số dạng REAL hay INTEGER cũng ra cùng khoá.
+  - Đếm theo giờ Worker, khớp mốc reset 00:00 UTC của quota.
+  - Khoá ngày không giảm khi xoá, đúng ý đồ.
+  - `source_key` chỉ gồm `[A-Za-z0-9_-]`, nên không đụng được `*`, `#dead`, `day:*`.
+- **Số free tier khớp nguồn** dev ghi:
+  - D1: 500 MB/DB; 2 MB/dòng; 50 truy vấn/invocation; 5M đọc + 100k ghi/ngày; index tính thêm; reset 00:00 UTC.
+  - Workers: 50 subrequest, 10 ms CPU (cả Cron), 128 MB.
+  - Trang Workers ghi rõ subrequest gồm cả lời gọi D1, nên cách dev cộng truy vấn D1 + fetch vào cùng một ngân sách là đúng mô hình.
+
+**TB-2a (mới, TB). Trần byte chỉ đếm `body`; `headers_json` và `target` không bị đếm, không bị kẹp.**
+- **Chỗ:**
+  - trigger `inbox_count_ins` / `inbox_dead_count_ins` dùng `length(NEW.body)`;
+  - `insertCaught` dùng `?12 = r.body.byteLength`;
+  - `storableHeaders` không có trần.
+- **Số liệu** (cùng trang limits tra hôm nay): Workers nhận tới **128 KB header** và **URL 16 KB**. Một dòng có thể chứa khoảng 144 KB không bị đếm, kể cả khi body rỗng.
+- **Kịch bản:** cùng mô hình đe doạ của TB-2 lượt 1, tức một `sourceKey` bị lộ, gửi lúc hub vắng.
+  - POST body 0 byte, header 128 KB, mỗi lần 1 dòng. Trần byte không tăng.
+  - Trần dòng của key: 2.000 × 144 KB ≈ **288 MB**. Hai key lộ là ≈ 576 MB, vượt 500 MB.
+  - Chỉ cần **một** key: dòng rác bị hub từ chối khi phát lại (`rejected`) sẽ sang `inbox_dead`. Hàng chết không có trần dòng, và trần byte của nó cũng chỉ đếm body. Key được giải phóng, kẻ xấu nạp lại.
+  - Trần ngày 5.000 × 144 KB ≈ **720 MB/ngày**. DB đầy trong chưa tới một ngày, đúng hệ quả TB-2 lượt 1 đã nêu: mọi `INSERT` của mọi source trả 503, `moveDead` lỗi, lưới chết.
+  - BB-3 vẫn giữ, nhưng mục tiêu của TB-2 ("trần đếm byte, không làm chết lưới") chưa đạt.
+- **Sửa (chọn một, đều vài dòng):**
+  - **(a)** Đếm đủ. Trigger dùng `length(NEW.body) + length(CAST(NEW.headers_json AS BLOB)) + length(CAST(NEW.target AS BLOB))`. Phải CAST, vì `length(TEXT)` đếm ký tự chứ không đếm byte. Đổi `?12` trong `insertCaught` thành tổng ba phần tính bằng `TextEncoder`, và áp cho cả `#dead`.
+  - **(b)** Kẹp trước khi hứng. `JSON.stringify(headers)` > 16 KB hoặc target > 4 KB thì không hứng (503) nhưng vẫn chuyển tiếp như thường. Nên làm thêm bước này dù chọn (a).
+  - Thêm một ca vào `[LH:T10] (phần c)`: body rỗng, header lớn, phải chạm trần byte.
+
+**TB-3: ĐÓNG** (còn ghi chú Thấp N1–N3).
+- Có đủ ba bước: `dueIds` (id + `length(body)` theo index) → `leaseRows` một câu → `loadRow` từng dòng.
+- `[LH:T8] (phần f)` chứng minh lượt bị giết thì lượt sau gửi dòng khác.
+- **Dòng hết lease** quay lại tự nhiên vì `next_at = lúc lease + 5'` ≤ now.
+  - Dòng bị lease mà chưa gửi (lô dừng vì hub vắng) **không** bị tăng `attempts`. Đúng.
+  - Nhánh `catch` không `markRetry`, nhưng lease đã đẩy dòng lùi, nên không còn giữ đầu hàng.
+- **Một lượt chạy quá 5 phút:** cần khoảng 2 nhóm × timeout 4s + độ trễ D1, cỡ chục giây. Trần wall-clock của Cron là 15 phút, nên về lý thuyết vẫn có thể xảy ra nếu D1 treo. Nếu xảy ra thì gửi trùng, và hub nuốt bằng khoá chống trùng (id provider / `bodyHashKey`; `x-catchnet-id` không nằm trong khoá) → `duplicate` → xoá. Chấp nhận được, **nhưng phải ghi vào phần đánh đổi của ADR-216** (xem N2).
+- **Đếm truy vấn:**
+  - Mỗi dòng: `loadRow` 1 + fetch 1 + kết quả tối đa 2 (`moveDead` là batch 2 câu). `deleteRow`/`markRetry` chỉ 1.
+  - Trigger chạy trong cùng câu, không tính thêm.
+  - Cố định: `dueIds` 1 + `leaseRows` 1. Ở phút 00 có thêm `purgeDead`, giờ là **batch 2 câu**, nên tổng là **4** chứ không phải 3.
+  - Trường hợp xấu nhất: 4 + 4×10 = **44** < 50. Dev ghi 43 là lệch 1, nhưng vẫn dưới trần. Sửa con số trong ADR-224 khi tiện.
+  - `redirect: 'manual'` nên không có subrequest ẩn do chuyển hướng.
+
+**TB-4: ĐÓNG.**
+- Cổng LH2b đã có ở bảng H12 (dòng 4b, LH6 phụ thuộc LH2b), §15b, DEPLOYMENT §3.6, ADR-214 (Đánh đổi), ADR-215 và `wrangler.toml`.
+- Nhãn "(phần Worker; tick khi review ĐẠT)" ở §15b đúng như đã yêu cầu.
+
+### Các mục Thấp lượt 1
+
+**L2 `safeHookTarget`: ĐẠT.** Kết quả thử:
+
+| Target | Kết quả | Ghi chú |
+|---|---|---|
+| `%2e%2e` | 404 | |
+| `%2E.` | 404 | |
+| `.\t.` / `.\n.` | 404 | WHATWG xoá tab/xuống dòng thành `..`, bản chuẩn hoá bắt được. Đây là lý do cần kiểm hai lớp. |
+| `x;/../` | 404 | |
+| `\` / `%5c` / `%2f` | 404 | |
+| `./../` | 404 | |
+| `%252e%252e` | lọt | Vẫn dưới `/hooks/`. nginx giải mã một lần thành chữ `%2e`, không phải dấu chấm; Express không giải mã lại path. An toàn. |
+| `//` | lọt | `/hooks//api`, vẫn dưới `/hooks/`. |
+| `．．` (U+FF0E) | lọt | WHATWG mã hoá thành `%EF%BC%8E`, không phải dấu chấm. An toàn. |
+| `.%00.` | lọt | Không phải dot-segment. An toàn. |
+| `..` nằm trong query | lọt | Đúng: query không phải path. |
+
+Còn một điểm, xem N4.
+
+**L3: ĐẠT, không làm kẹt lô.**
+- 2xx không outcome được xử lý như `absent`, nên lô dừng sau nhóm đầu, `markRetry` lùi dần 1/2/5/10/30', và 5 dòng còn lại chờ hết lease.
+- Không dòng nào kẹt đầu hàng. Sau 7 ngày dòng thành `expired`.
+- Trong lúc cấu hình sai thì không giao được gì. Đó là hành vi đúng, kèm log `catchnet_misconfigured` mỗi dòng.
+- Ở chiều chuyển tiếp: hứng rồi ack nếu hứng được, không thì 503. Không có 2xx giả.
+
+**L1, L4–L11: ĐẠT.**
+- `changes > 0` an toàn theo cả hai cách đếm, vì WHERE sai thì không có trigger nào chạy và kết quả là 0.
+- `readCapped` dừng đọc khi vượt trần.
+- `%` hỏng → 422.
+- Resync rỗng dùng `COALESCE(MIN, startedAt)`.
+- ADR-214/215/216 đã gọn 3 dòng.
+
+### Hồi quy
+
+- **BB-3 giữ nguyên.** 2xx chỉ đến từ hai nguồn:
+  - `passThrough`, khi hub trả lời rõ, và giờ 2xx không outcome **không** còn đi qua đây;
+  - `ackResponse`, sau `insertCaught` trả `true`.
+- Nhánh mạch mở (`catchIt` trực tiếp) cũng ghi D1 trước khi ack.
+- Mọi lỗi trả 503. `handleFetch` vẫn bắt exception → 503.
+- **Chữ ký và bytes không đổi:**
+  - `callHub` vẫn ký `requestTarget(href)` và body thô.
+  - `readCapped` ghép chunk thành `Uint8Array` nguyên bytes, không `text()`.
+  - D1 vẫn lưu `rawTarget` thô.
+
+### ADR và migration
+
+- ADR-214/215/216/222/223/224 nằm trong dải 211–229, không trùng; master đang dùng 230–233.
+- ADR-224 đủ 3 dòng và có nguồn. Cần sửa hai chỗ: "43" thành 44, và bổ sung TB-2a / N1.
+- **Migration `0001` sửa tại chỗ:** chấp nhận, vì chưa áp lên D1 `--remote` nào và cổng TB-4 cấm deploy. Kèm hai điều kiện:
+  1. Ghi vào `LH2-VIEC-MAY-CONG-TY.md`: nếu máy công ty (hoặc spike LH-S) đã từng `migrations apply --local`, phải xoá `apps/catchnet/.wrangler/state` trước. `CREATE TABLE IF NOT EXISTS` không thêm cột `bytes` vào bảng cũ, và D1 cũng đã ghi `0001` là đã áp.
+  2. Sau lần `--remote` đầu tiên, chỉ thêm migration mới, không sửa `0001` nữa.
+
+### Thấp mới (ghi §16 làm nợ; không chặn nếu TB-2a đã sửa)
+
+**N1. Con số "≈ 11 dòng ghi/sự kiện" chỉ đúng với đường suôn sẻ.**
+- Chi phí của cron không bị đếm vào trần ngày:
+  - lease khoảng 2 dòng ghi mỗi dòng (bảng + index `next_at`);
+  - `markRetry` khoảng 2;
+  - `moveDead` khoảng 6–7.
+- Hub vắng cả ngày: mỗi lượt có 10 lease + 5 retry ≈ 30 dòng ghi → 1.440 lượt ≈ **43k/ngày**. Cộng 5.000 lần hứng × khoảng 5 = 25k, tổng vẫn dưới 100k.
+- Ngày hub trở lại với 15.000 dòng tồn: khoảng 14.400 × 6 ≈ 86k, cộng lần hứng mới, **có thể vượt 100k**.
+- Hệ quả khi vượt:
+  - `INSERT` lỗi → 503, BB-3 vẫn giữ.
+  - `deleteRow` lỗi → dòng gửi lại sau lease, hub nuốt bản trùng.
+  - Không mất dữ liệu, nhưng phải ghi vào phần đánh đổi của ADR-224.
+
+**N2. `dueIds` → `leaseRows` là hai câu, không nguyên tử.**
+- Hai invocation chồng nhau (`__scheduled` bấm tay, hoặc cron chồng lượt) có thể chọn cùng id và gửi hai lần.
+- Lượt dài hơn 5 phút cũng gây gửi trùng.
+- Hub nuốt cả hai trường hợp nhờ UNIQUE. Ghi vào ADR-216. Nếu muốn kín hơn: `UPDATE inbox SET next_at=? WHERE id IN (SELECT id … LIMIT ?) RETURNING id, length(body)`.
+
+**N3. Kiểm `expired` nằm sau `loadRow`.**
+- Nếu chính việc nạp một body (BLOB 1 MB dạng mảng số) làm lượt vượt CPU/bộ nhớ, dòng đó **không bao giờ** tới được nhánh `expired`. Nó quay lại mỗi 5 phút mãi mãi và kéo chết các dòng cùng lô (các dòng này chỉ bị gửi trùng, không mất).
+- Sửa: `dueIds` trả thêm `received_at`, và chuyển dòng quá hạn sang dead bằng SQL (`moveDead` vốn đã chép bằng `INSERT … SELECT`, không nạp body vào JS) trước khi lease.
+- Phụ thuộc vào số đo ở máy công ty §3b.
+
+**N4. `safeHookTarget` và route `/hooks` không phân biệt hoa thường (`/i`), còn `HOOK_RE` thì phân biệt.**
+- `/HOOKS/github/k` được chuyển tiếp tới hub.
+- `location /hooks` của nginx phân biệt hoa thường, nên request rơi vào location khác và đi vòng qua `limit_conn` / cầu chì của `/hooks`.
+- Express mặc định không phân biệt hoa thường, nên vẫn có thể vào route ingest.
+- Sửa: bỏ cờ `i`, chỉ nhận `/hooks/` chữ thường.
+
+**N5. Phần đếm `#dead` chỉ chạy bằng `UPDATE`, không upsert.**
+- Nếu dòng `#dead` mất (ai đó xoá tay), mọi câu cộng sẽ âm thầm không làm gì và trần đếm thiếu.
+- Nên đổi sang `INSERT … ON CONFLICT DO UPDATE` như khoá source.
+
+**N6. Số "43 truy vấn"** trong code comment, ADR-224 và bảng phản hồi: ở phút 00 thực tế là 44, vì `purgeDead` là batch 2 câu.
+
+### Điều kiện để ĐẠT (lượt 3)
+
+1. Sửa **TB-2a** theo (a) hoặc (b), kèm ca test header lớn + body rỗng trong `[LH:T10]`.
+2. Cập nhật ADR-224: 44 truy vấn, đánh đổi N1, và việc trần byte giờ tính cả header/target.
+3. Ghi N1–N6 vào §16 làm nợ. Sửa luôn N4 và N5 vì mỗi mục chỉ 1–3 dòng.
+4. Ghi điều kiện xoá `.wrangler/state` vào `LH2-VIEC-MAY-CONG-TY.md`.
