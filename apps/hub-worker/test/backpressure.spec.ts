@@ -429,7 +429,7 @@ describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
     return { due, channel };
   }
 
-  it('[BP:T4] (phần a) DB chết 60s dưới tải (200 delivery + 100 normalize): Prisma bị gọi ≤ 20/s/lane vài giây đầu, rồi chế độ dò ≤ 2 lần / 5s / tiến trình (nhịp dò tính theo LANE); log warn gộp', async () => {
+  it('[BP:T4] (phần a) DB chết 60s dưới tải (200 delivery + 100 normalize): Prisma bị gọi ≤ 20/s/lane vài giây đầu, rồi chế độ dò ≤ 2 lần / 5s trên đường consumer (normalize + delivery) (nhịp dò tính theo LANE); log warn gộp', async () => {
     jest.useFakeTimers();
     const warn = jest.spyOn(logger, 'child');
     try {

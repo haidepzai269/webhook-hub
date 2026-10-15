@@ -3,7 +3,7 @@
  * Phần a (mô phỏng L0/L1) ở apps/hub-worker/test/backpressure.spec.ts và circuit-breaker.spec.ts.
  *
  *   [BP:T4]  giết Postgres 60 s DƯỚI TẢI (cả lane normalize lẫn delivery có hàng) -> số lần xử lý message chạm DB mỗi 5 s bị
- *            chặn trên (chế độ dò ≤ 2 / 5 s / tiến trình), log consumer không xả; DB về -> 0 mất, 0 trùng.
+ *            chặn trên (chế độ dò ≤ 2 / 5 s trên đường consumer (normalize + delivery), ≤ 1 / lane), log consumer không xả; DB về -> 0 mất, 0 trùng.
  *   [BP:T21] dừng Postgres 10 phút dưới tải đều -> q.normalize.dlq tăng ≤ 5; DB về thì xử lý hết (0 mất, 0 trùng).
  *   [BP:T16] đích chết 10 phút với 500 delivery hoãn -> hồi phục: không giây nào vượt trần ramp (2,4,…,64 rps trong 60 s).
  *
@@ -39,6 +39,8 @@ import {
   workerLogs,
 } from '../lib/chaos';
 import { ROOT } from '../lib/compose';
+// Hằng ramp: một nguồn với worker (import thẳng file nguồn — @hub/messaging trỏ dist, verify không build lib).
+import { DELIVERY_RAMP_SECONDS, DELIVERY_RAMP_START_RPS, DELIVERY_RAMP_STEP_SECONDS } from '../../libs/messaging/src/retry-window';
 import { closeWorld, createKey, createSource, registerDev, RUN, SINK_INTERNAL, sleep, svc } from '../lib/e2e-world';
 import { expect } from '../lib/http-session';
 import { ScenarioFile, waitFor } from '../lib/scenario';
@@ -94,15 +96,18 @@ const NORMALIZE_DB = [{ name: 'hub_normalize_deferred_total' }, { name: 'hub_nor
 const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
 const FACTOR = (s: MetricsSampler, i: number) => MetricsSampler.value(s.samples[i], 'hub_backpressure_factor', { dependency: 'db' });
 
-/** Mỗi cửa sổ [mẫu i, mẫu j] dài ≤ 5 s trong [from, to): max số lần chạm DB (cả hai lane) — chế độ dò ≤ 2. */
-function maxPer5s(s: MetricsSampler, from: number, to: number): { max: number; at: number; windows: number } {
+/**
+ * Mỗi cửa sổ [mẫu i, mẫu j] dài ≤ 5 s trong [from, to): max số lần chạm DB của `lanes` (mặc định cả hai lane — chế độ dò ≤ 2;
+ * một lane — ≤ 1). Sai số mẫu 1 s: cửa sổ đo là khoảng giữa hai mẫu (≤ 5 s), không phải mọi khoảng 5 s liên tục.
+ */
+function maxPer5s(s: MetricsSampler, from: number, to: number, lanes = [...DELIVERY_DB, ...NORMALIZE_DB]): { max: number; at: number; windows: number } {
   let max = 0;
   let at = 0;
   let windows = 0;
   for (let i = from; i < to; i++) {
     for (let j = i + 1; j <= to && s.samples[j].t - s.samples[i].t <= 5000; j++) {
       windows++;
-      const d = s.delta(i, j, [...DELIVERY_DB, ...NORMALIZE_DB]);
+      const d = s.delta(i, j, lanes);
       if (d > max) {
         max = d;
         at = s.samples[i].t;
@@ -136,7 +141,7 @@ const file: ScenarioFile = {
   },
   scenarios: [
     {
-      name: '[BP:T4] (phần b) LOCAL hubv: giết Postgres 60 s dưới tải (normalize + delivery) — chế độ dò ≤ 2 lần chạm DB / 5 s / tiến trình, log consumer gộp, DB về 0 mất 0 trùng',
+      name: '[BP:T4] (phần b) LOCAL hubv: giết Postgres 60 s dưới tải (normalize + delivery) — chế độ dò ≤ 2 lần chạm DB / 5 s trên đường consumer (normalize + delivery), log consumer gộp, DB về 0 mất 0 trùng',
       tags: ['chaos-bp', 'bp-t4', 'BP5'],
       fn: () =>
         guarded(async () => {
@@ -182,6 +187,9 @@ const file: ScenarioFile = {
           const w5raw = iProbe >= 0 ? maxPer5s(sampler, iProbe, iUp) : { max: -1, at: 0, windows: 0 };
           const iSteady = iProbe >= 0 ? sampler.indexAt(sampler.samples[iProbe].t + PRISMA_CONNECT_TIMEOUT_MS + 1000) : -1;
           const w5 = iSteady >= 0 && iSteady < iUp ? maxPer5s(sampler, iSteady, iUp) : { max: -1, at: 0, windows: 0 };
+          const NONE = { max: -1, at: 0, windows: 0 };
+          const w5d = iSteady >= 0 && iSteady < iUp ? maxPer5s(sampler, iSteady, iUp, DELIVERY_DB) : NONE;
+          const w5n = iSteady >= 0 && iSteady < iUp ? maxPer5s(sampler, iSteady, iUp, NORMALIZE_DB) : NONE;
           const probeCalls = iSteady >= 0 ? sampler.delta(iSteady, iUp, [...DELIVERY_DB, ...NORMALIZE_DB]) : -1;
           const probeSpanS = iSteady >= 0 ? (sampler.samples[iUp].t - sampler.samples[iSteady].t) / 1000 : 0;
           const inflightBurst = iProbe >= 0 && iSteady > iProbe ? sampler.delta(iProbe, iSteady, [...DELIVERY_DB, ...NORMALIZE_DB]) : 0;
@@ -195,7 +203,9 @@ const file: ScenarioFile = {
             return -1;
           })();
 
-          const logs = await workerLogs(win.downAt, win.startedAt);
+          // Review Thấp (5): khung log từ lúc phá tới khi factor về 0 (gồm cả pha hồi phục), không dừng ở lúc DB lên lại.
+          const logUntil = iZero >= 0 ? sampler.samples[iZero].t : win.readyAt;
+          const logs = await workerLogs(win.downAt, logUntil);
           const rate = logRate(logs);
           const deliveryWarn = logs.filter((l) => l.level === 'warn' && l.msg.startsWith('Lỗi hạ tầng hub ở delivery')).length;
           const tProbe = iProbe >= 0 ? sampler.samples[iProbe].t : Infinity;
@@ -213,11 +223,13 @@ const file: ScenarioFile = {
           v.check('Tiền đề: worker không khởi động lại giữa kịch bản (chuỗi mẫu liên tục)', `RestartCount ${r0} → ${r1}, exec nối lại ${sampler.resets} lần`, r1 === r0);
           v.check('factor{db} lên 1 (chế độ dò) trong ≤ 10 s sau khi DB chết', `${(toProbeMs / 1000).toFixed(1)} s`, iProbe >= 0 && toProbeMs <= 10_000);
           v.check(
-            'Chế độ dò (từ factor = 1 + 6 s tới khi DB về): mọi cửa sổ ≤ 5 s có ≤ 2 lần chạm DB cho cả tiến trình (1 / lane / 5 s)',
+            'Chế độ dò (chặn trên tính từ mốc factor = 1 cộng 6 s, tới khi DB về): mọi cửa sổ ≤ 5 s có ≤ 2 lần chạm DB trên đường consumer (normalize + delivery)',
             `max ${w5.max} (${w5.windows} cửa sổ, ${probeCalls} lần / ${probeSpanS.toFixed(0)} s = ${(probeCalls / Math.max(1, probeSpanS / 5)).toFixed(2)} / 5 s); 6 s đầu sau factor = 1: ${inflightBurst} lỗi của permit cấp trước đó, max thô ${w5raw.max}`,
             w5.max >= 0 && w5.max <= 2,
           );
-          v.check(`Log delivery hạ tầng gộp ≤ 1 dòng / 30 s (≤ ${Math.ceil(DOWN / 30_000) + 1} dòng trong ${DOWN / 1000} s)`, `${deliveryWarn} dòng`, deliveryWarn <= Math.ceil(DOWN / 30_000) + 1);
+          v.check('Chế độ dò theo lane: mọi cửa sổ ≤ 5 s có ≤ 1 lần chạm DB mỗi lane', `delivery max ${w5d.max}, normalize max ${w5n.max}`, w5d.max >= 0 && w5d.max <= 1 && w5n.max >= 0 && w5n.max <= 1);
+          const logSpan = logUntil - win.downAt;
+          v.check(`Log delivery hạ tầng gộp ≤ 1 dòng / 30 s (≤ ${Math.ceil(logSpan / 30_000) + 1} dòng trong ${Math.round(logSpan / 1000)} s, từ lúc phá tới factor = 0)`, `${deliveryWarn} dòng`, deliveryWarn <= Math.ceil(logSpan / 30_000) + 1);
           v.check('Log normalize: 0 dòng warn "Lỗi tạm" sau khi factor = 1 (DB đã biết ốm -> debug)', `${normWarnAfterProbe} dòng`, normWarnAfterProbe === 0);
           v.check('Log consumer (normalize + delivery, warn/error) không xả: ≤ 5 dòng / giây', `max ${consumerRate.maxPerSec} dòng/s, tổng ${consumerRate.total}`, consumerRate.maxPerSec <= 5);
           v.check('Delivery: lỗi DB xếp transient (không rơi vào nhánh unknown -> DLQ)', `transient ${infraKinds.transient}, unknown ${infraKinds.unknown}`, infraKinds.unknown === 0);
@@ -226,7 +238,7 @@ const file: ScenarioFile = {
             params: { downMs: DOWN, n: N, sinkDelayMs: 1000, mode: 'kill' },
             window: win,
             preload: { acked: pre.st.acked.size, depths: pre.depths, readyMet: pre.readyMet },
-            counts: { deliveryDbCalls: delivCalls, normalizeDbCalls: normCalls, infraKinds, toProbeMs, probeCalls, probeSpanS, maxPer5s: w5, maxPer5sRawFromFactor1: w5raw, inflightBurstAfterFactor1: inflightBurst, spilled, factorZeroAfterUpMs: iZero >= 0 ? sampler.samples[iZero].t - win.startedAt : null },
+            counts: { deliveryDbCalls: delivCalls, normalizeDbCalls: normCalls, infraKinds, toProbeMs, probeCalls, probeSpanS, maxPer5s: w5, maxPer5sDelivery: w5d, maxPer5sNormalize: w5n, maxPer5sRawFromFactor1: w5raw, firstWave: { deliveryDbCalls: iProbe >= 0 ? sampler.delta(iDown, iSteady, DELIVERY_DB) : null, normalizeDbCalls: iProbe >= 0 ? sampler.delta(iDown, iSteady, NORMALIZE_DB) : null, untilMs: iSteady >= 0 ? sampler.samples[iSteady].t - win.downAt : null }, logWindowMs: logSpan, inflightBurstAfterFactor1: inflightBurst, spilled, factorZeroAfterUpMs: iZero >= 0 ? sampler.samples[iZero].t - win.startedAt : null },
             firstSeconds: firstSecs,
             logs: { all: { total: rate.total, maxPerSec: rate.maxPerSec }, perMsg: rate.perMsg, deliveryWarn, normWarnAfterProbe, consumer: { total: consumerRate.total, maxPerSec: consumerRate.maxPerSec }, relayErrorLines: relayLines },
             queues: { before: q0, after: q1 },
@@ -292,6 +304,9 @@ const file: ScenarioFile = {
           const iSteady = iProbe >= 0 ? sampler.indexAt(sampler.samples[iProbe].t + PRISMA_CONNECT_TIMEOUT_MS + 1000) : -1;
           const w5 = iSteady >= 0 && iSteady < iUp ? maxPer5s(sampler, iSteady, iUp) : { max: -1, at: 0, windows: 0 };
           const steadyCalls = iSteady >= 0 ? sampler.delta(iSteady, iUp, [...DELIVERY_DB, ...NORMALIZE_DB]) : -1;
+          const NONE = { max: -1, at: 0, windows: 0 };
+          const w5d = iSteady >= 0 && iSteady < iUp ? maxPer5s(sampler, iSteady, iUp, DELIVERY_DB) : NONE;
+          const w5n = iSteady >= 0 && iSteady < iUp ? maxPer5s(sampler, iSteady, iUp, NORMALIZE_DB) : NONE;
           const steadySpanS = iSteady >= 0 ? (sampler.samples[iUp].t - sampler.samples[iSteady].t) / 1000 : 0;
           const spilled = sampler.delta(iDown, sampler.samples.length - 1, [{ name: 'hub_backpressure_spilled_total' }]);
           const deferred = sampler.delta(iDown, sampler.samples.length - 1, [{ name: 'hub_normalize_deferred_total' }]);
@@ -307,7 +322,8 @@ const file: ScenarioFile = {
           v.check('Tiền đề: Postgres chết THẬT suốt cửa sổ', `${win.unexpectedlyUp} lần thấy đang chạy; ${Math.round((win.startedAt - win.downAt) / 1000)} s`, win.unexpectedlyUp === 0 && win.startedAt - win.downAt >= DOWN);
           v.check('Tiền đề: lane normalize có hàng chạm DB trong lúc DB chết (dưới tải)', `normalize ${normCalls} lần chạm DB (delivery ${delivCalls})`, normCalls > 0);
           v.check('Tiền đề: worker không khởi động lại giữa kịch bản', `RestartCount ${r0} → ${r1}, exec nối lại ${sampler.resets} lần`, r1 === r0);
-          v.check('(đo thêm) chế độ dò suốt 10 phút: mọi cửa sổ ≤ 5 s có ≤ 2 lần chạm DB', `max ${w5.max}; ${steadyCalls} lần / ${steadySpanS.toFixed(0)} s = ${(steadyCalls / Math.max(1, steadySpanS / 5)).toFixed(2)} / 5 s`, w5.max >= 0 && w5.max <= 2);
+          v.check('(đo thêm) chế độ dò suốt 10 phút (từ factor = 1 cộng 6 s): mọi cửa sổ ≤ 5 s có ≤ 2 lần chạm DB trên đường consumer (normalize + delivery)', `max ${w5.max}; ${steadyCalls} lần / ${steadySpanS.toFixed(0)} s = ${(steadyCalls / Math.max(1, steadySpanS / 5)).toFixed(2)} / 5 s`, w5.max >= 0 && w5.max <= 2);
+          v.check('(đo thêm) chế độ dò theo lane: mọi cửa sổ ≤ 5 s có ≤ 1 lần chạm DB mỗi lane', `delivery max ${w5d.max}, normalize max ${w5n.max}`, w5d.max >= 0 && w5d.max <= 1 && w5n.max >= 0 && w5n.max <= 1);
           v.check('q.normalize.dlq tăng ≤ 5 (đếm chính xác rabbitmqctl, trước/sau)', `+${dlq} (${q0['q.normalize.dlq'] ?? 0} → ${q1['q.normalize.dlq'] ?? 0})`, dlq <= 5);
 
           v.finish('chaos-bp-T21.json', {
@@ -315,7 +331,7 @@ const file: ScenarioFile = {
             window: win,
             preload: { acked: pre.st.acked.size, depths: pre.depths, readyMet: pre.readyMet },
             steady: { ids: st.ids.length, acked: st.acked.size, failed: st.failed.size },
-            counts: { normalizeDbCalls: normCalls, deliveryDbCalls: delivCalls, toProbeMs: iProbe >= 0 ? sampler.samples[iProbe].t - win.downAt : null, maxPer5s: w5, steadyCalls, steadySpanS, normalizeDeferred: deferred, normalizeRetriesBurned: retries, spilled, factorZeroAfterUpMs: iZero >= 0 ? sampler.samples[iZero].t - win.startedAt : null, dlqDelta: dlq },
+            counts: { normalizeDbCalls: normCalls, deliveryDbCalls: delivCalls, toProbeMs: iProbe >= 0 ? sampler.samples[iProbe].t - win.downAt : null, maxPer5s: w5, maxPer5sDelivery: w5d, maxPer5sNormalize: w5n, steadyCalls, steadySpanS, normalizeDeferred: deferred, normalizeRetriesBurned: retries, spilled, factorZeroAfterUpMs: iZero >= 0 ? sampler.samples[iZero].t - win.startedAt : null, dlqDelta: dlq },
             logs: { total: rate.total, maxPerSec: rate.maxPerSec, perMsg: rate.perMsg },
             queues: { before: q0, after: q1 },
             drain,
@@ -324,14 +340,14 @@ const file: ScenarioFile = {
         }),
     },
     {
-      name: '[BP:T16] (phần b) LOCAL hubv: đích chết 10 phút với 500 delivery hoãn → hồi phục — không giây nào vượt trần ramp (2,4,…,64 rps trong 60 s)',
+      name: '[BP:T16] (phần b) LOCAL hubv: đích chết 10 phút với 500 delivery hoãn → hồi phục — không giây nào vượt trần ramp (2,4,…,64 rps trong 60 s, bậc kẹp 64 tới 70 s; sau ramp ≤ 64/s)',
       tags: ['chaos-bp', 'bp-t16', 'BP4'],
       fn: () =>
         guarded(async () => {
           const DOWN = envMs('BP_T16_DOWN_MS', 600_000);
           const N = envMs('BP_T16_N', 500);
-          // Mặc định của worker (DELIVERY_RAMP_START_RPS / _STEP_SECONDS / _SECONDS) — hubv không đặt env này.
-          const RAMP = { start: 2, stepS: 10, seconds: 60 };
+          // Mặc định của worker — một nguồn với code (review Thấp 4); hubv không đặt env DELIVERY_RAMP_*.
+          const RAMP = { start: DELIVERY_RAMP_START_RPS, stepS: DELIVERY_RAMP_STEP_SECONDS, seconds: DELIVERY_RAMP_SECONDS };
           const v = new Verdicts();
           const w = await world('bp16');
           await sinkReset();
@@ -360,8 +376,11 @@ const file: ScenarioFile = {
             await waitFor('probe thành công -> circuit:{id}:ramp', async () => redis.get(`circuit:${w.endpointId}:ramp`), 15 * 60_000, 250),
           );
           console.log(`  probe thành công, ramp bắt đầu ${new Date(rampStart).toISOString()} (${Math.round((rampStart - tUp) / 1000)} s sau khi đích sống)`);
-          await sleep(Math.max(0, rampStart + RAMP.seconds * 1000 + 5000 - Date.now()));
-          const rampEnd = rampStart + RAMP.seconds * 1000;
+          await sleep(Math.max(0, rampStart + (RAMP.seconds + RAMP.stepS) * 1000 + 5000 - Date.now()));
+          // F3 (ADR-232): khoá :ramp sống ramp + một bậc (70 s), bậc thêm kẹp ở trần cuối.
+          const rampEnd = rampStart + (RAMP.seconds + RAMP.stepS) * 1000;
+          const lastStep = Math.max(0, Math.ceil(RAMP.seconds / RAMP.stepS) - 1);
+          const finalCap = RAMP.start * 2 ** lastStep;
           /** Số request tới sink theo giây epoch, chỉ tính request trong [from, to). */
           const bySecond = (reqs: { at: string }[], from: number, to: number) => {
             const m = new Map<number, number>();
@@ -376,13 +395,13 @@ const file: ScenarioFile = {
           // Trong ramp: chỉ request tới khi `:ramp` còn sống [rampStart, rampEnd). Probe (HALF_OPEN) tới TRƯỚC rampStart — không thuộc trần.
           const perSec = bySecond(reqs, rampStart, rampEnd);
           // Trần của giây epoch S (khoá throttle theo giây epoch): trần tại thời điểm CUỐI phần giây còn ramp (trần tăng giữa giây thì cả giây được tới mức mới).
-          const capOf = (s: number) => RAMP.start * 2 ** Math.floor((Math.min(s * 1000 + 999, rampEnd - 1) - rampStart) / (RAMP.stepS * 1000));
+          const capOf = (s: number) => RAMP.start * 2 ** Math.min(lastStep, Math.floor((Math.min(s * 1000 + 999, rampEnd - 1) - rampStart) / (RAMP.stepS * 1000)));
           const rows: { s: number; t: number; n: number; cap: number }[] = [];
           for (let s = Math.floor(rampStart / 1000); s * 1000 < rampEnd; s++) rows.push({ s: s - Math.floor(rampStart / 1000), t: s, n: perSec.get(s) ?? 0, cap: capOf(s) });
           const over = rows.filter((r) => r.n > r.cap);
           const inRamp = rows.reduce((a, r) => a + r.n, 0);
           const probeReqs = reqs.filter((r) => Date.parse(r.at) < rampStart).length;
-          console.log(`  ramp 60 s: ${inRamp} request; theo giây ${rows.map((r) => `${r.n}/${r.cap}`).join(' ')}`);
+          console.log(`  ramp (60 s + bậc kẹp): ${inRamp} request; theo giây ${rows.map((r) => `${r.n}/${r.cap}`).join(' ')}`);
 
           let drain: { waitedMs: number } | null = null;
           await v.soft('Hồi phục: mọi delivery SUCCEEDED, 0 DEAD, 0 trùng (Postgres)', async () => {
@@ -400,7 +419,8 @@ const file: ScenarioFile = {
 
           v.check('Tiền đề: 500 delivery hoãn lúc đích sống lại (0 SUCCEEDED)', `${before.del} delivery, ${before.ok} SUCCEEDED`, before.del === N && before.ok === 0);
           v.check('Tiền đề: worker không khởi động lại', `RestartCount ${r0} → ${r1}`, r0 === r1);
-          v.check('Không giây nào trong 60 s ramp vượt trần (2,4,8,16,32,64 rps)', over.length ? `${over.length} giây vượt: ${over.map((o) => `+${o.s}s ${o.n}>${o.cap}`).join(', ')}` : `0 giây vượt; ${inRamp} request trong ramp`, over.length === 0);
+          v.check('Không giây nào trong ramp vượt trần (2,4,8,16,32,64 rps trong 60 s, rồi bậc kẹp 64 tới 70 s)', over.length ? `${over.length} giây vượt: ${over.map((o) => `+${o.s}s ${o.n}>${o.cap}`).join(', ')}` : `0 giây vượt; ${inRamp} request trong ramp`, over.length === 0);
+          v.check(`Sau ramp (khoá :ramp hết hạn, F3): không giây nào vượt trần cuối ${finalCap}/s`, `max ${afterMax}/s, ${afterTotal} request sau ramp`, afterMax <= finalCap);
           v.check('0 DEAD', `${fin.dead}`, fin.dead === 0);
 
           v.finish('chaos-bp-T16.json', {

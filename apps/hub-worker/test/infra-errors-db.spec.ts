@@ -10,7 +10,9 @@ import { classifyNormalizeError } from '../src/consumers/normalize-errors';
  */
 describeDb('ADR-194 classifyInfraError với lỗi Prisma thật (Postgres, hub_app)', () => {
   const app = newTestPrisma('app');
-  afterAll(() => app.$disconnect());
+  // client RIÊNG cho ca lỗi dữ liệu: ca trên cắt chính kết nối của `app` (lần dùng kế tiếp ra P1017, không phải lỗi cần kiểm)
+  const app2 = newTestPrisma('app');
+  afterAll(() => Promise.all([app.$disconnect(), app2.$disconnect()]));
 
   it('backend bị cắt giữa $executeRaw (pg_terminate_backend chính mình, 57P01) -> transient (normalize: transient)', async () => {
     const err = await app.$executeRaw`SELECT pg_terminate_backend(pg_backend_pid())`.then(
@@ -26,7 +28,7 @@ describeDb('ADR-194 classifyInfraError với lỗi Prisma thật (Postgres, hub_
   });
 
   it('lỗi dữ liệu thật qua $executeRaw (cast "08006" sang uuid -> 22P02, câu lỗi chứa "08006") -> unknown', async () => {
-    const err = await app.$executeRaw`SELECT '08006'::uuid`.then(
+    const err = await app2.$executeRaw`SELECT '08006'::uuid`.then(
       () => null,
       (e: unknown) => e,
     );
