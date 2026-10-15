@@ -287,7 +287,7 @@
           "BP6": "T23"
         }
       },
-      "note": "SPEC-ap-luc-nguoc §13 + mục ĐÍNH CHÍNH SAU QT (ADR-195..200). L0/L1; T4, T16, T21 là chaos LOCAL (docker-compose, C8). [BP:T24] khai báo ở C5 (không nằm trong bảng §13) -> khai báo inline. [BP:T22] không thuộc story nào: bắt buộc khi mọi BP đã [x]."
+      "note": "SPEC-ap-luc-nguoc §13 + mục ĐÍNH CHÍNH SAU QT (ADR-195..200). L0/L1; T4, T16, T21: phần a L0/L1, phần b chaos LOCAL verify/scenarios/chaos-bp.ts (npm run verify:chaos:bp, ADR-193; kết quả CHAOS-BP-KET-QUA.md, C14). [BP:T24] khai báo ở C5 (không nằm trong bảng §13) -> khai báo inline. [BP:T22] không thuộc story nào: bắt buộc khi mọi BP đã [x]."
     },
     {
       "ns": "PK",
@@ -378,7 +378,6 @@
     "DX:TX2": "Đo bằng đồng hồ với người test chưa đọc code (thời gian từ connection string tới event đầu tiên) — bản chất là phép đo thủ công, không tự động hoá được; chưa có kết quả ở §9.",
     "DX:TX3": "E2E làm tay: hub listen + examples/quickstart-node + SePay mock trên stack dev (PASS 2026-10-11 ở §9). Phần lõi phủ tự động ở L0 [DX:UX9], [DX:UX10], [DX:UX12]-[DX:UX14] (webhook-body.spec, listen.spec).",
     "DX:TX4": "E2E làm tay: đếm hub.deliveries trước/sau TX3 trên stack dev (PASS 2026-10-11 ở §9). listen chỉ đọc vì đi qua polling A (GET), không tạo delivery.",
-    "DX:TX5": "E2E làm tay: npx hub trigger + listen trên stack (SPEC-dev-experience §6.2), chưa ghi kết quả ở §9. Phần lõi phủ tự động ở L0 [DX:UX16] (libs/hub-sdk/test/trigger.spec.ts: body qua validateCanonical).",
-    "BP:T4": "Phần chaos LOCAL (dừng Postgres thật 60s dưới tải, docker-compose) chưa chạy (C8). Cận trên số lần gọi Prisma/s có ở BP5: L0 mô phỏng backpressure.spec [BP:T4] (phần a)."
+    "DX:TX5": "E2E làm tay: npx hub trigger + listen trên stack (SPEC-dev-experience §6.2), chưa ghi kết quả ở §9. Phần lõi phủ tự động ở L0 [DX:UX16] (libs/hub-sdk/test/trigger.spec.ts: body qua validateCanonical)."
   }
 }
