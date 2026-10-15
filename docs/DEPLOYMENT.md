@@ -222,6 +222,12 @@ khoá CHUNG cả lưới (50 kết nối chậm của kẻ xấu = mọi provide
 **không bao giờ** đọc `x-catchnet-client-ip` (test khoá: template không có `$http_x_catchnet`). Giới hạn theo IP ĐÃ KÝ chỉ có ở
 cổng phạt của hub-api (D3). `/v1/p/*` giữ cầu chì (không đi qua lưới). `EDGE_IP_FUSE=1` + lưới bật → cảnh báo level 50 lúc
 khởi động. Đánh đổi: `/hooks/*` mất lớp chống slowloris theo IP ở nginx (còn `client_body_timeout 10s` + cổng phạt hub-api).
+**Chỉ nới cho IP Cloudflare (LH2, REVIEW-LH3-R2 R2-L1, ADR-223):** khối `geo $edge_cf_ip` trong `nginx.conf.template` chứa dải
+IP Cloudflare công bố (`https://www.cloudflare.com/ips-v4`, `/ips-v6`). Khoá rỗng chỉ áp cho IP thuộc dải đó; IP khác gọi
+**thẳng** `/hooks/*` (source cũ ở URL Render, U-C; kẻ giữ kết nối chậm) vẫn bị `limit_conn` (và cầu chì nếu bật) theo IP như
+EG1. Trước khi bật lưới: đối chiếu dải với trang Cloudflare và đo IP egress của Worker trong log edge (`ip` của request có
+`x-catchnet-id`) — IP egress nằm ngoài dải = request lưới bị đếm chung như trước (an toàn, chỉ dễ 429 hơn). Kẻ xấu đi qua
+Worker riêng của họ trên Cloudflare vẫn được nới: còn `client_body_timeout` + cổng phạt hub-api.
 Phản hồi nginx tự sinh trên `/hooks*` mang `x-hub-outcome` (429 `refused`, 413/404 `rejected`, 503 `unavailable`). Node
 `clientError` (431/400 trước Express) không có header — lưới hứng coi 4xx không outcome theo luật ở ADR-221.
 
