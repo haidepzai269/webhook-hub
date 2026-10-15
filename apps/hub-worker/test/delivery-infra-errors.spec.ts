@@ -137,6 +137,25 @@ describe('BP1 — DeliveryConsumer không còn vòng lặp nóng requeue (ADR-19
     }
   });
 
+  it('Review TB-1 (ADR-194): P2010 bọc 23505 (câu lỗi chứa "57P01"/"08006") là unknown -> retry.1m, KHÔNG vào vòng transient không trần; P2010 57P01 -> retry.10s', async () => {
+    const p2010 = (sqlstate: string, msg: string) =>
+      new Prisma.PrismaClientKnownRequestError(`Raw query failed. Code: \`${sqlstate}\`. Message: \`${msg}\``, { code: 'P2010', clientVersion: 'x', meta: { code: sqlstate, message: msg } });
+    const cases: [unknown, string, string][] = [
+      [p2010('23505', 'duplicate key value violates unique constraint, Key (ref)=(08006 57P01)'), 'q.delivery.retry.1m', 'unknown'],
+      [p2010('57P01', 'FATAL: terminating connection due to unexpected postmaster exit'), 'q.delivery.retry.10s', 'transient'],
+    ];
+    for (const [err, queue, kind] of cases) {
+      const { prisma } = fakePrisma(err);
+      const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'));
+      const before = await counterValue(kind);
+      const ch = buildChannel();
+      await consumer.handleMessage(amqpMsg(buildSlimMsg()), ch);
+      expect(ch.nack).not.toHaveBeenCalled();
+      expect(ch.sendToQueue.mock.calls[0][0]).toBe(queue);
+      expect(await counterValue(kind)).toBe(before + 1);
+    }
+  });
+
   it('[BP:T2] (phần a) lỗi unknown 5 lần liên tiếp -> 4 lần hoãn retry.1m rồi publish DLX ĐÚNG một lần + ack, không nack, không vòng lặp', async () => {
     const { prisma, repo } = fakePrisma(new TypeError("Cannot read properties of undefined (reading 'destination')"));
     const consumer = new DeliveryConsumer(prisma, buildFakeCircuitBreaker('CLOSED'));

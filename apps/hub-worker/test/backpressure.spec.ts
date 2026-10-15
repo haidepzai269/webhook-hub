@@ -376,6 +376,7 @@ describe('BP5 §7.4 — normalize hoãn không đốt lượt khi DB đang ốm'
     expect(normalizeMaxDeferMs('600000')).toBe(600_000);
     expect(normalizeMaxDeferMs('1')).toBe(30_000);
   });
+
 });
 
 describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
@@ -536,6 +537,16 @@ describe('BP5 — bảng mã lỗi hạ tầng (nợ §16 của BP1)', () => {
     // P2010 với lỗi dữ liệu thật (vi phạm unique, cú pháp) vẫn KHÔNG phải hạ tầng
     expect(classifyInfraError(p2010('23505', 'duplicate key value violates unique constraint'))).toBe('unknown');
     expect(classifyNormalizeError(p2010('42601', 'syntax error at or near'))).toBe('permanent');
+    // Review TB-1: meta.code có thì CHỈ theo meta.code — câu lỗi dữ liệu chứa "08006"/"57P01" (giá trị người dùng) không được thành transient
+    expect(classifyInfraError(p2010('22P02', 'invalid input syntax for type uuid: "08006"'))).toBe('unknown');
+    expect(classifyInfraError(p2010('23505', 'duplicate key (id)=(57P01) Code: `57P01`'))).toBe('unknown');
+    expect(classifyNormalizeError(p2010('22P02', 'invalid input syntax for type integer: "57P01"'))).toBe('permanent');
+    // Thiếu meta: dò câu theo khuôn engine, có neo "Code: `…`"
+    const noMeta = (m: string) => new Prisma.PrismaClientKnownRequestError(m, { code: 'P2010', clientVersion: 'x' });
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `57P01`. Message: `FATAL: terminating connection due to administrator command`'))).toBe('transient');
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `08006`. Message: `connection failure`'))).toBe('transient');
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `22P02`. Message: `invalid input syntax for type uuid: "08006"`'))).toBe('unknown');
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `23505`. Message: `57P01 terminating connection due to administrator command`'))).toBe('unknown');
     expect(classifyInfraError(unknownReq('some other query error'))).toBe('unknown');
   });
 
