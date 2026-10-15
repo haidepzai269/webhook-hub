@@ -114,7 +114,7 @@ const inboxRows = (r: Rig) => r.db.raw.prepare('SELECT * FROM inbox ORDER BY rec
 beforeEach(() => resetCircuit());
 
 describe('LH2 ghi xuyên', () => {
-  it('[LH:T4] hub sống -> phản hồi hub đi qua nguyên vẹn (bỏ x-hub-outcome), D1 rỗng; request tới hub mang bytes gốc + header lưới đã ký', async () => {
+  it('[LH:T4] (phần c) hub sống -> phản hồi hub đi qua nguyên vẹn (bỏ x-hub-outcome), D1 rỗng; request tới hub mang bytes gốc + header lưới đã ký', async () => {
     const r = rig();
     await addSource(r, 'src_momo', { provider: 'momo', ackStatus: 204 });
     r.setHub(() => new Response('{"received":true}', { status: 200, headers: { 'x-hub-outcome': 'accepted', 'x-request-id': 'req-1', 'set-cookie': 'a=b' } }));
@@ -137,7 +137,7 @@ describe('LH2 ghi xuyên', () => {
     await expectSigned(sent, RAW, 'forward');
   });
 
-  it('[LH:T5] hub chết (5xx không outcome) -> D1 đúng 1 dòng, body BẰNG TỪNG BYTE, header gốc đã lọc, provider nhận ack của source (MoMo 204)', async () => {
+  it('[LH:T5] (phần a) hub chết (5xx không outcome) -> D1 đúng 1 dòng, body BẰNG TỪNG BYTE, header gốc đã lọc, provider nhận ack của source (MoMo 204)', async () => {
     const r = rig();
     await addSource(r, 'src_momo', { provider: 'momo', ackStatus: 204 });
     r.setHub(() => new Response('Bad Gateway', { status: 502 }));
@@ -159,7 +159,7 @@ describe('LH2 ghi xuyên', () => {
     expect(r.logs.map((l) => l.event)).toContain('catchnet_caught');
   });
 
-  it('[LH:T5] ack theo khuôn source: VNPay 200 + body RspCode 00 (content-type riêng); outcome unavailable cũng là hub vắng', async () => {
+  it('[LH:T5] (phần b) ack theo khuôn source: VNPay 200 + body RspCode 00 (content-type riêng); outcome unavailable cũng là hub vắng', async () => {
     const r = rig();
     const ack = '{"RspCode":"00","Message":"Confirm Success"}';
     await addSource(r, 'src_vnp', { provider: 'generic', ackStatus: 200, ackType: 'application/json; charset=utf-8', ackBody: ack });
@@ -171,7 +171,7 @@ describe('LH2 ghi xuyên', () => {
     expect(count(r.db, 'inbox')).toBe(1);
   });
 
-  it('[LH:T5] timeout -> hứng; mạch "hub chết" mở 30s: request sau KHÔNG chờ hub, hứng luôn; hết 30s thì thử hub lại', async () => {
+  it('[LH:T5] (phần c) timeout -> hứng; mạch "hub chết" mở 30s: request sau KHÔNG chờ hub, hứng luôn; hết 30s thì thử hub lại', async () => {
     const r = rig();
     await addSource(r, 'src_gh', { provider: 'github', ackStatus: 200, ackBody: '{"ok":true}' });
     r.setHub(() => 'timeout');
@@ -201,7 +201,7 @@ describe('LH2 ghi xuyên', () => {
     expect(count(r.db, 'inbox')).toBe(0);
   });
 
-  it('[LH:T7] source không có trong sources_sync (hoặc provider lệch) + hub chết -> 503, D1 rỗng', async () => {
+  it('[LH:T7] (phần a) source không có trong sources_sync (hoặc provider lệch) + hub chết -> 503, D1 rỗng', async () => {
     const r = rig();
     await addSource(r, 'src_momo', { provider: 'momo', ackStatus: 204 });
     r.setHub(() => new Response('', { status: 502 }));
@@ -211,7 +211,7 @@ describe('LH2 ghi xuyên', () => {
     expect(count(r.db, 'inbox')).toBe(0);
   });
 
-  it('[LH:T7] không có secret hợp lệ -> vẫn chuyển tiếp (không header lưới) nhưng KHÔNG hứng', async () => {
+  it('[LH:T7] (phần b) không có secret hợp lệ -> vẫn chuyển tiếp (không header lưới) nhưng KHÔNG hứng', async () => {
     const r = rig({ CATCHNET_FORWARD_SECRET: 'ngan' });
     await addSource(r, 'src_momo', { provider: 'momo', ackStatus: 204 });
     r.setHub(() => new Response('{"ok":true}', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
@@ -222,7 +222,7 @@ describe('LH2 ghi xuyên', () => {
     expect(count(r.db, 'inbox')).toBe(0);
   });
 
-  it('[LH:T18] source rejectStatus 503 + chữ ký sai -> provider nhận 503 của hub (không x-hub-outcome), D1 rỗng', async () => {
+  it('[LH:T18] (phần b) source rejectStatus 503 + chữ ký sai -> provider nhận 503 của hub (không x-hub-outcome), D1 rỗng', async () => {
     const r = rig();
     await addSource(r, 'src_gen', { provider: 'generic', ackStatus: 200, ackBody: '{"ok":true}' });
     r.setHub(() => new Response('{"error":"invalid_signature"}', { status: 503, headers: { 'x-hub-outcome': 'rejected', 'content-type': 'application/json' } }));
@@ -233,7 +233,7 @@ describe('LH2 ghi xuyên', () => {
     expect(count(r.db, 'inbox')).toBe(0);
   });
 
-  it('[LH:T9] H6: GET/HEAD không hứng (catch_methods mặc định POST) -> 503; source khai GET (VNPay IPN) -> hứng, query thô giữ nguyên', async () => {
+  it('[LH:T9] (phần b) H6: GET/HEAD không hứng (catch_methods mặc định POST) -> 503; source khai GET (VNPay IPN) -> hứng, query thô giữ nguyên', async () => {
     const r = rig();
     await addSource(r, 'src_meta', { provider: 'generic', ackStatus: 200, ackBody: '{"ok":true}' });
     await addSource(r, 'src_vnp', { provider: 'generic', ackStatus: 200, ackBody: '{"RspCode":"00"}', catchMethods: ['GET'] });
@@ -248,7 +248,7 @@ describe('LH2 ghi xuyên', () => {
     expect(inboxRows(r).map((x) => [x.method, x.target])).toEqual([['GET', vnp]]);
   });
 
-  it('[LH:T10] trần CATCHNET_MAX_PER_KEY / CATCHNET_MAX_ROWS -> 503 + log catchnet_overflow; key khác vẫn hứng tới trần toàn bảng', async () => {
+  it('[LH:T10] (phần a) trần CATCHNET_MAX_PER_KEY / CATCHNET_MAX_ROWS -> 503 + log catchnet_overflow; key khác vẫn hứng tới trần toàn bảng', async () => {
     const r = rig({ CATCHNET_MAX_PER_KEY: '2', CATCHNET_MAX_ROWS: '3' });
     await addSource(r, 'src_a', { provider: 'generic', ackStatus: 202 });
     await addSource(r, 'src_b', { provider: 'generic', ackStatus: 202 });
@@ -263,7 +263,7 @@ describe('LH2 ghi xuyên', () => {
     expect(await hit('src_b')).toBe(202);
   });
 
-  it('[LH:T10] body > 1MB -> 413, không gọi hub, không hứng', async () => {
+  it('[LH:T10] (phần b) body > 1MB -> 413, không gọi hub, không hứng', async () => {
     const r = rig();
     await addSource(r, 'src_a', { provider: 'generic', ackStatus: 200 });
     const res = await handleFetch(providerReq('/hooks/generic/src_a', { body: new Uint8Array(1024 * 1024 + 1) }), r.env, r.deps);
@@ -284,7 +284,7 @@ describe('LH2 phát lại (cron)', () => {
     r.bodies.length = 0;
   }
 
-  it('[LH:T8] 200 duplicate -> xoá; 401 rejected -> inbox_dead; 503 -> next_at lùi 1m; 429 + Retry-After -> next_at ≥ Retry-After, dòng còn nguyên', async () => {
+  it('[LH:T8] (phần c) 200 duplicate -> xoá; 401 rejected -> inbox_dead; 503 -> next_at lùi 1m; 429 + Retry-After -> next_at ≥ Retry-After, dòng còn nguyên', async () => {
     const r = rig();
     await seed(r, 4);
     const replies = [
@@ -319,7 +319,7 @@ describe('LH2 phát lại (cron)', () => {
     expect((await runReplay(r.env, r.deps)).sent).toBe(0);
   });
 
-  it('[LH:T8] nhịp 25/lượt; hub vắng -> DỪNG lô (dòng chưa gửi giữ nguyên), không dội hub đang chết', async () => {
+  it('[LH:T8] (phần d) nhịp 25/lượt; hub vắng -> DỪNG lô (dòng chưa gửi giữ nguyên), không dội hub đang chết', async () => {
     const r = rig();
     await seed(r, 30);
     r.setHub(() => new Response('ok', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
@@ -333,7 +333,7 @@ describe('LH2 phát lại (cron)', () => {
     expect(r.db.raw.prepare('SELECT COUNT(*) AS n FROM inbox WHERE attempts = 1').get()).toEqual({ n: 5 });
   });
 
-  it('[LH:T8] 4xx không outcome (431 của Node) retry có hạn rồi dead; 404 dead ngay; quá hạn giữ -> dead expired; inbox_dead dọn sau 7 ngày', async () => {
+  it('[LH:T8] (phần e) 4xx không outcome (431 của Node) retry có hạn rồi dead; 404 dead ngay; quá hạn giữ -> dead expired; inbox_dead dọn sau 7 ngày', async () => {
     const r = rig();
     await seed(r, 2);
     r.setHub((req) => (new URL(req.url).searchParams.get('n') === '0' ? new Response('', { status: 431 }) : new Response('', { status: 404, headers: { 'x-hub-outcome': 'rejected' } })));
@@ -361,7 +361,7 @@ describe('LH2 phát lại (cron)', () => {
     expect(count(r.db, 'inbox_dead')).toBe(0);
   });
 
-  it('[LH:T9] VNPay GET phát lại đúng method + query thô, không body', async () => {
+  it('[LH:T9] (phần c) VNPay GET phát lại đúng method + query thô, không body', async () => {
     const r = rig();
     await addSource(r, 'src_vnp', { provider: 'generic', ackStatus: 200, ackBody: '{"RspCode":"00"}', catchMethods: ['GET'] });
     r.setHub(() => new Response('', { status: 502 }));
@@ -381,7 +381,7 @@ describe('LH2 phát lại (cron)', () => {
 });
 
 describe('LH2 đồng bộ sources_sync (/_admin, §4.5)', () => {
-  it('[LH:T7] token sai -> 401; thiếu token cấu hình -> 503; ack không phải 2xx / HEAD trong catchMethods -> 422; resync final dọn key cũ', async () => {
+  it('[LH:T7] (phần c) token sai -> 401; thiếu token cấu hình -> 503; ack không phải 2xx / HEAD trong catchMethods -> 422; resync final dọn key cũ', async () => {
     const r = rig();
     expect((await admin(r, 'PUT', '/_admin/sources/src_a', { provider: 'x', ackStatus: 200 }, `${ADMIN}x`)).status).toBe(401);
     expect((await admin(rig({ CATCHNET_ADMIN_TOKEN: 'ngan' }), 'GET', '/_admin/stats')).status).toBe(503);

@@ -14,7 +14,7 @@ import {
 const r = (status: number | null, outcome: Outcome | null = null): HubReply => ({ status, outcome });
 
 describe('LH2 phân loại phản hồi hub (H1, H2, T-5, ADR-222)', () => {
-  it('[LH:T18] chuyển tiếp: chỉ hứng khi hub VẮNG — 503 có outcome rejected (rejectStatus) trả nguyên, không hứng', () => {
+  it('[LH:T18] (phần a) chuyển tiếp: chỉ hứng khi hub VẮNG — 503 có outcome rejected (rejectStatus) trả nguyên, không hứng', () => {
     // Hub vắng: timeout/lỗi mạng, 5xx không outcome, outcome unavailable.
     for (const x of [r(null), r(502), r(503), r(504), r(500), r(503, 'unavailable'), r(200, 'unavailable')]) {
       expect(forwardDecision(x)).toBe('catch');
@@ -25,7 +25,7 @@ describe('LH2 phân loại phản hồi hub (H1, H2, T-5, ADR-222)', () => {
     }
   });
 
-  it('[LH:T8] phát lại: bảng quyết định — 408/429/507 xét TRƯỚC outcome; 404 / rejected / refused -> dead; 4xx không outcome retry có hạn', () => {
+  it('[LH:T8] (phần a) phát lại: bảng quyết định — 408/429/507 xét TRƯỚC outcome; 404 / rejected / refused -> dead; 4xx không outcome retry có hạn', () => {
     const table: Array<[HubReply, number, string]> = [
       [r(200, 'accepted'), 1, 'done'],
       [r(200, 'duplicate'), 1, 'done'],
@@ -58,7 +58,7 @@ describe('LH2 phân loại phản hồi hub (H1, H2, T-5, ADR-222)', () => {
     }
   });
 
-  it('[LH:T8] lùi dần 1m/2m/5m/10m/30m; Retry-After (giây hoặc HTTP-date) đẩy next_at xa hơn; outcome lạ = không có', () => {
+  it('[LH:T8] (phần b) lùi dần 1m/2m/5m/10m/30m; Retry-After (giây hoặc HTTP-date) đẩy next_at xa hơn; outcome lạ = không có', () => {
     expect([1, 2, 3, 4, 5, 9].map(backoffMs)).toEqual([60_000, 120_000, 300_000, 600_000, 1_800_000, 1_800_000]);
     const now = 1_760_000_000_000;
     expect(retryAfterMs(new Headers({ 'retry-after': '120' }), now)).toBe(120_000);

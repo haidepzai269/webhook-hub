@@ -144,7 +144,7 @@ describe('EG1 — template nginx + envsubst', () => {
     for (const l of ['= /health', '/socket.io/', '/']) expect(locs.find(([x]) => x === l)?.[1]).toBe(false);
   });
 
-  it('[LH:T22] (LH2, R2-L1) lưới bật chỉ nới cầu chì + limit_conn cho IP thuộc dải Cloudflare (geo); IP khác gọi thẳng /hooks/* vẫn bị đếm', () => {
+  it('[LH:T22] (phần a) (LH2, R2-L1) lưới bật chỉ nới cầu chì + limit_conn cho IP thuộc dải Cloudflare (geo); IP khác gọi thẳng /hooks/* vẫn bị đếm', () => {
     const on = render({ EDGE_IP_FUSE: '1', CATCHNET_FORWARD_SECRET: 's'.repeat(40) });
     const geo = on.split('geo $edge_cf_ip {\n')[1]?.split('}')[0] ?? '';
     expect(geo).toMatch(/default 0;/);
@@ -168,7 +168,7 @@ describe('EG1 — template nginx + envsubst', () => {
     expect(TEMPLATE).not.toMatch(/\$http_x_catchnet/i);
   });
 
-  it('[LH:T22] (REVIEW-LH3 TB-1) lưới hứng bật -> nginx tắt cầu chì + limit_conn theo IP cho /hooks/* (không tin x-catchnet-client-ip), /v1/p/* giữ; phản hồi nginx tự sinh trên /hooks* mang x-hub-outcome', () => {
+  it('[LH:T22] (phần b) (REVIEW-LH3 TB-1) lưới hứng bật -> nginx tắt cầu chì + limit_conn theo IP cho /hooks/* (không tin x-catchnet-client-ip), /v1/p/* giữ; phản hồi nginx tự sinh trên /hooks* mang x-hub-outcome', () => {
     const SECRET = 's'.repeat(40);
     const block = (conf: string, head: string) => conf.split(`${head} {\n`)[1]?.split('}')[0] ?? '';
     const hooksLoc = 'location ~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"';

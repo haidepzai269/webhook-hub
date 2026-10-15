@@ -28,7 +28,7 @@ const VEC = JSON.parse(
 
 describe('LH2 ký header lưới (vector chung với hub)', () => {
   for (const c of VEC.cases) {
-    it(`[LH:T4] vector "${c.name}" -> chuỗi ký, chữ ký đầu, chữ ký body khớp hub`, async () => {
+    it(`[LH:T4] (phần a) vector "${c.name}" -> chuỗi ký, chữ ký đầu, chữ ký body khớp hub`, async () => {
       const body = new TextEncoder().encode(c.bodyUtf8);
       const input = { id: c.id, receivedAt: Number(c.receivedAt), clientIp: c.clientIp, mode: c.mode, method: c.method, target: c.target, body };
       expect(signingString(input)).toBe(c.signingString);
@@ -43,7 +43,7 @@ describe('LH2 ký header lưới (vector chung với hub)', () => {
     });
   }
 
-  it('[LH:T9] target ký = ĐÚNG chuỗi đưa vào fetch: giữ `?` đứng một mình và percent-encoding thô (T-7)', () => {
+  it('[LH:T9] (phần a) target ký = ĐÚNG chuỗi đưa vào fetch: giữ `?` đứng một mình và percent-encoding thô (T-7)', () => {
     const origin = 'https://hub.example.com';
     for (const c of VEC.cases) {
       const raw = rawTargetOf(`https://hub-hooks.webhookhub.workers.dev${c.target}`);
@@ -62,7 +62,7 @@ describe('LH2 ký header lưới (vector chung với hub)', () => {
     expect(() => requestTarget(origin, 'evil.com/x')).toThrow();
   });
 
-  it('[LH:T4] so hằng thời gian, kiểm độ dài trước; secret ký = giá trị đầu ≥ 32 ký tự', () => {
+  it('[LH:T4] (phần b) so hằng thời gian, kiểm độ dài trước; secret ký = giá trị đầu ≥ 32 ký tự', () => {
     expect(constantTimeEqual('a'.repeat(40), 'a'.repeat(40))).toBe(true);
     expect(constantTimeEqual('a'.repeat(40), `${'a'.repeat(39)}b`)).toBe(false);
     expect(constantTimeEqual('abc', 'abcd')).toBe(false);
