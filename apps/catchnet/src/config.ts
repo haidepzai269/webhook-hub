@@ -18,6 +18,9 @@ export interface Env {
   CATCHNET_RETENTION_DAYS?: string;
   CATCHNET_MAX_PER_KEY?: string;
   CATCHNET_MAX_ROWS?: string;
+  CATCHNET_MAX_BYTES?: string;
+  CATCHNET_MAX_KEY_BYTES?: string;
+  CATCHNET_MAX_PER_DAY?: string;
 }
 
 export interface Config {
@@ -30,6 +33,9 @@ export interface Config {
   retentionMs: number;
   maxPerKey: number;
   maxRows: number;
+  maxBytes: number;
+  maxKeyBytes: number;
+  maxPerDay: number;
 }
 
 /** Giống hub-api (`MIN_CATCHNET_SECRET_CHARS`, REVIEW-LH3 T-6): secret ngắn bị dò offline từ một header lộ ra. */
@@ -37,6 +43,17 @@ export const MIN_SECRET_CHARS = 32;
 export const DAY_MS = 86_400_000;
 /** Trần ingest của hub (H10). Lớn hơn -> 413, không hứng. */
 export const MAX_BODY_BYTES = 1024 * 1024;
+const MB = 1024 * 1024;
+
+/**
+ * Giới hạn gói free (tra trang chính thức 2026-10-15, ADR-224):
+ *  - Workers: 50 subrequest/invocation (gồm D1), CPU 10 ms (cả Cron), 128 MB/isolate.
+ *  - D1: 50 truy vấn/invocation, DB tối đa 500 MB, dòng/BLOB ≤ 2 MB, 5M rows read + 100k rows written/ngày (index tính thêm).
+ * Lượt cron tốn 3 truy vấn cố định (chọn id, lease, dọn) + ≤ 4/dòng (nạp, fetch, ghi kết quả ≤ 2) -> ≤ 10 dòng/lượt.
+ */
+export const REPLAY_BATCH_MAX = 10;
+/** Tổng byte body nạp trong một lượt cron (BLOB về dạng mảng số trên Workers — 1 MB ≈ 8–16 MB heap). Luôn gửi ≥ 1 dòng. */
+export const REPLAY_BYTES_BUDGET = 2 * MB;
 
 function intIn(raw: string | undefined, def: number, min: number, max: number): number {
   if (raw === undefined || raw.trim() === '') return def;
@@ -74,9 +91,13 @@ export function loadConfig(env: Env): Config {
     forwardSecret: firstSecret(env.CATCHNET_FORWARD_SECRET),
     adminToken: admin.length >= MIN_SECRET_CHARS ? admin : null,
     forwardTimeoutMs: intIn(env.CATCHNET_FORWARD_TIMEOUT_MS, 4000, 1000, 8000),
-    replayBatch: intIn(env.CATCHNET_REPLAY_BATCH, 25, 1, 40),
+    replayBatch: intIn(env.CATCHNET_REPLAY_BATCH, REPLAY_BATCH_MAX, 1, REPLAY_BATCH_MAX),
     retentionMs: retentionDays(env.CATCHNET_RETENTION_DAYS) * DAY_MS,
-    maxPerKey: intIn(env.CATCHNET_MAX_PER_KEY, 2000, 1, 1_000_000),
-    maxRows: intIn(env.CATCHNET_MAX_ROWS, 50_000, 1, 10_000_000),
+    // Trần theo dòng/byte/ngày (REVIEW-LH2 TB-2): dưới DB 500 MB và quota ghi 100k/ngày, có biên an toàn.
+    maxPerKey: intIn(env.CATCHNET_MAX_PER_KEY, 2000, 1, 15_000),
+    maxRows: intIn(env.CATCHNET_MAX_ROWS, 15_000, 1, 15_000),
+    maxBytes: intIn(env.CATCHNET_MAX_BYTES, 300 * MB, MB, 400 * MB),
+    maxKeyBytes: intIn(env.CATCHNET_MAX_KEY_BYTES, 50 * MB, MB, 400 * MB),
+    maxPerDay: intIn(env.CATCHNET_MAX_PER_DAY, 5000, 1, 6000),
   };
 }

@@ -18,10 +18,19 @@ export interface HubReply {
   outcome: Outcome | null;
 }
 
-/** "Hub vắng" (H1): timeout, lỗi mạng, 5xx KHÔNG có outcome, hoặc outcome `unavailable`. */
+/**
+ * 2xx KHÔNG có `x-hub-outcome`: hub thật luôn gắn outcome cho 2xx của /hooks (ADR-221) -> đây là `HUB_ORIGIN_URL` trỏ
+ * nhầm (SPA, trang bảo trì trả 200). Không bao giờ coi là "đã nhận" (REVIEW-LH2 L3).
+ */
+export function misconfiguredOk(r: HubReply): boolean {
+  return r.status !== null && r.status >= 200 && r.status < 300 && r.outcome === null;
+}
+
+/** "Hub vắng" (H1): timeout, lỗi mạng, 5xx KHÔNG có outcome, outcome `unavailable`, hoặc 2xx không outcome (L3). */
 export function hubAbsent(r: HubReply): boolean {
   if (r.status === null) return true;
   if (r.outcome === 'unavailable') return true;
+  if (misconfiguredOk(r)) return true;
   return r.status >= 500 && r.outcome === null;
 }
 
@@ -42,7 +51,7 @@ export const MAX_CLIENT_ERROR_ATTEMPTS = 3;
  * Phát lại (H2 + T-5). Thứ tự xét CỐ ĐỊNH:
  *  1. 408 / 429 / 507 -> retry, xét TRƯỚC outcome (429 mang `refused` nhưng là "chậm lại", không phải "vứt"; 507 = ADR-222).
  *  2. hub vắng (H1) -> retry (và dừng lô).
- *  3. 2xx, hoặc outcome accepted/duplicate/handshake -> xong, xoá dòng.
+ *  3. outcome accepted/duplicate/handshake -> xong, xoá dòng (2xx KHÔNG outcome đã rơi vào bước 2 — L3).
  *  4. 404 -> `inbox_dead` (source không còn).
  *  5. outcome rejected/refused (4xx, hoặc 5xx như 503 `rejectStatus` chữ ký sai) -> `inbox_dead`.
  *  6. còn lại (4xx/3xx không outcome: 431/400 của Node, redirect lạ) -> retry, tới lần thứ MAX_CLIENT_ERROR_ATTEMPTS thì dead.
@@ -53,7 +62,7 @@ export function replayDecision(r: HubReply, attempts: number): ReplayAction {
   if (s === 408 || s === 429 || s === 507) return { kind: 'retry', absent: false };
   if (hubAbsent(r)) return { kind: 'retry', absent: true };
   if (s === null) return { kind: 'retry', absent: true }; // (đã phủ ở trên; giữ cho kiểu)
-  if ((s >= 200 && s < 300) || r.outcome === 'accepted' || r.outcome === 'duplicate' || r.outcome === 'handshake') {
+  if (r.outcome === 'accepted' || r.outcome === 'duplicate' || r.outcome === 'handshake') {
     return { kind: 'done' };
   }
   if (s === 404) return { kind: 'dead', reason: 'not_found' };

@@ -16,11 +16,12 @@ const r = (status: number | null, outcome: Outcome | null = null): HubReply => (
 describe('LH2 phân loại phản hồi hub (H1, H2, T-5, ADR-222)', () => {
   it('[LH:T18] (phần a) chuyển tiếp: chỉ hứng khi hub VẮNG — 503 có outcome rejected (rejectStatus) trả nguyên, không hứng', () => {
     // Hub vắng: timeout/lỗi mạng, 5xx không outcome, outcome unavailable.
-    for (const x of [r(null), r(502), r(503), r(504), r(500), r(503, 'unavailable'), r(200, 'unavailable')]) {
+    // L3: 2xx KHÔNG outcome = HUB_ORIGIN_URL trỏ nhầm -> coi như vắng, không bao giờ là "đã nhận".
+    for (const x of [r(null), r(502), r(503), r(504), r(500), r(503, 'unavailable'), r(200, 'unavailable'), r(200), r(204)]) {
       expect(forwardDecision(x)).toBe('catch');
     }
     // Hub trả lời rõ ràng -> trả nguyên.
-    for (const x of [r(200, 'accepted'), r(200), r(204), r(401, 'rejected'), r(404), r(429, 'refused'), r(503, 'rejected'), r(507, 'refused'), r(400), r(431), r(408)]) {
+    for (const x of [r(200, 'accepted'), r(204, 'duplicate'), r(401, 'rejected'), r(404), r(429, 'refused'), r(503, 'rejected'), r(507, 'refused'), r(400), r(431), r(408)]) {
       expect(forwardDecision(x)).toBe('pass');
     }
   });
@@ -29,9 +30,11 @@ describe('LH2 phân loại phản hồi hub (H1, H2, T-5, ADR-222)', () => {
     const table: Array<[HubReply, number, string]> = [
       [r(200, 'accepted'), 1, 'done'],
       [r(200, 'duplicate'), 1, 'done'],
-      [r(204), 1, 'done'],
+      [r(204, 'accepted'), 1, 'done'],
+      [r(204), 1, 'retry:absent'], // L3
+      [r(200), 1, 'retry:absent'], // L3
       [r(200, 'handshake'), 1, 'done'],
-      [r(202), 1, 'done'],
+      [r(202, 'accepted'), 1, 'done'],
       [r(429, 'refused'), 1, 'retry'], // H2: không phải dead dù outcome refused
       [r(429), 1, 'retry'],
       [r(408), 9, 'retry'],

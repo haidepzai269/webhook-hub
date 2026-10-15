@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { hmacHex, sha256Hex } from '../src/sign';
-import { CIRCUIT_MS, handleFetch, resetCircuit, runReplay, type Deps } from '../src/worker';
+import { CIRCUIT_MS, handleFetch, LEASE_MS, resetCircuit, runReplay, safeHookTarget, type Deps } from '../src/worker';
 import type { Env } from '../src/config';
 import { count, fakeD1, type FakeD1 } from './d1-fake';
 
@@ -270,6 +270,88 @@ describe('LH2 ghi xuyên', () => {
     expect(res.status).toBe(413);
     expect(r.calls).toHaveLength(0);
   });
+  it('[LH:T5] (phần d) TB-1: mạch đang mở + source KHÔNG hứng được (chưa sync / GET bắt tay) -> vẫn chuyển tiếp, nhận phản hồi của hub (không 503)', async () => {
+    const r = rig();
+    await addSource(r, 'src_gh', { provider: 'github', ackStatus: 200, ackBody: '{"ok":true}' });
+    r.setHub(() => 'timeout');
+    await handleFetch(providerReq('/hooks/github/src_gh', { body: 'a' }), r.env, r.deps); // mở mạch
+    r.advance(1000);
+    r.setHub(() => new Response('{"received":true}', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
+    const calls = r.calls.length;
+    // Key chưa có trong sources_sync.
+    const res = await handleFetch(providerReq('/hooks/github/src_unsynced', { body: 'b' }), r.env, r.deps);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('{"received":true}');
+    // GET bắt tay (Meta hub.challenge) của source chỉ hứng POST.
+    r.setHub(() => new Response('123', { status: 200, headers: { 'x-hub-outcome': 'handshake' } }));
+    const hs = await handleFetch(providerReq('/hooks/github/src_gh?hub.challenge=123', { method: 'GET' }), r.env, r.deps);
+    expect([hs.status, await hs.text()]).toEqual([200, '123']);
+    expect(r.calls.length).toBe(calls + 2);
+    // Source hứng được thì vẫn đi đường mạch: ghi D1, không gọi hub.
+    expect((await handleFetch(providerReq('/hooks/github/src_gh', { body: 'c' }), r.env, r.deps)).status).toBe(200);
+    expect(r.calls.length).toBe(calls + 2);
+    expect(count(r.db, 'inbox')).toBe(2);
+  });
+
+  it('[LH:T10] (phần c) TB-2: trần BYTE theo key + toàn D1 (tính cả inbox_dead) và trần số lần hứng/ngày -> 503 + catchnet_overflow', async () => {
+    const MB = 1024 * 1024;
+    const r = rig({ CATCHNET_MAX_KEY_BYTES: String(2 * MB), CATCHNET_MAX_BYTES: String(3 * MB), CATCHNET_MAX_PER_DAY: '6' });
+    await addSource(r, 'src_a', { provider: 'generic', ackStatus: 202 });
+    await addSource(r, 'src_b', { provider: 'generic', ackStatus: 202 });
+    r.setHub(() => new Response('', { status: 502 }));
+    const hit = (k: string, n: number) =>
+      handleFetch(providerReq(`/hooks/generic/${k}`, { body: new Uint8Array(n) }), r.env, r.deps).then((x) => x.status);
+    const big = 900 * 1024;
+    expect([await hit('src_a', big), await hit('src_a', big), await hit('src_a', big)]).toEqual([202, 202, 503]); // > 2 MB/key
+    expect(await hit('src_b', big)).toBe(202); // tổng 2,7 MB
+    expect(await hit('src_b', big)).toBe(503); // > 3 MB toàn D1
+    // inbox_dead chiếm chung trần dung lượng.
+    r.db.raw.exec("INSERT INTO inbox_dead SELECT id || 'x', source_key, provider, method, target, headers_json, body, client_ip, received_at, 0, NULL, NULL, 'rejected', 0 FROM inbox LIMIT 1");
+    r.db.raw.exec("DELETE FROM inbox WHERE source_key = 'src_b'");
+    expect(await hit('src_b', 10)).toBe(202); // 1,8 MB inbox + 0,9 MB dead + 10 B
+    expect(await hit('src_b', big)).toBe(503);
+    // Trần ngày: đã hứng 4 lần hôm nay (trigger không giảm khi xoá) -> còn 2.
+    r.db.raw.exec('DELETE FROM inbox; DELETE FROM inbox_dead;');
+    expect([await hit('src_b', 1), await hit('src_b', 1), await hit('src_b', 1)]).toEqual([202, 202, 503]);
+    r.advance(86_400_000); // sang ngày UTC mới
+    expect(await hit('src_b', 1)).toBe(202);
+    expect(r.logs.filter((l) => l.event === 'catchnet_overflow').length).toBe(4);
+  });
+
+  it('[LH:T10] (phần d) L2: target thoát khỏi /hooks/ (.., %2e, %2f, \) -> 404, không chuyển tiếp, không hứng', async () => {
+    const r = rig();
+    for (const p of ['/hooks/%2e%2e/api/v1/x', '/hooks/%2E%2E/%2E%2E/auth', '/hooks/../api/v1/x', '/hooks/github%2f..%2f..%2fapi', '/hooks/a\..\api']) {
+      const res = await handleFetch(new Request(`${WORKER}${p}`, { method: 'POST', body: 'x' }), r.env, r.deps);
+      // new Request đã gộp ".." thô -> path rời /hooks: handleFetch không vào nhánh hooks (404); bản mã hoá -> safeHookTarget 404.
+      expect(res.status).toBe(404);
+    }
+    // workerd có thể giữ %2e%2e thô trong request.url (Node/WHATWG gộp sẵn) -> kiểm thẳng hàm chặn trên chuỗi thô.
+    for (const t of ['/hooks/%2e%2e/api/v1/x', '/hooks/github/%2E%2E/x', '/hooks/a/..', '/hooks/a%2fb/c', '/hooks/a%5c..', '/api/v1/x', '/HOOKSX/a']) {
+      expect({ t, ok: safeHookTarget(t, HUB) }).toEqual({ t, ok: false });
+    }
+    for (const t of ['/hooks/github/src_gh', '/hooks/github/src_gh?', '/hooks/generic/k?a=b%20c&x=%2e%2e']) {
+      expect({ t, ok: safeHookTarget(t, HUB) }).toEqual({ t, ok: true }); // %2e trong QUERY không sao
+    }
+    expect(r.calls).toHaveLength(0);
+    expect(count(r.db, 'inbox')).toBe(0);
+  });
+
+  it('[LH:T10] (phần e) L7: body chunked (không content-length) > 1MB -> 413 khi đọc vượt trần, không gọi hub', async () => {
+    const r = rig();
+    const chunk = new Uint8Array(256 * 1024);
+    let sentChunks = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (sentChunks++ < 8) c.enqueue(chunk);
+        else c.close();
+      },
+    });
+    const req = new Request(`${WORKER}/hooks/generic/src_a`, { method: 'POST', body: stream, duplex: 'half' } as RequestInit);
+    expect(req.headers.get('content-length')).toBeNull();
+    expect((await handleFetch(req, r.env, r.deps)).status).toBe(413);
+    expect(sentChunks).toBeLessThanOrEqual(6); // dừng đọc ngay khi vượt 1MB, không đọc trọn 2MB
+    expect(r.calls).toHaveLength(0);
+  });
 });
 
 describe('LH2 phát lại (cron)', () => {
@@ -319,18 +401,65 @@ describe('LH2 phát lại (cron)', () => {
     expect((await runReplay(r.env, r.deps)).sent).toBe(0);
   });
 
-  it('[LH:T8] (phần d) nhịp 25/lượt; hub vắng -> DỪNG lô (dòng chưa gửi giữ nguyên), không dội hub đang chết', async () => {
+  it('[LH:T8] (phần d) ≤ 10 dòng/lượt (ngân sách 50 truy vấn D1/subrequest); hub vắng -> DỪNG lô, dòng chưa gửi đã được lease lùi 5 phút', async () => {
     const r = rig();
     await seed(r, 30);
     r.setHub(() => new Response('ok', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
-    expect((await runReplay(r.env, r.deps)).sent).toBe(25);
-    expect(count(r.db, 'inbox')).toBe(5);
-    await seed(r, 12, 'src_t', 'generic');
+    expect((await runReplay(r.env, r.deps)).sent).toBe(10);
+    expect(count(r.db, 'inbox')).toBe(20);
     r.setHub(() => 'timeout');
     const out = await runReplay(r.env, r.deps);
     expect(out).toEqual({ sent: 5, stopped: true }); // một nhóm song song rồi dừng
-    expect(count(r.db, 'inbox')).toBe(17);
+    expect(count(r.db, 'inbox')).toBe(20);
     expect(r.db.raw.prepare('SELECT COUNT(*) AS n FROM inbox WHERE attempts = 1').get()).toEqual({ n: 5 });
+    // 5 dòng chưa gửi của lô: lease next_at = now + 5m, attempts giữ 0.
+    expect(r.db.raw.prepare('SELECT COUNT(*) AS n FROM inbox WHERE attempts = 0 AND next_at = ?').get(r.now() + LEASE_MS)).toEqual({ n: 5 });
+  });
+
+  it('[LH:T8] (phần f) TB-3: lượt cron chết giữa chừng (ghi kết quả lỗi) -> lô đã lease, lượt sau gửi dòng KHÁC chứ không kẹt đầu hàng', async () => {
+    const r = rig();
+    await seed(r, 12);
+    const firstTen = (r.db.raw.prepare('SELECT id FROM inbox ORDER BY next_at LIMIT 10').all() as Array<{ id: string }>).map((x) => x.id);
+    r.setHub(() => new Response('ok', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
+    r.db.failOn = /DELETE FROM inbox WHERE id|UPDATE inbox SET attempts/; // mọi ghi kết quả đều chết
+    await runReplay(r.env, r.deps);
+    r.db.failOn = null;
+    expect(count(r.db, 'inbox')).toBe(12);
+    r.calls.length = 0;
+    r.advance(1000);
+    await runReplay(r.env, r.deps);
+    const sentIds = r.calls.map((c) => c.headers.get('x-catchnet-id'));
+    expect(sentIds).toHaveLength(2);
+    for (const id of sentIds) expect(firstTen).not.toContain(id);
+    // Hết lease thì lô cũ được thử lại.
+    r.advance(LEASE_MS);
+    r.calls.length = 0;
+    await runReplay(r.env, r.deps);
+    expect(r.calls).toHaveLength(10);
+    expect(count(r.db, 'inbox')).toBe(0);
+  });
+
+  it('[LH:T8] (phần g) TB-3: lô cắt theo tổng byte ≤ 2 MB (body nạp từng dòng), luôn gửi ≥ 1 dòng', async () => {
+    const r = rig();
+    await addSource(r, 'src_big', { provider: 'generic', ackStatus: 200 });
+    r.setHub(() => new Response('', { status: 502 }));
+    for (let i = 0; i < 4; i++) {
+      r.advance(1);
+      expect((await handleFetch(providerReq('/hooks/generic/src_big', { body: new Uint8Array(900 * 1024) }), r.env, r.deps)).status).toBe(200);
+    }
+    r.calls.length = 0;
+    r.setHub(() => new Response('ok', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
+    expect((await runReplay(r.env, r.deps)).sent).toBe(2);
+    expect(count(r.db, 'inbox')).toBe(2);
+  });
+
+  it('[LH:T8] (phần h) L3: 2xx KHÔNG x-hub-outcome (HUB_ORIGIN_URL trỏ nhầm) -> không xoá, retry + log catchnet_misconfigured', async () => {
+    const r = rig();
+    await seed(r, 1);
+    r.setHub(() => new Response('<html>maintenance</html>', { status: 200 }));
+    await runReplay(r.env, r.deps);
+    expect(inboxRows(r)).toEqual([expect.objectContaining({ attempts: 1, last_status: 200, last_error: '2xx_without_x-hub-outcome' })]);
+    expect(r.logs.some((l) => l.event === 'catchnet_misconfigured')).toBe(true);
   });
 
   it('[LH:T8] (phần e) 4xx không outcome (431 của Node) retry có hạn rồi dead; 404 dead ngay; quá hạn giữ -> dead expired; inbox_dead dọn sau 7 ngày', async () => {
@@ -399,6 +528,11 @@ describe('LH2 đồng bộ sources_sync (/_admin, §4.5)', () => {
     const keys = r.db.raw.prepare('SELECT source_key FROM sources_sync ORDER BY source_key').all().map((x) => (x as { source_key: string }).source_key);
     expect(keys).toEqual(['src_a', 'src_b', 'src_live']);
     expect(await (await admin(r, 'DELETE', '/_admin/sources/src_b')).json()).toEqual({ deleted: true });
-    expect(await (await admin(r, 'GET', '/_admin/stats')).json()).toEqual({ pending: 0, dead: 0, sources: 2 });
+    expect(await (await admin(r, 'GET', '/_admin/stats')).json()).toEqual({ pending: 0, pendingBytes: 0, dead: 0, deadBytes: 0, sources: 2, caughtToday: 0 });
+    // L7: % hỏng trong key -> 422, không 503.
+    expect((await admin(r, 'PUT', '/_admin/sources/%E0%A4%A', { provider: 'x', ackStatus: 200 })).status).toBe(422);
+    // L6: lượt resync RỖNG + final -> dọn mọi key cũ hơn lượt đó.
+    r.advance(10);
+    expect(await (await admin(r, 'POST', '/_admin/sources/resync', { syncId: 'sync2', sources: [], final: true })).json()).toEqual({ upserted: 0, removed: 2 });
   });
 });

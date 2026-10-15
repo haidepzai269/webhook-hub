@@ -51,24 +51,42 @@ CREATE TABLE IF NOT EXISTS sources_sync (
   updated_at    INTEGER NOT NULL
 );
 
--- Bộ đếm cho trần chống xả rác (§4.2): đếm bằng trigger thay COUNT(*) mỗi lần hứng (COUNT quét cả bảng = đốt rows read).
--- k = '*' (toàn bảng) hoặc source_key.
+-- Bộ đếm cho trần chống xả rác (§4.2 + REVIEW-LH2 TB-2): giữ bằng trigger thay COUNT(*)/SUM() mỗi lần hứng (quét cả bảng
+-- = đốt rows read). k:
+--   '*'            hàng chờ toàn bảng (n dòng, bytes body)
+--   '#dead'        inbox_dead (bytes body — chiếm chung trần dung lượng D1)
+--   <source_key>   hàng chờ của một source (source_key chỉ [A-Za-z0-9_-], không đụng các khoá có ':' '*' '#')
+--   'day:<n>'      số lần hứng trong ngày UTC thứ n (= received_at / 86400000) — trần quota ghi/ngày; không giảm khi xoá
 CREATE TABLE IF NOT EXISTS inbox_count (
-  k  TEXT PRIMARY KEY,
-  n  INTEGER NOT NULL
+  k      TEXT PRIMARY KEY,
+  n      INTEGER NOT NULL DEFAULT 0,
+  bytes  INTEGER NOT NULL DEFAULT 0
 );
-INSERT OR IGNORE INTO inbox_count (k, n) VALUES ('*', 0);
+INSERT OR IGNORE INTO inbox_count (k, n, bytes) VALUES ('*', 0, 0);
+INSERT OR IGNORE INTO inbox_count (k, n, bytes) VALUES ('#dead', 0, 0);
 
 CREATE TRIGGER IF NOT EXISTS inbox_count_ins AFTER INSERT ON inbox
 BEGIN
-  INSERT INTO inbox_count (k, n) VALUES (NEW.source_key, 1)
+  INSERT INTO inbox_count (k, n, bytes) VALUES (NEW.source_key, 1, length(NEW.body))
+    ON CONFLICT(k) DO UPDATE SET n = n + 1, bytes = bytes + length(NEW.body);
+  UPDATE inbox_count SET n = n + 1, bytes = bytes + length(NEW.body) WHERE k = '*';
+  INSERT INTO inbox_count (k, n, bytes) VALUES ('day:' || CAST(NEW.received_at / 86400000 AS INTEGER), 1, 0)
     ON CONFLICT(k) DO UPDATE SET n = n + 1;
-  UPDATE inbox_count SET n = n + 1 WHERE k = '*';
 END;
 
 CREATE TRIGGER IF NOT EXISTS inbox_count_del AFTER DELETE ON inbox
 BEGIN
-  UPDATE inbox_count SET n = n - 1 WHERE k = OLD.source_key;
+  UPDATE inbox_count SET n = n - 1, bytes = bytes - length(OLD.body) WHERE k = OLD.source_key;
   DELETE FROM inbox_count WHERE k = OLD.source_key AND n <= 0;
-  UPDATE inbox_count SET n = n - 1 WHERE k = '*';
+  UPDATE inbox_count SET n = n - 1, bytes = bytes - length(OLD.body) WHERE k = '*';
+END;
+
+CREATE TRIGGER IF NOT EXISTS inbox_dead_count_ins AFTER INSERT ON inbox_dead
+BEGIN
+  UPDATE inbox_count SET n = n + 1, bytes = bytes + length(NEW.body) WHERE k = '#dead';
+END;
+
+CREATE TRIGGER IF NOT EXISTS inbox_dead_count_del AFTER DELETE ON inbox_dead
+BEGIN
+  UPDATE inbox_count SET n = n - 1, bytes = bytes - length(OLD.body) WHERE k = '#dead';
 END;

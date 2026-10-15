@@ -1,27 +1,30 @@
 /**
- * LH2 — lưới hứng `hub-hooks` (SPEC-hub-sap §4 + ĐÍNH CHÍNH H1/H2/H6/H10, ADR-214/215/216/222).
+ * LH2 — lưới hứng `hub-hooks` (SPEC-hub-sap §4 + ĐÍNH CHÍNH H1/H2/H6/H10, ADR-214/215/216/222/224).
  *
  *   provider ─► Worker /hooks/:provider/:sourceKey
- *     ├─ chuyển tiếp hub (timeout CATCHNET_FORWARD_TIMEOUT_MS, ký header lưới mode=forward)
+ *     ├─ mạch "hub chết" đang mở VÀ request hứng được ─► ghi D1 luôn (khỏi chờ 4s)
+ *     ├─ còn lại: chuyển tiếp hub (timeout CATCHNET_FORWARD_TIMEOUT_MS, ký header lưới mode=forward)
  *     │    hub trả lời rõ ràng ─► trả NGUYÊN cho provider, KHÔNG ghi D1
- *     │    hub vắng (timeout / lỗi mạng / 5xx không outcome / `unavailable`) ─► hứng:
- *     │        source có trong sources_sync + method được hứng + dưới trần ─► ghi D1 ─► ack "đã nhận" của source
+ *     │    hub vắng (timeout / lỗi mạng / 5xx không outcome / `unavailable` / 2xx không outcome) ─► hứng:
+ *     │        source có trong sources_sync + method được hứng + dưới mọi trần ─► ghi D1 ─► ack "đã nhận"
  *     │        còn lại (key lạ, GET/HEAD, vượt trần, D1 lỗi) ─► 503 (KHÔNG 2xx khi chưa ghi bền — BB-3)
- *     └─ cron mỗi phút: phát lại ≤ CATCHNET_REPLAY_BATCH dòng vào chính /hooks/* (mode=replay)
+ *     └─ cron mỗi phút: chọn ≤ 10 id, lease cả lô, nạp + phát lại từng dòng vào /hooks/* (mode=replay)
  *
  * Worker KHÔNG giữ secret của provider và KHÔNG verify chữ ký provider (ADR-214): verify chỉ ở hub.
  */
-import { forwardDecision, nextAttemptAt, outcomeOf, replayDecision, retryAfterMs, type HubReply } from './classify';
-import { loadConfig, MAX_BODY_BYTES, type Config, type Env } from './config';
+import { forwardDecision, misconfiguredOk, nextAttemptAt, outcomeOf, replayDecision, retryAfterMs, type HubReply } from './classify';
+import { loadConfig, MAX_BODY_BYTES, REPLAY_BYTES_BUDGET, type Config, type Env } from './config';
 import { passThrough, storableHeaders } from './headers';
 import { catchnetHeaders, constantTimeEqual, rawTargetOf, requestTarget, type CatchnetMode } from './sign';
 import {
   deleteRow,
   deleteSource,
-  dueRows,
+  dueIds,
   finishResync,
   getSource,
   insertCaught,
+  leaseRows,
+  loadRow,
   markRetry,
   moveDead,
   purgeDead,
@@ -52,12 +55,16 @@ const PROVIDER_RE = /^[a-z0-9-]{1,64}$/;
 /** H6: method được phép khai trong `catch_methods`. HEAD không bao giờ. GET chỉ khi source khai GET là sự kiện. */
 const CATCHABLE = new Set(['POST', 'PUT', 'PATCH', 'DELETE', 'GET']);
 const REPLAY_CONCURRENCY = 5;
-/** Mạch "hub chết" trong isolate (§4.1): sau timeout/lỗi mạng, bỏ qua chuyển tiếp ≤ 30s — khỏi bắt provider chờ 4s mỗi lần. */
+/** Mạch "hub chết" trong isolate (§4.1): sau timeout/lỗi mạng, request HỨNG ĐƯỢC bỏ qua chuyển tiếp ≤ 30s. */
 export const CIRCUIT_MS = 30_000;
+/** Lease của lượt cron: dòng đã chọn lùi chừng này trước khi gửi (REVIEW-LH2 TB-3). */
+export const LEASE_MS = 5 * 60_000;
 
 const circuit = { openUntil: 0 };
+let warnedUnsigned = false;
 export function resetCircuit(): void {
   circuit.openUntil = 0;
+  warnedUnsigned = false;
 }
 
 const json = (obj: unknown, status: number, extra?: Record<string, string>) =>
@@ -76,11 +83,55 @@ const unavailable = (reason: string) =>
     { 'retry-after': '30' },
   );
 
+const notFound = () => json({ error: 'not_found' }, 404);
+
 function validIp(v: string | null): string | null {
   if (!v) return null;
   const t = v.trim();
   if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(t)) return t.split('.').every((p) => Number(p) <= 255) ? t : null;
   return /^[0-9a-fA-F:.]{2,45}$/.test(t) && t.includes(':') ? t : null;
+}
+
+/**
+ * REVIEW-LH2 L2: target chỉ được ở dưới /hooks/ — kiểm trên bản THÔ (không `..`, không `%2e`) VÀ trên bản WHATWG đã
+ * chuẩn hoá (đúng chuỗi fetch gửi). Không thì Worker thành proxy tới mọi API của hub, đi ra từ IP Cloudflare.
+ */
+export function safeHookTarget(rawTarget: string, hubOrigin: string): boolean {
+  const rawPath = rawTarget.split('?')[0];
+  if (!/^\/hooks\//i.test(rawPath)) return false;
+  if (/\.\.|%2e|\\|%5c|%2f/i.test(rawPath)) return false;
+  let normPath: string;
+  try {
+    normPath = requestTarget(hubOrigin, rawTarget).target.split('?')[0];
+  } catch {
+    return false;
+  }
+  return /^\/hooks\//i.test(normPath) && !normPath.includes('..');
+}
+
+/** Đọc body có trần: không nạp trọn body chunked khổng lồ vào isolate (L7). null = vượt trần. */
+async function readCapped(req: Request, max: number): Promise<Uint8Array | null> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.byteLength;
+  }
+  return out;
 }
 
 interface HubCall {
@@ -111,6 +162,10 @@ async function callHub(cfg: Config, deps: Deps, c: HubCall): Promise<Response> {
       body: sent,
     });
     for (const [k, v] of Object.entries(sig)) headers.set(k, v);
+  } else if (!warnedUnsigned) {
+    // L4: không ký = hub chấm điểm/phạt IP egress Cloudflare dùng chung. Log một lần mỗi isolate.
+    warnedUnsigned = true;
+    deps.log('catchnet_misconfigured', { what: 'CATCHNET_FORWARD_SECRET', effect: 'forwarding_unsigned' });
   }
   return deps.fetch(url, {
     method: c.method,
@@ -136,75 +191,119 @@ export function catchable(src: SourceSync | null, provider: string, method: stri
   return allowed.includes(method);
 }
 
+interface Incoming extends HubCall {
+  provider: string | null;
+  sourceKey: string | null;
+}
+
+/** Tra source khi cần hứng. Lỗi D1 -> 'error'. */
+async function lookup(env: Env, inc: Incoming, deps: Deps): Promise<SourceSync | null | 'error'> {
+  if (!inc.sourceKey || !inc.provider) return null;
+  try {
+    const src = await getSource(env.DB, inc.sourceKey);
+    return catchable(src, inc.provider, inc.method) ? src : null;
+  } catch (e) {
+    deps.log('catchnet_d1_error', { id: inc.id, op: 'getSource', error: String((e as Error)?.message ?? e) });
+    return 'error';
+  }
+}
+
+/** Ghi D1 rồi ack; mọi thất bại -> 503. */
+async function catchIt(env: Env, cfg: Config, deps: Deps, inc: Incoming, src: SourceSync, why: string): Promise<Response> {
+  try {
+    const ok = await insertCaught(
+      env.DB,
+      {
+        id: inc.id,
+        sourceKey: inc.sourceKey!,
+        provider: inc.provider!,
+        method: inc.method,
+        target: inc.rawTarget,
+        headers: inc.headers,
+        body: inc.body,
+        clientIp: inc.clientIp,
+        receivedAt: inc.receivedAt,
+      },
+      { maxRows: cfg.maxRows, maxPerKey: cfg.maxPerKey, maxBytes: cfg.maxBytes, maxKeyBytes: cfg.maxKeyBytes, maxPerDay: cfg.maxPerDay },
+    );
+    if (!ok) {
+      deps.log('catchnet_overflow', { sourceKey: inc.sourceKey, bytes: inc.body.byteLength });
+      return unavailable('overflow');
+    }
+  } catch (e) {
+    deps.log('catchnet_d1_error', { id: inc.id, op: 'insert', error: String((e as Error)?.message ?? e) });
+    return unavailable('store_failed');
+  }
+  deps.log('catchnet_caught', { id: inc.id, sourceKey: inc.sourceKey, provider: inc.provider, method: inc.method, why, bytes: inc.body.byteLength });
+  return ackResponse(src);
+}
+
 async function handleHook(req: Request, env: Env, cfg: Config, deps: Deps): Promise<Response> {
   const method = req.method.toUpperCase();
   const rawTarget = rawTargetOf(req.url);
-  const declared = Number(req.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return json({ error: 'payload_too_large' }, 413);
-  const body = new Uint8Array(await req.arrayBuffer()); // bytes thô, KHÔNG parse (HMAC tính trên bytes)
-  if (body.byteLength > MAX_BODY_BYTES) return json({ error: 'payload_too_large' }, 413);
   if (!cfg.hubOrigin) {
     deps.log('catchnet_misconfigured', { what: 'HUB_ORIGIN_URL' });
     return unavailable('misconfigured');
   }
+  if (!safeHookTarget(rawTarget, cfg.hubOrigin)) return notFound();
+  const declared = Number(req.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return json({ error: 'payload_too_large' }, 413);
+  const body = await readCapped(req, MAX_BODY_BYTES); // bytes thô, KHÔNG parse (HMAC tính trên bytes)
+  if (body === null) return json({ error: 'payload_too_large' }, 413);
 
   const receivedAt = deps.now();
-  const id = ulid(receivedAt);
-  const clientIp = validIp(req.headers.get('cf-connecting-ip')) ?? '0.0.0.0';
-  const headers = storableHeaders(req.headers);
-  const call: HubCall = { id, receivedAt, clientIp, mode: 'forward', method, rawTarget, headers, body };
+  const m = HOOK_RE.exec(rawTarget.split('?')[0]);
+  const inc: Incoming = {
+    id: ulid(receivedAt),
+    receivedAt,
+    clientIp: validIp(req.headers.get('cf-connecting-ip')) ?? '0.0.0.0',
+    mode: 'forward',
+    method,
+    rawTarget,
+    headers: storableHeaders(req.headers),
+    body,
+    provider: m ? m[1] : null,
+    sourceKey: m ? m[2] : null,
+  };
+  // Không ký được thì phát lại vô nghĩa -> không bao giờ hứng.
+  const canCatch = cfg.forwardSecret !== null && inc.sourceKey !== null;
+
+  // TB-1: mạch chỉ áp cho request HỨNG ĐƯỢC; không hứng được thì vẫn chuyển tiếp như thường.
+  let src: SourceSync | null | 'error' | undefined;
+  if (canCatch && receivedAt < circuit.openUntil) {
+    src = await lookup(env, inc, deps);
+    if (src && src !== 'error') return catchIt(env, cfg, deps, inc, src, 'circuit_open');
+  }
 
   let reply: HubReply = { status: null, outcome: null };
   let res: Response | null = null;
-  if (receivedAt >= circuit.openUntil) {
-    try {
-      res = await callHub(cfg, deps, call);
-      reply = { status: res.status, outcome: outcomeOf(res.headers) };
-    } catch (e) {
-      circuit.openUntil = deps.now() + CIRCUIT_MS;
-      deps.log('catchnet_hub_unreachable', { id, error: (e as Error)?.name ?? 'Error' });
-    }
+  try {
+    res = await callHub(cfg, deps, inc);
+    reply = { status: res.status, outcome: outcomeOf(res.headers) };
+  } catch (e) {
+    circuit.openUntil = deps.now() + CIRCUIT_MS;
+    deps.log('catchnet_hub_unreachable', { id: inc.id, error: (e as Error)?.name ?? 'Error' });
   }
   if (res && forwardDecision(reply) === 'pass') return passThrough(res);
   if (res) await res.body?.cancel().catch(() => undefined);
+  if (misconfiguredOk(reply)) deps.log('catchnet_misconfigured', { what: 'HUB_ORIGIN_URL', effect: '2xx_without_x-hub-outcome', status: reply.status });
 
   // ---- Hub vắng: hứng nếu được, không thì 503.
-  const m = HOOK_RE.exec(rawTarget.split('?')[0]);
-  if (!m) return unavailable('hub_unavailable');
-  if (!cfg.forwardSecret) {
-    deps.log('catchnet_misconfigured', { what: 'CATCHNET_FORWARD_SECRET' }); // không ký được thì phát lại vô nghĩa
+  if (!canCatch) {
+    if (inc.sourceKey && !cfg.forwardSecret) deps.log('catchnet_misconfigured', { what: 'CATCHNET_FORWARD_SECRET', effect: 'not_catching' });
     return unavailable('hub_unavailable');
   }
-  const [, provider, sourceKey] = m;
-  let src: SourceSync | null;
-  try {
-    src = await getSource(env.DB, sourceKey);
-  } catch (e) {
-    deps.log('catchnet_d1_error', { id, op: 'getSource', error: String((e as Error)?.message ?? e) });
-    return unavailable('store_failed');
-  }
-  if (!catchable(src, provider, method)) return unavailable('hub_unavailable');
-  try {
-    const ok = await insertCaught(
-      env.DB,
-      { id, sourceKey, provider, method, target: rawTarget, headers, body, clientIp, receivedAt },
-      { maxRows: cfg.maxRows, maxPerKey: cfg.maxPerKey },
-    );
-    if (!ok) {
-      deps.log('catchnet_overflow', { sourceKey, maxRows: cfg.maxRows, maxPerKey: cfg.maxPerKey });
-      return unavailable('overflow');
-    }
-  } catch (e) {
-    deps.log('catchnet_d1_error', { id, op: 'insert', error: String((e as Error)?.message ?? e) });
-    return unavailable('store_failed');
-  }
-  deps.log('catchnet_caught', { id, sourceKey, provider, method, status: reply.status, bytes: body.byteLength });
-  return ackResponse(src!);
+  if (src === undefined || src === 'error') src = await lookup(env, inc, deps);
+  if (src === 'error') return unavailable('store_failed');
+  if (!src) return unavailable('hub_unavailable');
+  return catchIt(env, cfg, deps, inc, src, reply.status === null ? 'unreachable' : `status_${reply.status}`);
 }
 
 // ------------------------------------------------------------------ phát lại
 
-async function replayOne(row: InboxRow, env: Env, cfg: Config, deps: Deps): Promise<'absent' | 'ok'> {
+async function replayOne(id: string, env: Env, cfg: Config, deps: Deps): Promise<'absent' | 'ok'> {
+  const row: InboxRow | null = await loadRow(env.DB, id); // nạp body TỪNG dòng, ngay trước khi gửi (TB-3)
+  if (!row) return 'ok';
   const now = deps.now();
   if (now - row.received_at > cfg.retentionMs) {
     // Hub cũng bỏ header lưới quá hạn -> phát lại thành "gọi thẳng" và trượt cửa sổ chữ ký: dừng ở đây.
@@ -234,6 +333,10 @@ async function replayOne(row: InboxRow, env: Env, cfg: Config, deps: Deps): Prom
     error = (e as Error)?.name ?? 'Error';
     circuit.openUntil = deps.now() + CIRCUIT_MS;
   }
+  if (misconfiguredOk(reply)) {
+    error = '2xx_without_x-hub-outcome';
+    deps.log('catchnet_misconfigured', { what: 'HUB_ORIGIN_URL', effect: '2xx_without_x-hub-outcome', id: row.id, status: reply.status });
+  }
   const act = replayDecision(reply, attempts);
   if (act.kind === 'done') {
     await deleteRow(env.DB, row.id);
@@ -252,28 +355,42 @@ async function replayOne(row: InboxRow, env: Env, cfg: Config, deps: Deps): Prom
 }
 
 /**
- * Một lượt cron (ADR-216): ≤ `replayBatch` dòng tới hạn, song song ≤ 5, DỪNG lô khi thấy hub vắng (dòng chưa gửi giữ
- * nguyên `next_at`, lượt sau thử lại) — không dội hub đang chết, không đốt subrequest. Dọn `inbox_dead` mỗi giờ.
+ * Một lượt cron (ADR-216, REVIEW-LH2 TB-3):
+ *  1. chọn ≤ `replayBatch` (≤ 10) id tới hạn theo index, KHÔNG nạp body; cắt lô theo tổng byte ≤ 2 MB (luôn ≥ 1 dòng);
+ *  2. lease cả lô (`next_at = now + 5m`) bằng MỘT câu — lượt bị giết giữa chừng thì dòng tự lùi, không kẹt đầu hàng;
+ *  3. nạp + gửi từng dòng, song song ≤ 5; DỪNG khi thấy hub vắng (dòng chưa gửi chờ hết lease).
+ * Ngân sách: 3 truy vấn cố định + ≤ 4/dòng ≤ 43 < 50 (D1 queries / subrequests của gói free). Dọn hàng chết mỗi giờ.
  */
 export async function runReplay(env: Env, deps: Deps = defaultDeps, scheduledTime?: number): Promise<{ sent: number; stopped: boolean }> {
   const cfg = loadConfig(env);
   const now = deps.now();
   if (new Date(scheduledTime ?? now).getUTCMinutes() === 0) {
-    const n = await purgeDead(env.DB, now - cfg.retentionMs);
+    const n = await purgeDead(env.DB, now - cfg.retentionMs, now);
     if (n > 0) deps.log('catchnet_dead_purged', { n });
   }
   if (!cfg.hubOrigin || !cfg.forwardSecret) {
     deps.log('catchnet_misconfigured', { what: !cfg.hubOrigin ? 'HUB_ORIGIN_URL' : 'CATCHNET_FORWARD_SECRET', in: 'replay' });
     return { sent: 0, stopped: true };
   }
-  const rows = await dueRows(env.DB, now, cfg.replayBatch);
+  const due = await dueIds(env.DB, now, cfg.replayBatch);
+  const picked: string[] = [];
+  let bytes = 0;
+  for (const d of due) {
+    if (picked.length > 0 && bytes + d.len > REPLAY_BYTES_BUDGET) break;
+    picked.push(d.id);
+    bytes += d.len;
+  }
+  if (picked.length === 0) return { sent: 0, stopped: false };
+  await leaseRows(env.DB, picked, now + LEASE_MS);
+
   let sent = 0;
-  for (let i = 0; i < rows.length; i += REPLAY_CONCURRENCY) {
-    const chunk = rows.slice(i, i + REPLAY_CONCURRENCY);
+  for (let i = 0; i < picked.length; i += REPLAY_CONCURRENCY) {
+    const chunk = picked.slice(i, i + REPLAY_CONCURRENCY);
     const results = await Promise.all(
-      chunk.map((r) =>
-        replayOne(r, env, cfg, deps).catch((e) => {
-          deps.log('catchnet_d1_error', { id: r.id, op: 'replay', error: String((e as Error)?.message ?? e) });
+      chunk.map((id) =>
+        replayOne(id, env, cfg, deps).catch((e) => {
+          // Lease đã đẩy dòng lùi 5 phút; ghi thêm lỗi theo kiểu best-effort (lỗi lặp lại không giữ đầu hàng).
+          deps.log('catchnet_d1_error', { id, op: 'replay', error: String((e as Error)?.message ?? e) });
           return 'ok' as const;
         }),
       ),
@@ -326,11 +443,16 @@ async function handleAdmin(req: Request, url: URL, env: Env, cfg: Config, deps: 
       parsed.push(p);
     }
     if (parsed.length) await env.DB.batch(parsed.map((p) => upsertSourceStmt(env.DB, p, now, b.syncId as string)));
-    const removed = b.final === true ? await finishResync(env.DB, b.syncId) : 0;
+    const removed = b.final === true ? await finishResync(env.DB, b.syncId, now) : 0;
     return json({ upserted: parsed.length, removed }, 200);
   }
   if (one && one[1] !== 'resync') {
-    const key = decodeURIComponent(one[1]);
+    let key: string;
+    try {
+      key = decodeURIComponent(one[1]);
+    } catch {
+      return json({ error: 'invalid', message: 'source_key sai khuôn' }, 422); // L7: `%` hỏng
+    }
     if (req.method === 'PUT') {
       const p = parseSource(key, await req.json().catch(() => null));
       if (typeof p === 'string') return json({ error: 'invalid', message: p }, 422);
@@ -340,8 +462,8 @@ async function handleAdmin(req: Request, url: URL, env: Env, cfg: Config, deps: 
     if (req.method === 'DELETE') return json({ deleted: await deleteSource(env.DB, key) }, 200);
     return json({ error: 'method_not_allowed' }, 405);
   }
-  if (url.pathname === '/_admin/stats' && req.method === 'GET') return json(await stats(env.DB), 200);
-  return json({ error: 'not_found' }, 404);
+  if (url.pathname === '/_admin/stats' && req.method === 'GET') return json(await stats(env.DB, now), 200);
+  return notFound();
 }
 
 export async function handleFetch(req: Request, env: Env, deps: Deps = defaultDeps): Promise<Response> {
@@ -349,12 +471,12 @@ export async function handleFetch(req: Request, env: Env, deps: Deps = defaultDe
   const path = rawTargetOf(req.url).split('?')[0];
   try {
     if (/^\/hooks(\/|$)/i.test(path)) return await handleHook(req, env, cfg, deps);
-    if (path === '/_health') return json({ ok: true }, 200);
+    // L4: /_health báo Worker có ký được không (không lộ secret).
+    if (path === '/_health') return json({ ok: true, signing: cfg.forwardSecret !== null, origin: cfg.hubOrigin !== null }, 200);
     if (path.startsWith('/_admin/')) return await handleAdmin(req, new URL(req.url), env, cfg, deps);
-    return json({ error: 'not_found' }, 404);
+    return notFound();
   } catch (e) {
     deps.log('catchnet_error', { error: String((e as Error)?.message ?? e) });
     return unavailable('internal'); // chưa ghi bền -> không 2xx
   }
 }
-
