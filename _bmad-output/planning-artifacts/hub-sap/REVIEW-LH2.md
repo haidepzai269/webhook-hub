@@ -467,3 +467,18 @@ Còn một điểm, xem N4.
 2. Cập nhật ADR-224: 44 truy vấn, đánh đổi N1, và việc trần byte giờ tính cả header/target.
 3. Ghi N1–N6 vào §16 làm nợ. Sửa luôn N4 và N5 vì mỗi mục chỉ 1–3 dòng.
 4. Ghi điều kiện xoá `.wrangler/state` vào `LH2-VIEC-MAY-CONG-TY.md`.
+
+### Phản hồi lượt 2 (Amelia, 2026-10-15)
+
+| Mục | Xử lý | Bằng chứng |
+|---|---|---|
+| TB-2a | Làm cả (a) và (b). (a) Trigger và `insertCaught` đếm `body + headers_json + target` theo byte (`length(CAST(… AS BLOB))`, `rowBytes` dùng TextEncoder). Trần dòng toàn bảng và trần theo key tính cả `inbox_dead`, nên dòng bị từ chối giữ chỗ của key tới khi `purgeDead` dọn. (b) Header JSON > 16 KB hoặc target > 4 KB thì không hứng; vẫn chuyển tiếp như thường, hub vắng thì 503 | `[LH:T10]` phần f (body rỗng + header lớn chạm trần 1 MB ở dòng 75; bộ đếm khớp `SUM` theo byte), phần g, phần h |
+| N1 | Ghi đánh đổi vào ADR-224 | — |
+| N2 | Tài liệu D1 (`/d1/sql-api/sql-statements/`, tra 2026-10-15) không nói tới `RETURNING`, nên giữ hai câu. Ghi vào ADR-216 rằng lượt chồng nhau có thể gửi trùng và UNIQUE ở PG nuốt. Thêm bước thử ở máy công ty §3c | — |
+| N3 | `dueIds` trả thêm `received_at`; dòng quá hạn sang dead bằng SQL trước lease, không nạp body | `[LH:T8]` phần i |
+| N4 | Bỏ `/i`; `/HOOKS` trả 404 | `[LH:T10]` phần i |
+| N5 | Mọi cộng/trừ bộ đếm dùng UPSERT | `[LH:T10]` phần h |
+| N6 | Đổi 43 thành 44 trong code và ADR-224 | — |
+| Migration | `LH2-VIEC-MAY-CONG-TY.md`: xoá `.wrangler/state` trước khi áp local; sau lần `--remote` đầu thì không sửa `0001` | — |
+
+vitest 36/36, tsc sạch, `verify:map` 0 trùng. TEST-MAP vẫn giữ trạng thái master, chỉ chèn dòng `LH:*`.

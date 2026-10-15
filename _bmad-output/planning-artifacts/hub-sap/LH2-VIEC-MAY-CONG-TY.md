@@ -1,6 +1,6 @@
 # LH2 — việc còn phải chạy ở máy công ty
 
-Máy nhà yếu RAM nên chưa chạy các bước dưới đây (luật Admin 2026-10-15). Đã chạy ở máy nhà: vitest `apps/catchnet` 31/31 (sau REVIEW-LH2), `tsc` của catchnet, jest `edge-nginx.spec` + `ingest-catchnet.spec` (42 pass, 3 skip vì cần nginx thật), `verify:map` (0 mồ côi, 0 trùng).
+Máy nhà yếu RAM nên chưa chạy các bước dưới đây (luật Admin 2026-10-15). Đã chạy ở máy nhà: vitest `apps/catchnet` 36/36 (sau REVIEW-LH2 lượt 2), `tsc` của catchnet, jest `edge-nginx.spec` + `ingest-catchnet.spec` (42 pass, 3 skip vì cần nginx thật), `verify:map` (0 mồ côi, 0 trùng).
 
 **Nhánh:** `feat/lh` · **SHA lúc viết file:** `3163882` (commit chứa file này đứng ngay sau). Chỉ chạy LOCAL. **Cấm** `wrangler deploy`, `wrangler d1 create`, `--remote`, và cấm gọi Cloudflare/Render/Neon thật.
 
@@ -16,7 +16,7 @@ cd apps/catchnet && npm ci && npm run typecheck && npm test
 **ĐẠT khi:**
 - `verify:unit` không đỏ mới so với master `d417118`, và không có file nào dưới `apps/catchnet/` trong danh sách jest chạy.
 - `verify:map` báo `0 mồ côi · 0 ma · 0 trùng`.
-- catchnet: `Tests 31 passed (31)`, `tsc` không lỗi.
+- catchnet: `Tests 36 passed (36)`, `tsc` không lỗi.
 - `npm ci` ở gốc không báo lock lệch (workspaces có `"!apps/catchnet"`).
 
 ## 2. nginx thật: `geo` dải Cloudflare (R2-L1, ADR-223)
@@ -46,8 +46,11 @@ node -e "require('http').createServer((q,s)=>{let b=[];q.on('data',c=>b.push(c))
 
 Ở terminal khác:
 
+> **Migration `0001` đã sửa tại chỗ (REVIEW-LH2 lượt 2).** Máy nào đã từng `migrations apply --local` (kể cả thư mục spike) phải xoá `apps/catchnet/.wrangler/state` trước — `CREATE TABLE IF NOT EXISTS` không thêm cột `bytes`, và D1 local đã ghi `0001` là đã áp. Sau lần `--remote` đầu tiên (Admin, sau cổng LH2b) thì **không** sửa `0001` nữa, chỉ thêm migration mới.
+
 ```bash
 cd apps/catchnet
+rm -rf .wrangler/state
 npx wrangler d1 migrations apply hub-hooks-db --local
 npx wrangler dev --local --test-scheduled --port 8787
 ```
@@ -97,6 +100,14 @@ curl -s localhost:8787/_admin/stats -H "$A"
 - Query `|`/`'`: chữ ký đầu qua `verifyCatchnetHeaders` (ghi target hub nhận được vào §16).
 - TB-3: một lượt cron gửi 2 dòng (ngân sách 2 MB), không lỗi "exceeded CPU" / "too many subrequests" / "out of memory" trong log của `wrangler dev`; ghi CPU ms (log `wrangler dev` hoặc `--inspect`), số truy vấn D1, bộ nhớ vào §16. Lượt sau gửi tiếp 2 dòng khác; `stats.pending` giảm 2 mỗi phút.
 - Kill `wrangler dev` ngay sau `__scheduled` rồi chạy lại: dòng của lô vừa lease có `next_at` = lúc lease + 5 phút (`SELECT id, next_at FROM inbox ORDER BY next_at`), lượt kế gửi dòng khác.
+
+## 3c. Tuỳ chọn: D1 có nhận `UPDATE … RETURNING` không (REVIEW-LH2 N2)
+
+```bash
+npx wrangler d1 execute hub-hooks-db --local --command "UPDATE inbox SET next_at = next_at WHERE id IN (SELECT id FROM inbox ORDER BY next_at LIMIT 1) RETURNING id, length(body)"
+```
+
+Chạy được thì ghi vào §16 (có thể gộp chọn + lease làm một câu ở story sau). Ghi chú: `--local` chạy SQLite của workerd, chưa chứng minh được D1 remote.
 
 ## 4. Ghi kết quả
 
