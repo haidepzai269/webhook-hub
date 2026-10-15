@@ -59,8 +59,8 @@ describe('[PK:T40] (phần c) ingest: chống trùng theo path lồng / băm bod
     const { svc, tx } = build({ path: 'webhook_metadata.event.id' });
     const b1 = '{"webhook_metadata":{"attempt":{"id":"a1"},"event":{"id":"EVT-1"}}}';
     const b2 = '{"webhook_metadata":{"attempt":{"id":"a2"},"event":{"id":"EVT-1"}}}'; // lần gửi lại: attempt đổi, event giữ
-    expect(await svc.ingestWebhook(req(b1))).toEqual({ status: 200, body: { ok: true } });
-    expect(await svc.ingestWebhook(req(b2))).toEqual({ status: 200, body: { ok: true, duplicate: true } });
+    expect(await svc.ingestWebhook(req(b1))).toEqual({ status: 200, body: { ok: true }, outcome: 'accepted' });
+    expect(await svc.ingestWebhook(req(b2))).toEqual({ status: 200, body: { ok: true, duplicate: true }, outcome: 'duplicate' });
     expect(accepted(tx)[0].idempotencyKey).toBe('generic:EVT-1');
     expect(tx.outbox.create).toHaveBeenCalledTimes(1);
   });
@@ -82,7 +82,7 @@ describe('[PK:T40] (phần c) ingest: chống trùng theo path lồng / băm bod
   it('bodyHash + body rỗng (ký đúng) -> 422 empty_body kèm fix, REJECTED signature_valid=true, KHÔNG outbox', async () => {
     const { svc, tx } = build({ bodyHash: true });
     const r = await svc.ingestWebhook(req(''));
-    expect(r).toEqual({ status: 422, body: { ok: false, error: 'empty_body', fix: expect.stringMatching(/Empty body/) } });
+    expect(r).toEqual({ status: 422, body: { ok: false, error: 'empty_body', fix: expect.stringMatching(/Empty body/) }, outcome: 'rejected' });
     expect(tx.rawEvent.create.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED', signatureValid: true });
     expect(tx.outbox.create).not.toHaveBeenCalled();
   });
