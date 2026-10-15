@@ -188,3 +188,21 @@ Muốn lên ĐẠT cần ba việc:
    - ARCHITECTURE, DEPLOYMENT, retry-window, storage-api và các comment test đã cập nhật 7h34m10s. Không còn chỗ nào sót "7h23m" ngoài ADR lịch sử.
    - ADR-234 đúng 3 dòng và không chồng số.
    - Hai chỗ phải sửa: câu khẳng định L1 (TB-2) và cụm "không bao giờ" (Thấp-1).
+
+---
+
+## Phản hồi của dev (2026-10-15)
+
+| Mục | Xử lý |
+|---|---|
+| **TB-1** | Thêm ca L1 `[BP:T16] (phần d)` trong `circuit-breaker.spec.ts` (khối `describeRedis`, chạy trong CI `db (L1)`). Ca này chạy Lua thật với `DELIVERY_RAMP_STEP_SECONDS=1` và 100 rps đều. Kiểm trần 2..64 và kiểm guard `ext > PTTL`: không giây nào PTTL bị rút ngắn, lần gia hạn đầu ở giây 50. Kiểm thêm khoá hết trong (start+179 s, start+180 s], và `:ramp` hỏng thì không ramp. Hai fake JS đã khớp với Lua: dùng `DELIVERY_RAMP_MAX_DOUBLINGS`, có `ext > PTTL` theo hạn ảo `rampExp`, đọc mức gia hạn từ ARGV[9], ghi rõ PHẠM VI FAKE. Fake L0 có thêm ca guard với bước 1 s. **Chưa chạy local** (máy không có Redis). Bằng chứng = CI `db (L1)` sau khi push. |
+| **TB-2** | Dòng Đánh đổi của ADR-234 đổi thành "**Kỳ vọng (tính tay, CHƯA chạy)**". Thêm dòng "**Đo lại:** L1 — chưa · T16 — chưa". |
+| Thấp-1 | Bỏ "không bao giờ" ở code, ARCHITECTURE và ADR. Nay ghi "≤ RAMP_MAX + độ lệch đồng hồ D giữa các worker (không dùng `TIME`, để script deterministic)". |
+| Thấp-2 | Mức gia hạn đổi thành `deliveryRampExtendMs` = max(2 × step, 10 s + step), truyền qua ARGV[9]. Mặc định vẫn 20 s; step 4 → 14 s; step 1 → 11 s. Có test L0. |
+| Thấp-3 | `maxSeconds` mặc định = min(180, 3 × (ramp + step)). Ví dụ ramp 10 s / step 10 s → 60 s, không còn 180 s ở 2 rps. Env chỉ kẹp thấp hơn mặc định đó. Có test L0. |
+| Thấp-4 | `DELIVERY_RAMP_START_RPS` chỉ kẹp thấp hơn 2, nên trần cuối tuyệt đối ≤ 64. Test cũ `START=5` đổi kỳ vọng thành 2. Có test L0 với `START=5000`. |
+| Thấp-5 | DEPLOYMENT đã ghi sàn `RAMP_SECONDS + STEP`, mặc định min(180, 3×…), và "0/bậy → mặc định (không phải tắt)". |
+| Thấp-6 | Ghi trong comment `LUA_GATE` và ADR-234. Có test cả fake L0 lẫn L1 Lua thật (`'hong'` → CLOSED, không ramp). |
+| Thấp-7 | `SPEC-hub-sap.md:93` → "PK: 230, 235+ (231–234 thuộc BP)". Tiêu đề ADR-234 ghi "PK dùng 235+". |
+| Thấp-8 | `docs/TEST-MAP.md` khôi phục bản master `d417118`, giữ nguyên các trạng thái ✅. Chỉ thêm 3 dòng `BP:T15`/`BP:T16`/`BP:T22` (bản master chưa có dòng BP nào). Sinh lại trọn file trên Linux/CI sau. |
+| Thấp-9 | **Ghi nợ.** Lỗ biên giây epoch có từ ADR-232. Kiểm "giây biên gộp ≤ 2 × 64" không thêm được gì: hai kiểm "trong ramp ≤ 64" và "sau ramp ≤ 64" đã kéo theo ≤ 128. Phần còn lại là sai số poll 250 ms, chấp nhận. |

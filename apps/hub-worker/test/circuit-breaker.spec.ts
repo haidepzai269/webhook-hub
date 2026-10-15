@@ -17,6 +17,7 @@ import {
   circuitOpenMaxSeconds,
   deliveryRampCapAt,
   deliveryRampConfig,
+  deliveryRampExtendMs,
   deliveryRampKeySeconds,
   deliveryRampLastStep,
 } from '@hub/messaging';
@@ -37,6 +38,7 @@ function fakeRedis() {
     calls,
     writes,
     pexpires: [] as Array<[string, number]>,
+    rampExp: new Map<string, number>(),
     expireNow: (k: string) => store.delete(k),
     mget: jest.fn(async (...keys: string[]) => {
       calls.push('mget');
@@ -93,17 +95,20 @@ function fakeRedis() {
       if (script === LUA_GATE) {
         // BP2 §6 + BP4: KEYS open, failures, throttle, ramp, probe; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL,
         // bậc cuối (F3 + Thấp-9), trần tuyệt đối ms (ADR-234). INCR chỉ khi CLOSED và có trần (rps > 0 hoặc còn :ramp).
-        // Bậc cuối + bị chặn -> PEXPIRE :ramp trong script (ghi vào `pexpires`). Bản thật kiểm trên Redis thật ở cuối file.
+        // Bậc cuối + bị chặn -> PEXPIRE :ramp trong script, CHỈ khi dài hơn PTTL (ghi vào `pexpires`).
+        // PHẠM VI FAKE (review F3 TB-1): hạn khoá là `rampExp` theo đồng hồ GIẢ (nowMs của ARGV), không tự hết hạn; không có
+        // = PTTL −1 như Redis. Bản sao JS chỉ để kiểm consumer/ngân sách — Lua THẬT kiểm ở khối Redis thật cuối file (CI db L1).
         const [open, failures, throttle, ramp, probe] = keys;
         let t = -1;
         let cap = -1;
         let atLast = false;
         let el = 0;
+        const now = Number(argv[2]);
         if (!store.has(open) && parseInt(store.get(failures) ?? '0', 10) < Number(argv[0])) {
           if (store.has(ramp)) {
-            el = Math.max(0, Number(argv[2]) - Number(store.get(ramp)));
+            el = Math.max(0, now - (Number(store.get(ramp)) || 0));
             if (el < Number(argv[7])) {
-              const last = Math.max(0, Math.min(5, Number(argv[6])));
+              const last = Math.max(0, Math.min(DELIVERY_RAMP_MAX_DOUBLINGS, Number(argv[6])));
               const steps = Math.min(last, Math.floor(el / (Number(argv[4]) * 1000)));
               atLast = steps >= last;
               cap = Number(argv[3]) * 2 ** steps;
@@ -112,7 +117,14 @@ function fakeRedis() {
           if (Number(argv[1]) > 0 || cap > 0) {
             t = parseInt(store.get(throttle) ?? '0', 10) + 1;
             store.set(throttle, String(t));
-            if (atLast && t > cap) r.pexpires.push([ramp, Math.min(2 * Number(argv[4]) * 1000, Number(argv[7]) - el)]);
+            if (atLast && t > cap) {
+              const ext = Math.min(Number(argv[8]), Number(argv[7]) - el);
+              const pttl = r.rampExp.has(ramp) ? r.rampExp.get(ramp) - now : -1;
+              if (ext > pttl) {
+                r.rampExp.set(ramp, now + ext);
+                r.pexpires.push([ramp, ext]);
+              }
+            }
           }
         }
         // ADR-233: cờ :probe đang bị giữ, chỉ khi HALF_OPEN (hết :open, failures ≥ ngưỡng)
@@ -123,6 +135,7 @@ function fakeRedis() {
         keys.slice(0, 4).forEach((k2: string) => store.delete(k2));
         store.set(keys[4], argv[0]);
         ttls.set(keys[4], Number(argv[1]));
+        r.rampExp.set(keys[4], Number(argv[0]) + Number(argv[1]) * 1000);
         return 1;
       }
       if (script === LUA_RELEASE_PROBE) {
@@ -372,7 +385,9 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(redis.store.get(K('open'))).toBe('OPEN');
     expect(deliveryRampConfig({})).toEqual({ startRps: 2, stepSeconds: 10, seconds: 60, maxSeconds: 180 });
     expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '600', DELIVERY_RAMP_START_RPS: '0', DELIVERY_RAMP_STEP_SECONDS: 'x' })).toEqual({ startRps: 2, stepSeconds: 10, seconds: 60, maxSeconds: 180 });
-    expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '30', DELIVERY_RAMP_START_RPS: '5', DELIVERY_RAMP_STEP_SECONDS: '4' })).toEqual({ startRps: 5, stepSeconds: 4, seconds: 30, maxSeconds: 180 });
+    // START chỉ kẹp thấp hơn 2 (review F3 Thấp-4); RAMP_MAX mặc định min(180, 3 × (30 + 4)) = 102 (Thấp-3)
+    expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '30', DELIVERY_RAMP_START_RPS: '5', DELIVERY_RAMP_STEP_SECONDS: '4' })).toEqual({ startRps: 2, stepSeconds: 4, seconds: 30, maxSeconds: 102 });
+    expect(deliveryRampConfig({ DELIVERY_RAMP_START_RPS: '1' }).startRps).toBe(1);
   });
 
   it('[BP:T15] (phần d) ADR-234 L0 — kẹp cấu hình: RAMP_MAX chỉ kẹp xuống (≤ 180, ≥ ramp + một bậc); bậc cuối ≤ 5 lần nhân đôi dù bước 1s (Thấp-9)', () => {
@@ -383,6 +398,16 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(deliveryRampConfig({ DELIVERY_RAMP_MAX_SECONDS: 'x' }).maxSeconds).toBe(180);
     expect(deliveryRampConfig({ DELIVERY_RAMP_MAX_SECONDS: '0' }).maxSeconds).toBe(180);
     expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '20', DELIVERY_RAMP_STEP_SECONDS: '5', DELIVERY_RAMP_MAX_SECONDS: '10' }).maxSeconds).toBe(25);
+    // Thấp-3: hạ ramp thì trần hạ theo (10s/10s -> khoá 20s -> RAMP_MAX 60s, không 180s ở 2 rps); env không nới quá mặc định đó
+    expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '10' }).maxSeconds).toBe(60);
+    expect(deliveryRampConfig({ DELIVERY_RAMP_SECONDS: '10', DELIVERY_RAMP_MAX_SECONDS: '180' }).maxSeconds).toBe(60);
+    // Thấp-2: mức gia hạn ≥ một vòng retry.10s + một bậc
+    expect(deliveryRampExtendMs(deliveryRampConfig({}))).toBe(20_000);
+    expect(deliveryRampExtendMs(deliveryRampConfig({ DELIVERY_RAMP_STEP_SECONDS: '4' }))).toBe(14_000);
+    expect(deliveryRampExtendMs(deliveryRampConfig({ DELIVERY_RAMP_STEP_SECONDS: '1' }))).toBe(11_000);
+    // Thấp-4: trần cuối tuyệt đối ≤ 64 dù env START lớn
+    const big = deliveryRampConfig({ DELIVERY_RAMP_START_RPS: '5000', DELIVERY_RAMP_STEP_SECONDS: '1' });
+    expect(deliveryRampCapAt(big, 100_000)).toBe(64);
     expect(DELIVERY_RAMP_MAX_SECONDS).toBe(180);
     // Thấp-9: bước 1s, ramp 60s -> trước đây bậc cuối 59 (kẹp 20 trong Lua = 2M rps); nay ≤ 5 -> trần cuối start × 32
     expect(deliveryRampLastStep(deliveryRampConfig({}))).toBe(5);
@@ -417,12 +442,12 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
       now = t0 + 25_000;
       expect(await burst(10)).toBe(8);
       expect(redis.pexpires).toEqual([]);
-      // bậc cuối (55s): 64 lần đầu không bị chặn -> không gia hạn; 2 lần bị chặn -> mỗi lần gia hạn 20s (vẫn 1 EVAL / lần)
+      // bậc cuối (55s): 64 lần đầu không bị chặn -> không gia hạn; lần chặn đầu gia hạn 20s, lần sau cùng thời điểm không (PTTL đã 20s)
       now = t0 + 55_000;
       const before = redis.calls.length;
       expect(await burst(66)).toBe(64);
       expect(redis.calls.length - before).toBe(66);
-      expect(redis.pexpires).toEqual([[K('ramp'), 20_000], [K('ramp'), 20_000]]);
+      expect(redis.pexpires).toEqual([[K('ramp'), 20_000]]);
       // sát RAMP_MAX: gia hạn chỉ phần còn lại
       redis.pexpires.length = 0;
       now = t0 + 171_500;
@@ -435,6 +460,18 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
       process.env.DELIVERY_RAMP_STEP_SECONDS = '1';
       now = t0 + 50_000;
       expect((await cb.getState(DEST, 0)).rampCap).toBe(64);
+      // guard "không rút ngắn" (bước 1s: bậc cuối từ 5s, khoá gốc 61s, mức gia hạn max(2s, 10s + 1s) = 11s)
+      redis.pexpires.length = 0;
+      redis.rampExp.set(K('ramp'), t0 + 61_000);
+      now = t0 + 10_000;
+      await burst(70);
+      expect(redis.pexpires).toEqual([]); // PTTL 51s > 11s -> không PEXPIRE
+      now = t0 + 52_000;
+      await burst(70);
+      expect(redis.pexpires).toEqual([[K('ramp'), 11_000]]); // PTTL 9s < 11s -> kéo dài
+      // `:ramp` hỏng (không phải số) -> không ramp, không INCR (review F3 Thấp-6)
+      redis.store.set(K('ramp'), 'hong');
+      expect(await cb.getState(DEST, 0)).toEqual({ state: 'CLOSED', failures: 0 });
     } finally {
       delete process.env.DELIVERY_RAMP_STEP_SECONDS;
       jest.restoreAllMocks();
@@ -801,14 +838,19 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
    * tăng = gate vừa gia hạn trong script -> virtExp = now + PTTL. now ≥ virtExp -> xoá khoá (= hết hạn).
    * `arrivals(sec)` = số lần gate trong giây đó; phần bị chặn quay lại sau 10s nếu `requeue` (nhịp retry.10s).
    */
-  async function simulateRamp(start: number, arrivals: (sec: number) => number, o: { requeue: boolean; maxSec: number }) {
-    const keySeconds = deliveryRampKeySeconds(deliveryRampConfig({}));
+  async function simulateRamp(start: number, arrivals: (sec: number) => number, o: { requeue: boolean; maxSec: number; env?: Record<string, string> }) {
+    const env = o.env ?? {};
+    const keySeconds = deliveryRampKeySeconds(deliveryRampConfig(env));
     await redis.set(k('ramp'), String(start), 'EX', keySeconds);
     let virtExp = start + keySeconds * 1000;
     let expiredAt: number | null = null;
     const due = new Map<number, number>();
     const perSec: { sec: number; n: number; ok: number; cap: number | null }[] = [];
     const exps: number[] = [];
+    /** PTTL thật của :ramp trước / sau các lần gate trong giây (Lua thật) — kiểm guard "không rút ngắn". */
+    const pttls: { sec: number; before: number; after: number }[] = [];
+    const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, env);
     try {
       for (let sec = 0; sec < o.maxSec; sec++) {
         const now = start + sec * 1000 + 500;
@@ -834,6 +876,7 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
         jest.restoreAllMocks();
         if (expiredAt === null) {
           const pAfter = await redis.pttl(k('ramp'));
+          pttls.push({ sec, before: pBefore, after: pAfter });
           if (pAfter > pBefore) {
             virtExp = now + pAfter;
             exps.push(virtExp);
@@ -844,9 +887,13 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
       }
     } finally {
       jest.restoreAllMocks();
+      for (const [key, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[key];
+        else process.env[key] = v;
+      }
       await redis.del(k('ramp'));
     }
-    return { perSec, expiredAt, virtExp, exps };
+    return { perSec, expiredAt, virtExp, exps, pttls };
   }
 
   it('F3 (ADR-232 + ADR-234) trên Redis THẬT: 500 message hoãn dội về theo nhịp retry.10s (dồn 1 giây/vòng như chaos đo lại, và rải 2 giây/vòng) — gate gia hạn :ramp ở bậc cuối tới khi hàng hết; KHÔNG giây nào vượt 64, 500/500 trước RAMP_MAX', async () => {
@@ -889,6 +936,38 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     const low = await simulateRamp(start + 1_000_000, () => 10, { requeue: false, maxSec: 75 });
     expect(low.exps).toEqual([]);
     expect(low.expiredAt).toBe(start + 1_000_000 + 70_000);
+  });
+
+  it('[BP:T16] (phần d) review F3 TB-1 — Lua THẬT, DELIVERY_RAMP_STEP_SECONDS=1, 100 rps đều: trần 2..64 (≤ 5 lần nhân đôi), guard "không rút ngắn" giữ khoá gốc 61s (không cắt còn 11s), gia hạn chỉ từ khi PTTL < 11s, ramp hết ở RAMP_MAX; `:ramp` hỏng -> không ramp', async () => {
+    await redis.del(k('failures'), k('open'), k('probe'), k('trips'), k('ramp'));
+    const env = { DELIVERY_RAMP_STEP_SECONDS: '1' };
+    const cfg = deliveryRampConfig(env);
+    expect(cfg).toMatchObject({ stepSeconds: 1, seconds: 60, maxSeconds: 180 });
+    expect(deliveryRampKeySeconds(cfg)).toBe(61);
+    expect(deliveryRampExtendMs(cfg)).toBe(11_000);
+    const start = 1_980_000_000_000;
+    const s = await simulateRamp(start, () => 100, { requeue: false, maxSec: cfg.maxSeconds + 3, env });
+    for (const r of s.perSec) {
+      if (r.sec < cfg.maxSeconds) {
+        const cap = deliveryRampCapAt(cfg, r.sec * 1000 + 500);
+        expect({ sec: r.sec, ok: r.ok, cap: r.cap }).toEqual({ sec: r.sec, ok: cap, cap });
+      } else {
+        expect({ sec: r.sec, ok: r.ok, cap: r.cap }).toEqual({ sec: r.sec, ok: 100, cap: null });
+      }
+    }
+    expect(Math.max(...s.perSec.map((r) => r.ok).slice(0, cfg.maxSeconds))).toBe(64); // Thấp-9: không phải 2 × 2^20
+    // guard: bị chặn ở bậc cuối từ giây 5 nhưng PTTL (≈ 61s − el) > 11s -> Lua KHÔNG PEXPIRE; không giây nào PTTL bị rút ngắn
+    for (const p of s.pttls) expect({ sec: p.sec, shortened: p.after < p.before - 200 }).toEqual({ sec: p.sec, shortened: false });
+    const firstExt = s.pttls.find((p) => p.after > p.before);
+    expect(firstExt?.sec).toBe(50); // PTTL 10,5s < 11s lần đầu ở giây 50
+    for (const e of s.exps) expect(e).toBeLessThanOrEqual(start + cfg.maxSeconds * 1000);
+    expect(s.expiredAt).toBeGreaterThan(start + (cfg.maxSeconds - 1) * 1000);
+    expect(s.expiredAt).toBeLessThanOrEqual(start + cfg.maxSeconds * 1000);
+    // review F3 Thấp-6: `:ramp` hỏng -> el rất lớn > RAMP_MAX -> gửi bình thường, không INCR, không gia hạn
+    await redis.set(k('ramp'), 'hong', 'EX', 60);
+    expect(await cb.getState(dest, 0)).toEqual({ state: 'CLOSED', failures: 0 });
+    expect(await redis.pttl(k('ramp'))).toBeLessThanOrEqual(60_000);
+    await redis.del(k('ramp'));
   });
 
   it('BP2 §6 LUA_GATE: Redis LỖI (cổng chết) -> fail-open CLOSED degraded, không ném', async () => {

@@ -82,8 +82,10 @@ export const CIRCUIT_DEFER_ROUND_MS = circuitDeferTier(CIRCUIT_OPEN_MAX_MS).ttlM
  * F3 (chaos [BP:T16] phần b, ADR-232): khoá `:ramp` sống `seconds + stepSeconds` và trần KẸP ở bậc cuối trong bậc thêm đó —
  * hàng tồn chưa xả hết trong 60s không dội về hết tốc ngay khi khoá hết hạn (đo được 123/s ở trần cuối 64).
  * F3 bậc cuối (ADR-234, đính chính ADR-232): ở bậc cuối mà gate còn THROTTLE (hàng còn dội) thì CÙNG EVAL gia hạn `:ramp`
- * thêm 2 × step, nhưng KHÔNG BAO GIỜ quá `rampStart + DELIVERY_RAMP_MAX_SECONDS` (180s) — trần tuyệt đối tính từ mốc trong khoá.
- * Thấp-9: số lần nhân đôi kẹp ≤ `DELIVERY_RAMP_MAX_DOUBLINGS` (5) — trần cuối ≤ start × 32 dù env bước ramp nhỏ cỡ nào.
+ * thêm `deliveryRampExtendMs` (≥ một vòng retry.10s + một bậc), tới tối đa `rampStart + maxSeconds` (≤ 180s) — tính bằng đồng
+ * hồ worker: lệch đồng hồ D giữa các worker thì ramp có thể sống tới RAMP_MAX + D.
+ * Thấp-9: số lần nhân đôi kẹp ≤ `DELIVERY_RAMP_MAX_DOUBLINGS` (5) và `DELIVERY_RAMP_START_RPS` chỉ kẹp THẤP hơn 2 -> trần cuối
+ * tuyệt đối ≤ 2 × 32 = 64 rps dù env đặt thế nào.
  */
 export const DELIVERY_RAMP_START_RPS = 2;
 export const DELIVERY_RAMP_STEP_SECONDS = 10;
@@ -98,7 +100,10 @@ export interface DeliveryRampConfig {
   stepSeconds: number;
   /** 0 = tắt slow-start. */
   seconds: number;
-  /** ADR-234: trần tuyệt đối (giây, tính từ rampStart) — trong [seconds + stepSeconds, DELIVERY_RAMP_MAX_SECONDS]. */
+  /**
+   * ADR-234: trần tuyệt đối (giây, tính từ rampStart) — trong [seconds + stepSeconds, DELIVERY_RAMP_MAX_SECONDS]. Mặc định
+   * min(180, 3 × (seconds + step)) (review F3 Thấp-3: hạ ramp thì trần cũng hạ theo); env chỉ kẹp thấp hơn mặc định đó.
+   */
   maxSeconds: number;
 }
 
@@ -112,12 +117,15 @@ export function deliveryRampConfig(env: Record<string, string | undefined> = pro
   const step = intEnv(env.DELIVERY_RAMP_STEP_SECONDS);
   const secs = intEnv(env.DELIVERY_RAMP_SECONDS);
   const max = intEnv(env.DELIVERY_RAMP_MAX_SECONDS);
-  const startRps = start !== null && start >= 1 ? start : DELIVERY_RAMP_START_RPS;
+  // review F3 Thấp-4: START chỉ kẹp THẤP hơn mặc định — trần cuối tuyệt đối ≤ DELIVERY_RAMP_START_RPS × 2^MAX_DOUBLINGS (64).
+  const startRps = start !== null && start >= 1 ? Math.min(start, DELIVERY_RAMP_START_RPS) : DELIVERY_RAMP_START_RPS;
   const stepSeconds = step !== null && step >= 1 ? Math.min(step, DELIVERY_RAMP_STEP_SECONDS) : DELIVERY_RAMP_STEP_SECONDS;
   const seconds = secs !== null && secs >= 0 ? Math.min(secs, DELIVERY_RAMP_SECONDS) : DELIVERY_RAMP_SECONDS;
-  // ADR-234: chỉ kẹp THẤP hơn 180 (cửa sổ retry tính theo mặc định), nhưng không thấp hơn khoá gốc (ramp + một bậc).
+  // ADR-234: chỉ kẹp THẤP hơn mặc định (≤ 180 — cửa sổ retry tính theo 180), không thấp hơn khoá gốc (ramp + một bậc).
+  // Env bậy / ≤ 0 -> mặc định (không có nghĩa "tắt"; tắt ramp là DELIVERY_RAMP_SECONDS=0).
   const keySeconds = seconds > 0 ? seconds + stepSeconds : 0;
-  const maxSeconds = Math.max(keySeconds, max !== null && max > 0 ? Math.min(max, DELIVERY_RAMP_MAX_SECONDS) : DELIVERY_RAMP_MAX_SECONDS);
+  const def = Math.min(DELIVERY_RAMP_MAX_SECONDS, 3 * keySeconds);
+  const maxSeconds = Math.max(keySeconds, max !== null && max > 0 ? Math.min(max, def) : def);
   return { startRps, stepSeconds, seconds, maxSeconds };
 }
 
@@ -135,6 +143,14 @@ export function deliveryRampCapAt(c: DeliveryRampConfig, elapsedMs: number): num
   if (c.seconds <= 0 || elapsedMs >= c.maxSeconds * 1000) return null;
   const steps = Math.min(deliveryRampLastStep(c), Math.floor(Math.max(0, elapsedMs) / (c.stepSeconds * 1000)));
   return c.startRps * 2 ** steps;
+}
+
+/**
+ * ADR-234 (review F3 Thấp-2): mỗi lần gia hạn ở bậc cuối = max(2 × step, một vòng retry.10s + một bậc) — hàng bị chặn quay lại
+ * sau 10s, nên gia hạn ngắn hơn 10s (bước < 5s) để khoá hết hạn trước vòng kế tiếp và F3 mất tác dụng. Mặc định 20s.
+ */
+export function deliveryRampExtendMs(c: DeliveryRampConfig): number {
+  return Math.max(2 * c.stepSeconds * 1000, retryQueueForDelay(0).ttlMs + c.stepSeconds * 1000);
 }
 
 /** F3 (ADR-232): thời gian khoá `:ramp` sống = ramp + một bậc kẹp ở trần cuối. */

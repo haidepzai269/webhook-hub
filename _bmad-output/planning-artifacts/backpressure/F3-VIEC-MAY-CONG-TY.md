@@ -1,6 +1,8 @@
 # F3 bậc cuối (ADR-234) — việc còn phải chạy ở máy công ty
 
-Nhánh `feat/bp-f3`, code ở commit `1c84d84` (tách từ master `d417118`). Kéo nhánh về, ở **HEAD của nhánh** thì chạy hai việc dưới đây.
+Nhánh `feat/bp-f3`, code ở commit `1c84d84` + bản vá review `REVIEW-F3` (commit sau `d1a1020`, xem `git log`; tách từ master `d417118`). Kéo nhánh về, ở **HEAD của nhánh** thì chạy hai việc dưới đây.
+
+**Mục 1 (L1) không cần máy công ty:** job CI `db (L1)` có `redis:7-alpine` và chạy đúng các ca này. Coordinator push nhánh → CI xanh là bằng chứng (review F3 TB-1). Máy công ty chỉ cần nếu CI không chạy được.
 
 Máy nhà đã chạy L0 (6 suite, 68 pass, 11 skip L1), tsc 3 project và `verify:map`.
 Máy nhà KHÔNG có Postgres/Redis và không dựng docker, nên hai việc này chưa chạy lần nào.
@@ -30,6 +32,11 @@ RUN_DB_TESTS=1 REDIS_URL=<redis hubv> npx jest --maxWorkers=1 apps/hub-worker/te
   - mô hình dồn 1 giây/vòng ra `[2,4,8,16,32,64,64,64,64,64,64,54]`, xả hết ở +110 s;
   - mô hình rải 2 giây/vòng ra `[2,2,4,4,8,8,16,16,32,32,64,64,64,64,60,60]`;
   - không giây nào vượt 64.
+- **`[BP:T16] (phần d)`** (review F3 TB-1), Lua thật với `DELIVERY_RAMP_STEP_SECONDS=1`, 100 rps đều:
+  - trần 2,4,8,16,32 rồi 64 (không vượt 64);
+  - không giây nào PTTL bị rút ngắn (guard `ext > PTTL`), lần gia hạn đầu ở giây 50;
+  - khoá hết trong (rampStart + 179 s, rampStart + 180 s];
+  - `:ramp` hỏng giá trị → `{CLOSED, failures: 0}`, không ramp.
 - Các ca L1 cũ vẫn xanh: `[BP:T15] (phần c)`, `[BP:T16] (phần a)`, LUA_GATE trên Redis thật.
 
 Nếu ca dồn 1 giây/vòng đỏ ở đúng giây vừa gia hạn, nghi ngay `PTTL` trong Lua: script chỉ gia hạn khi `ext > PTTL`. Còn test dựa vào việc PTTL tăng để biết đã gia hạn.

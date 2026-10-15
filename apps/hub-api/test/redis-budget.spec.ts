@@ -13,8 +13,13 @@
  */
 const calls: string[] = [];
 const store = new Map<string, string>();
-/** ADR-234: PEXPIRE chạy TRONG `LUA_GATE` (không phải lệnh client) — ghi lại để kiểm gia hạn mà số lệnh vẫn 1. */
+/**
+ * ADR-234: PEXPIRE chạy TRONG `LUA_GATE` (không phải lệnh client) — ghi lại để kiểm gia hạn mà số lệnh vẫn 1.
+ * PHẠM VI FAKE (review F3 TB-1): file này đếm LỆNH CLIENT; logic Lua chỉ là bản sao đủ để consumer đi đúng nhánh. Hạn khoá là
+ * `rampExp` theo đồng hồ giả, không có = PTTL −1. Lua THẬT được kiểm trên Redis thật ở circuit-breaker.spec (CI db L1).
+ */
 const pexpires: Array<[string, number]> = [];
+const rampExp = new Map<string, number>();
 
 function fakeRedis() {
   const impl: Record<string, (...a: any[]) => any> = {
@@ -40,11 +45,12 @@ function fakeRedis() {
         let cap = -1;
         let atLast = false;
         let el = 0;
+        const now = Number(rest[n + 2]);
         if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
           if (store.get(ramp)) {
-            el = Math.max(0, Number(rest[n + 2]) - Number(store.get(ramp)));
+            el = Math.max(0, now - (Number(store.get(ramp)) || 0));
             if (el < Number(rest[n + 7])) {
-              const last = Math.max(0, Math.min(5, Number(rest[n + 6])));
+              const last = Math.max(0, Math.min(DELIVERY_RAMP_MAX_DOUBLINGS, Number(rest[n + 6])));
               const steps = Math.min(last, Math.floor(el / (Number(rest[n + 4]) * 1000)));
               atLast = steps >= last;
               cap = Number(rest[n + 3]) * 2 ** steps;
@@ -53,7 +59,13 @@ function fakeRedis() {
           if (Number(rest[n + 1]) > 0 || cap > 0) {
             t = Number(store.get(throttle) ?? 0) + 1;
             store.set(throttle, String(t));
-            if (atLast && t > cap) pexpires.push([ramp, Math.min(2 * Number(rest[n + 4]) * 1000, Number(rest[n + 7]) - el)]);
+            if (atLast && t > cap) {
+              const ext = Math.min(Number(rest[n + 8]), Number(rest[n + 7]) - el);
+              if (ext > (rampExp.has(ramp) ? rampExp.get(ramp)! - now : -1)) {
+                rampExp.set(ramp, now + ext);
+                pexpires.push([ramp, ext]);
+              }
+            }
           }
         }
         // ADR-233: cờ :probe đang bị giữ (chỉ khi HALF_OPEN)
@@ -111,6 +123,8 @@ function fakeRedis() {
 }
 
 jest.mock('ioredis', () => jest.fn().mockImplementation(() => fakeRedis()));
+
+import { DELIVERY_RAMP_MAX_DOUBLINGS } from '@hub/messaging';
 
 import { aesGcmEncrypt } from '@hub/crypto';
 import { createHash, createHmac } from 'crypto';
@@ -270,6 +284,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     calls.length = 0;
     store.clear();
     pexpires.length = 0;
+    rampExp.clear();
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn().mockResolvedValue({ status: 200, body: 'ok', durationMs: 7 }) } as any);
   });
   afterEach(() => jest.restoreAllMocks());
@@ -397,6 +412,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(pexpires).toEqual([[ramp, 20_000]]); // 2 × step
     // gần trần tuyệt đối: gia hạn chỉ tới rampStart + 180s
     pexpires.length = 0;
+    rampExp.clear();
     jest.spyOn(Date, 'now').mockReturnValue(t0 + 175_300);
     store.set(`throttle:destination:dest-1:${Math.floor((t0 + 175_300) / 1000)}`, '64');
     await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
@@ -404,6 +420,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(pexpires).toEqual([[ramp, 4_700]]);
     // bậc 2 (25s) bị throttle -> KHÔNG gia hạn (chỉ bậc cuối)
     pexpires.length = 0;
+    rampExp.clear();
     jest.spyOn(Date, 'now').mockReturnValue(t0 + 25_300);
     store.set(`throttle:destination:dest-1:${Math.floor((t0 + 25_300) / 1000)}`, '8');
     await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
