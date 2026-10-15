@@ -32,7 +32,7 @@ function fakeRedis() {
       const key = rest[0];
       if (/PTTL/.test(script)) {
         // LUA_GATE (BP2 §6 + BP4): KEYS open, failures, throttle, ramp; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL.
-        const [open, failures, throttle, ramp] = rest.slice(0, n);
+        const [open, failures, throttle, ramp, probe] = rest.slice(0, n);
         let t = -1;
         let cap = -1;
         if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
@@ -46,7 +46,9 @@ function fakeRedis() {
             store.set(throttle, String(t));
           }
         }
-        return [store.get(open) ? 1 : 0, store.get(failures) ?? '', store.get(open) ? 60_000 : -2, t, cap];
+        // ADR-233: cờ :probe đang bị giữ (chỉ khi HALF_OPEN)
+        const held = !store.get(open) && Number(store.get(failures) ?? 0) >= Number(rest[n]) && probe && store.get(probe) ? 1 : 0;
+        return [store.get(open) ? 1 : 0, store.get(failures) ?? '', store.get(open) ? 60_000 : -2, t, cap, held];
       }
       if (/redis\.call\('DEL'/.test(script) && /'SET'/.test(script)) {
         // LUA_CLOSE_AND_RAMP (BP4): DEL 4 khoá + SET :ramp
@@ -344,6 +346,17 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     // Không gộp acquire vào gate (C10/C11: dù gộp vẫn > 3 vì PUBLISH circuit; đổi ngữ nghĩa getState, rủi ro hơn lợi).
     expect(take()).toEqual(['eval', 'eval', 'publish', 'eval', 'publish', 'publish']);
     expect(store.get('circuit:dest-1:ramp')).toEqual(expect.any(String)); // ramp bắt đầu
+  });
+
+  it('[BP:T22] (phần d) ADR-233: HALF_OPEN mà probe ĐANG bị giữ (worker khác đang dò) -> bên thua chỉ [EVAL] gate, 0 truy vấn đọc, hoãn retry.1m', async () => {
+    store.set('circuit:dest-1:failures', '5'); // :open hết hạn -> HALF_OPEN
+    store.set('circuit:dest-1:probe', 'worker-khac:token'); // probe đang bị giữ
+    const { repo, channel } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']); // trước ADR-233: ['eval', 'eval'] (gate + LUA_ACQUIRE_PROBE thua)
+    expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(repo.claimForSend).not.toHaveBeenCalled();
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+    expect(store.get('circuit:dest-1:probe')).toBe('worker-khac:token'); // không đụng probe của người khác
   });
 
   it('[BP:T22] (phần c) ramp (BP4): trong ramp gửi được = 2 lệnh (gate + PUBLISH); vượt trần ramp = 1 lệnh, 0 DB', async () => {

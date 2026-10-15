@@ -325,7 +325,8 @@ export class DeliveryConsumer {
       let view: CircuitView | null = null;
       if (hint) {
         view = await this.circuitBreaker.getState(hint.destinationId, hint.rateLimitRps);
-        if (view.state === 'HALF_OPEN') {
+        // ADR-233: probe đang bị giữ (gate đã thấy, cùng lệnh) -> bên thua không gọi tryAcquireProbe: hoãn với đúng 1 lệnh.
+        if (view.state === 'HALF_OPEN' && !view.probeHeld) {
           probeToken = await this.circuitBreaker.tryAcquireProbe(hint.destinationId);
           probeFor = probeToken ? hint.destinationId : null;
         }
@@ -410,7 +411,7 @@ export class DeliveryConsumer {
         if (hint) log.info({ hinted: hint.destinationId, actual: destinationId }, 'Gợi ý destinationId lệch row -> gate lại với id thật');
         await releaseHeldProbe();
         view = await this.circuitBreaker.getState(destinationId, rateLimitRps);
-        if (view.state === 'HALF_OPEN') {
+        if (view.state === 'HALF_OPEN' && !view.probeHeld) {
           probeToken = await this.circuitBreaker.tryAcquireProbe(destinationId);
           probeFor = probeToken ? destinationId : null;
         }

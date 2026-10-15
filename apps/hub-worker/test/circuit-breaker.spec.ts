@@ -84,7 +84,7 @@ function fakeRedis() {
       if (script === LUA_GATE) {
         // BP2 §6 + BP4: KEYS open, failures, throttle, ramp; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL, ramp giây (F3).
         // INCR chỉ khi CLOSED và có trần (rps > 0 hoặc còn :ramp). Bản thật kiểm trên Redis thật ở cuối file.
-        const [open, failures, throttle, ramp] = keys;
+        const [open, failures, throttle, ramp, probe] = keys;
         let t = -1;
         let cap = -1;
         if (!store.has(open) && parseInt(store.get(failures) ?? '0', 10) < Number(argv[0])) {
@@ -98,7 +98,9 @@ function fakeRedis() {
             store.set(throttle, String(t));
           }
         }
-        return [store.has(open) ? 1 : 0, store.get(failures) ?? '', store.has(open) ? 60_000 : -2, t, cap];
+        // ADR-233: cờ :probe đang bị giữ, chỉ khi HALF_OPEN (hết :open, failures ≥ ngưỡng)
+        const held = !store.has(open) && parseInt(store.get(failures) ?? '0', 10) >= Number(argv[0]) && probe !== undefined && store.has(probe) ? 1 : 0;
+        return [store.has(open) ? 1 : 0, store.get(failures) ?? '', store.has(open) ? 60_000 : -2, t, cap, held];
       }
       if (script === LUA_CLOSE_AND_RAMP) {
         keys.slice(0, 4).forEach((k2: string) => store.delete(k2));
@@ -606,7 +608,14 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     const t1 = await cb.tryAcquireProbe(dest);
     expect(t1).toEqual(expect.any(String));
     expect(await cb.tryAcquireProbe(dest)).toBeNull();
+    // ADR-233: probe đang bị giữ -> gate (vẫn 1 lệnh) báo probeHeld, bên thua khỏi gọi tryAcquireProbe
+    expect(await cb.getState(dest, 1)).toEqual({ state: 'HALF_OPEN', failures: 5, probeHeld: true });
     await cb.releaseProbe(dest, t1);
+    expect(await cb.getState(dest, 1)).toEqual({ state: 'HALF_OPEN', failures: 5 }); // nhả -> trống, giành lại được
+    // OPEN thì không báo probeHeld (dù khoá :probe còn sót)
+    await redis.set(k('probe'), 'x', 'EX', 30);
+    await redis.set(k('open'), 'OPEN', 'EX', 60);
+    expect((await cb.getState(dest, 1)).probeHeld).toBeUndefined();
     await redis.del(k('failures'), k('open'), k('probe'), tk);
   });
 

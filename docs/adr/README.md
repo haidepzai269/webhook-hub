@@ -2353,3 +2353,13 @@ không thấy gì.
 **Vấn đề:** chaos `[BP:T16]` phần b đo được 60 s ramp chỉ xả 256/500 delivery, vì hàng về theo nhịp `retry.10s` và mỗi bậc chỉ dùng được khoảng 2 giây có trần. Khoá `:ramp` hết hạn thì 243 delivery còn lại dội vào đích với 123 và 120 rps, gần gấp đôi trần cuối 64. Đích chỉ chịu được khoảng 64 rps thì có thể sập lại ngay sau khi vừa hồi phục.
 **Chọn:** (Admin chọn hướng b) `LUA_CLOSE_AND_RAMP` đặt TTL `:ramp` = `seconds + stepSeconds` (70 s), và `LUA_GATE` kẹp bậc ở `ceil(seconds/step) − 1`, nên bậc thêm vẫn giữ 64 rps. Không thêm lệnh Redis nào: chỉ có thêm một ARGV và đổi TTL. `DELIVERY_RAMP_STEP_SECONDS` từ env chỉ được kẹp THẤP hơn mặc định (C2). Cửa sổ retry cộng 6 × 10 s, thành khoảng 7h23m10s. Có test L1 trên Redis thật: 500 message về theo nhịp `retry.10s`, rải 2 giây mỗi vòng như số đo chaos; sau khi khoá hết hạn không giây nào vượt 64.
 **Đánh đổi:** cách này chỉ thêm một bậc 64 rps, tức khoảng 128 message nữa với nhịp đo được. Hàng tồn lớn hơn nhiều, hoặc dồn hết vào một giây, vẫn dội về sau 70 s. Muốn chặn hẳn thì phải kéo ramp theo kích thước hàng, việc đó chưa làm. Lệnh dọn `olderThan` dưới khoảng 7h24m bị 400.
+
+## ADR-233 — Gate báo "probe đang bị giữ": bên thua probe HALF_OPEN chỉ tốn 1 lệnh; đính chính ADR-196 (thuộc BP, R1, 2026-10-15)
+
+**Vấn đề:** ADR-196 ghi rằng HALF_OPEN không giành được probe thì hoãn với 1 lệnh Redis. Code thực tế tốn 2 lệnh: `LUA_GATE` + `LUA_ACQUIRE_PROBE` thua (`delivery.consumer.ts`, cả gate trước khi nạp lẫn gate sau khi nạp). Mỗi message trong hàng hoãn quay về đúng lúc một worker khác đang dò sẽ đốt thêm 1 lệnh, vi phạm R1 ("đường hoãn ≤ 1 lệnh", ADR-062/196). `DEPLOYMENT.md` cũng viết sai thành "thêm 1 EVAL giành probe nếu thắng".
+**Chọn:**
+- `LUA_GATE` nhận thêm `KEYS[5]` = `:probe` và trả cờ `probeHeld`. Cờ = 1 chỉ khi đang HALF_OPEN (hết `:open`, `:failures` ≥ ngưỡng) và `:probe` tồn tại.
+- Consumer: `probeHeld` → hoãn ngay, không gọi `tryAcquireProbe`. Kết quả là 1 lệnh và 0 truy vấn đọc.
+- Probe trống thì vẫn giành bằng `LUA_ACQUIRE_PROBE` riêng (nguyên tử). Giữ đúng C11/ADR-198: không gộp việc giành probe vào gate.
+- Test: `redis-budget.spec` `[BP:T22]` (phần d) khoá chuỗi lệnh `['eval']` cho bên thua; Redis thật kiểm cờ (có/không, OPEN không báo).
+**Đánh đổi:** vẫn có ca hiếm tốn 2 lệnh. Gate thấy probe trống nhưng worker khác giành mất ngay trước khi mình gọi `LUA_ACQUIRE_PROBE`, tức là tranh nhau đúng khe giữa hai lệnh. Gate đọc thêm một `EXISTS` trong script, nhưng số lệnh client không đổi.
