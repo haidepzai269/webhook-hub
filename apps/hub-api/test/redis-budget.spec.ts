@@ -13,6 +13,8 @@
  */
 const calls: string[] = [];
 const store = new Map<string, string>();
+/** ADR-234: PEXPIRE chạy TRONG `LUA_GATE` (không phải lệnh client) — ghi lại để kiểm gia hạn mà số lệnh vẫn 1. */
+const pexpires: Array<[string, number]> = [];
 
 function fakeRedis() {
   const impl: Record<string, (...a: any[]) => any> = {
@@ -31,19 +33,27 @@ function fakeRedis() {
     eval: async (script: string, n: number, ...rest: any[]) => {
       const key = rest[0];
       if (/PTTL/.test(script)) {
-        // LUA_GATE (BP2 §6 + BP4): KEYS open, failures, throttle, ramp; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL.
+        // LUA_GATE (BP2 §6 + BP4): KEYS open, failures, throttle, ramp, probe; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL,
+        // bậc cuối (F3 + Thấp-9), trần tuyệt đối ms (ADR-234).
         const [open, failures, throttle, ramp, probe] = rest.slice(0, n);
         let t = -1;
         let cap = -1;
+        let atLast = false;
+        let el = 0;
         if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
           if (store.get(ramp)) {
-            const el = Math.max(0, Number(rest[n + 2]) - Number(store.get(ramp)));
-            const last = Math.max(0, Math.ceil(Number(rest[n + 6]) / Number(rest[n + 4])) - 1); // F3: kẹp bậc cuối
-            cap = Number(rest[n + 3]) * 2 ** Math.min(20, last, Math.floor(el / (Number(rest[n + 4]) * 1000)));
+            el = Math.max(0, Number(rest[n + 2]) - Number(store.get(ramp)));
+            if (el < Number(rest[n + 7])) {
+              const last = Math.max(0, Math.min(5, Number(rest[n + 6])));
+              const steps = Math.min(last, Math.floor(el / (Number(rest[n + 4]) * 1000)));
+              atLast = steps >= last;
+              cap = Number(rest[n + 3]) * 2 ** steps;
+            }
           }
           if (Number(rest[n + 1]) > 0 || cap > 0) {
             t = Number(store.get(throttle) ?? 0) + 1;
             store.set(throttle, String(t));
+            if (atLast && t > cap) pexpires.push([ramp, Math.min(2 * Number(rest[n + 4]) * 1000, Number(rest[n + 7]) - el)]);
           }
         }
         // ADR-233: cờ :probe đang bị giữ (chỉ khi HALF_OPEN)
@@ -208,7 +218,7 @@ async function runDelivery(i: number, rateLimitRps = 0) {
  * BP2 (ADR-196, C9): message mang GỢI Ý `destinationId` + `rateLimitRps` -> gate TRƯỚC khi nạp DB.
  * `real` = cấu hình thật trong row; `hint` = gợi ý trong message (có thể lệch).
  */
-async function runDeliveryHinted(i: number, o: { real: { destinationId?: string; rateLimitRps: number }; hint: { destinationId?: string; rateLimitRps: number }; headers?: Record<string, unknown>; persistedCircuit?: string; circuitDbWrites?: boolean }) {
+async function runDeliveryHinted(i: number, o: { real: { destinationId?: string; rateLimitRps: number }; hint: { destinationId?: string; rateLimitRps: number } | null; headers?: Record<string, unknown>; persistedCircuit?: string; circuitDbWrites?: boolean }) {
   const now = new Date();
   const destId = o.real.destinationId ?? `dest-${i}`;
   const row = {
@@ -242,9 +252,10 @@ async function runDeliveryHinted(i: number, o: { real: { destinationId?: string;
   };
   const consumer = new DeliveryConsumer(prisma, new CircuitBreakerService(prisma));
   const channel: any = { ack: jest.fn(), nack: jest.fn(), sendToQueue: jest.fn(), publish: jest.fn() };
+  // hint null = message KHÔNG gợi ý (kiểu cũ) -> nạp row rồi mới gate (gate sau khi nạp).
   const msg = {
     deliveryId: row.id, tenantId: TENANT, attemptGeneration: 1, attemptCount: 0, correlationId: 'c',
-    destinationId: o.hint.destinationId ?? destId, rateLimitRps: o.hint.rateLimitRps,
+    ...(o.hint ? { destinationId: o.hint.destinationId ?? destId, rateLimitRps: o.hint.rateLimitRps } : {}),
   };
   await consumer.handleMessage({ content: Buffer.from(JSON.stringify(msg)), properties: { headers: o.headers ?? {} } } as any, channel);
   expect(channel.ack).toHaveBeenCalled();
@@ -258,6 +269,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
   beforeEach(() => {
     calls.length = 0;
     store.clear();
+    pexpires.length = 0;
     jest.spyOn(SenderRegistry, 'get').mockReturnValue({ type: 'webhook', send: jest.fn().mockResolvedValue({ status: 200, body: 'ok', durationMs: 7 }) } as any);
   });
   afterEach(() => jest.restoreAllMocks());
@@ -357,6 +369,51 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(repo.claimForSend).not.toHaveBeenCalled();
     expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
     expect(store.get('circuit:dest-1:probe')).toBe('worker-khac:token'); // không đụng probe của người khác
+  });
+
+  it('[BP:T22] (phần e) nợ Thấp #4 — ADR-233 ở gate SAU KHI NẠP (message không gợi ý): probe đang bị giữ -> bên thua chỉ [EVAL] gate, không giành probe', async () => {
+    store.set('circuit:dest-1:failures', '5'); // :open hết hạn -> HALF_OPEN
+    store.set('circuit:dest-1:probe', 'worker-khac:token');
+    const { repo, channel } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: null, persistedCircuit: 'HALF_OPEN' });
+    expect(take()).toEqual(['eval']); // không có LUA_ACQUIRE_PROBE thua
+    expect(repo.findDeliveryForSend).toHaveBeenCalledTimes(1); // message kiểu cũ: phải nạp row để biết đích (đường cũ)
+    expect(repo.claimForSend).not.toHaveBeenCalled();
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.1m');
+    expect(store.get('circuit:dest-1:probe')).toBe('worker-khac:token');
+  });
+
+  it('[BP:T22] (phần f) ADR-234: ramp ở BẬC CUỐI mà bị throttle -> gia hạn :ramp TRONG gate, vẫn đúng 1 lệnh, 0 DB; chưa bậc cuối hoặc không bị chặn -> không gia hạn', async () => {
+    const t0 = Date.parse('2026-10-13T12:00:00.200Z');
+    const ramp = 'circuit:dest-1:ramp';
+    store.set(ramp, String(t0));
+    // bậc cuối (55s, trần 64), cửa sổ throttle giây này đã đầy -> hoãn 1 lệnh, PEXPIRE trong script
+    jest.spyOn(Date, 'now').mockReturnValue(t0 + 55_300);
+    store.set(`throttle:destination:dest-1:${Math.floor((t0 + 55_300) / 1000)}`, '64');
+    const { repo, channel } = await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']);
+    expect(channel.sendToQueue.mock.calls[0][0]).toBe('q.delivery.retry.10s');
+    expect(repo.findDeliveryForSend).not.toHaveBeenCalled();
+    expect(repo.deferDelivery).not.toHaveBeenCalled();
+    expect(pexpires).toEqual([[ramp, 20_000]]); // 2 × step
+    // gần trần tuyệt đối: gia hạn chỉ tới rampStart + 180s
+    pexpires.length = 0;
+    jest.spyOn(Date, 'now').mockReturnValue(t0 + 175_300);
+    store.set(`throttle:destination:dest-1:${Math.floor((t0 + 175_300) / 1000)}`, '64');
+    await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']);
+    expect(pexpires).toEqual([[ramp, 4_700]]);
+    // bậc 2 (25s) bị throttle -> KHÔNG gia hạn (chỉ bậc cuối)
+    pexpires.length = 0;
+    jest.spyOn(Date, 'now').mockReturnValue(t0 + 25_300);
+    store.set(`throttle:destination:dest-1:${Math.floor((t0 + 25_300) / 1000)}`, '8');
+    await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval']);
+    expect(pexpires).toEqual([]);
+    // bậc cuối nhưng còn trong trần -> gửi (2 lệnh), không gia hạn
+    jest.spyOn(Date, 'now').mockReturnValue(t0 + 58_300);
+    await runDeliveryHinted(1, { real: { rateLimitRps: 0 }, hint: { rateLimitRps: 0 } });
+    expect(take()).toEqual(['eval', 'publish']);
+    expect(pexpires).toEqual([]);
   });
 
   it('[BP:T22] (phần c) ramp (BP4): trong ramp gửi được = 2 lệnh (gate + PUBLISH); vượt trần ramp = 1 lệnh, 0 DB', async () => {

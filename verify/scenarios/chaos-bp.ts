@@ -40,7 +40,7 @@ import {
 } from '../lib/chaos';
 import { ROOT } from '../lib/compose';
 // Hằng ramp: một nguồn với worker (import thẳng file nguồn — @hub/messaging trỏ dist, verify không build lib).
-import { DELIVERY_RAMP_SECONDS, DELIVERY_RAMP_START_RPS, DELIVERY_RAMP_STEP_SECONDS } from '../../libs/messaging/src/retry-window';
+import { DELIVERY_RAMP_SECONDS, DELIVERY_RAMP_START_RPS, DELIVERY_RAMP_STEP_SECONDS, deliveryRampConfig, deliveryRampLastStep } from '../../libs/messaging/src/retry-window';
 import { closeWorld, createKey, createSource, registerDev, RUN, SINK_INTERNAL, sleep, svc } from '../lib/e2e-world';
 import { expect } from '../lib/http-session';
 import { ScenarioFile, waitFor } from '../lib/scenario';
@@ -340,14 +340,14 @@ const file: ScenarioFile = {
         }),
     },
     {
-      name: '[BP:T16] (phần b) LOCAL hubv: đích chết 10 phút với 500 delivery hoãn → hồi phục — không giây nào vượt trần ramp (2,4,…,64 rps trong 60 s, bậc kẹp 64 tới 70 s; sau ramp ≤ 64/s)',
+      name: '[BP:T16] (phần b) LOCAL hubv: đích chết 10 phút với 500 delivery hoãn → hồi phục — không giây nào vượt trần ramp (2,4,…,64 rps; bậc cuối 64 được gia hạn khi còn bị chặn, ≤ RAMP_MAX 180 s — ADR-234; sau ramp ≤ 64/s)',
       tags: ['chaos-bp', 'bp-t16', 'BP4'],
       fn: () =>
         guarded(async () => {
           const DOWN = envMs('BP_T16_DOWN_MS', 600_000);
           const N = envMs('BP_T16_N', 500);
           // Mặc định của worker — một nguồn với code (review Thấp 4); hubv không đặt env DELIVERY_RAMP_*.
-          const RAMP = { start: DELIVERY_RAMP_START_RPS, stepS: DELIVERY_RAMP_STEP_SECONDS, seconds: DELIVERY_RAMP_SECONDS };
+          const RAMP = { start: DELIVERY_RAMP_START_RPS, stepS: DELIVERY_RAMP_STEP_SECONDS, seconds: DELIVERY_RAMP_SECONDS, maxS: deliveryRampConfig({}).maxSeconds };
           const v = new Verdicts();
           const w = await world('bp16');
           await sinkReset();
@@ -376,10 +376,13 @@ const file: ScenarioFile = {
             await waitFor('probe thành công -> circuit:{id}:ramp', async () => redis.get(`circuit:${w.endpointId}:ramp`), 15 * 60_000, 250),
           );
           console.log(`  probe thành công, ramp bắt đầu ${new Date(rampStart).toISOString()} (${Math.round((rampStart - tUp) / 1000)} s sau khi đích sống)`);
-          await sleep(Math.max(0, rampStart + (RAMP.seconds + RAMP.stepS) * 1000 + 5000 - Date.now()));
-          // F3 (ADR-232): khoá :ramp sống ramp + một bậc (70 s), bậc thêm kẹp ở trần cuối.
-          const rampEnd = rampStart + (RAMP.seconds + RAMP.stepS) * 1000;
-          const lastStep = Math.max(0, Math.ceil(RAMP.seconds / RAMP.stepS) - 1);
+          // F3 (ADR-232 + ADR-234): khoá :ramp sống ramp + một bậc (70 s); gate gia hạn ở bậc cuối khi còn bị chặn, tối đa RAMP_MAX
+          // tính từ rampStart -> hết ramp = lúc khoá BIẾN MẤT (dò 250 ms), không còn cố định 70 s.
+          await waitFor('khoá circuit:{id}:ramp hết hạn', async () => ((await redis.exists(`circuit:${w.endpointId}:ramp`)) === 0 ? true : null), (RAMP.maxS + 30) * 1000, 250);
+          const rampEnd = Math.min(Date.now(), rampStart + RAMP.maxS * 1000);
+          const rampLenMs = Date.now() - rampStart;
+          await sleep(5000);
+          const lastStep = deliveryRampLastStep({ startRps: RAMP.start, stepSeconds: RAMP.stepS, seconds: RAMP.seconds, maxSeconds: RAMP.maxS });
           const finalCap = RAMP.start * 2 ** lastStep;
           /** Số request tới sink theo giây epoch, chỉ tính request trong [from, to). */
           const bySecond = (reqs: { at: string }[], from: number, to: number) => {
@@ -401,7 +404,7 @@ const file: ScenarioFile = {
           const over = rows.filter((r) => r.n > r.cap);
           const inRamp = rows.reduce((a, r) => a + r.n, 0);
           const probeReqs = reqs.filter((r) => Date.parse(r.at) < rampStart).length;
-          console.log(`  ramp (60 s + bậc kẹp): ${inRamp} request; theo giây ${rows.map((r) => `${r.n}/${r.cap}`).join(' ')}`);
+          console.log(`  ramp (${Math.round(rampLenMs / 1000)} s, trần ${RAMP.maxS} s): ${inRamp} request; theo giây ${rows.map((r) => `${r.n}/${r.cap}`).join(' ')}`);
 
           let drain: { waitedMs: number } | null = null;
           await v.soft('Hồi phục: mọi delivery SUCCEEDED, 0 DEAD, 0 trùng (Postgres)', async () => {
@@ -419,7 +422,8 @@ const file: ScenarioFile = {
 
           v.check('Tiền đề: 500 delivery hoãn lúc đích sống lại (0 SUCCEEDED)', `${before.del} delivery, ${before.ok} SUCCEEDED`, before.del === N && before.ok === 0);
           v.check('Tiền đề: worker không khởi động lại', `RestartCount ${r0} → ${r1}`, r0 === r1);
-          v.check('Không giây nào trong ramp vượt trần (2,4,8,16,32,64 rps trong 60 s, rồi bậc kẹp 64 tới 70 s)', over.length ? `${over.length} giây vượt: ${over.map((o) => `+${o.s}s ${o.n}>${o.cap}`).join(', ')}` : `0 giây vượt; ${inRamp} request trong ramp`, over.length === 0);
+          v.check(`ADR-234: khoá :ramp không sống quá RAMP_MAX ${RAMP.maxS} s kể từ rampStart`, `${Math.round(rampLenMs / 1000)} s`, rampLenMs <= RAMP.maxS * 1000 + 1000);
+          v.check('Không giây nào trong ramp vượt trần (2,4,8,16,32,64 rps, rồi giữ 64 tới khi khoá hết hạn)', over.length ? `${over.length} giây vượt: ${over.map((o) => `+${o.s}s ${o.n}>${o.cap}`).join(', ')}` : `0 giây vượt; ${inRamp} request trong ramp`, over.length === 0);
           v.check(`Sau ramp (khoá :ramp hết hạn, F3): không giây nào vượt trần cuối ${finalCap}/s`, `max ${afterMax}/s, ${afterTotal} request sau ramp`, afterMax <= finalCap);
           v.check('0 DEAD', `${fin.dead}`, fin.dead === 0);
 
@@ -427,6 +431,7 @@ const file: ScenarioFile = {
             params: { downMs: DOWN, n: N, ramp: RAMP },
             down: { at: tDown, upAt: tUp, requestsHitDeadDestination: downReqs.length, circuitLog },
             rampStart,
+            rampLenMs,
             rampStartAfterUpMs: rampStart - tUp,
             probeRequestsBeforeRamp: probeReqs,
             ramp: rows,
