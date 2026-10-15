@@ -60,10 +60,22 @@ export interface CaughtRequest {
   receivedAt: number;
 }
 
+const utf8 = new TextEncoder();
+
+/**
+ * Byte của một dòng, CÙNG công thức trigger: body + headers_json + target theo UTF-8 (REVIEW-LH2 TB-2a). Header tới 128 KB
+ * và URL tới 16 KB của Workers không được "miễn phí" trong trần dung lượng.
+ */
+export function rowBytes(r: { body: Uint8Array; headers: Record<string, string>; target: string }): number {
+  return r.body.byteLength + utf8.encode(JSON.stringify(r.headers)).byteLength + utf8.encode(r.target).byteLength;
+}
+
 export interface CatchCaps {
+  /** Tổng dòng hàng chờ + inbox_dead. */
   maxRows: number;
+  /** Dòng chờ + chết của MỘT key (dòng chết giữ trần của key tới khi bị dọn). */
   maxPerKey: number;
-  /** Tổng byte body hàng chờ + inbox_dead (dung lượng D1 dùng chung). */
+  /** Tổng byte (body + header + target) hàng chờ + inbox_dead (dung lượng D1 dùng chung). */
   maxBytes: number;
   maxKeyBytes: number;
   /** Số lần hứng / ngày UTC (quota rows written của D1 free). */
@@ -80,7 +92,8 @@ export async function insertCaught(db: D1Database, r: CaughtRequest, caps: Catch
     .prepare(
       `INSERT INTO inbox (${COLS}, attempts, next_at)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, X''), ?8, ?9, 0, ?9
-       WHERE COALESCE((SELECT n FROM inbox_count WHERE k = '*'), 0) < ?10
+       WHERE COALESCE((SELECT n FROM inbox_count WHERE k = '*'), 0)
+           + COALESCE((SELECT n FROM inbox_count WHERE k = '#dead'), 0) < ?10
          AND COALESCE((SELECT n FROM inbox_count WHERE k = ?2), 0) < ?11
          AND COALESCE((SELECT bytes FROM inbox_count WHERE k = '*'), 0)
            + COALESCE((SELECT bytes FROM inbox_count WHERE k = '#dead'), 0) + ?12 <= ?13
@@ -89,19 +102,23 @@ export async function insertCaught(db: D1Database, r: CaughtRequest, caps: Catch
     )
     .bind(
       r.id, r.sourceKey, r.provider, r.method, r.target, JSON.stringify(r.headers), r.body, r.clientIp, r.receivedAt,
-      caps.maxRows, caps.maxPerKey, r.body.byteLength, caps.maxBytes, caps.maxKeyBytes, caps.maxPerDay,
+      caps.maxRows, caps.maxPerKey, rowBytes(r), caps.maxBytes, caps.maxKeyBytes, caps.maxPerDay,
     )
     .run();
   return res.meta.changes > 0;
 }
 
 /** Bước 1 của lượt phát lại: id + độ dài body của dòng tới hạn, theo index `next_at` (KHÔNG nạp body). */
-export async function dueIds(db: D1Database, nowMs: number, limit: number): Promise<Array<{ id: string; len: number }>> {
+export async function dueIds(
+  db: D1Database,
+  nowMs: number,
+  limit: number,
+): Promise<Array<{ id: string; len: number; receivedAt: number; attempts: number }>> {
   const { results } = await db
-    .prepare('SELECT id, length(body) AS len FROM inbox WHERE next_at <= ?1 ORDER BY next_at LIMIT ?2')
+    .prepare('SELECT id, length(body) AS len, received_at, attempts FROM inbox WHERE next_at <= ?1 ORDER BY next_at LIMIT ?2')
     .bind(nowMs, limit)
-    .all<{ id: string; len: number }>();
-  return results.map((x) => ({ id: x.id, len: Number(x.len) }));
+    .all<{ id: string; len: number; received_at: number; attempts: number }>();
+  return results.map((x) => ({ id: x.id, len: Number(x.len), receivedAt: Number(x.received_at), attempts: Number(x.attempts) }));
 }
 
 /**
@@ -155,7 +172,7 @@ export async function moveDead(
     db
       .prepare(
         `INSERT INTO inbox_dead (${COLS}, attempts, last_status, last_error, reason, dead_at)
-         SELECT ${COLS}, ?2, ?3, ?4, ?5, ?6 FROM inbox WHERE id = ?1`,
+         SELECT ${COLS}, ?2, COALESCE(?3, last_status), COALESCE(?4, last_error), ?5, ?6 FROM inbox WHERE id = ?1`,
       )
       .bind(id, attempts, status, error, reason, nowMs),
     db.prepare('DELETE FROM inbox WHERE id = ?1').bind(id),

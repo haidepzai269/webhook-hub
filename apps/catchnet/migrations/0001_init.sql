@@ -51,42 +51,56 @@ CREATE TABLE IF NOT EXISTS sources_sync (
   updated_at    INTEGER NOT NULL
 );
 
--- Bộ đếm cho trần chống xả rác (§4.2 + REVIEW-LH2 TB-2): giữ bằng trigger thay COUNT(*)/SUM() mỗi lần hứng (quét cả bảng
--- = đốt rows read). k:
---   '*'            hàng chờ toàn bảng (n dòng, bytes body)
---   '#dead'        inbox_dead (bytes body — chiếm chung trần dung lượng D1)
---   <source_key>   hàng chờ của một source (source_key chỉ [A-Za-z0-9_-], không đụng các khoá có ':' '*' '#')
---   'day:<n>'      số lần hứng trong ngày UTC thứ n (= received_at / 86400000) — trần quota ghi/ngày; không giảm khi xoá
+-- Bộ đếm cho trần chống xả rác (§4.2 + REVIEW-LH2 TB-2/TB-2a): giữ bằng trigger thay COUNT(*)/SUM() mỗi lần hứng (quét cả
+-- bảng = đốt rows read). bytes = body + headers_json + target tính theo BYTE (CAST AS BLOB — length(TEXT) đếm ký tự).
+-- k:
+--   '*'             hàng chờ toàn bảng (n dòng, bytes)
+--   '#dead'         inbox_dead toàn bảng — chiếm chung trần dòng + dung lượng
+--   <source_key>    hàng chờ + hàng chết CỦA source đó (dòng chết vẫn giữ trần của key tới khi bị dọn sau hạn giữ:
+--                   kẻ xấu không "giải phóng" key bằng cách để hub từ chối rồi nạp lại)
+--   'day:<n>'       số lần hứng trong ngày UTC thứ n (= received_at / 86400000) — trần quota ghi; không giảm khi xoá
+-- source_key chỉ [A-Za-z0-9_-] nên không đụng các khoá có '*', '#', ':'.
+-- Mọi cộng/trừ là UPSERT (REVIEW-LH2 N5): dòng đếm bị xoá tay thì tự tạo lại, không âm thầm bỏ qua.
 CREATE TABLE IF NOT EXISTS inbox_count (
   k      TEXT PRIMARY KEY,
   n      INTEGER NOT NULL DEFAULT 0,
   bytes  INTEGER NOT NULL DEFAULT 0
 );
-INSERT OR IGNORE INTO inbox_count (k, n, bytes) VALUES ('*', 0, 0);
-INSERT OR IGNORE INTO inbox_count (k, n, bytes) VALUES ('#dead', 0, 0);
 
 CREATE TRIGGER IF NOT EXISTS inbox_count_ins AFTER INSERT ON inbox
 BEGIN
-  INSERT INTO inbox_count (k, n, bytes) VALUES (NEW.source_key, 1, length(NEW.body))
-    ON CONFLICT(k) DO UPDATE SET n = n + 1, bytes = bytes + length(NEW.body);
-  UPDATE inbox_count SET n = n + 1, bytes = bytes + length(NEW.body) WHERE k = '*';
+  INSERT INTO inbox_count (k, n, bytes) VALUES (NEW.source_key, 1, (length(NEW.body) + length(CAST(NEW.headers_json AS BLOB)) + length(CAST(NEW.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n + 1, bytes = bytes + excluded.bytes;
+  INSERT INTO inbox_count (k, n, bytes) VALUES ('*', 1, (length(NEW.body) + length(CAST(NEW.headers_json AS BLOB)) + length(CAST(NEW.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n + 1, bytes = bytes + excluded.bytes;
   INSERT INTO inbox_count (k, n, bytes) VALUES ('day:' || CAST(NEW.received_at / 86400000 AS INTEGER), 1, 0)
     ON CONFLICT(k) DO UPDATE SET n = n + 1;
 END;
 
+-- Rời hàng chờ: trừ '*' và key. Dòng sang inbox_dead thì moveDead CHÉP trước rồi mới xoá: trigger dead_ins đã cộng lại
+-- cho key, nên dòng chết vẫn chiếm trần của key tới khi purgeDead dọn.
 CREATE TRIGGER IF NOT EXISTS inbox_count_del AFTER DELETE ON inbox
 BEGIN
-  UPDATE inbox_count SET n = n - 1, bytes = bytes - length(OLD.body) WHERE k = OLD.source_key;
-  DELETE FROM inbox_count WHERE k = OLD.source_key AND n <= 0;
-  UPDATE inbox_count SET n = n - 1, bytes = bytes - length(OLD.body) WHERE k = '*';
+  INSERT INTO inbox_count (k, n, bytes) VALUES (OLD.source_key, -1, -(length(OLD.body) + length(CAST(OLD.headers_json AS BLOB)) + length(CAST(OLD.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n - 1, bytes = bytes + excluded.bytes;
+  INSERT INTO inbox_count (k, n, bytes) VALUES ('*', -1, -(length(OLD.body) + length(CAST(OLD.headers_json AS BLOB)) + length(CAST(OLD.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n - 1, bytes = bytes + excluded.bytes;
+  DELETE FROM inbox_count WHERE k = OLD.source_key AND n <= 0 AND bytes <= 0;
 END;
 
 CREATE TRIGGER IF NOT EXISTS inbox_dead_count_ins AFTER INSERT ON inbox_dead
 BEGIN
-  UPDATE inbox_count SET n = n + 1, bytes = bytes + length(NEW.body) WHERE k = '#dead';
+  INSERT INTO inbox_count (k, n, bytes) VALUES ('#dead', 1, (length(NEW.body) + length(CAST(NEW.headers_json AS BLOB)) + length(CAST(NEW.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n + 1, bytes = bytes + excluded.bytes;
+  INSERT INTO inbox_count (k, n, bytes) VALUES (NEW.source_key, 1, (length(NEW.body) + length(CAST(NEW.headers_json AS BLOB)) + length(CAST(NEW.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n + 1, bytes = bytes + excluded.bytes;
 END;
 
 CREATE TRIGGER IF NOT EXISTS inbox_dead_count_del AFTER DELETE ON inbox_dead
 BEGIN
-  UPDATE inbox_count SET n = n - 1, bytes = bytes - length(OLD.body) WHERE k = '#dead';
+  INSERT INTO inbox_count (k, n, bytes) VALUES ('#dead', -1, -(length(OLD.body) + length(CAST(OLD.headers_json AS BLOB)) + length(CAST(OLD.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n - 1, bytes = bytes + excluded.bytes;
+  INSERT INTO inbox_count (k, n, bytes) VALUES (OLD.source_key, -1, -(length(OLD.body) + length(CAST(OLD.headers_json AS BLOB)) + length(CAST(OLD.target AS BLOB))))
+    ON CONFLICT(k) DO UPDATE SET n = n - 1, bytes = bytes + excluded.bytes;
+  DELETE FROM inbox_count WHERE k = OLD.source_key AND n <= 0 AND bytes <= 0;
 END;

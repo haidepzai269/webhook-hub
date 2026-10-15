@@ -28,6 +28,7 @@ import {
   markRetry,
   moveDead,
   purgeDead,
+  rowBytes,
   stats,
   upsertSourceStmt,
   type InboxRow,
@@ -57,6 +58,10 @@ const CATCHABLE = new Set(['POST', 'PUT', 'PATCH', 'DELETE', 'GET']);
 const REPLAY_CONCURRENCY = 5;
 /** Mạch "hub chết" trong isolate (§4.1): sau timeout/lỗi mạng, request HỨNG ĐƯỢC bỏ qua chuyển tiếp ≤ 30s. */
 export const CIRCUIT_MS = 30_000;
+/** TB-2a (b): trần header (JSON) và target của request ĐƯỢC HỨNG. Workers nhận tới 128 KB header + 16 KB URL. */
+export const MAX_CATCH_HEADER_BYTES = 16 * 1024;
+export const MAX_CATCH_TARGET_BYTES = 4 * 1024;
+const utf8Len = (t: string) => new TextEncoder().encode(t).byteLength;
 /** Lease của lượt cron: dòng đã chọn lùi chừng này trước khi gửi (REVIEW-LH2 TB-3). */
 export const LEASE_MS = 5 * 60_000;
 
@@ -98,7 +103,7 @@ function validIp(v: string | null): string | null {
  */
 export function safeHookTarget(rawTarget: string, hubOrigin: string): boolean {
   const rawPath = rawTarget.split('?')[0];
-  if (!/^\/hooks\//i.test(rawPath)) return false;
+  if (!rawPath.startsWith('/hooks/')) return false; // N4: chỉ chữ thường, như nginx + HOOK_RE
   if (/\.\.|%2e|\\|%5c|%2f/i.test(rawPath)) return false;
   let normPath: string;
   try {
@@ -106,7 +111,7 @@ export function safeHookTarget(rawTarget: string, hubOrigin: string): boolean {
   } catch {
     return false;
   }
-  return /^\/hooks\//i.test(normPath) && !normPath.includes('..');
+  return normPath.startsWith('/hooks/') && !normPath.includes('..');
 }
 
 /** Đọc body có trần: không nạp trọn body chunked khổng lồ vào isolate (L7). null = vượt trần. */
@@ -265,8 +270,11 @@ async function handleHook(req: Request, env: Env, cfg: Config, deps: Deps): Prom
     provider: m ? m[1] : null,
     sourceKey: m ? m[2] : null,
   };
-  // Không ký được thì phát lại vô nghĩa -> không bao giờ hứng.
-  const canCatch = cfg.forwardSecret !== null && inc.sourceKey !== null;
+  // Không ký được thì phát lại vô nghĩa -> không bao giờ hứng. Header/target quá khổ (TB-2a b) cũng không hứng: vẫn chuyển
+  // tiếp như thường, hub vắng thì 503 (không ghi).
+  const oversize =
+    rowBytes({ body: new Uint8Array(0), headers: inc.headers, target: '' }) > MAX_CATCH_HEADER_BYTES || utf8Len(rawTarget) > MAX_CATCH_TARGET_BYTES;
+  const canCatch = cfg.forwardSecret !== null && inc.sourceKey !== null && !oversize;
 
   // TB-1: mạch chỉ áp cho request HỨNG ĐƯỢC; không hứng được thì vẫn chuyển tiếp như thường.
   let src: SourceSync | null | 'error' | undefined;
@@ -290,6 +298,7 @@ async function handleHook(req: Request, env: Env, cfg: Config, deps: Deps): Prom
 
   // ---- Hub vắng: hứng nếu được, không thì 503.
   if (!canCatch) {
+    if (oversize) deps.log('catchnet_not_caught', { id: inc.id, reason: 'oversize_headers_or_target' });
     if (inc.sourceKey && !cfg.forwardSecret) deps.log('catchnet_misconfigured', { what: 'CATCHNET_FORWARD_SECRET', effect: 'not_catching' });
     return unavailable('hub_unavailable');
   }
@@ -359,7 +368,10 @@ async function replayOne(id: string, env: Env, cfg: Config, deps: Deps): Promise
  *  1. chọn ≤ `replayBatch` (≤ 10) id tới hạn theo index, KHÔNG nạp body; cắt lô theo tổng byte ≤ 2 MB (luôn ≥ 1 dòng);
  *  2. lease cả lô (`next_at = now + 5m`) bằng MỘT câu — lượt bị giết giữa chừng thì dòng tự lùi, không kẹt đầu hàng;
  *  3. nạp + gửi từng dòng, song song ≤ 5; DỪNG khi thấy hub vắng (dòng chưa gửi chờ hết lease).
- * Ngân sách: 3 truy vấn cố định + ≤ 4/dòng ≤ 43 < 50 (D1 queries / subrequests của gói free). Dọn hàng chết mỗi giờ.
+ * Ngân sách: 2 truy vấn cố định (+2 ở phút 00: purgeDead là batch 2 câu) + ≤ 4/dòng (nạp, fetch, kết quả ≤ 2; dòng
+ * quá hạn chỉ moveDead 2) -> ≤ 44 < 50 (D1 queries + subrequests của gói free, ADR-224). Dọn hàng chết mỗi giờ.
+ * Chọn và lease là HAI câu (N2): tài liệu D1 không xác nhận UPDATE … RETURNING; hai lượt chồng nhau có thể gửi trùng một
+ * dòng — UNIQUE(source_id, idempotency_key) của Postgres nuốt (ADR-216).
  */
 export async function runReplay(env: Env, deps: Deps = defaultDeps, scheduledTime?: number): Promise<{ sent: number; stopped: boolean }> {
   const cfg = loadConfig(env);
@@ -373,9 +385,18 @@ export async function runReplay(env: Env, deps: Deps = defaultDeps, scheduledTim
     return { sent: 0, stopped: true };
   }
   const due = await dueIds(env.DB, now, cfg.replayBatch);
+  // N3: quá hạn giữ -> inbox_dead bằng SQL (INSERT … SELECT, KHÔNG nạp body vào JS) trước khi lease: một body làm lượt
+  // vượt CPU/bộ nhớ không thể kẹt mãi ở đầu hàng sau khi hết hạn.
+  const live: typeof due = [];
+  for (const d of due) {
+    if (now - d.receivedAt > cfg.retentionMs) {
+      await moveDead(env.DB, d.id, d.attempts, 'expired', now, null, null);
+      deps.log('catchnet_dead', { id: d.id, reason: 'expired' });
+    } else live.push(d);
+  }
   const picked: string[] = [];
   let bytes = 0;
-  for (const d of due) {
+  for (const d of live) {
     if (picked.length > 0 && bytes + d.len > REPLAY_BYTES_BUDGET) break;
     picked.push(d.id);
     bytes += d.len;
@@ -470,7 +491,7 @@ export async function handleFetch(req: Request, env: Env, deps: Deps = defaultDe
   const cfg = loadConfig(env);
   const path = rawTargetOf(req.url).split('?')[0];
   try {
-    if (/^\/hooks(\/|$)/i.test(path)) return await handleHook(req, env, cfg, deps);
+    if (path === '/hooks' || path.startsWith('/hooks/')) return await handleHook(req, env, cfg, deps); // N4: chữ thường
     // L4: /_health báo Worker có ký được không (không lộ secret).
     if (path === '/_health') return json({ ok: true, signing: cfg.forwardSecret !== null, origin: cfg.hubOrigin !== null }, 200);
     if (path.startsWith('/_admin/')) return await handleAdmin(req, new URL(req.url), env, cfg, deps);

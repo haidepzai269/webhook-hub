@@ -49,7 +49,7 @@ const MB = 1024 * 1024;
  * Giới hạn gói free (tra trang chính thức 2026-10-15, ADR-224):
  *  - Workers: 50 subrequest/invocation (gồm D1), CPU 10 ms (cả Cron), 128 MB/isolate.
  *  - D1: 50 truy vấn/invocation, DB tối đa 500 MB, dòng/BLOB ≤ 2 MB, 5M rows read + 100k rows written/ngày (index tính thêm).
- * Lượt cron tốn 3 truy vấn cố định (chọn id, lease, dọn) + ≤ 4/dòng (nạp, fetch, ghi kết quả ≤ 2) -> ≤ 10 dòng/lượt.
+ * Lượt cron tốn ≤ 4 truy vấn cố định (chọn id, lease, dọn = batch 2 câu ở phút 00) + ≤ 4/dòng -> 4 + 4×10 = 44 < 50.
  */
 export const REPLAY_BATCH_MAX = 10;
 /** Tổng byte body nạp trong một lượt cron (BLOB về dạng mảng số trên Workers — 1 MB ≈ 8–16 MB heap). Luôn gửi ≥ 1 dòng. */

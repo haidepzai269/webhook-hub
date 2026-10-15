@@ -352,6 +352,66 @@ describe('LH2 ghi xuyên', () => {
     expect(sentChunks).toBeLessThanOrEqual(6); // dừng đọc ngay khi vượt 1MB, không đọc trọn 2MB
     expect(r.calls).toHaveLength(0);
   });
+  it('[LH:T10] (phần f) TB-2a: trần byte tính body + header + target (UTF-8) — body rỗng, header lớn vẫn chạm trần', async () => {
+    const r = rig({ CATCHNET_MAX_KEY_BYTES: String(1024 * 1024) }); // trần nhỏ nhất được phép (kẹp ≥ 1 MB)
+    await addSource(r, 'src_h', { provider: 'generic', ackStatus: 202 });
+    r.setHub(() => new Response('', { status: 502 }));
+    const fat = { 'x-pad': 'é'.repeat(7000) }; // 14000 byte UTF-8 (7000 ký tự) — dưới trần hứng 16 KB
+    const hit = () => handleFetch(providerReq('/hooks/generic/src_h', { headers: fat }), r.env, r.deps).then((x) => x.status);
+    const got: number[] = [];
+    for (let i = 0; i < 80; i++) got.push(await hit());
+    // 1 MB / (14000 B header + target + khung JSON) ≈ 74 dòng; đếm theo KÝ TỰ (7000) thì lọt cả 80.
+    expect(got.indexOf(503)).toBe(74);
+    expect(got.slice(74).every((x) => x === 503)).toBe(true);
+    const c = r.db.raw.prepare("SELECT n, bytes FROM inbox_count WHERE k = 'src_h'").get() as { n: number; bytes: number };
+    expect(c.n).toBe(74);
+    expect(c.bytes).toBeGreaterThan(74 * 14000);
+    expect(c.bytes).toBeLessThanOrEqual(1024 * 1024); // đếm theo BYTE, không theo ký tự
+    const sum = r.db.raw.prepare('SELECT SUM(length(body) + length(CAST(headers_json AS BLOB)) + length(CAST(target AS BLOB))) AS b FROM inbox').get() as { b: number };
+    expect(c.bytes).toBe(sum.b); // trigger khớp công thức của insertCaught
+  });
+
+  it('[LH:T10] (phần g) TB-2a: header > 16 KB hoặc target > 4 KB -> không hứng (hub vắng: 503, D1 rỗng) nhưng vẫn chuyển tiếp khi hub sống', async () => {
+    const r = rig();
+    await addSource(r, 'src_h', { provider: 'generic', ackStatus: 202 });
+    const big = { 'x-pad': 'a'.repeat(17 * 1024) };
+    const longQ = '/hooks/generic/src_h?q=' + 'b'.repeat(4100);
+    r.setHub(() => new Response('{"ok":true}', { status: 200, headers: { 'x-hub-outcome': 'accepted' } }));
+    expect((await handleFetch(providerReq('/hooks/generic/src_h', { body: 'x', headers: big }), r.env, r.deps)).status).toBe(200);
+    expect((await handleFetch(providerReq(longQ, { body: 'x' }), r.env, r.deps)).status).toBe(200);
+    r.setHub(() => new Response('', { status: 502 }));
+    expect((await handleFetch(providerReq('/hooks/generic/src_h', { body: 'x', headers: big }), r.env, r.deps)).status).toBe(503);
+    expect((await handleFetch(providerReq(longQ, { body: 'x' }), r.env, r.deps)).status).toBe(503);
+    expect(count(r.db, 'inbox')).toBe(0);
+    expect(r.logs.filter((l) => l.event === 'catchnet_not_caught')).toHaveLength(2);
+  });
+
+  it('[LH:T10] (phần h) TB-2a: dòng ở inbox_dead vẫn giữ trần của key (không "giải phóng" key bằng cách để hub từ chối) tới khi bị dọn', async () => {
+    const r = rig({ CATCHNET_MAX_PER_KEY: '2' });
+    await addSource(r, 'src_d', { provider: 'generic', ackStatus: 202 });
+    r.setHub(() => new Response('', { status: 502 }));
+    const hit = () => handleFetch(providerReq('/hooks/generic/src_d', { body: 'rác' }), r.env, r.deps).then((x) => x.status);
+    expect([await hit(), await hit()]).toEqual([202, 202]);
+    r.setHub(() => new Response('{"error":"invalid_signature"}', { status: 401, headers: { 'x-hub-outcome': 'rejected' } }));
+    await runReplay(r.env, r.deps);
+    expect([count(r.db, 'inbox'), count(r.db, 'inbox_dead')]).toEqual([0, 2]);
+    r.setHub(() => new Response('', { status: 502 }));
+    expect(await hit()).toBe(503); // key vẫn đầy
+    // N5: dòng đếm '#dead' bị xoá tay -> lần chuyển dead sau tự tạo lại (UPSERT), không âm thầm bỏ qua.
+    r.db.raw.exec("DELETE FROM inbox_count WHERE k = '#dead'");
+    r.advance(7 * 86_400_000 + 1);
+    await runReplay(r.env, r.deps, Math.ceil(r.now() / 3_600_000) * 3_600_000); // lượt đầu giờ dọn hàng chết
+    expect(count(r.db, 'inbox_dead')).toBe(0);
+    expect(await hit()).toBe(202);
+  });
+
+  it('[LH:T10] (phần i) N4: /HOOKS/… (hoa) -> 404, không chuyển tiếp (nginx + HOOK_RE chỉ nhận chữ thường)', async () => {
+    const r = rig();
+    for (const p of ['/HOOKS/github/k', '/Hooks/github/k']) {
+      expect((await handleFetch(new Request(WORKER + p, { method: 'POST', body: 'x' }), r.env, r.deps)).status).toBe(404);
+    }
+    expect(r.calls).toHaveLength(0);
+  });
 });
 
 describe('LH2 phát lại (cron)', () => {
@@ -505,6 +565,18 @@ describe('LH2 phát lại (cron)', () => {
     expect(r.calls[0].url).toBe(HUB + vnp);
     expect(r.bodies[0].byteLength).toBe(0);
     await expectSigned(r.calls[0], r.bodies[0], 'replay');
+    expect(count(r.db, 'inbox')).toBe(0);
+  });
+  it('[LH:T8] (phần i) N3: dòng quá hạn chuyển inbox_dead bằng SQL TRƯỚC khi nạp body — nạp body lỗi cũng không giữ nó ở đầu hàng', async () => {
+    const r = rig();
+    await seed(r, 1);
+    r.advance(7 * 86_400_000 + 1);
+    r.db.failOn = /^SELECT id, source_key[\s\S]*FROM inbox WHERE id = \?/; // loadRow chết
+    r.calls.length = 0;
+    await runReplay(r.env, r.deps);
+    r.db.failOn = null;
+    expect(r.calls).toHaveLength(0);
+    expect(r.db.raw.prepare('SELECT reason FROM inbox_dead').all()).toEqual([{ reason: 'expired' }]);
     expect(count(r.db, 'inbox')).toBe(0);
   });
 });
