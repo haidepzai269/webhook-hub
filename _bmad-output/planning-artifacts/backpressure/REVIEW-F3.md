@@ -206,3 +206,68 @@ Muốn lên ĐẠT cần ba việc:
 | Thấp-7 | `SPEC-hub-sap.md:93` → "PK: 230, 235+ (231–234 thuộc BP)". Tiêu đề ADR-234 ghi "PK dùng 235+". |
 | Thấp-8 | `docs/TEST-MAP.md` khôi phục bản master `d417118`, giữ nguyên các trạng thái ✅. Chỉ thêm 3 dòng `BP:T15`/`BP:T16`/`BP:T22` (bản master chưa có dòng BP nào). Sinh lại trọn file trên Linux/CI sau. |
 | Thấp-9 | **Ghi nợ.** Lỗ biên giây epoch có từ ADR-232. Kiểm "giây biên gộp ≤ 2 × 64" không thêm được gì: hai kiểm "trong ramp ≤ 64" và "sau ramp ≤ 64" đã kéo theo ≤ 128. Phần còn lại là sai số poll 250 ms, chấp nhận. |
+
+---
+
+## Lượt 2 (Murat, 2026-10-15) — commit `7995154`
+
+**Kết luận: ĐẠT có điều kiện CI `db (L1)` xanh.** Không còn mục Nặng hay TB. Bằng chứng còn thiếu duy nhất là lần chạy Lua thật trên CI. Dev chưa chạy L1 ở local; tôi cũng không dựng docker.
+
+Đã chạy:
+- `jest --maxWorkers=1` cho circuit-breaker, redis-budget, delivery-gate: **3/3 suite PASS**, 55 passed, 14 skipped (khối `describeRedis`/L1 bị skip như dự kiến).
+- `tsc --noEmit` cho hub-worker, hub-api, messaging: sạch.
+
+### TB-1: đóng về thiết kế, chờ CI để có bằng chứng
+- **Ca `[BP:T16]` phần d chạy Lua thật.** Nó gọi `cb.getState`, hàm này gọi `redis.eval(LUA_GATE, …)` trên Redis thật, không qua fake.
+- **Ca này đỏ được nếu Lua sai.** Tôi kiểm từng trường hợp:
+  - Bỏ guard `ext > PTTL`: ở giây 5, Lua `PEXPIRE` 11 s trong khi PTTL còn 56 s. Assert `shortened` sẽ đỏ.
+  - Đọc sai `ARGV[9]` (ví dụ quay lại 2 × step = 2 s): lần gia hạn đầu không còn ở giây 50, nên `firstExt.sec` đỏ.
+  - Bỏ kẹp `left`: `exps` vượt start + 180 s, đỏ.
+  - Bỏ kẹp số lần nhân đôi: trần vượt 64, đỏ.
+  - Hỏng nhánh `tonumber(rs) or 0`: `getState` không còn trả `{CLOSED, 0}`, đỏ.
+- **Đồng hồ là đồng hồ GIẢ.** `Date.now` được mock, nên `nowMs` trong ARGV là giả. Hạn ảo `virtExp` được đồng bộ vào PTTL thật bằng `PEXPIRE` trước mỗi giây. Ca này không chạy 180 s thời gian thật.
+  - Chi phí: khoảng 183 giây ảo × 100 gate ≈ 18.300 EVAL. Chạy localhost mất vài giây, tương đương phần c.
+- **Ca này nằm trong job `db (L1)`.** Cách gom như sau:
+  - `describeRedis = describeDb`.
+  - `verify:db` chạy mọi `*.spec.ts` có dùng `describeDb`, với `RUN_DB_TESTS=1` và `REDIS_URL` lấy từ `VERIFY_REDIS_URL`.
+  - Job `db (L1)` có service `redis:7-alpine`. Job này là required check.
+  - Timeout của job là 15 phút, ca mới không đe doạ mức này.
+- **Hai fake JS đã khớp Lua:** dùng `DELIVERY_RAMP_MAX_DOUBLINGS`, có `ext > PTTL` theo `rampExp`, đọc mức gia hạn từ ARGV[9], và có ghi PHẠM VI FAKE.
+
+### TB-2: đóng
+- Dòng Đánh đổi của ADR-234 nay ghi "**Kỳ vọng (tính tay, CHƯA chạy)**". Dòng "**Đo lại:** L1 — chưa · T16 — chưa" là thật.
+- Không còn câu nào khẳng định kết quả chưa đo. ARCHITECTURE §5.4b chỉ mô tả thiết kế, không nêu số đo.
+- ADR có 3 dòng chính, cộng một dòng "Đo lại". Cách này giống ADR-233 có thêm dòng "Test", chấp nhận được.
+- Sau khi CI xanh, phải sửa "L1 — chưa" thành run id.
+
+### Thay đổi mới: không gây lỗi
+- **`RAMP_MAX` mặc định = min(180, 3 × khoá).**
+  - Với env mặc định ra đúng 180, nên `DELIVERY_RAMP_DEFER_MS` và `TOTAL_RETRY_WINDOW_MS` (vẫn tính theo hằng 180) giữ nguyên 27.250.000 ms.
+  - Mọi cấu hình khác chỉ cho ra giá trị ≤ 180, nên cửa sổ retry vẫn là cận trên đúng.
+- **`START_RPS` chỉ được kẹp xuống.** Không file cấu hình nào (`.env.example`, compose, chaos, workflow) đặt giá trị > 2. Test cũ duy nhất (`START=5`) đã đổi kỳ vọng, và vẫn xanh.
+- **`ARGV[9]`.**
+  - Chỉ có một chỗ gọi `EVAL LUA_GATE` (`circuit-breaker.service.ts:210`), và chỗ này đã truyền `deliveryRampExtendMs(ramp)`.
+  - Lua đọc `ARGV[9]`; hai fake đọc `argv[8]` / `rest[n+8]`, khớp vị trí.
+  - `retryQueueForDelay(0).ttlMs` = 10 s, nên kết quả là 20 / 14 / 11 s, đúng như test L0.
+- **Ngân sách Redis:** redis-budget phần f vẫn chỉ ra `['eval']`. `PTTL` và `PEXPIRE` nằm trong script nên vẫn tính là 1 lệnh client.
+- **TEST-MAP:** so với master `d417118`, file chỉ thêm đúng 3 dòng BP, không mất trạng thái ✅ nào.
+
+### Thấp (không chặn)
+- **Thấp-L2-1: khe thời gian thật ở phần d.**
+  - Assert `shortened` cho phép PTTL thật trôi tối đa 200 ms trong khi chạy 100 gate tuần tự. Lần gia hạn đầu ở giây 50 có khe 500 ms (PTTL ảo 10,5 s so với ngưỡng 11 s).
+  - Ở localhost, 100 EVAL mất khoảng 20–100 ms, nên khe này đủ. Tuy vậy, runner chạy 2 jest worker song song mà bị nghẽn thì có thể đỏ giả.
+  - Nếu CI chập chờn: đo thời gian thật của vòng lặp gate rồi dùng số đó làm dung sai, không nới cứng con số.
+- **Thấp-L2-2: fake và Lua khác nhau ở các lần chặn lặp lại trong cùng một giây.**
+  - Fake dùng thời gian ảo đứng yên, nên PTTL = ext và không `PEXPIRE` lại. Comment L0 ghi "lần sau cùng thời điểm không".
+  - Lua thật thì `PEXPIRE` lại ở mỗi lần chặn, vì PTTL thật đã giảm vài ms.
+  - Vô hại: vẫn 1 lệnh client và cùng một mức kẹp. Có điều comment L0 mô tả hành vi mà Lua thật không có.
+- **Thấp-L2-3: `.env.example:170-174` chưa cập nhật.**
+  - Vẫn ghi "cửa sổ retry QT tính theo 60".
+  - Thiếu `DELIVERY_RAMP_MAX_SECONDS`.
+  - Thiếu ghi chú "START chỉ đặt thấp hơn 2".
+- **Thấp-L2-4: lệch đồng hồ D chưa tính vào cửa sổ retry.** ADR đã ghi ramp có thể sống tới RAMP_MAX + D, nhưng `TOTAL_RETRY_WINDOW_MS` không cộng D (tối đa 6 × D). D thường vài giây, nhỏ so với các biên khác. Ghi nợ, không cần sửa.
+
+### Điều kiện để thành ĐẠT
+1. CI `db (L1)` xanh trên commit chứa `7995154`, gồm F3 500 hàng, phần c và phần d, với số skip = 0.
+2. Sửa dòng "Đo lại" của ADR-234 và cột trạng thái TEST-MAP thành run id thật.
+3. Chaos T16 phần b vẫn còn nợ ở máy công ty (`F3-VIEC-MAY-CONG-TY.md`). Mục này không thuộc điều kiện của review code này.
