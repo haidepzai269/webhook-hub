@@ -38,7 +38,8 @@ function fakeRedis() {
         if (!store.get(open) && Number(store.get(failures) ?? 0) < Number(rest[n])) {
           if (store.get(ramp)) {
             const el = Math.max(0, Number(rest[n + 2]) - Number(store.get(ramp)));
-            cap = Number(rest[n + 3]) * 2 ** Math.min(20, Math.floor(el / (Number(rest[n + 4]) * 1000)));
+            const last = Math.max(0, Math.ceil(Number(rest[n + 6]) / Number(rest[n + 4])) - 1); // F3: kẹp bậc cuối
+            cap = Number(rest[n + 3]) * 2 ** Math.min(20, last, Math.floor(el / (Number(rest[n + 4]) * 1000)));
           }
           if (Number(rest[n + 1]) > 0 || cap > 0) {
             t = Number(store.get(throttle) ?? 0) + 1;

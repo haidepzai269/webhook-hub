@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { CircuitState, fastFailRedisOptions, logger } from '@hub/common';
 import { PrismaService } from '@hub/database';
-import { CIRCUIT_OPEN_MS as OPEN_FIRST_MS, circuitOpenMaxSeconds, deliveryRampConfig } from '@hub/messaging';
+import { CIRCUIT_OPEN_MS as OPEN_FIRST_MS, circuitOpenMaxSeconds, deliveryRampConfig, deliveryRampKeySeconds } from '@hub/messaging';
 
 /** Token DI tuỳ chọn để test tiêm Redis giả; production tự tạo client riêng. */
 export const CIRCUIT_REDIS = Symbol('CIRCUIT_REDIS');
@@ -40,9 +40,10 @@ return n`;
 /**
  * BP2 §6 (ADR-196) + BP4 (ADR-198): GATE — MỘT script, LUÔN đúng 1 lệnh, có hay không có throttle/ramp.
  * KEYS: open, failures, throttle:{giây}, ramp. ARGV: ngưỡng lỗi, rate_limit_rps, nowMs, ramp start rps, ramp step (giây),
- * TTL cửa sổ throttle (giây).
+ * TTL cửa sổ throttle (giây), ramp giây (để kẹp trần ở bậc cuối — F3).
  * - Trả PTTL của `:open` (BP3 hoãn tới hết OPEN, C4).
- * - CLOSED + còn `:ramp` (BP4, đặt lúc probe thành công): rampCap = start × 2^floor((now − rampStart)/step).
+ * - CLOSED + còn `:ramp` (BP4, đặt lúc probe thành công): rampCap = start × 2^min(floor((now − rampStart)/step), bậc cuối) —
+ *   khoá sống ramp + một bậc (F3), bậc thêm đó giữ trần cuối.
  * - INCR bộ đếm throttle chỉ khi CLOSED VÀ có trần (rps > 0 hoặc còn `:ramp`) — không trần thì 0 lệnh throttle như cũ.
  * Cap thật = min(rps nếu > 0, rampCap) tính ở JS từ hai giá trị trả về (để kiểm lại với rps thật mà không INCR lần hai, C9).
  * Trả {open 1|0, failures|'', openPttl|-2, count|-1, rampCap|-1}.
@@ -59,7 +60,11 @@ if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
     local el = tonumber(ARGV[3]) - (tonumber(rs) or 0)
     if el < 0 then el = 0 end
     local steps = math.floor(el / (tonumber(ARGV[5]) * 1000))
-    -- phòng thủ: env đã kẹp (ramp ≤ 60s, bước ≥ 1s) nên steps ≤ 60 và 2^60 không tràn double; kẹp 20 chỉ giữ cap hữu hạn nếu ai nới kẹp env
+    -- F3 (ADR-232): khoá sống thêm một bậc sau ramp -> kẹp ở bậc CUỐI của ramp (ARGV[7] = ramp giây): 60s/10s -> bậc 5 = 64 rps
+    local last = math.ceil(tonumber(ARGV[7]) / tonumber(ARGV[5])) - 1
+    if last < 0 then last = 0 end
+    if steps > last then steps = last end
+    -- phòng thủ: env đã kẹp (ramp ≤ 60s, bước ≥ 1s) nên steps ≤ 59; kẹp 20 chỉ giữ cap hữu hạn nếu ai nới kẹp env
     if steps > 20 then steps = 20 end
     cap = tonumber(ARGV[4]) * (2 ^ steps)
   end
@@ -73,8 +78,8 @@ if open then o = 1 end
 return {o, failures or '', pttl, t, cap}`;
 
 /**
- * BP4 (ADR-198): probe thành công -> CLOSED trong MỘT lệnh: DEL failures, open, probe, trips + SET `:ramp` = nowMs EX ramp giây.
- * KEYS: failures, open, probe, trips, ramp. ARGV: nowMs, ramp giây.
+ * BP4 (ADR-198): probe thành công -> CLOSED trong MỘT lệnh: DEL failures, open, probe, trips + SET `:ramp` = nowMs EX
+ * (ramp giây + một bậc — F3, ADR-232: bậc thêm giữ trần cuối). KEYS: failures, open, probe, trips, ramp. ARGV: nowMs, TTL giây.
  */
 export const LUA_CLOSE_AND_RAMP = `redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
 redis.call('SET', KEYS[5], ARGV[1], 'EX', tonumber(ARGV[2]))
@@ -168,7 +173,7 @@ export class CircuitBreakerService {
       const throttleKey = `throttle:destination:${destinationId}:${Math.floor(now / 1000)}`;
       const [openFlag, failuresRaw, pttl, count, capRaw] = (await this.redis.eval(
         LUA_GATE, 4, k.open, k.failures, throttleKey, k.ramp,
-        CIRCUIT_FAILURE_THRESHOLD, rps, now, ramp.startRps, ramp.stepSeconds, 2,
+        CIRCUIT_FAILURE_THRESHOLD, rps, now, ramp.startRps, ramp.stepSeconds, 2, ramp.seconds,
       )) as [number, string, number, number, number];
       const failures = parseInt(failuresRaw || '0', 10) || 0;
       if (Number(openFlag) === 1) {
@@ -244,7 +249,7 @@ export class CircuitBreakerService {
       if (view.state === 'HALF_OPEN' && ramp.seconds > 0) {
         // BP4 (ADR-198): PROBE thành công -> đích vừa hồi phục, hàng hoãn sắp dội về: xoá 4 khoá + bắt đầu ramp, MỘT lệnh.
         // Chỉ ramp sau probe: mạch tự về CLOSED (khoá hết hạn) hay thành công khi CLOSED còn failures nghĩa là chưa từng OPEN.
-        await this.redis.eval(LUA_CLOSE_AND_RAMP, 5, k.failures, k.open, k.probe, k.trips, k.ramp, Date.now(), ramp.seconds);
+        await this.redis.eval(LUA_CLOSE_AND_RAMP, 5, k.failures, k.open, k.probe, k.trips, k.ramp, Date.now(), deliveryRampKeySeconds(ramp));
       } else {
         await this.redis.del(k.failures, k.open, k.probe, k.trips); // BP3: CLOSED -> xoá cả `:trips` (vẫn MỘT lệnh)
       }
