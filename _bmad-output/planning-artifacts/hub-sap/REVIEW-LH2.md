@@ -482,3 +482,105 @@ Còn một điểm, xem N4.
 | Migration | `LH2-VIEC-MAY-CONG-TY.md`: xoá `.wrangler/state` trước khi áp local; sau lần `--remote` đầu thì không sửa `0001` | — |
 
 vitest 36/36, tsc sạch, `verify:map` 0 trùng. TEST-MAP vẫn giữ trạng thái master, chỉ chèn dòng `LH:*`.
+
+---
+
+## Lượt 3 (Winston, 2026-10-15)
+
+**Phạm vi:** `214a995` (code) + `5cf181a` (giấy), diff `3eb3e7b..5cf181a`.
+
+**Đã chạy (máy nhà):** `apps/catchnet` `npx vitest run` → **36/36 pass**. `npx tsc -p tsconfig.json --noEmit` → exit 0.
+
+### Kết luận lượt 3: **ĐẠT** — 0 Nặng · 0 TB · 3 Thấp mới
+
+TB-2a đã đóng. Không có hồi quy nào chạm BB-3, chữ ký hay bytes.
+
+**Điều kiện tick LH2 ở §15b** (giữ nguyên từ lượt 1):
+- Chạy `LH2-VIEC-MAY-CONG-TY.md` §1–§3c ở máy công ty.
+- Ghi số đo vào §16. Quan trọng nhất là CPU và bộ nhớ của một lượt cron, cùng `meta.changes`.
+- Cổng LH2b vẫn giữ: chưa deploy Worker thật.
+
+### TB-2a: ĐÓNG
+
+**1. Công thức JS khớp SQL.**
+- Phía JS, `rowBytes` cộng ba phần:
+  - `body.byteLength`;
+  - số byte UTF-8 của `JSON.stringify(headers)`;
+  - số byte UTF-8 của `target`.
+- Phía trigger: `length(body) + length(CAST(headers_json AS BLOB)) + length(CAST(target AS BLOB))`.
+- Hai bên đo trên **cùng** dữ liệu:
+  - `insertCaught` bind đúng chuỗi `JSON.stringify(r.headers)` làm `headers_json`;
+  - `target` là `inc.rawTarget` ở cả hai chỗ.
+- D1 lưu TEXT dạng UTF-8, nên `CAST AS BLOB` trả về đúng số byte UTF-8. Có CAST thì `length` cũng không dừng ở ký tự NUL như khi đếm trên TEXT.
+- Giá trị header là ByteString, gồm byte 0x80–0xFF, nên không có surrogate lẻ. Cả hai phía đều mã hoá ra 2 byte.
+- Body rỗng: `COALESCE(?7, X'')` cho `length` = 0, khớp `byteLength` = 0.
+- Hệ quả: điều kiện `+ ?12 <= max` và số trigger cộng vào bằng nhau từng byte. Test `[LH:T10] (phần f)` còn đối chiếu bộ đếm với `SUM` theo byte.
+
+**2. Trigger cho dòng chết.**
+- `moveDead` là batch: INSERT vào `inbox_dead` (cộng 1 cho key và `#dead`) rồi DELETE khỏi `inbox` (trừ 1 cho key và `*`).
+- Key giữ nguyên số đếm; phần còn lại chuyển từ `*` sang `#dead`.
+- `purgeDead` trừ khỏi key và `#dead`. Dòng đếm của key chỉ bị xoá khi `n<=0 AND bytes<=0`.
+- Bỏ hai dòng seed `*`/`#dead` không sao: câu kiểm dùng `COALESCE`, và UPSERT tự tạo lại dòng (N5).
+
+**3. Kẹp (b).**
+- Header JSON > 16 KB hoặc target > 4 KB thì `canCatch=false`.
+- Hub sống thì vẫn chuyển tiếp như thường. Hub vắng thì trả 503 và không ghi D1.
+- Kẹp nằm **trước** nhánh mạch mở, nên request quá khổ không bao giờ bị hứng.
+- Header của provider thật cỡ 1–4 KB; query VNPay cỡ 1 KB. Không chặn nhầm.
+
+**4. Kịch bản "khoá key 7 ngày": có đổi bản chất, nhưng hẹp hơn và không phải DoS dễ hơn.**
+- **Trước lượt 3:**
+  - Chỉ cần một key lộ là làm đầy D1 cho **mọi** source (TB-2a).
+  - Hoặc key được "giải phóng" sau mỗi vòng bị hub từ chối, nên kẻ xấu nạp lại vô hạn.
+- **Bây giờ:**
+  - Key lộ chỉ khoá được **nhánh hứng của chính source đó**: tối đa 2.000 dòng / 50 MB.
+  - Khoá kéo dài tới khi `purgeDead` dọn, tức 7 ngày tính từ `dead_at`, có thể tới khoảng 14 ngày tính từ lúc nhận.
+  - Trong thời gian đó, hub sống thì source vẫn chạy bình thường (chuyển tiếp). Hub vắng thì nhận 503 và provider tự retry, giống hệt khi gọi thẳng Render.
+  - Không mất dữ liệu, BB-3 vẫn giữ.
+- **Khoá toàn lưới** cần ≥ 6 key lộ (6 × 50 MB = 300 MB) hoặc ≥ 8 key (8 × 2.000 dòng = 15.000 dòng). ADR-224 đã ghi "nhiều key lộ" trong phần đánh đổi.
+- Kết luận: phạm vi hẹp hơn hẳn, đánh đổi chấp nhận được.
+- Còn thiếu đường gỡ khoá → **R2** bên dưới.
+
+### Thấp lượt 2: đã xử lý
+
+- **N1, N2:** đã ghi vào phần đánh đổi của ADR-224 và ADR-216.
+  - N2 giữ hai câu SQL vì tài liệu D1 không xác nhận `RETURNING`. Có bước thử ở máy công ty §3c. Chấp nhận.
+- **N3:** dòng quá hạn chuyển sang dead bằng `INSERT … SELECT` trước khi lease và không nạp body vào JS. `moveDead` dùng `COALESCE(?, last_status/last_error)`, nên giữ được lỗi cuối khi `status=null`.
+  - Ngân sách truy vấn: `1 + 2k + 1 + 4(10−k) + 2 = 44 − 2k ≤ 44`.
+- **N4:** `/HOOKS/...` → 404 cả ở `handleFetch` lẫn `safeHookTarget`.
+- **N5:** mọi trigger đều dùng UPSERT.
+- **N6:** sửa thành 44.
+
+### Hồi quy
+
+- **BB-3:**
+  - `ackResponse` vẫn chỉ trả sau khi `insertCaught` trả `changes > 0`.
+  - Nhánh oversize trả 503.
+  - Nhánh dead/expired không đụng tới đường trả lời cho provider.
+- **Chữ ký và bytes:** `callHub`/`requestTarget`/`readCapped` không đổi.
+- **Thứ tự lượt cron:** chọn → dead hoá dòng quá hạn → lease → gửi. Dòng quá hạn không bị gửi thêm lần nào.
+
+### Thấp mới
+
+**R1. Nhánh dead hoá dòng quá hạn trong `runReplay` không có try/catch.**
+- Một lần `moveDead` lỗi sẽ ném lỗi ra khỏi `runReplay` **trước** bước lease. Lỗi có thể do D1 lỗi tạm, hết quota ghi (N1), hoặc DB đầy làm INSERT vào `inbox_dead` thất bại.
+- Khi đó cả lượt bỏ dở, kể cả các dòng còn sống lẽ ra gửi được và giải phóng chỗ. Dòng quá hạn vẫn đứng đầu, nên phút sau lặp lại.
+- Trước lượt 3, lỗi này bị `replayOne(...).catch` khoanh lại trong một dòng.
+- Hệ quả: chậm chứ không mất. Lỗi tạm thì tự hết; hết quota thì hết khi quota reset lúc 00:00 UTC.
+- Sửa: bọc từng `moveDead` trong try/catch, log `catchnet_d1_error`, rồi đưa dòng đó vào lease để nó lùi 5 phút.
+
+**R2. Không có đường gỡ khoá key và không có tín hiệu cho từng key.**
+- Dòng chết giữ trần của key tới 7 ngày.
+- Ca hợp lệ cũng dính: dev xoay secret sai giữa lúc hub vắng, hàng trăm dòng thành `rejected`, và source mất lưới hứng 7 ngày. Dấu hiệu duy nhất là log `catchnet_overflow`.
+- Đề xuất, nợ §16 (làm cùng LH2b hoặc console):
+  - `/_admin/stats` trả thêm `n`/`bytes` của từng key đang gần trần;
+  - thêm `DELETE /_admin/dead/:key` (Bearer) để Admin gỡ khoá sau khi đã xem hàng chết.
+
+**R3.** `LH2-VIEC-MAY-CONG-TY.md` nên thêm một bước:
+- Trên D1 local, sau khi hứng một request có header chứa ký tự ≥ 0x80, so `SELECT bytes FROM inbox_count WHERE k='*'` với `rowBytes` mà Worker log ra.
+- Mục đích: xác nhận D1 thật lưu TEXT dạng UTF-8 giống node:sqlite.
+
+### ADR
+
+- ADR-216 và ADR-224 vẫn 3 dòng, số không đổi.
+- Phần "Chọn" của ADR-224 đã dài, gần chạm luật 3 dòng. Lần sửa sau nên chuyển phần số liệu sang §16.
