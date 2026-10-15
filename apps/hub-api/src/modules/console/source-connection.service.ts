@@ -7,7 +7,7 @@ import { unprocessable } from '../service-api/service-api.controller';
 import { hubError } from '../errors/hub-error';
 import { assertSourceLimit } from './source-limit';
 import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from './source-key';
-import { publicIngestBase } from './public-ingest-base';
+import { ingestPublicUrlVar, publicIngestBase } from './public-ingest-base';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** `GET …/connection` gọi `status?` của provider tối đa 1 lần / phút / kết nối (đọc `last_checked_at`, 0 lệnh Redis). */
@@ -39,6 +39,10 @@ function publicSource(source: any) {
 
 // PK5 (E6): `publicIngestBase` tách sang `public-ingest-base.ts` (ingest dùng chung, không kéo service này vào vòng import).
 export { publicIngestBase } from './public-ingest-base';
+
+/** ADR-211: lời nhắc gọi ĐÚNG biến đang quyết định URL ingest (`HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL`). */
+const publicUrlRequired = (env: Record<string, string | undefined>) =>
+  hubError('public_url_required', {}, `${ingestPublicUrlVar(env)} là localhost/IP nội bộ — provider không gọi vào được`);
 
 function lastN(v: string, n = 4): string {
   return v.length <= n ? '****' : `****${v.slice(-n)}`;
@@ -115,7 +119,7 @@ export class SourceConnectionService {
     const credentials = parseCredentials(connector, body?.credentials);
     this.requireAck(connector, body);
     const base = publicIngestBase(this.env);
-    if (!base) throw hubError('public_url_required', {}, 'HUB_PUBLIC_URL là localhost/IP nội bộ — provider không gọi vào được');
+    if (!base) throw publicUrlRequired(this.env);
     const ingestUrl = `${base}/hooks/${provider}/${sourceKey}`;
     const masterKey = getMasterKey();
     const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
@@ -174,7 +178,7 @@ export class SourceConnectionService {
       return { source: publicSource(source), connection: r.connection, secretChanged: r.secretChanged };
     }
     const base = publicIngestBase(this.env);
-    if (!base) throw hubError('public_url_required', {}, 'HUB_PUBLIC_URL là localhost/IP nội bộ — provider không gọi vào được');
+    if (!base) throw publicUrlRequired(this.env);
     const ingestUrl = `${base}/hooks/${source.provider}/${source.sourceKey}`;
     const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
     const masterKey = getMasterKey();
@@ -213,7 +217,7 @@ export class SourceConnectionService {
       credentials = stored;
     }
     const base = publicIngestBase(this.env);
-    if (!base) throw hubError('public_url_required', {}, 'HUB_PUBLIC_URL là localhost/IP nội bộ — provider không gọi vào được');
+    if (!base) throw publicUrlRequired(this.env);
     const ingestUrl = `${base}/hooks/${source.provider}/${source.sourceKey}`;
     const secretForSource = connector.spec.sourceSecretField ? credentials[connector.spec.sourceSecretField] : undefined;
     const secretChanged = !!secretForSource && !this.currentSecrets(source).includes(secretForSource);
@@ -250,10 +254,10 @@ export class SourceConnectionService {
       if (!live) {
         // FAILED / PENDING / DISCONNECTED: không hỏi provider; chỉ đối chiếu secret bên dưới.
       } else if (expected && expected !== conn.ingestUrl) {
-        // HUB_PUBLIC_URL đổi (đổi domain) -> provider vẫn gọi URL cũ.
+        // URL ingest đổi (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL — ADR-211) -> provider vẫn gọi URL cũ.
         status = 'DRIFTED';
         lastError = 'public_url_changed';
-        lastFix = 'HUB_PUBLIC_URL đã đổi — bấm "Kết nối lại" để đăng ký URL mới tại provider.';
+        lastFix = `${ingestPublicUrlVar(this.env)} đã đổi — bấm "Kết nối lại" để đăng ký URL mới tại provider.`;
       } else if (connector.status && conn.remoteRef) {
         const creds = this.decrypt(conn.credentialsEncrypted);
         if (creds) {

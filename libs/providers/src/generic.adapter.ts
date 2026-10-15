@@ -46,7 +46,7 @@ export class GenericAdapter implements ProviderAdapter {
 
   /**
    * PK5 (E6, ADR-206): `unverified` lưu `__hub_meta` lúc nhận — `method`, và `url` (URL công khai do LÕI dựng từ
-   * `HUB_PUBLIC_URL`, không từ `Host`) CHỈ khi `forwardUrl` (E18: URL chứa sourceKey). Worker chỉ đọc lại.
+   * `HUB_INGEST_PUBLIC_URL`, thiếu thì `HUB_PUBLIC_URL` — ADR-211; không từ `Host`) CHỈ khi `forwardUrl` (E18: URL chứa sourceKey). Worker chỉ đọc lại.
    */
   storedMeta(req: RawWebhookRequest, ctx?: AdapterContext): Record<string, unknown> | null {
     const c = configOf(ctx);

@@ -216,9 +216,11 @@ describe("connectionDialogMode — nút Kết nối trên dòng Nguồn", () => 
 });
 
 describe("errorMessageOf — 422 public_url_required", () => {
-  it("nói đúng biến HUB_PUBLIC_URL, đặt ở service hub-api trên Render (thắng detail tiếng Anh của hub)", () => {
+  it("nói đúng biến (HUB_INGEST_PUBLIC_URL, thiếu thì HUB_PUBLIC_URL — ADR-211), đặt ở service hub-api trên Render (thắng detail tiếng Anh của hub)", () => {
     const m = errorMessageOf({ error: "public_url_required", detail: "HUB_PUBLIC_URL là localhost/IP nội bộ" }, vi);
+    expect(m).toContain("HUB_INGEST_PUBLIC_URL=");
     expect(m).toContain("HUB_PUBLIC_URL=");
+    expect(errorMessageOf({ error: "public_url_required" }, createT("en"))).toContain("HUB_INGEST_PUBLIC_URL=");
     expect(m).toContain("hub-api trên Render");
     expect(errorMessageOf({ error: "public_url_required" }, createT("en"))).toContain("hub-api service on Render");
   });

@@ -63,12 +63,40 @@ ${EDGE_REAL_IP}
         "1" $binary_remote_addr;
         default "";
     }
+    # LH3 (ADR-217, REVIEW-LH3 TB-1): EDGE_HOOKS_IP_LIMITS=0 khi lưới hứng bật (CATCHNET_FORWARD_SECRET hợp lệ) — request
+    # /hooks/* đi qua vài IP egress của Cloudflare, khoá theo IP kết nối = khoá chung cả lưới. nginx KHÔNG kiểm được chữ ký
+    # lưới nên không tin `x-catchnet-client-ip`: tắt cầu chì + limit_conn theo IP cho /hooks/*; giới hạn theo IP ĐÃ KÝ nằm ở
+    # cổng phạt của hub-api. /v1/p/* giữ cầu chì như cũ (không đi qua lưới).
+    map "${EDGE_HOOKS_IP_LIMITS}" $edge_hooks_fuse_key {
+        "1" $edge_fuse_key;
+        default "";
+    }
+    map "${EDGE_HOOKS_IP_LIMITS}" $edge_hooks_conn_key {
+        "1" $binary_remote_addr;
+        default "";
+    }
     limit_req_zone $edge_fuse_key zone=hooks_ip:10m rate=${EDGE_IP_RATE}r/s;
+    limit_req_zone $edge_hooks_fuse_key zone=hooks_path_ip:10m rate=${EDGE_IP_RATE}r/s;
     limit_req_status 429;
     limit_req_log_level warn;
-    limit_conn_zone $binary_remote_addr zone=hooks_conn:10m;
+    limit_conn_zone $edge_hooks_conn_key zone=hooks_conn:10m;
     limit_conn_status 429;
     limit_conn_log_level warn;
+
+    # ---- LH3 (ADR-221): phản hồi nginx TỰ SINH trên /hooks* mang `x-hub-outcome` như hub-api (lưới hứng đọc). Ngoài /hooks
+    # -> chuỗi rỗng = add_header không gắn. 503 upstream = `unavailable` (hub vắng thật).
+    map $uri $edge_outcome_refused {
+        "~*^/hooks(/|$)" refused;
+        default "";
+    }
+    map $uri $edge_outcome_rejected {
+        "~*^/hooks(/|$)" rejected;
+        default "";
+    }
+    map $uri $edge_outcome_unavailable {
+        "~*^/hooks(/|$)" unavailable;
+        default "";
+    }
 
     # ---- Slowloris (§3.4): Node không còn phải giữ kết nối nhả từng byte.
     client_header_timeout 10s;
@@ -107,7 +135,7 @@ ${EDGE_REAL_IP}
 
         # EG:SOURCE_KEY_RE — [EG:T3] đọc regex của dòng dưới, đừng tách ra nhiều dòng.
         location ~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$" {
-            limit_req zone=hooks_ip burst=${EDGE_IP_BURST} nodelay;
+            limit_req zone=hooks_path_ip burst=${EDGE_IP_BURST} nodelay;
             limit_conn hooks_conn ${EDGE_CONN_PER_IP};
             client_max_body_size 1m;
             proxy_read_timeout 30s;
@@ -121,6 +149,7 @@ ${EDGE_REAL_IP}
         location ~* "^/hooks(/|$)" {
             default_type application/json;
             add_header X-Request-Id $edge_request_id always;
+            add_header x-hub-outcome rejected always;
             return 404 '{"error":"not_found","message":"The resource was not found.","fix":"Check the webhook URL: /hooks/<provider>/<sourceKey> as shown in the console.","docsUrl":"${HUB_DOCS_URL}#not_found","requestId":"$edge_request_id"}';
         }
 
@@ -153,6 +182,7 @@ ${EDGE_REAL_IP}
             default_type application/json;
             add_header Retry-After 1 always;
             add_header X-Request-Id $edge_request_id always;
+            add_header x-hub-outcome $edge_outcome_refused always;
             return 429 '{"error":"edge_rate_limited","message":"Too many requests from this IP address.","fix":"Slow down and retry after the number of seconds in Retry-After. Providers retry on 429 by themselves.","docsUrl":"${HUB_DOCS_URL}#edge_rate_limited","requestId":"$edge_request_id","retryAfter":1}';
         }
 
@@ -160,12 +190,14 @@ ${EDGE_REAL_IP}
             default_type application/json;
             add_header Retry-After 5 always;
             add_header X-Request-Id $edge_request_id always;
+            add_header x-hub-outcome $edge_outcome_unavailable always;
             return 503 '{"error":"service_unavailable","message":"The service is temporarily unavailable.","fix":"Retry in 5s (with backoff). If it persists, send the requestId to the hub admin.","docsUrl":"${HUB_DOCS_URL}#service_unavailable","requestId":"$edge_request_id","retryAfter":5}';
         }
 
         location @edge_payload_too_large {
             default_type application/json;
             add_header X-Request-Id $edge_request_id always;
+            add_header x-hub-outcome $edge_outcome_rejected always;
             return 413 '{"error":"payload_too_large","message":"The request body is too large.","fix":"Send at most 1MB per webhook and 100KB per API request.","docsUrl":"${HUB_DOCS_URL}#payload_too_large","requestId":"$edge_request_id"}';
         }
     }

@@ -1,9 +1,13 @@
 import { ERROR_CATALOG, ProviderType, docsUrlFor } from '@hub/common';
 import { ProviderRegistry } from '@hub/providers';
+import type { HubOutcome } from './hub-outcome';
 
 /** Phản hồi của lõi ingest. `headers` chỉ dùng cho 429 của hộp phạt (`Retry-After`). */
-/** PK4: `contentType` (echo bắt tay `text/plain`), `headers` (Retry-After của hộp phạt; header-echo). */
-export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string>; contentType?: string };
+/**
+ * PK4: `contentType` (echo bắt tay `text/plain`), `headers` (Retry-After của hộp phạt; header-echo).
+ * LH3 (H1, ADR-221): `outcome` -> header `x-hub-outcome` (controller đặt); `ingestWebhook` luôn điền.
+ */
+export type IngestResponse = { status: number; body: unknown; headers?: Record<string, string>; contentType?: string; outcome?: HubOutcome };
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
 

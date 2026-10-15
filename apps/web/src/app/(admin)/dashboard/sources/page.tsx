@@ -228,7 +228,8 @@ type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : neve
 const _formShape: SameShape<Values, SourceFormValues> = true;
 void _formShape;
 
-const fullUrl = (s: Source) => `${HUB_API_URL}${s.webhookUrl}`;
+// ADR-211: hub trả URL ingest (HUB_INGEST_PUBLIC_URL) khi có URL công khai; không có thì ghép như cũ.
+const fullUrl = (s: Source) => s.ingestUrl || `${HUB_API_URL}${s.webhookUrl}`;
 
 const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubColumn<Source>[] => [
   {
@@ -423,7 +424,7 @@ export default function SourcesPage() {
       (src) => {
         toast.success(t("page.sources.toast.created", { name: src.name }), {
           description: t("page.sources.toast.created-url", {
-            url: `${HUB_API_URL}/hooks/${src.provider}/${src.sourceKey}`,
+            url: src.ingestUrl || `${HUB_API_URL}/hooks/${src.provider}/${src.sourceKey}`,
           }),
         });
         form.reset();

@@ -279,7 +279,7 @@ describe('[PK:T11] (phần a) GET chỉ cho bắt tay; HEAD 405; sai verify toke
     for (const cfg of [SLACK, ASANA, { ...SLACK, handshake: undefined }]) {
       const t = build(cfg);
       const r = await t.svc.ingestWebhook(req({ method: 'GET', query: 'challenge=1&hub.challenge=2' }));
-      expect(r).toEqual({ status: 405, body: { error: 'method_not_allowed' } });
+      expect(r).toEqual({ status: 405, body: { error: 'method_not_allowed' }, outcome: 'rejected' });
       expect(t.tx.rawEvent.create).not.toHaveBeenCalled();
       expect(t.bad).not.toHaveBeenCalled();
     }
@@ -363,18 +363,18 @@ describe('[PK:T12] (phần a) ack theo cấu hình: rejectStatus 503 vẫn phạ
     const t = build({ ...ASANA, ack: { successStatus: 204 } });
     const body = '{"events":[{"action":"changed"}]}';
     const r = await t.svc.ingestWebhook(req({ body, headers: { 'x-hook-signature': hex(SECRET, body), 'x-request-id': 'r1' } }));
-    expect(r).toEqual({ status: 204, body: null });
+    expect(r).toEqual({ status: 204, body: null, outcome: 'accepted' });
     expect(t.tx.outbox.create).toHaveBeenCalledTimes(1);
     t.redis.getIdempotencyKey.mockResolvedValue('raw-1');
     const again = await t.svc.ingestWebhook(req({ body, headers: { 'x-hook-signature': hex(SECRET, body), 'x-request-id': 'r1' } }));
-    expect(again).toEqual({ status: 204, body: null });
+    expect(again).toEqual({ status: 204, body: null, outcome: 'duplicate' });
   });
 
   it('successStatus 202 -> 202 kèm body ok', async () => {
     const t = build({ ...ASANA, ack: { successStatus: 202 } });
     const body = '{"events":[]}';
     const r = await t.svc.ingestWebhook(req({ body, headers: { 'x-hook-signature': hex(SECRET, body), 'x-request-id': 'r2' } }));
-    expect(r).toEqual({ status: 202, body: { ok: true } });
+    expect(r).toEqual({ status: 202, body: { ok: true }, outcome: 'accepted' });
   });
 });
 
@@ -670,7 +670,7 @@ describe('[PK:T11] (phần e) ADR-205 bổ sung: HEAD `head-ok` -> 200 rỗng qu
     const traffic = jest.spyOn(svc.traffic, 'record');
     const verify = jest.spyOn(ProviderRegistry.get('generic'), 'verify');
     const r = await svc.ingestWebhook(req({ method: 'HEAD' }));
-    expect(r).toEqual({ status: 200, body: null });
+    expect(r).toEqual({ status: 200, body: null, outcome: 'handshake' });
     expect(t.tx.rawEvent.create).not.toHaveBeenCalled();
     expect(t.prisma.rawEvent.create).not.toHaveBeenCalled();
     expect(t.redisCalls()).toBe(0);
@@ -720,7 +720,7 @@ describe('[PK:T11] (phần e) ADR-205 bổ sung: HEAD `head-ok` -> 200 rỗng qu
   it('danh mục: intercom (head-ok) — HEAD 200, sự kiện ký sha1 -> ACCEPTED', async () => {
     const cfg = (CATALOG.find((e) => e.id === 'intercom')!.handler as { config: unknown }).config;
     const t = build(cfg);
-    expect(await t.svc.ingestWebhook(req({ method: 'HEAD' }))).toEqual({ status: 200, body: null });
+    expect(await t.svc.ingestWebhook(req({ method: 'HEAD' }))).toEqual({ status: 200, body: null, outcome: 'handshake' });
     const body = JSON.stringify({ type: 'notification_event', topic: 'company.created', id: 'notif_2', data: { type: 'notification_event_data', item: {} } });
     const r = await t.svc.ingestWebhook(req({ body, headers: { 'x-hub-signature': `sha1=${createHmac('sha1', SECRET).update(body).digest('hex')}` } }));
     expect(r.status).toBe(200);

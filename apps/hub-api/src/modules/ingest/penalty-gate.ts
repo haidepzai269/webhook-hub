@@ -6,6 +6,8 @@ import { blockedAck, providerMetricLabel } from './blocked-ack';
 import { PenaltyBox, PenaltyVerdict } from './penalty-box';
 import { IngestService } from './ingest.service';
 import { HookRouteMatch, hooksPathOf, matchHookRoute, pathnameOfUrl } from './hooks-path';
+import { catchnetOf } from './catchnet';
+import { HUB_OUTCOME_HEADER } from './hub-outcome';
 
 /**
  * D3 (SPEC-chong-qua-tai ĐÍNH CHÍNH D3/D4, ADR-177 bổ sung): gate hộp phạt TRƯỚC body parser. IP/cặp đang bị phạt nhận 429
@@ -18,6 +20,10 @@ import { HookRouteMatch, hooksPathOf, matchHookRoute, pathnameOfUrl } from './ho
  *   chung với ingest; metric `BLOCKED` ghi đúng MỘT lần ở đây (ingest không chạy); cặp có chủ -> lưu lượng `BLOCKED`
  *   như ingest. Gate ném lỗi -> log + `next()`.
  * - 0 Redis, 0 DB (R1 không đổi).
+ * - LH3 (H3, ADR-217): request có chữ ký ĐẦU của lưới hứng hợp lệ (`x-catchnet-signature`, không cần body) -> IP của hộp
+ *   phạt là `x-catchnet-client-ip` đã ký, không phải IP Cloudflare đang kết nối. Thiếu / sai chữ ký -> IP kết nối như cũ
+ *   (header IP không bao giờ được tin khi chưa ký). Kết quả nhớ trên request (`catchnetOf`) — ingest dùng lại.
+ * - LH3 (H1, ADR-221): 429 của cổng mang `x-hub-outcome: refused`.
  */
 
 /** Route mặc định của gate. `/v1/p/*` KHÔNG có (D6: 401 API key ở ApiKeyGuard, luật (b) chưa áp cho /v1/p). */
@@ -50,14 +56,16 @@ export function createPenaltyGate(deps: PenaltyGateDeps): (req: GateReq, res: Se
     const startedAt = Date.now();
     let hit: HookRouteMatch | null;
     let verdict: PenaltyVerdict;
+    let ip: string | undefined = req.ip;
     try {
       // PK0 (ADR-201, F11): MỌI method trên /hooks/* đều qua gate, trừ OPTIONS (preflight CORS, không bao giờ tới ingest).
       // PK4 sẽ mở GET cho bắt tay — gate phải chặn GET TRƯỚC khi GET tồn tại, không thì cửa sau mở đúng ngày merge.
       if (req.method === 'OPTIONS') return next();
       hit = matchHookRoute(hooksPathOf(req), routes); // app.use ở gốc: req.url = originalUrl
       if (!hit) return next();
-      verdict = deps.penalty.checkIp(req.ip, hit.sourceKey);
-      if (!verdict.blocked) verdict = deps.penalty.checkPair(req.ip, hit.sourceKey);
+      ip = catchnetOf(req)?.clientIp ?? req.ip;
+      verdict = deps.penalty.checkIp(ip, hit.sourceKey);
+      if (!verdict.blocked) verdict = deps.penalty.checkPair(ip, hit.sourceKey);
       if (!verdict.blocked) return next();
     } catch (err: any) {
       logger.warn({ err: err?.message }, 'Gate hộp phạt lỗi -> cho request đi qua (fail-open)');
@@ -81,7 +89,7 @@ export function createPenaltyGate(deps: PenaltyGateDeps): (req: GateReq, res: Se
     }
     if (verdict.owner && deps.traffic) {
       try {
-        deps.traffic.record(verdict.owner.tenantId, verdict.owner.sourceId, 'BLOCKED', req.ip);
+        deps.traffic.record(verdict.owner.tenantId, verdict.owner.sourceId, 'BLOCKED', ip);
       } catch (err: any) {
         logger.warn({ err: err?.message }, 'Không ghi được lưu lượng vào bộ nhớ (bỏ qua)');
       }
@@ -96,6 +104,7 @@ function sendBlocked(res: ServerResponse, retryAfterSec: number, headers: Incomi
   res.statusCode = ack.status;
   for (const [k, v] of Object.entries(ack.headers ?? {})) res.setHeader(k, v);
   res.setHeader('Connection', 'close');
+  res.setHeader(HUB_OUTCOME_HEADER, 'refused');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(ack.body));
 }

@@ -136,6 +136,10 @@ Tách ra mua được ba thứ:
 > ⚠️ **Bản ý tưởng gốc (mục 6.2) làm MẤT sự kiện.** Nó `SET NX` vào Redis **trước** transaction. Postgres chết giữa chừng → Redis key vẫn còn → provider retry → hub trả "200 duplicate" → sự kiện biến mất vĩnh viễn và provider tưởng đã giao thành công.
 
 ```
+0'. Header lưới hứng (LH3, ADR-217 — chỉ khi đặt CATCHNET_FORWARD_SECRET; thuần CPU, 0 Redis, 0 DB): request có
+    `x-catchnet-signature` = HMAC(id.received_at.client_ip.mode.METHOD.path_and_query) đúng (timingSafeEqual) và
+    |now − received_at| ≤ CATCHNET_RETENTION_DAYS -> IP cho bước 0/2a/chấm điểm = `x-catchnet-client-ip` ĐÃ KÝ.
+    Sai/thiếu/quá hạn -> bỏ qua cả bộ header, request như gọi thẳng (không 401). Kiểm ở gate (trước body parser).
 0.  Hộp phạt theo IP (bộ nhớ, 0 Redis, 0 DB — §7.5, ADR-177): IP đang bị phạt vì dò sourceKey -> 429 -> DỪNG
     (trừ cặp (IP, sourceKey) đã verify đúng trong 24h gần nhất — IP chung của provider không cắt source đang chạy)
     Kiểm HAI chỗ, cùng một instance PenaltyBox (D3): gate TRƯỚC body parser (`penalty-gate.ts`, path tách bằng
@@ -152,6 +156,14 @@ Tách ra mua được ba thứ:
     HARD_LOCKED (≥110%). Đọc nấc lỗi -> fail-open. Cờ tắt (mặc định production) -> chỉ đếm "lẽ ra chặn".
     Publish /v1/p: ApiKeyGuard -> nạp source api (JOIN nấc) -> 2q -> rate limit -> persist (cùng hàm quyết định).
 2a. Hộp phạt theo cặp (IP, sourceKey): cặp đang bị phạt vì ký sai liên tục -> 429 -> DỪNG (0 HMAC, 0 Redis)
+2b. (LH3) Chữ ký body của lưới `x-catchnet-body-signature` = HMAC(id.hex(sha256(rawBody))) khớp -> received_at của
+    Worker = "bây giờ" khi verify (`ctx.verifyAt`: Stripe `constructEvent(receivedAt)`, Standard Webhooks `nowSec`,
+    signed-template) và = raw_events.received_at. Lệch -> ingest coi như gọi thẳng (IP kết nối, Date.now(), không via) —
+    cổng phạt (trước body) chỉ KIỂM theo IP đã ký. Hạn: quá khứ ≤ CATCHNET_RETENTION_DAYS, tương lai ≤ 5 phút.
+    raw_events.headers bỏ x-catchnet-* (trừ id). nginx EG1 không đọc header lưới; lưới bật -> tắt cầu chì/limit_conn
+    theo IP của nginx cho /hooks/* (DEPLOYMENT §3.6).
+    raw_events.via = catchnet-forward | catchnet-replay (NULL = gọi thẳng). URL công khai của request (`ctx.publicUrl`)
+    theo đường vào: qua lưới -> HUB_INGEST_PUBLIC_URL, gọi thẳng -> HUB_PUBLIC_URL (H4).
 3.  Giải mã secrets · adapter.verify(rawBytes, headers, secrets[])
        sai chữ ký -> lưu MẪU raw_events(status=REJECTED, ≤4KB, ≤20/phút/source) (+1 điểm phạt cho cặp) -> 401 -> DỪNG
     Header nhạy cảm che trước khi lưu (ADR-051); signature_header = adapter.extractSignature(req) (S3-1)
@@ -172,6 +184,10 @@ Tách ra mua được ba thứ:
 ```
 
 **Nguyên tắc:** ingest **không gọi bất kỳ dịch vụ ngoài nào**. Chỉ verify → lưu → trả lời. Mục tiêu p95 < 100ms.
+
+**Header lưới hứng không đổi thứ tự trên** (LH3, ADR-217): bước 0' và 2b chỉ thay *IP* và *"bây giờ"* mà các bước sẵn có dùng; COMMIT (6) rồi mới SET NX (7) giữ nguyên, idempotency giữ nguyên (request phát lại cùng bytes + cùng id provider → UNIQUE nuốt thành `duplicate`).
+
+**`x-hub-outcome` trên mọi phản hồi `/hooks/*`** (H1, ADR-221): `accepted` · `duplicate` · `handshake` · `rejected` (request sai: chữ ký — kể cả `rejectStatus: 503` —, 404, 400, 405, 413, 414, 422) · `refused` (chính sách: 429 cổng phạt / rate limit, 507, cờ unverified tắt) · `unavailable` (lỗi tạm thời 5xx — BB-3). Lưới hứng chỉ coi là "hub vắng" khi timeout / lỗi mạng / 5xx không có outcome hoặc `unavailable`; 408/429 luôn retry (H2). Controller đặt theo trace của ingest; cổng phạt đặt `refused`; lưới đỡ ở gốc app (cài trước guard `/hooks`, cổng phạt, body parser) gắn theo status cho nhánh còn lại (4xx `rejected`, 5xx `unavailable`).
 
 Rollback vì lý do khác (không phải unique) → trả **5xx** để provider retry. (Không cần `DEL idem`: `SET NX` chỉ chạy SAU `COMMIT`, nên rollback thì khoá Redis chưa từng được ghi.)
 
@@ -1020,7 +1036,7 @@ Console có hai nút "một bước" thay cho làm tay ở hai đầu:
 
 ```
 1. TX: Source + SourceSecret (secret ký dev nhập, vd checksumKey) + source_connections PENDING + audit  → COMMIT
-2. NGOÀI TX: connector.connect(ingestUrl = HUB_PUBLIC_URL/hooks/<provider>/<sourceKey>)
+2. NGOÀI TX: connector.connect(ingestUrl = HUB_INGEST_PUBLIC_URL (thiếu thì HUB_PUBLIC_URL, ADR-211)/hooks/<provider>/<sourceKey>)
       ↳ provider bắn request kiểm tra vào ingest NGAY lúc này → source phải tồn tại, verify được, trả 200
 3. TX: CONNECTED + display (+ SourceSecret do provider sinh) | FAILED + last_error/last_fix (source giữ lại, "Thử lại")
 ```

@@ -24,6 +24,7 @@ const EDGE_ENVSUBST_VARS = [
   'EDGE_IP_RATE',
   'EDGE_IP_BURST',
   'EDGE_CONN_PER_IP',
+  'EDGE_HOOKS_IP_LIMITS',
   'HUB_DOCS_URL',
   'EDGE_ACCESS_LOG',
   'EDGE_SHUTDOWN_TIMEOUT',
@@ -37,6 +38,17 @@ const LIMITS = {
 };
 
 const on = (v) => ['1', 'true', 'on', 'yes'].includes(String(v ?? '').trim().toLowerCase());
+
+/**
+ * LH3 (ADR-217, REVIEW-LH3 TB-1): lưới hứng bật = CATCHNET_FORWARD_SECRET có ít nhất một giá trị ≥ 32 ký tự (CÙNG luật
+ * với hub-api `catchnetSecrets`). Chỉ đọc độ dài — giá trị secret không bao giờ vào cấu hình nginx.
+ */
+function catchnetOn(env) {
+  return String(env.CATCHNET_FORWARD_SECRET || '')
+    .split(',')
+    .slice(0, 2)
+    .some((s) => s.trim().length >= 32);
+}
 
 function clampInt(env, name) {
   const { def, min, max } = LIMITS[name];
@@ -201,6 +213,16 @@ function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout'
       msg: 'EDGE_IP_FUSE=1 nhưng EDGE_TRUSTED_PROXIES trống: cầu chì đếm theo địa chỉ kết nối TCP — chỉ đúng khi KHÔNG có proxy phía trước (local). Sau proxy Render = chặn mọi người (§3.2).',
     });
   }
+  // LH3 (TB-1): lưới bật -> /hooks/* đi qua IP egress Cloudflare. nginx không kiểm được chữ ký lưới, nên KHÔNG tin
+  // x-catchnet-client-ip và KHÔNG khoá theo IP kết nối ở /hooks/* (khoá chung cả lưới): tắt cầu chì + limit_conn của
+  // /hooks/*. Giới hạn theo IP đã ký = cổng phạt hub-api. /v1/p/* giữ cầu chì.
+  const catchnet = catchnetOn(env);
+  if (catchnet && fuse) {
+    warnings.push({
+      level: 50,
+      msg: 'EDGE_IP_FUSE=1 + lưới hứng bật (CATCHNET_FORWARD_SECRET): cầu chì và limit_conn theo IP của nginx TẮT cho /hooks/* (IP kết nối là IP Cloudflare, nginx không kiểm được chữ ký lưới). /v1/p/* vẫn có cầu chì; /hooks/* chỉ còn cổng phạt theo IP đã ký của hub-api (ADR-217).',
+    });
+  }
   return {
     warnings,
     vars: {
@@ -212,6 +234,7 @@ function edgeVars(env, { listenPort, upstream, prefix, accessLog = '/dev/stdout'
       EDGE_IP_RATE: String(clampInt(env, 'EDGE_IP_RATE')),
       EDGE_IP_BURST: String(clampInt(env, 'EDGE_IP_BURST')),
       EDGE_CONN_PER_IP: String(clampInt(env, 'EDGE_CONN_PER_IP')),
+      EDGE_HOOKS_IP_LIMITS: catchnet ? '0' : '1',
       HUB_DOCS_URL: docs,
       EDGE_ACCESS_LOG: accessLog,
       EDGE_SHUTDOWN_TIMEOUT: `${nginxShutdownSeconds(env)}s`,
@@ -280,4 +303,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EDGE_ENVSUBST_VARS, TEMPLATE, edgeVars, renderTemplate, prepareEdge, sourceKeyLocationRegex, realIpBlock, on, edgeDrainMs, nginxShutdownSeconds, tooWide };
+module.exports = { EDGE_ENVSUBST_VARS, TEMPLATE, catchnetOn, edgeVars, renderTemplate, prepareEdge, sourceKeyLocationRegex, realIpBlock, on, edgeDrainMs, nginxShutdownSeconds, tooWide };

@@ -31,6 +31,7 @@ import { parseAcceptUnverified } from './accept-unverified';
 import { assertSourceLimit, isOperatorRequest } from '../console/source-limit';
 import { SOURCE_KEY_RE, SOURCE_KEY_RULE, generateSourceKey } from '../console/source-key';
 import { ProjectScopeGuard } from '../console/project-scope.guard';
+import { sourceIngestUrl } from '../console/public-ingest-base';
 import { RequireScope } from '../service-api/require-scope.decorator';
 import { resolveSourceIds } from '../service-api/service-resources.controller';
 import { consoleSource, parseSourceInput } from '../service-api/source-input';
@@ -147,7 +148,8 @@ export class ApiController {
     // ADR-161: mặc định ẩn source đã lưu trữ.
     const sources = await repo.findSources({ archivedAt: null });
     // Review PK4 TB-1: cùng một hàm map với create/PATCH — không secrets, không verifyTokenEnc.
-    return sources.map((s) => ({ ...consoleSource(s), webhookUrl: `/hooks/${s.provider}/${s.sourceKey}` }));
+    // ADR-211: `ingestUrl` tuyệt đối theo HUB_INGEST_PUBLIC_URL (thiếu thì HUB_PUBLIC_URL) cho dev copy; null -> web tự ghép.
+    return sources.map((s) => ({ ...consoleSource(s), webhookUrl: `/hooks/${s.provider}/${s.sourceKey}`, ingestUrl: sourceIngestUrl(s.provider, s.sourceKey) }));
   }
 
   @Post('sources')
@@ -186,7 +188,7 @@ export class ApiController {
       return created;
     });
     // Không trả ciphertext secret / verifyTokenEnc ra trình duyệt (review PK4 TB-1: một hàm map chung).
-    return consoleSource(source);
+    return { ...consoleSource(source), ingestUrl: sourceIngestUrl(source.provider, source.sourceKey) };
   }
 
   /**

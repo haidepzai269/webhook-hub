@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { ProviderAdapter } from './provider.interface';
+import { AdapterContext, ProviderAdapter } from './provider.interface';
 import { RawWebhookRequest, NormalizedEvent, IngestResult, ProviderType, parseProviderTime } from '@hub/common';
 import { NormalizeContext, amountOf, envelope, fallbackTxnId, receivedTime, str } from './normalize-helpers';
 import { bodyHashKey } from '@hub/crypto';
@@ -23,14 +23,19 @@ export class StripeAdapter implements ProviderAdapter {
    * (hỗ trợ xoay secret — ARCHITECTURE.md). Thử lần lượt từng secret vì Stripe
    * chỉ chấp nhận đúng secret của endpoint tương ứng.
    */
-  async verify(req: RawWebhookRequest, secrets: string[]): Promise<boolean> {
+  async verify(req: RawWebhookRequest, secrets: string[], ctx?: AdapterContext): Promise<boolean> {
     const sigHeader = req.headers['stripe-signature'] as string | undefined;
     if (!sigHeader) return false;
+    // LH3 (H3, ADR-217): `ctx.verifyAt` = giờ lưới hứng nhận request (đã ký, body khớp) -> "bây giờ" của cửa sổ 5 phút. Tham
+    // số `receivedAt` (ms) của CHÍNH `constructEvent` (stripe 22.6.2, Webhooks.js `validateComputedSignature`) — cùng hàm,
+    // ADR-174 giữ nguyên. verifyAt hỏng (NaN) -> fail-closed: SDK coi NaN là "không quá hạn" nên phải chặn ở đây.
+    const receivedAt = ctx?.verifyAt ? ctx.verifyAt.getTime() : undefined;
+    if (receivedAt !== undefined && !Number.isFinite(receivedAt)) return false;
 
     for (const secret of secrets) {
       try {
         // Bắt buộc dùng rawBody (bytes), không phải req.body đã parse — CLAUDE.md.
-        stripeClient.webhooks.constructEvent(req.rawBody, sigHeader, secret);
+        stripeClient.webhooks.constructEvent(req.rawBody, sigHeader, secret, undefined, undefined, receivedAt);
         return true;
       } catch {
         // Sai secret hoặc lệch tolerance (mặc định 5 phút) — thử secret kế tiếp.
