@@ -9,6 +9,8 @@
  *   npm run verify:deployed        L2 chỉ kịch bản `@deployed-safe`, vào VERIFY_API_URL (bắt buộc). Không bánh cóc.
  *   npm run verify                 L0 + L1 + L2.
  *   npm run verify:chaos           L3 — kill/restart/pause container hubv (VF5, verify/scenarios/chaos-l3.ts).
+ *   npm run verify:chaos:bp        L3 BP (ADR-193) — Postgres chết 60 s / 10 phút, đích chết 10 phút (~40 phút, chạy tay;
+ *                                  `--tag bp-t4|bp-t21|bp-t16` cho một kịch bản). Không nằm trong verify:chaos/nightly.
  *   npm run verify:all             L0 → L3.
  *   npm run verify:probe -- P-BB3-01 | --all [--overlay a,b]   probe §6.3 trong git worktree tạm (VF6).
  *   npm run verify:bb              bảng 5 bất biến: test BB:n xanh + probe đỏ (§8.2).

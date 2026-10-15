@@ -17,8 +17,12 @@ export const EXTERNAL_SUITES: { file: string; tags: string[] }[] = [{ file: 'ver
 
 /** File kịch bản module — thêm file mới vào đây (mỗi spec tự thêm kịch bản của mình). */
 export const SCENARIO_MODULES = ['verify/scenarios/ingest-e2e.ts', 'verify/scenarios/edge-e2e.ts'];
-/** VF5: L3 chaos — kill/restart/pause container hubv. Không bao giờ trong verify:deployed. */
-export const CHAOS_MODULES = ['verify/scenarios/chaos-l3.ts'];
+/**
+ * VF5: L3 chaos — kill/restart/pause container hubv. Không bao giờ trong verify:deployed.
+ * chaos-bp.ts (ADR-193): kịch bản BP dài (10 phút/kịch bản) mang tag `chaos-bp`, KHÔNG mang `chaos` -> `verify:chaos` mặc định
+ * (nightly) không chạy; chạy tay `npm run verify:chaos:bp` hoặc `npm run verify:chaos -- --tag bp-t4`.
+ */
+export const CHAOS_MODULES = ['verify/scenarios/chaos-l3.ts', 'verify/scenarios/chaos-bp.ts'];
 
 export interface L2Options {
   tags: string[];

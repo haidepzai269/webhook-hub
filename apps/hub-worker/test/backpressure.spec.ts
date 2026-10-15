@@ -7,7 +7,7 @@ jest.mock('ioredis', () => {
 });
 
 import { Prisma } from '@prisma/client';
-import { logger } from '@hub/common';
+import { LogThrottle, logger } from '@hub/common';
 import { NORMALIZE_MAX_DEFER_MS, normalizeMaxDeferMs } from '@hub/messaging';
 import { FailureRateController, backpressureOptionsFromEnv } from '../src/backpressure/failure-rate.controller';
 import { runGated } from '../src/backpressure/gate';
@@ -376,6 +376,41 @@ describe('BP5 §7.4 — normalize hoãn không đốt lượt khi DB đang ốm'
     expect(normalizeMaxDeferMs('600000')).toBe(600_000);
     expect(normalizeMaxDeferMs('1')).toBe(30_000);
   });
+
+  it('F2 (ADR-231, phát hiện ở chaos T4 phần b): đợt đầu khi DB vừa chết (factor = 0) — 20 message lỗi tạm -> 1 dòng warn / 30s / tiến trình (kèm suppressedSinceLastLog), từng message hạ xuống debug; nhánh DLQ không gộp', async () => {
+    const lines: { level: string; o: any; m: string }[] = [];
+    const spy = jest.spyOn(logger, 'child').mockImplementation(
+      () =>
+        ({
+          warn: (o: any, m: string) => lines.push({ level: 'warn', o, m }),
+          error: (o: any, m: string) => lines.push({ level: 'error', o, m }),
+          debug: (o: any, m: string) => lines.push({ level: 'debug', o, m }),
+          info: jest.fn(),
+        }) as any,
+    );
+    try {
+      let now = 0;
+      const consumer = normalizeWith(new FailureRateController({ dependency: 'db' })); // factor 0: chưa tick
+      (consumer as any).transientLogThrottle = new LogThrottle(30_000, () => now);
+      for (let i = 0; i < 20; i++) await consumer.handleMessage(nMsg(), buildChannel());
+      const transientWarn = () => lines.filter((l) => l.level === 'warn' && l.m.startsWith('Lỗi tạm ở normalize'));
+      expect(transientWarn()).toHaveLength(1);
+      expect(transientWarn()[0].o.suppressedSinceLastLog).toBe(0);
+      expect(lines.filter((l) => l.level === 'debug' && l.m.startsWith('Lỗi tạm ở normalize'))).toHaveLength(20);
+      now += 29_999;
+      await consumer.handleMessage(nMsg(), buildChannel());
+      expect(transientWarn()).toHaveLength(1);
+      now += 1;
+      await consumer.handleMessage(nMsg(), buildChannel());
+      expect(transientWarn()).toHaveLength(2);
+      expect(transientWarn()[1].o.suppressedSinceLastLog).toBe(20); // 19 của đợt đầu + 1 lúc 29,999s
+      // hết lượt -> DLQ: log.error từng message, không gộp
+      for (let i = 0; i < 3; i++) await consumer.handleMessage(nMsg({ [NORMALIZE_RETRY_HEADER]: 5 }), buildChannel());
+      expect(lines.filter((l) => l.level === 'error' && l.m.includes('-> DLQ'))).toHaveLength(3);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
@@ -394,7 +429,7 @@ describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
     return { due, channel };
   }
 
-  it('[BP:T4] (phần a) DB chết 60s dưới tải (200 delivery + 100 normalize): Prisma bị gọi ≤ 20/s/lane vài giây đầu, rồi chế độ dò ≤ 2 lần / 5s / tiến trình (nhịp dò tính theo LANE); log warn gộp', async () => {
+  it('[BP:T4] (phần a) DB chết 60s dưới tải (200 delivery + 100 normalize): Prisma bị gọi ≤ 20/s/lane vài giây đầu, rồi chế độ dò ≤ 2 lần / 5s trên đường consumer (normalize + delivery) (nhịp dò tính theo LANE); log warn gộp', async () => {
     jest.useFakeTimers();
     const warn = jest.spyOn(logger, 'child');
     try {
@@ -528,6 +563,24 @@ describe('BP5 — bảng mã lỗi hạ tầng (nợ §16 của BP1)', () => {
       expect(classifyNormalizeError(err)).toBe('transient');
     }
     expect(classifyInfraError(Object.assign(new Error('Channel closed'), { name: 'IllegalOperationError' }))).toBe('unknown');
+    // Chaos [BP:T4] phần b bắt được (ADR-194): $executeRaw khi Postgres bị giết -> P2010 bọc 57P01 -> trước đây "Lỗi dữ liệu" -> DLQ.
+    const p2010 = (sqlstate: string, msg: string) => new Prisma.PrismaClientKnownRequestError(`Raw query failed. Code: \`${sqlstate}\`. Message: \`${msg}\``, { code: 'P2010', clientVersion: 'x', meta: { code: sqlstate, message: msg } });
+    expect(classifyInfraError(p2010('57P01', 'FATAL: terminating connection due to unexpected postmaster exit'))).toBe('transient');
+    expect(classifyNormalizeError(p2010('57P01', 'FATAL: terminating connection due to unexpected postmaster exit'))).toBe('transient');
+    expect(classifyInfraError(p2010('08006', 'connection failure'))).toBe('transient');
+    // P2010 với lỗi dữ liệu thật (vi phạm unique, cú pháp) vẫn KHÔNG phải hạ tầng
+    expect(classifyInfraError(p2010('23505', 'duplicate key value violates unique constraint'))).toBe('unknown');
+    expect(classifyNormalizeError(p2010('42601', 'syntax error at or near'))).toBe('permanent');
+    // Review TB-1: meta.code có thì CHỈ theo meta.code — câu lỗi dữ liệu chứa "08006"/"57P01" (giá trị người dùng) không được thành transient
+    expect(classifyInfraError(p2010('22P02', 'invalid input syntax for type uuid: "08006"'))).toBe('unknown');
+    expect(classifyInfraError(p2010('23505', 'duplicate key (id)=(57P01) Code: `57P01`'))).toBe('unknown');
+    expect(classifyNormalizeError(p2010('22P02', 'invalid input syntax for type integer: "57P01"'))).toBe('permanent');
+    // Thiếu meta: dò câu theo khuôn engine, có neo "Code: `…`"
+    const noMeta = (m: string) => new Prisma.PrismaClientKnownRequestError(m, { code: 'P2010', clientVersion: 'x' });
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `57P01`. Message: `FATAL: terminating connection due to administrator command`'))).toBe('transient');
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `08006`. Message: `connection failure`'))).toBe('transient');
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `22P02`. Message: `invalid input syntax for type uuid: "08006"`'))).toBe('unknown');
+    expect(classifyInfraError(noMeta('Raw query failed. Code: `23505`. Message: `57P01 terminating connection due to administrator command`'))).toBe('unknown');
     expect(classifyInfraError(unknownReq('some other query error'))).toBe('unknown');
   });
 
