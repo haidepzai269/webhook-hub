@@ -1,0 +1,31 @@
+# LH2 — lưới hứng (SPEC-hub-sap §4, §9, ADR-214/216/220).
+# Tên Worker là BẤT BIẾN: URL = https://hub-hooks.webhookhub.workers.dev — đổi tên = đổi URL của MỌI source (§9).
+# Môi trường thử dùng tên riêng (vd `hub-hooks-staging`), KHÔNG deploy Worker khác cùng tên này.
+# Bật thật (wrangler deploy, d1 create, secret put) là thao tác hạ tầng: Admin làm / duyệt từng lần (H12).
+name = "hub-hooks"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# Phát lại mỗi phút (§4.4, ADR-216): ≤ CATCHNET_REPLAY_BATCH dòng/lượt.
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hub-hooks-db"
+# PLACEHOLDER — KHÔNG phải id thật. Admin chạy `npx wrangler d1 create hub-hooks-db --location apac` rồi dán id vào đây.
+# Local (`wrangler dev --local`, `d1 migrations apply --local`) chạy với id nào cũng được.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+# URL gốc hub thật (Render) — Worker chuyển tiếp/phát lại vào HUB_ORIGIN_URL + /hooks/... Admin điền lúc bật.
+HUB_ORIGIN_URL = ""
+CATCHNET_FORWARD_TIMEOUT_MS = "4000"
+CATCHNET_REPLAY_BATCH = "25"
+CATCHNET_RETENTION_DAYS = "7"
+CATCHNET_MAX_PER_KEY = "2000"
+CATCHNET_MAX_ROWS = "50000"
+# Secret (KHÔNG để ở đây): CATCHNET_FORWARD_SECRET, CATCHNET_ADMIN_TOKEN
+#   local:    apps/catchnet/.dev.vars (đã .gitignore)
+#   deployed: `npx wrangler secret put CATCHNET_FORWARD_SECRET` / `... CATCHNET_ADMIN_TOKEN` (cùng giá trị với hub-api)

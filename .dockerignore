@@ -16,3 +16,7 @@ Thumbs.db
 **/.env
 **/.env.*
 !.env.example
+# LH2: state cục bộ của wrangler + secret local của Worker (apps/catchnet, spikes/)
+**/.wrangler
+**/.dev.vars
+**/.dev.vars.*

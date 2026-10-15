@@ -71,6 +71,27 @@ jobs:
             verify/.last-red.json
           if-no-files-found: ignore
 
+  # LH2 (SPEC-hub-sap H10, ADR-214): Worker lưới hứng `apps/catchnet` nằm NGOÀI npm workspaces (wrangler/workerd nặng,
+  # không làm chậm `npm ci` của hub) -> lock riêng, job riêng. L0 = vitest trên Node (D1 giả bằng node:sqlite).
+  # `[LH:T*]` của Worker được verify:map đọc (tên test), nhưng jest gốc không chạy chúng.
+  catchnet:
+    name: catchnet (Worker L0 + typecheck)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/catchnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/catchnet/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   db:
     name: db (L1)
     runs-on: ubuntu-24.04

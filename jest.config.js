@@ -15,8 +15,9 @@ module.exports = {
   workerIdleMemoryLimit: '512MB',
   // VF7: worktree của agent (.claude/worktrees/*) và của probe (VF6) nằm DƯỚI thư mục repo → haste map thấy hai
   // bản @hub/* và mọi suite import @hub chết ("several different files … provide a module"). Bỏ qua chúng.
-  modulePathIgnorePatterns: ['<rootDir>/.claude/', '<rootDir>/dist/'],
-  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
+  modulePathIgnorePatterns: ['<rootDir>/.claude/', '<rootDir>/dist/', '<rootDir>/apps/catchnet/'],
+  // LH2 (H10): apps/catchnet là Worker NGOÀI workspaces, test bằng vitest của chính nó (job CI riêng) — jest gốc bỏ qua.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/', '<rootDir>/apps/catchnet/'],
   moduleNameMapper: {
     '^@hub/common(.*)$': '<rootDir>/libs/common/src$1',
     '^@hub/crypto(.*)$': '<rootDir>/libs/crypto/src$1',
