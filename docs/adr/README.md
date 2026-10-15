@@ -2311,3 +2311,9 @@ không thấy gì.
   - Đánh đổi: source có id số lớn đổi khoá một lần, từ dạng đã làm tròn sang dạng đúng. Sự kiện đang được gửi lại qua lúc deploy có thể vào hai lần (nhận trùng, không mất).
 - **Đổi kiểu khoá của nguồn đang chạy** từ `field`/`path` sang `bodyHash`: dải khoá khác, nên sự kiện đang được gửi lại có thể vào hai lần (nhận trùng, không mất). Chấp nhận.
 - **`empty_body`** vào catalog lỗi và `docs/ERRORS.md`. `EMPTY_BODY_FIX` của adapter lấy từ catalog (một nguồn câu).
+
+## ADR-194 — `P2010` bọc SQLSTATE mất kết nối (57P0x, lớp 08) là lỗi hạ tầng `transient` (chaos `[BP:T4]` phần b, 2026-10-15)
+
+**Vấn đề:** chaos `[BP:T4]` phần b (giết Postgres giữa transaction) cho `$executeRaw` ném `PrismaClientKnownRequestError` **P2010** "Raw query failed. Code: `57P01`". `classifyInfraError` trả `unknown` cho mọi mã Prisma ngoài bảng — bảng 57P0x/lớp 08 của BP5 (C12) chỉ xét `UnknownRequestError` và lỗi driver — nên normalize coi là lỗi dữ liệu → `q.normalize.dlq` ngay lượt 0 (1/2000 event kẹt, phải renormalize tay), delivery đi nhánh `unknown` (hoãn 1 phút, 5 lần → DLQ).
+**Chọn:** P2010 mà SQLSTATE bên trong (`meta.code`, hoặc khớp `TRANSIENT_PG_MESSAGE` trong thông điệp) thuộc 57P01/57P02/57P03/lớp 08 → `transient`; P2010 với SQLSTATE khác (23505, 42601…) giữ `unknown`/`permanent`. Một chỗ sửa trong `classifyInfraError`, normalize + delivery + bộ điều khiển `db` đổi theo.
+**Đánh đổi:** dựa vào `meta.code`/thông điệp của Prisma 6 (đổi định dạng ở bản Prisma sau thì về lại `unknown` — test "bảng mã" của `backpressure.spec` sẽ đỏ khi nâng Prisma nếu fixture cập nhật theo). Lỗi dữ liệu thật bọc trong P2010 không bị nhận nhầm vì chỉ danh sách SQLSTATE mất kết nối được nâng.

@@ -29,7 +29,16 @@ export function classifyInfraError(err: unknown): InfraErrorKind {
 
   // So sánh theo `name` ngoài `instanceof`: hai bản @prisma/client khác nhau (dist cũ, jest) vẫn nhận ra.
   const isKnown = err instanceof Prisma.PrismaClientKnownRequestError || e.name === 'PrismaClientKnownRequestError';
-  if (isKnown) return TRANSIENT_PRISMA_CODES.has(String(e.code)) ? 'transient' : 'unknown';
+  if (isKnown) {
+    if (TRANSIENT_PRISMA_CODES.has(String(e.code))) return 'transient';
+    // Chaos [BP:T4] phần b (ADR-194): `$queryRaw`/`$executeRaw` bọc lỗi Postgres trong P2010 ("Raw query failed. Code: `57P01`")
+    // — Postgres bị giết giữa transaction ra ĐÚNG dạng này. Không xét SQLSTATE bên trong thì normalize coi là lỗi dữ liệu -> DLQ ngay.
+    if (String(e.code) === 'P2010') {
+      const meta = (e as { meta?: { code?: unknown } }).meta;
+      if (TRANSIENT_PG_SQLSTATES.has(String(meta?.code)) || TRANSIENT_PG_MESSAGE.test(String((e as { message?: unknown }).message ?? ''))) return 'transient';
+    }
+    return 'unknown';
+  }
 
   if (err instanceof Prisma.PrismaClientInitializationError || e.name === 'PrismaClientInitializationError') {
     return 'transient';

@@ -528,6 +528,14 @@ describe('BP5 — bảng mã lỗi hạ tầng (nợ §16 của BP1)', () => {
       expect(classifyNormalizeError(err)).toBe('transient');
     }
     expect(classifyInfraError(Object.assign(new Error('Channel closed'), { name: 'IllegalOperationError' }))).toBe('unknown');
+    // Chaos [BP:T4] phần b bắt được (ADR-194): $executeRaw khi Postgres bị giết -> P2010 bọc 57P01 -> trước đây "Lỗi dữ liệu" -> DLQ.
+    const p2010 = (sqlstate: string, msg: string) => new Prisma.PrismaClientKnownRequestError(`Raw query failed. Code: \`${sqlstate}\`. Message: \`${msg}\``, { code: 'P2010', clientVersion: 'x', meta: { code: sqlstate, message: msg } });
+    expect(classifyInfraError(p2010('57P01', 'FATAL: terminating connection due to unexpected postmaster exit'))).toBe('transient');
+    expect(classifyNormalizeError(p2010('57P01', 'FATAL: terminating connection due to unexpected postmaster exit'))).toBe('transient');
+    expect(classifyInfraError(p2010('08006', 'connection failure'))).toBe('transient');
+    // P2010 với lỗi dữ liệu thật (vi phạm unique, cú pháp) vẫn KHÔNG phải hạ tầng
+    expect(classifyInfraError(p2010('23505', 'duplicate key value violates unique constraint'))).toBe('unknown');
+    expect(classifyNormalizeError(p2010('42601', 'syntax error at or near'))).toBe('permanent');
     expect(classifyInfraError(unknownReq('some other query error'))).toBe('unknown');
   });
 
