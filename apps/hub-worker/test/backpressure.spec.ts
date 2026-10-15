@@ -7,7 +7,7 @@ jest.mock('ioredis', () => {
 });
 
 import { Prisma } from '@prisma/client';
-import { logger } from '@hub/common';
+import { LogThrottle, logger } from '@hub/common';
 import { NORMALIZE_MAX_DEFER_MS, normalizeMaxDeferMs } from '@hub/messaging';
 import { FailureRateController, backpressureOptionsFromEnv } from '../src/backpressure/failure-rate.controller';
 import { runGated } from '../src/backpressure/gate';
@@ -377,6 +377,40 @@ describe('BP5 §7.4 — normalize hoãn không đốt lượt khi DB đang ốm'
     expect(normalizeMaxDeferMs('1')).toBe(30_000);
   });
 
+  it('F2 (ADR-231, chaos [BP:T4] phần b): đợt đầu khi DB vừa chết (factor = 0) — 20 message lỗi tạm -> 1 dòng warn / 30s / tiến trình (kèm suppressedSinceLastLog), từng message hạ xuống debug; nhánh DLQ không gộp', async () => {
+    const lines: { level: string; o: any; m: string }[] = [];
+    const spy = jest.spyOn(logger, 'child').mockImplementation(
+      () =>
+        ({
+          warn: (o: any, m: string) => lines.push({ level: 'warn', o, m }),
+          error: (o: any, m: string) => lines.push({ level: 'error', o, m }),
+          debug: (o: any, m: string) => lines.push({ level: 'debug', o, m }),
+          info: jest.fn(),
+        }) as any,
+    );
+    try {
+      let now = 0;
+      const consumer = normalizeWith(new FailureRateController({ dependency: 'db' })); // factor 0: chưa tick
+      (consumer as any).transientLogThrottle = new LogThrottle(30_000, () => now);
+      for (let i = 0; i < 20; i++) await consumer.handleMessage(nMsg(), buildChannel());
+      const transientWarn = () => lines.filter((l) => l.level === 'warn' && l.m.startsWith('Lỗi tạm ở normalize'));
+      expect(transientWarn()).toHaveLength(1);
+      expect(transientWarn()[0].o.suppressedSinceLastLog).toBe(0);
+      expect(lines.filter((l) => l.level === 'debug' && l.m.startsWith('Lỗi tạm ở normalize'))).toHaveLength(20);
+      now += 29_999;
+      await consumer.handleMessage(nMsg(), buildChannel());
+      expect(transientWarn()).toHaveLength(1);
+      now += 1;
+      await consumer.handleMessage(nMsg(), buildChannel());
+      expect(transientWarn()).toHaveLength(2);
+      expect(transientWarn()[1].o.suppressedSinceLastLog).toBe(20); // 19 của đợt đầu + 1 lúc 29,999s
+      // hết lượt -> DLQ: log.error từng message, không gộp
+      for (let i = 0; i < 3; i++) await consumer.handleMessage(nMsg({ [NORMALIZE_RETRY_HEADER]: 5 }), buildChannel());
+      expect(lines.filter((l) => l.level === 'error' && l.m.includes('-> DLQ'))).toHaveLength(3);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('BP5 — mô phỏng sự cố DB (L0, đồng hồ giả)', () => {
