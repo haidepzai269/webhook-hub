@@ -718,7 +718,8 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     const keySeconds = deliveryRampKeySeconds(deliveryRampConfig({}));
     expect(keySeconds).toBe(70);
     await redis.set(k('ramp'), String(start), 'EX', keySeconds);
-    // Mô hình đến theo đúng số đo chaos [BP:T16] phần b: mỗi vòng retry.10s hàng về rải trong 2 giây (prefetch × xử lý);
+    // Mô hình đến theo số đo chaos T16 lượt 1: mỗi vòng retry.10s hàng về rải trong 2 giây (prefetch × xử lý). LẠC QUAN: lượt đo
+    // lại (ADR-232 "Đo lại") hàng dồn ~1 giây/vòng và sau ramp vẫn 149/s — test này chỉ khoá cơ chế kẹp, không chứng minh hết dội;
     // message bị chặn quay lại đúng 10s sau. Khoá :ramp "hết hạn" khi đồng hồ giả qua start + keySeconds (TTL thật đo theo giờ thật).
     const due = new Map<number, number>([[0, 250], [1, 250]]);
     const perSec: { sec: number; ok: number; cap: number | null }[] = [];

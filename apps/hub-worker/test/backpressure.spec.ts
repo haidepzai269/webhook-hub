@@ -377,7 +377,7 @@ describe('BP5 §7.4 — normalize hoãn không đốt lượt khi DB đang ốm'
     expect(normalizeMaxDeferMs('1')).toBe(30_000);
   });
 
-  it('F2 (ADR-231, chaos [BP:T4] phần b): đợt đầu khi DB vừa chết (factor = 0) — 20 message lỗi tạm -> 1 dòng warn / 30s / tiến trình (kèm suppressedSinceLastLog), từng message hạ xuống debug; nhánh DLQ không gộp', async () => {
+  it('F2 (ADR-231, phát hiện ở chaos T4 phần b): đợt đầu khi DB vừa chết (factor = 0) — 20 message lỗi tạm -> 1 dòng warn / 30s / tiến trình (kèm suppressedSinceLastLog), từng message hạ xuống debug; nhánh DLQ không gộp', async () => {
     const lines: { level: string; o: any; m: string }[] = [];
     const spy = jest.spyOn(logger, 'child').mockImplementation(
       () =>

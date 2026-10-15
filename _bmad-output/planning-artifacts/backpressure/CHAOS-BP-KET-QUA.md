@@ -1,33 +1,134 @@
 # Kết quả chaos LOCAL — `[BP:T4]` `[BP:T16]` `[BP:T21]` (phần b)
 
-> Chạy ngày **2026-10-15**, stack `hubv` (docker compose, LOCAL — ADR-019, C8). Kịch bản `verify/scenarios/chaos-bp.ts`, đồ nghề `verify/lib/chaos.ts` (ADR-193).
-> Máy: Linux 12 CPU / 31 GB RAM, Docker 29.6.1. Không agent nặng nào khác chạy jest/tsc/docker trong lúc đo (đã chờ máy rảnh theo C8).
-> Code: nhánh `feat/chaos-bp` mở từ `master` `35918bd`. Lượt 1 (cả ba kịch bản) chạy trên image dựng từ `35918bd`. Lượt 2 và 3 (chỉ T4) chạy sau khi vá P2010 (ADR-194, xem §4).
-> Chạy lại: `npm run verify:up && npm run verify:chaos:bp` (~35 phút), hoặc `npm run verify:chaos -- --tag bp-t4|bp-t21|bp-t16`. Số chi tiết (chuỗi mẫu 1 s, cửa sổ, log) nằm ở `verify/.results/chaos-bp-T*.json`.
+> **Số chính thức: lượt cuối, chạy ngày 2026-10-15 trên HEAD `9717787`** của nhánh `feat/chaos-bp`. Lượt này chạy sau khi đã gộp `origin/master` `4c9b6ac` và có đủ các sửa: ADR-194 (P2010, bản siết theo review TB-1), ADR-231 (F2), ADR-232 (F3), ADR-233 (R1 probe). Image `hubv` được dựng lại bằng `verify:up`.
+> Môi trường: stack `hubv` (docker compose, LOCAL — ADR-019, C8). Máy Linux 12 CPU / 31 GB, Docker 29.6.1. Trước khi chạy đã kiểm `pgrep -af 'jest|tsc'` và `compose -p hubv ps`: không có agent nặng nào khác.
+> Kịch bản `verify/scenarios/chaos-bp.ts`, đồ nghề `verify/lib/chaos.ts` (ADR-193). Số chi tiết (chuỗi mẫu 1 s, cửa sổ, log) nằm ở `verify/.results/chaos-bp-T*.json`.
+> Chạy lại: `npm run verify:up && npm run verify:chaos:bp` (khoảng 27 phút), hoặc `npm run verify:chaos -- --tag bp-t4|bp-t21|bp-t16`.
+> Các lượt trước (từ `35918bd`, trước các sửa trên) nằm ở §7 Lịch sử.
 
 ## 0. Cách đo
 
-- **Số "lần gọi Prisma".** Đọc từ `/metrics` của hub-worker mỗi 1 s (một `docker compose exec` chạy suốt kịch bản, không mở cổng ra ngoài). Mỗi lane có bộ đếm riêng:
-  - delivery: `hub_delivery_infra_errors_total`;
-  - normalize: `hub_normalize_deferred_total` + `hub_normalize_retries_total`.
-
-  Khi DB chết, mỗi lần một message chạm DB là một lần gọi thất bại. Có hai giới hạn khi đọc con số này:
-  - Bộ đếm tăng lúc lần gọi **thất bại**, không phải lúc bắt đầu. Prisma `connect_timeout` là 5 s, nên permit được cấp ngay trước khi factor lên 1 có thể báo lỗi muộn tới 5 s. Vì vậy "chế độ dò ổn định" được tính từ lúc factor = 1 cộng 6 s. Số thô tính từ đúng lúc factor = 1 vẫn được ghi riêng.
-  - Bộ đếm **không** gồm truy vấn của scheduler (relay outbox, sweeper, alert, storage). Phần này nằm ngoài BP5 (§7.5, P2) và được ghi riêng bên dưới.
-- **Phá dưới tải** (`preloadBacklog`). Trình tự:
+- **Số "lần chạm DB".** Đọc `/metrics` của hub-worker mỗi 1 s, qua một `docker compose exec` chạy suốt kịch bản; không mở cổng ra ngoài.
+  - Lane delivery đếm bằng `hub_delivery_infra_errors_total`.
+  - Lane normalize đếm bằng `hub_normalize_deferred_total` + `hub_normalize_retries_total`.
+  - Khi DB chết, mỗi lần một message chạm DB là một lần gọi Prisma thất bại.
+- **Giới hạn của cách đếm này:**
+  - Bộ đếm tăng lúc lỗi, không tăng lúc bắt đầu. Prisma `connect_timeout` là 5 s, nên **chặn trên được tính từ mốc factor = 1 cộng 6 s**. Đợt đầu (từ lúc phá tới mốc đó) được ghi riêng.
+  - Số đếm **chỉ gồm đường consumer (normalize + delivery)**. Scheduler (relay outbox, sweeper, alert, storage) nằm ngoài BP5 (§7.5) và được ghi riêng ở F4.
+- **Sai số của mẫu 1 s.** Một "cửa sổ ≤ 5 s" là khoảng giữa hai mẫu cách nhau ≤ 5 s, không phải mọi khoảng 5 s liên tục. Mốc lấy mẫu lệch nhịp dò tới khoảng 1 s, nên số trung bình mỗi 5 s có thể nhích quá 2 (ví dụ 2,04) mà max theo cửa sổ vẫn bằng 2. Log được đếm theo `time` của từng dòng pino.
+- **Phá dưới tải** (`preloadBacklog`):
   1. Dừng hub-worker.
-  2. Provider giả bắn N id. hub-api vẫn COMMIT và trả 2xx; outbox dồn lại.
+  2. Bắn N id. hub-api vẫn COMMIT và trả 2xx; outbox dồn lại.
   3. Bật lại worker.
   4. Phá ngay khi AMQP passive-declare thấy đủ message READY ở `q.normalize` và `q.delivery.main`.
 
-  Đích của T4 chậm 1 s (sink `PUT /_mode delayMs`) để lane delivery có hàng dồn.
-- **0 mất / 0 trùng** đếm bằng Postgres (BB-2), theo id delivery của GitHub:
-  - mỗi id có đúng 1 raw ACCEPTED, 1 event, 1 delivery SUCCEEDED;
-  - không có delivery trùng `(event, subscription)`;
-  - mọi id đã nhận 2xx đều có raw (BB-3).
-- **Đích chết** (T16): sink `PUT /_mode?path=… {"mode":"fail"}` trả 500 nhưng vẫn ghi lại request, nhờ vậy đếm được số request đập vào đích chết. Endpoint đã xác minh challenge, URL giữ nguyên.
+  Mốc phá là lúc phát lệnh. Đích của T4 chậm 1 s (sink `PUT /_mode delayMs`).
+- **0 mất / 0 trùng** đếm bằng Postgres (BB-2), theo id delivery của GitHub. Mỗi id phải có đúng 1 raw ACCEPTED, 1 event và 1 delivery SUCCEEDED; không có delivery trùng; mọi id đã nhận 2xx đều có raw (BB-3).
+- **Đích chết** (T16): sink `PUT /_mode {"mode":"fail"}` trả 500 nhưng vẫn ghi lại request.
 
-## 1. `[BP:T4]` — giết Postgres (SIGKILL) 60 s dưới tải
+## 1. `[BP:T4]` — giết Postgres (SIGKILL) 60 s dưới tải — **PASS đủ 11/11 tiêu chí**
+
+Tải lúc phá: 2000 id, `q.normalize` có 1534 READY, `q.delivery.main` có 419 READY.
+
+| Tiêu chí | Kết quả |
+|---|---|
+| Postgres chết thật suốt 60 s (kiểm mỗi 5 s) | PASS (0 lần thấy chạy) |
+| Cả hai lane có message chạm DB khi DB chết | PASS (delivery 449, normalize 204) |
+| Worker không khởi động lại | PASS |
+| factor{db} lên 1 trong ≤ 10 s | PASS (4,2 s) |
+| **Đợt đầu** (từ lúc phá tới mốc factor = 1 + 6 s, khoảng 10,2 s) | đo, không có ngưỡng: **634 lần chạm DB** (delivery 439, normalize 195). Khoảng 612 lần rơi vào 1,2 s đầu: giây 0,2 có normalize 173, giây 1,2 có delivery 439. 6 s sau factor = 1 còn 22 lỗi của permit đã cấp trước đó (max thô trong một cửa sổ 5 s: 21) |
+| **Chế độ dò**, chặn trên tính từ mốc factor = 1 + 6 s: mọi cửa sổ ≤ 5 s có ≤ 2 lần chạm DB trên đường consumer (normalize + delivery) | PASS: max 2; 19 lần / 49 s = 1,94 / 5 s |
+| Chế độ dò theo lane: ≤ 1 / lane / 5 s | PASS: delivery max 1, normalize max 1 |
+| Log delivery hạ tầng gộp ≤ 1 dòng / 30 s (khung từ lúc phá tới factor = 0, 100 s) | PASS (3 dòng) |
+| Log normalize: 0 warn "Lỗi tạm" sau factor = 1 | PASS (0) |
+| Log consumer ≤ 5 dòng/s (N do phiên đặt trước khi đo, spec không cho N) | **PASS: max 2 dòng/s, tổng 4.** Trước khi có ADR-231 con số này là 225/s |
+| Delivery: lỗi DB xếp `transient` | PASS (449 / 0 unknown) |
+| DB về: 0 mất / 0 trùng / mọi delivery SUCCEEDED | PASS: 2000/2000 sau 139 s; `q.normalize.dlq` 0 → 0 |
+
+Số đo thêm:
+- Spill: 16.
+- factor về 0 sau 40,2 s kể từ lúc DB nhận kết nối lại.
+- Log toàn tiến trình: 140 dòng warn/error trong 100 s, max 4 dòng/s. Trong đó relay outbox 121 dòng (F4), storage 12, consumer 4.
+- Đích nhận lặp 20/2000: đây là at-least-once (F5).
+
+## 2. `[BP:T21]` — dừng Postgres 10 phút dưới tải đều — **PASS**
+
+Tải gồm backlog 1500 id (lúc phá `q.normalize` có 940 READY) và tải đều 0,5 sự kiện/s: 305 id, trong đó 300 nhận 5xx và được gửi lại sau khi DB về. Postgres bị `stop`.
+
+| Tiêu chí | Kết quả |
+|---|---|
+| Postgres chết thật suốt 600 s | PASS |
+| Lane normalize có hàng chạm DB khi DB chết | PASS (normalize 611, delivery 165) |
+| Worker không khởi động lại | PASS |
+| **`q.normalize.dlq` tăng ≤ 5** (đếm bằng `rabbitmqctl` trước/sau) | **PASS: +0** (0 → 0) |
+| **DB về: mọi sự kiện được xử lý**, 0 mất / 0 trùng | **PASS**: 1805/1805, xong sau 28 s kể từ khi provider gửi lại xong |
+| (đo thêm) chế độ dò 10 phút trên đường consumer: ≤ 2 / 5 s | PASS: max 2; 236 lần / 590 s = 2,00 / 5 s |
+| (đo thêm) theo lane: ≤ 1 / lane / 5 s | PASS: delivery 1, normalize 1 |
+
+Số đo thêm:
+- factor lên 1 sau 3,8 s.
+- Đốt lượt ở đợt đầu (factor = 0): 300 lần, mỗi message tối đa 1 trong 5 lượt. Hoãn không đốt lượt: 311 lần. Spill: 160.
+- factor về 0 sau 39,9 s kể từ lúc DB về.
+- Log 10 phút: relay 1198 dòng (F4), storage 129, delivery 19 (đã gộp), normalize 1 (đã gộp, ADR-231). Max 4 dòng/s.
+
+## 3. `[BP:T16]` — đích chết 10 phút với 500 delivery hoãn → hồi phục — **trần ramp PASS; "sau ramp ≤ 64/s" FAIL**
+
+| Tiêu chí | Kết quả |
+|---|---|
+| Tiền đề: lúc đích sống lại có 500 delivery hoãn, 0 SUCCEEDED | PASS |
+| Worker không khởi động lại | PASS |
+| **Không giây nào trong ramp vượt trần** (2..64 trong 60 s, rồi bậc kẹp 64 tới 70 s, ADR-232) | **PASS**: 0 giây vượt; 307 request trong ramp |
+| **Sau ramp** (khoá `:ramp` hết hạn): không giây nào > 64/s (tiêu chí mới của F3) | **FAIL: 192 request còn lại tới ở giây +70 và +71 với 43 và 149/s** |
+| Hồi phục: 500/500 SUCCEEDED, 0 DEAD, 0 trùng | PASS: xong 136 s sau khi đích sống |
+
+- Trong 10 phút đích chết chỉ có **23 request** đập vào đích: 21 request đầu (mạch OPEN), rồi 1 probe ở khoảng giây 61 (`:trips` = 1, OPEN 300 s) và 1 probe ở khoảng giây 361 (`:trips` = 2). Khớp BP3.
+- Probe kế thành công 61,2 s sau khi đích sống. Ramp bắt đầu `09:20:10.641Z`.
+- Số request mỗi giây trong ramp (số/trần), chỉ liệt kê giây ≠ 0: `+0` 2/2 · `+1` 2/2 · `+9` 1/2 · `+10` 2/4 · `+11` 4/4 · `+20` 4/8 · `+21` 8/8 · `+30` 8/16 · `+31` 16/16 · `+40` 32/32 · `+41` 32/32 · `+50` 64/64 · `+51` 64/64 · **`+60` 64/64 (bậc kẹp)** · `+61` 4/64.
+- **Vì sao vẫn trượt.** Bậc kẹp 60–70 s chỉ xả thêm một vòng (64 + 4 request). Ở lượt này, vòng `retry.10s` dồn vào khoảng 1 giây, chứ không rải 2 giây như lượt 1, nên phần còn lại (192) về đúng lúc khoá hết hạn. Hướng (b) đã giảm phần dội từ 243 xuống 192, nhưng đỉnh vẫn 149/s (lượt 1: 123/s). Chi tiết ở F3.
+
+## 4. Phát hiện
+
+- **F1 — ĐÃ VÁ (ADR-194, siết theo review TB-1). P2010 bọc 57P01 bị xếp "lỗi dữ liệu".** Hậu quả là normalize đưa event vào DLQ ngay lượt 0 (T4 lượt 1: 1 event).
+  - Nay `meta.code` dạng SQLSTATE quyết một mình. Chỉ khi thiếu `meta.code` mới dò câu theo mẫu có neo `` Code: `(57P0[123]|08\d{3})` ``.
+  - Có test L1 trên Postgres thật (`infra-errors-db.spec`): `pg_terminate_backend` chính mình → Prisma ném `P2010 {"code":"57P01"}` → `transient`; `'08006'::uuid` → `unknown`.
+  - Lượt cuối: DLQ +0 ở cả T4 lẫn T21.
+- **F2 — ĐÃ VÁ (ADR-231). Đợt warn normalize đầu tiên không gộp.** Lượt 3 đo 225 dòng/s; lượt cuối còn max 2 dòng/s, chỉ 1 dòng normalize (đã gộp) trong toàn bộ T4.
+- **F3 — VÁ MỘT PHẦN (ADR-232, hướng b), tiêu chí mới vẫn FAIL.** Sau ramp, phần tồn vẫn dội 149/s (trần cuối 64). Cần Admin quyết hướng tiếp: kéo ramp theo kích thước hàng tồn, hoặc giữ trần cuối tới khi hàng hết.
+- **R1 — ĐÃ VÁ (ADR-233). Bên thua probe HALF_OPEN tốn 2 lệnh Redis.** Nay gate báo "probe đang bị giữ", bên thua chỉ tốn 1 lệnh (`redis-budget` `[BP:T22]` phần d).
+- **F4 — Ghi nhận (ngoài BP5, §7.5 P2).** Khi DB chết, relay outbox và storage ghi khoảng 2 dòng log/s và gọi khoảng 2 truy vấn Prisma/s mà bộ điều khiển không chặn.
+- **F5 — Ghi nhận, đúng thiết kế: at-least-once ở đích.** 20/2000 delivery đang bay đúng lúc DB bị giết tới đích 2 lần. Postgres vẫn chỉ có 1 delivery cho mỗi event.
+
+## 5. Trích bằng chứng thô (lượt cuối)
+
+```
+# T4 — chuỗi mẫu 1 s (giây | delivery | normalize | factor)
+0,2 | 0 | 173 | 0      1,2 | 439 | 0 | 0,25     2,2 | 0 | 0 | 0,5     3,2 | 0 | 0 | 0,75     (factor 1 từ 4,2 s)
+log T4 (100 s): "Lỗi tạm ở normalize -> q.normalize.retry.30s (log gộp tối đa 1 dòng/30s)" ×1 · delivery gộp ×3 · relay ×121 · storage ×12
+T4: gửi 2000 id (2xx lần đầu 2000) → raw 2000/2000 · event 2000/2000 · delivery 2000/2000 SUCCEEDED · DEAD 0 · trùng 0 (chờ 139 s)
+
+# T21
+backlog normalize trước khi phá: q.normalize ready 940
+chế độ dò 10 phút: 236 lần / 590 s = 2,00 / 5 s, max 2 (delivery 1, normalize 1) · q.normalize.dlq +0 (0 → 0)
+T21: gửi 1805 id (2xx lần đầu 1505) → raw 1805/1805 · event 1805/1805 · delivery 1805/1805 SUCCEEDED · DEAD 0 · trùng 0
+
+# T16
+đích SỐNG lại sau 600 s; hàng hoãn: 500 delivery, 0 SUCCEEDED; 23 request đã đập vào đích chết
+probe thành công, ramp bắt đầu 2026-10-15T09:20:10.641Z (61 s sau khi đích sống)
+ramp (60 s + bậc kẹp): 307 request; 2/2 2/2 … 1/2 2/4 4/4 … 4/8 8/8 … 8/16 16/16 … 32/32 32/32 … 64/64 64/64 … 64/64 4/64 …
+sau ramp: 192 request, max 149/s; +70s:43 +71s:149
+```
+
+## 6. Kiểm chứng phụ (cùng HEAD, sau lượt cuối)
+
+- `npm run verify:chaos` (VF5, chaos-l3 dùng `verify/lib/chaos.ts`): **6/6 xanh** (213 s).
+- `npm run verify:db` (L1): **271/271, 0 skip**. Có `infra-errors-db.spec` (P2010 thật) và test F3 trên Redis thật.
+- Ba kịch bản BP KHÔNG chạy trong `verify:chaos`/nightly (tag `chaos-bp`, ADR-193).
+
+## 7. Lịch sử — các lượt trước (từ `35918bd`, trước ADR-194 bản siết, ADR-231, ADR-232, ADR-233)
+
+> Lượt 1 chạy cả ba kịch bản; lượt 2 và 3 chỉ chạy T4 (sau bản vá P2010 đầu tiên). Ở lượt 1 và 2, mốc phá lấy sau khi lệnh trả về, nên đợt lỗi đầu rơi ngoài cửa sổ đo. Câu "/ 5 s / tiến trình" ở dưới nghĩa là "/ 5 s trên đường consumer (normalize + delivery)".
+
+### 7.1 `[BP:T4]` — giết Postgres (SIGKILL) 60 s dưới tải
 
 Tải lúc phá:
 - Lượt 3 (lượt cuối): 2000 id, `q.normalize` có 1618 READY, `q.delivery.main` có 116 READY.
@@ -65,7 +166,7 @@ Số đo thêm ở lượt 3:
   - 12 dòng storage, 2 dòng delivery, 1 dòng alert.
 - **Đích nhận lặp:** 20 webhook-id tới sink 2 lần. Đây là delivery đang chờ HTTP đúng lúc DB chết: đích đã nhận, nhưng hub chưa ghi được kết quả nên gửi lại. Đây là at-least-once như thiết kế; đích chống trùng bằng `webhook-id`. Postgres vẫn chỉ có 1 delivery cho mỗi event.
 
-## 2. `[BP:T21]` — dừng Postgres 10 phút dưới tải đều (lượt 1, `35918bd`)
+### 7.2 `[BP:T21]` — dừng Postgres 10 phút dưới tải đều (lượt 1, `35918bd`)
 
 Tải gồm hai phần:
 - Backlog 1500 id. Lúc phá, `q.normalize` có 933 READY.
@@ -90,7 +191,7 @@ Số đo thêm:
 - Log 10 phút có 1192 dòng relay (khoảng 2/s, F4), 120 dòng storage, 19 dòng delivery (gộp 30 s), 10 alert, 9 sweeper. Max 4 dòng/s.
 - So với trước BP5 (**ước tính, không đo** — code cũ không còn trong image): với 5 lượt × 30 s, mọi message trong backlog sẽ cạn lượt sau khoảng 2,5 phút, tức khoảng 933 message vào DLQ.
 
-## 3. `[BP:T16]` — đích chết 10 phút với 500 delivery hoãn → hồi phục (lượt 1, `35918bd`)
+### 7.3 `[BP:T16]` — đích chết 10 phút với 500 delivery hoãn → hồi phục (lượt 1, `35918bd`)
 
 | Tiêu chí | Kết quả |
 |---|---|
@@ -113,29 +214,7 @@ Hồi phục:
 
 Hàng tồn về theo nhịp `retry.10s`. Mỗi bước 10 s, hàng chỉ có mặt ở gate trong khoảng 2 giây, và cả hai giây đều chạm đúng trần. Gate Lua (BP4) chặn đúng tới từng request.
 
-## 4. Phát hiện
-
-- **F1 — LỖI, đã vá trong commit riêng (ADR-194): P2010 bọc 57P01 bị xếp "lỗi dữ liệu" → normalize đưa thẳng vào DLQ.** T4 lượt 1 bắt được.
-  - Khi Postgres bị giết giữa transaction, `$executeRaw` ném `PrismaClientKnownRequestError` mã **P2010** ("Raw query failed. Code: `57P01`. Message: `FATAL: terminating connection due to unexpected postmaster exit`").
-  - `classifyInfraError` trả `unknown` cho mọi `KnownRequestError` không nằm trong bảng mã Prisma. Bảng 57P0x/lớp 08 của C12 chỉ được xét cho `UnknownRequestError` và cho lỗi driver. Vì vậy `classifyNormalizeError` trả `permanent` → **DLQ ngay ở lượt 0**. Log ghi: `"code":"P2010","kind":"permanent","retries":0,"msg":"Lỗi dữ liệu ở normalize -> DLQ"`.
-  - Delivery gặp cùng lỗi thì đi nhánh `unknown`: hoãn 1 phút, sau 5 lần vào DLQ.
-  - Hậu quả: event không mất (raw còn trong Postgres), nhưng kẹt ở DLQ và phải renormalize tay. Đây đúng là thứ BP5 hứa loại bỏ.
-  - Cách vá: P2010 có SQLSTATE bên trong (`meta.code` hoặc thông điệp) thuộc 57P01/57P02/57P03/lớp 08 → `transient`. P2010 với lỗi dữ liệu thật (23505, 42601) vẫn giữ nguyên. Test: `backpressure.spec` "bảng mã".
-  - Sau khi vá (lượt 2 và 3): log có 10 dòng 57P01 nhưng DLQ +0, 2000/2000.
-- **F2 — Ghi nhận, CHƯA sửa (cần phòng quyết): đợt log normalize đầu tiên không gộp.**
-  - Trước khi controller kịp tick (factor còn 0, khoảng 1 s), mỗi message normalize lỗi ghi **một dòng warn** "Lỗi tạm ở normalize → retry.30s". Hệ quả: 293 dòng trong khoảng 1 s, max 225 dòng/s, nên T4 trượt tiêu chí N = 5 (lượt 3).
-  - Delivery đã được gộp (BP1, 1 dòng/30 s); normalize thì chưa.
-  - L0 phần a chỉ kiểm "0 warn sau giây thứ 5", nên không thấy chỗ này.
-  - Gợi ý: dùng `LogThrottle` (`@hub/common`) cho nhánh transient của normalize, như delivery. Đánh đổi: mất dòng log theo từng `rawEventId` khi lỗi lẻ tẻ.
-- **F3 — Ghi nhận (thiết kế BP4, không vi phạm T16): hết ramp thì phần tồn còn lại dội về một lần.**
-  - 60 s ramp chỉ xả được 256 trên 500. Hàng về theo nhịp `retry.10s`, nên mỗi bước 10 s chỉ dùng được khoảng 2 giây có trần.
-  - Khoá `:ramp` hết hạn thì 243 request còn lại tới trong **2 giây: 123/s và 120/s**, gần gấp đôi trần cuối 64 rps.
-  - Spec §5 chấp nhận việc "sau đó khoá hết hạn và trở về bình thường". Nhưng nếu đích chỉ chịu được khoảng 64 rps thì cú dội cuối vẫn có thể đánh sập nó lần nữa.
-  - Hướng xử lý (để phòng quyết): giữ trần cuối thêm một bước, hoặc kéo `DELIVERY_RAMP_SECONDS` theo kích thước hàng tồn.
-- **F4 — Ghi nhận (ngoài BP5, §7.5 P2): relay outbox ghi log 2 dòng/s khi DB chết.** Relay poll mỗi khoảng 500 ms và mỗi lượt lỗi ghi một dòng error: 1192 dòng trong 10 phút (T21). Storage job thêm 1 dòng mỗi 5 s. Cả hai không có nhịp lùi hay gộp log. Đây cũng là nguồn truy vấn Prisma khoảng 2 lần/s nằm ngoài bộ điều khiển BP5.
-- **F5 — Ghi nhận: at-least-once ở đích.** Delivery đang chờ HTTP đúng lúc DB bị giết sẽ tới đích 2 lần (20/2000 ở T4). Postgres vẫn chỉ có 1 delivery cho mỗi event. Đây là đúng thiết kế (đích chống trùng bằng `webhook-id`), ghi lại để hội đồng hỏi thì có số.
-
-## 5. Trích bằng chứng thô
+### 7.4 Trích bằng chứng thô (lượt 1–3)
 
 ```
 # T4 lượt 1 — worker log (F1)
@@ -160,7 +239,3 @@ ramp 60 s: 256 request; 2/2 2/2 0 … 2/4 4/4 … 4/8 8/8 … 10/16 16/16 … 32
 sau ramp: 243 request, max 123/s; +60s:123 +61s:120
 ```
 
-## 6. Kiểm chứng phụ
-
-- `npm run verify:chaos` (bộ VF5 cũ, chaos-l3 đã chuyển sang dùng `verify/lib/chaos.ts`): **6/6 xanh**, 275 s, chạy sau các lượt BP trên cùng stack.
-- Ba kịch bản BP KHÔNG chạy trong `verify:chaos`/nightly (tag `chaos-bp`, ADR-193).
