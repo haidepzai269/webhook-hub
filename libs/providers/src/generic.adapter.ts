@@ -1,5 +1,5 @@
 import { createHmac } from 'crypto';
-import { HttpMethod, IngestResult, NormalizedEvent, ProviderType, RawWebhookRequest, parseProviderTime, validateCanonical } from '@hub/common';
+import { ERROR_CATALOG, HttpMethod, IngestResult, LogThrottle, NormalizedEvent, ProviderType, RawWebhookRequest, logger, parseProviderTime, validateCanonical } from '@hub/common';
 import { bodyHashKey, swHeaderSet, swVerify, timingSafeCompare } from '@hub/crypto';
 import { AdapterContext, Diagnosis, HandshakeOutcome, HandshakePhase, ProviderAdapter, StoredRawEvent, VerifyResult } from './provider.interface';
 import { NormalizeContext, amountOf, envelope, str } from './normalize-helpers';
@@ -18,10 +18,11 @@ import {
   isHmacScheme,
   isUnverifiedScheme,
   paymentTimeKey,
+  readIdempotencyPath,
   validateGenericConfig,
 } from './generic-config';
 import { kvHasKey, presentedSignatures, templateRequiredHeaders, verifySignedTemplate, withinTolerance } from './signed-template';
-import { IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
+import { EmptyBodyIdempotencyError, IdempotencyKeyMissingError, MappingFieldMissingError } from './errors';
 
 /**
  * S8 (SPEC §4.8, ADR-041 bậc 2): nguồn bên thứ ba mà hub CHƯA có adapter — service tự khai cách xác thực
@@ -137,16 +138,30 @@ export class GenericAdapter implements ProviderAdapter {
     // PK5 (E7): `unverified` — chưa ai verify mà chống trùng theo id của provider thì kẻ biết sourceKey gửi trước một body
     // giả mang id thật là NUỐT được sự kiện thật (DUPLICATE, 200, provider không gửi lại). Khoá luôn ghép băm bytes:
     // chỉ bản trùng ĐÚNG TỪNG BYTE mới là trùng. Không ngẫu nhiên. Đích tự chống trùng nghiệp vụ sau khi verify.
-    if (isUnverifiedScheme(c) && !id) return `generic:${bodyHashKey(req.rawBody)}`;
+    // PK10 (E31): `unverified` + `{bodyHash:true}` = như vắng (E7 giữ nguyên: khoá vốn đã là băm bytes).
+    const unv = isUnverifiedScheme(c);
+    if (unv && (!id || 'bodyHash' in id)) return `generic:${bodyHashKey(req.rawBody)}`;
     if (!id) throw new IdempotencyKeyMissingError('verificationConfig.idempotency');
+    if ('bodyHash' in id) return bodyHashIdempotencyKey(req);
     let v: unknown;
     if ('header' in id) v = headerOf(req, idempotencyHeader(c, req.headers));
-    else v = isObj(req.body) ? req.body[id.field] : isUnverifiedScheme(c) ? bodyObject(req)?.[id.field] : undefined;
+    else if ('path' in id) v = readIdempotencyPath(bodyObject(req), id.path);
+    else v = isObj(req.body) ? req.body[id.field] : unv ? bodyObject(req)?.[id.field] : undefined;
+    // Review PK10 T-c: số ngoài khoảng an toàn đã bị JSON.parse làm tròn (hai id khác nhau -> MỘT khoá -> nuốt sự kiện).
+    // Đọc lại đúng chữ số từ bytes gốc (chỉ nhánh hiếm này mới parse lần hai). Không đọc được -> path rơi băm body.
+    if (typeof v === 'number' && !Number.isSafeInteger(v) && !('header' in id)) {
+      const exact = exactNumberSource(req.rawBody, 'path' in id ? id.path : id.field);
+      v = exact ?? ('path' in id ? undefined : v);
+    }
     if (typeof v === 'number' && Number.isFinite(v)) v = String(v);
     if (typeof v !== 'string' || v.length === 0 || v.length > 200) {
+      // PK10 (E31): `path` thiếu giá trị -> băm bytes body (provider gửi lại đúng bytes -> cùng khoá). Không ngẫu nhiên.
+      // Review PK10 T-b: trỏ NHẦM vào object / mảng / boolean (không phải vắng) -> log warn có nhịp để dev biết cấu hình sai.
+      if ('path' in id && isNonScalar(v)) warnPathNotScalar(req.sourceKey, id.path);
+      if ('path' in id) return unv ? `generic:${bodyHashKey(req.rawBody)}` : bodyHashIdempotencyKey(req);
       throw new IdempotencyKeyMissingError('header' in id ? `header ${id.header}` : `field ${id.field}`);
     }
-    return isUnverifiedScheme(c) ? `generic:${v}:${bodyHashKey(req.rawBody)}` : `generic:${v}`;
+    return unv ? `generic:${v}:${bodyHashKey(req.rawBody)}` : `generic:${v}`;
   }
 
   /**
@@ -256,10 +271,17 @@ export class GenericAdapter implements ProviderAdapter {
     const has = (h: string) => typeof headers[h] === 'string' || Array.isArray(headers[h]);
     // PK5 khoá 2 (REVIEW-PK5 TB-1): nhận được nhưng KHÔNG xác thực — không bao giờ là 'ok' ("hợp lệ").
     if (raw.status === 'ACCEPTED' && isUnverifiedScheme(c)) return { ok: true, reason: 'unverified' };
+    // Review PK10 T-b: nhận rồi nhưng `path` trỏ object/mảng/boolean -> đã chống trùng theo băm body (gửi lại mà đổi một
+    // byte như `attempt` sẽ thành sự kiện mới). Chỉ TÊN path, không giá trị.
+    if (raw.status === 'ACCEPTED' && c.idempotency && 'path' in c.idempotency && isNonScalar(readIdempotencyPath(raw.body, c.idempotency.path))) {
+      return { ok: true, reason: 'idempotency_path_not_scalar', field: c.idempotency.path };
+    }
     if (raw.status === 'ACCEPTED') return c.mapping ? this.diagnoseMapping(raw, c) : { ok: true, reason: 'ok' };
     if (raw.signatureValid) {
       const id = c.idempotency;
       if (!id) return { ok: false, reason: 'missing_idempotency_key' };
+      // PK10: `bodyHash`/`path` chỉ từ chối khi body rỗng (path thiếu giá trị đã rơi về băm body).
+      if ('bodyHash' in id || 'path' in id) return { ok: false, reason: 'empty_body' };
       return 'header' in id
         ? { ok: false, reason: 'missing_idempotency_key', expectedHeader: idempotencyHeader(c, headers) }
         : { ok: false, reason: 'missing_idempotency_key', expectedField: id.field };
@@ -321,10 +343,16 @@ export class GenericAdapter implements ProviderAdapter {
     }
     // DX1 §2.1 (ngoại lệ duy nhất ở /hooks): người đọc ack của nguồn tuỳ chỉnh là DEV đang cấu hình -> kèm `fix`.
     const status = result.status === 401 ? (ack?.rejectStatus ?? 401) : result.status;
-    const fix = result.message === UNVERIFIED_DISABLED ? UNVERIFIED_DISABLED_FIX : genericAckFix(result.status);
+    const fix =
+      result.message === UNVERIFIED_DISABLED ? UNVERIFIED_DISABLED_FIX : result.message === EMPTY_BODY_ERROR ? EMPTY_BODY_FIX : genericAckFix(result.status);
     return { status, body: { ok: false, error: result.message ?? 'rejected', fix } };
   }
 }
+
+/** PK10 (E31): 422 của nguồn chống trùng theo băm body khi body rỗng. */
+export const EMPTY_BODY_ERROR = 'empty_body';
+/** Review PK10 TB-1: một nguồn câu sửa — mục `empty_body` của catalog lỗi (docs/ERRORS.md). */
+export const EMPTY_BODY_FIX = ERROR_CATALOG.empty_body.fix();
 
 /** Gợi ý sửa cho dev cấu hình nguồn tuỳ chỉnh — chỉ theo status, KHÔNG chứa giá trị header/secret/body. */
 export function genericAckFix(status: number): string {
@@ -336,6 +364,59 @@ export function genericAckFix(status: number): string {
   if (status === 429) return 'Rate limited: slow down and retry later.';
   if (status === 404) return 'Unknown or disabled source: check the webhook URL (/hooks/generic/<sourceKey>) in the console.';
   return 'See docs/ERRORS.md and the source listening mode in the console.';
+}
+
+/**
+ * PK10 (E31, ADR-230): khoá theo băm bytes body (`bodyHash`, và `path` khi thiếu giá trị). Tiền tố `generic:body:` để không
+ * bao giờ trùng với id thật của provider (`generic:<id>`). Body rỗng -> không có byte để băm có nghĩa (mọi request rỗng
+ * thành MỘT khoá, nuốt nhau) -> REJECTED 422 `empty_body`.
+ */
+function bodyHashIdempotencyKey(req: RawWebhookRequest): string {
+  if (req.rawBody.length === 0) throw new EmptyBodyIdempotencyError();
+  return `generic:body:${bodyHashKey(req.rawBody)}`;
+}
+
+/** Review PK10 T-b: có giá trị nhưng không phải chuỗi/số (object, mảng, boolean) — `path` trỏ nhầm cấp. */
+function isNonScalar(v: unknown): boolean {
+  return typeof v === 'boolean' || (v !== null && typeof v === 'object');
+}
+
+/**
+ * Review PK10 T-b: một dòng warn mỗi nguồn mỗi 30s (LogThrottle, đếm trong bộ nhớ, 0 lệnh Redis — R1). Chỉ sourceKey + TÊN
+ * path, không giá trị body. Bảng nhịp có trần: đầy thì xoá hết (tệ nhất là log sớm hơn một nhịp, không bao giờ lớn mãi).
+ */
+const PATH_WARN_SOURCES_MAX = 1000;
+const pathWarnThrottles = new Map<string, LogThrottle>();
+function warnPathNotScalar(sourceKey: string, path: string): void {
+  let t = pathWarnThrottles.get(sourceKey);
+  if (!t) {
+    if (pathWarnThrottles.size >= PATH_WARN_SOURCES_MAX) pathWarnThrottles.clear();
+    t = new LogThrottle();
+    pathWarnThrottles.set(sourceKey, t);
+  }
+  const suppressed = t.take();
+  if (suppressed === null) return;
+  logger.warn(
+    { sourceKey, idempotencyPath: path, suppressed },
+    'idempotency.path trỏ vào object/mảng/boolean -> chống trùng theo băm body (gửi lại mà đổi một byte sẽ thành sự kiện mới); sửa path tới id dạng chuỗi/số',
+  );
+}
+
+/**
+ * Review PK10 T-c: chữ số GỐC của id dạng số tại `path` (1–3 cấp đã kiểm), đọc lại từ bytes bằng reviver có `source`
+ * (JSON.parse source text access, Node ≥ 21). Chỉ gọi khi giá trị đã parse không phải số nguyên an toàn. Không đọc được -> null.
+ */
+function exactNumberSource(rawBody: Buffer, path: string): string | null {
+  if (rawBody.length === 0 || rawBody.length > 1024 * 1024) return null;
+  try {
+    const exact = JSON.parse(rawBody.toString('utf8'), (_k: string, v: unknown, ctx?: { source?: string }) =>
+      typeof v === 'number' && !Number.isSafeInteger(v) && typeof ctx?.source === 'string' ? { __hubNumberSource: ctx.source } : v,
+    );
+    const at = readIdempotencyPath(exact, path) as { __hubNumberSource?: unknown } | undefined;
+    return isObj(at) && typeof at.__hubNumberSource === 'string' ? at.__hubNumberSource : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
@@ -166,11 +166,12 @@ export function ConnectSourceDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <AdminDialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
           <DialogDescription>{t("page.sources.connect.description")}</DialogDescription>
         </DialogHeader>
+        <DialogBody>
         {result ? (
           <div className="flex flex-col gap-2">
             <StatusLine c={result} />
@@ -258,7 +259,7 @@ export function ConnectSourceDialog({
                     </FieldDescription>
                   </>
                 ) : (
-                  <>
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <Input
                       id="cn-name"
                       aria-label={t("page.sources.connect.name-aria")}
@@ -274,11 +275,11 @@ export function ConnectSourceDialog({
                       placeholder={t("page.sources.connect.key-placeholder")}
                     />
                     {candidates.length > 0 && (
-                      <FieldDescription className="text-amber-600">
+                      <FieldDescription className="text-amber-600 sm:col-span-2">
                         {t("page.sources.connect.new-url-warning")}
                       </FieldDescription>
                     )}
-                  </>
+                  </div>
                 )}
               </Field>
               {spec?.fields.map((f) => (
@@ -308,6 +309,7 @@ export function ConnectSourceDialog({
             </FieldGroup>
           </form>
         )}
+        </DialogBody>
         <DialogFooter>
           {result ? (
             <Button onClick={() => close(false)}>{t("common.close")}</Button>
@@ -375,11 +377,12 @@ export function ConnectionDialog({
   }, [mode, source, onClose, onConnect]);
   return (
     <Dialog open={Boolean(sourceId)} onOpenChange={(o) => !o && onClose()}>
-      <AdminDialogContent className="sm:max-w-lg">
+      <AdminDialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
           <DialogDescription className="font-mono text-xs">{c?.ingestUrl ?? ""}</DialogDescription>
         </DialogHeader>
+        <DialogBody>
         {mode === "loading" || mode === "connect" ? (
           <p className="text-sm">{t("common.loading")}</p>
         ) : !c ? (
@@ -428,6 +431,7 @@ export function ConnectionDialog({
             </div>
           </div>
         )}
+        </DialogBody>
       </AdminDialogContent>
     </Dialog>
   );

@@ -10,6 +10,7 @@ import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogBody,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -308,6 +309,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
       </CardContent>
       <AlertDialog open={!!pending} onOpenChange={(o) => !o && !clean.isPending && !apply.isPending && setPending(null)}>
         <AlertDialogContent>
+          <AlertDialogBody>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {pending && ck ? t(ck.titleKey, { importance: impName(pending.s.importance), age: ageLabel(t, pending.s.olderThan) }) : ""}
@@ -332,6 +334,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
+          </AlertDialogBody>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={clean.isPending || apply.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction

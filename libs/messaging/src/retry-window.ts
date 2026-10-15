@@ -76,8 +76,11 @@ export const CIRCUIT_DEFER_ROUND_MS = circuitDeferTier(CIRCUIT_OPEN_MAX_MS).ttlM
 
 /**
  * BP4 (SPEC-ap-luc-nguoc §5, ADR-198): slow-start sau khi probe thành công — cap = START × 2^floor(đã trôi / STEP), áp trong
- * `DELIVERY_RAMP_SECONDS` giây (0 = tắt). Mặc định 2 rps, bước 10s, 60s (trần cuối ~64 rps). `DELIVERY_RAMP_SECONDS` chỉ được
- * kẹp THẤP hơn 60: message bị ramp hoãn (retry.10s) tối đa trong thời gian ramp — cửa sổ retry tính theo mặc định.
+ * `DELIVERY_RAMP_SECONDS` giây (0 = tắt). Mặc định 2 rps, bước 10s, 60s (trần cuối ~64 rps). `DELIVERY_RAMP_SECONDS` và
+ * `DELIVERY_RAMP_STEP_SECONDS` chỉ được kẹp THẤP hơn mặc định: message bị ramp hoãn (retry.10s) tối đa trong thời gian khoá
+ * `:ramp` sống — cửa sổ retry tính theo mặc định.
+ * F3 (chaos [BP:T16] phần b, ADR-232): khoá `:ramp` sống `seconds + stepSeconds` và trần KẸP ở bậc cuối trong bậc thêm đó —
+ * hàng tồn chưa xả hết trong 60s không dội về hết tốc ngay khi khoá hết hạn (đo được 123/s ở trần cuối 64).
  */
 export const DELIVERY_RAMP_START_RPS = 2;
 export const DELIVERY_RAMP_STEP_SECONDS = 10;
@@ -101,16 +104,21 @@ export function deliveryRampConfig(env: Record<string, string | undefined> = pro
   const secs = intEnv(env.DELIVERY_RAMP_SECONDS);
   return {
     startRps: start !== null && start >= 1 ? start : DELIVERY_RAMP_START_RPS,
-    stepSeconds: step !== null && step >= 1 ? step : DELIVERY_RAMP_STEP_SECONDS,
+    stepSeconds: step !== null && step >= 1 ? Math.min(step, DELIVERY_RAMP_STEP_SECONDS) : DELIVERY_RAMP_STEP_SECONDS,
     seconds: secs !== null && secs >= 0 ? Math.min(secs, DELIVERY_RAMP_SECONDS) : DELIVERY_RAMP_SECONDS,
   };
 }
 
+/** F3 (ADR-232): thời gian khoá `:ramp` sống = ramp + một bậc kẹp ở trần cuối. */
+export function deliveryRampKeySeconds(c: DeliveryRampConfig): number {
+  return c.seconds > 0 ? c.seconds + c.stepSeconds : 0;
+}
+
 /**
- * Thời gian một lần thử có thể bị ramp hoãn: hết ramp + một vòng `retry.10s` (vòng kiểm cuối) — cộng vào cửa sổ retry cho MỖI
- * lần thử (BP4). Throttle `rate_limit_rps` do khách đặt (ADR-016) không có trần thời gian — ngoài phạm vi, như trước BP4.
+ * Thời gian một lần thử có thể bị ramp hoãn: khoá `:ramp` sống (ramp + một bậc kẹp, F3) + một vòng `retry.10s` (vòng kiểm cuối)
+ * — cộng vào cửa sổ retry cho MỖI lần thử (BP4). Throttle `rate_limit_rps` do khách đặt (ADR-016) không có trần thời gian — ngoài phạm vi, như trước BP4.
  */
-export const DELIVERY_RAMP_DEFER_MS = DELIVERY_RAMP_SECONDS * 1000 + retryQueueForDelay(0).ttlMs;
+export const DELIVERY_RAMP_DEFER_MS = (DELIVERY_RAMP_SECONDS + DELIVERY_RAMP_STEP_SECONDS) * 1000 + retryQueueForDelay(0).ttlMs;
 
 /**
  * Đọc `CIRCUIT_MAX_DEFER_MS` từ env — CHỈ được kẹp THẤP HƠN mặc định (C2): đặt cao hơn mà `TOTAL_RETRY_WINDOW_MS` không đổi
@@ -128,7 +136,7 @@ export function circuitMaxDeferMs(env: string | undefined = process.env.CIRCUIT_
  * 30s + (BP2, C2) tối đa `CIRCUIT_MAX_DEFER_MS` hoãn vì circuit cho MỖI lần thử (6 lần: 1 lần đầu + 5 tầng).
  * + một vòng hoãn DÀI NHẤT mỗi lần thử (trần kiểm theo vòng; BP3: 5 phút) + (BP4) hoãn vì ramp ≤ 60s + 10s mỗi lần thử.
  * + (BP5) normalize hoãn/spill ≤ 60 phút + một vòng 30s + giữ chờ permit ≤ 60s mỗi lần thử. processed_messages/outbox phải sống LÂU HƠN thế; dữ liệu mới hơn mốc này không được
- * dọn/xoá (QT §5.2). ≈ 7h22m10s.
+ * dọn/xoá (QT §5.2). ≈ 7h23m10s (F3 thêm 6 × 10s).
  */
 export const TOTAL_RETRY_WINDOW_MS =
   RETRY_TIERS.reduce((sum, t) => sum + t.ttlMs, 0) +

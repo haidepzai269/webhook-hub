@@ -15,6 +15,8 @@ import { BODY_FORMATS, CatalogEntry } from './types';
  * - đúng MỘT handler: `config` qua `validateGenericConfig` (cả `alternatives`), `native` có trong `ProviderRegistry`,
  *   `unsupported` có `reason` + `workaround` dùng `POST /v1/p/:project/events` (E22);
  * - config dùng sha1 thì bắt buộc `sha1Reason` (ADR-203: sha1 chỉ khi nhà cung cấp quy định);
+ * - config dùng `idempotency.bodyHash` thì bắt buộc `bodyHashReason` trích URL có trong `sources` (PK10, E31, ADR-230), và
+ *   body không được luôn rỗng;
  * - `sources` khác rỗng (§8.4: mọi chi tiết phải có nguồn).
  * Fixture (≥ 1 mỗi mục) kiểm ở bước build vì cần đọc đĩa.
  */
@@ -28,6 +30,24 @@ const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) 
 
 function usesSha1(config: Record<string, unknown>): boolean {
   return config.algo === 'sha1' || (Array.isArray(config.algos) && config.algos.includes('sha1'));
+}
+
+/** PK10 (E31): config chống trùng theo băm bytes body. */
+function usesBodyHash(config: Record<string, unknown>): boolean {
+  return isObj(config.idempotency) && config.idempotency.bodyHash === true;
+}
+
+/**
+ * PK10 (E31, ADR-230): lỗi của `bodyHashReason` (null = hợp lệ). Bắt buộc, có chữ, và trích ÍT NHẤT một URL nằm trong
+ * `sources` — lý do "gửi lại giữ nguyên body / không có id ổn định" phải có nguồn, không phải ý kiến.
+ */
+export function bodyHashReasonProblem(e: Record<string, any>): string | null {
+  const r = e.bodyHashReason;
+  if (typeof r !== 'string' || r.trim().length < 20) return 'dùng idempotency.bodyHash: bắt buộc bodyHashReason (vì sao không có id ổn định + gửi lại giữ nguyên body, kèm URL nguồn)';
+  const urls = r.match(/https?:\/\/[^\s)\]"]+/g) ?? [];
+  const sources: unknown[] = Array.isArray(e.sources) ? e.sources : [];
+  if (!urls.some((u) => sources.includes(u))) return 'bodyHashReason phải trích ít nhất một URL có trong sources';
+  return null;
 }
 
 /** Lỗi của MỘT mục (rỗng = hợp lệ). */
@@ -94,7 +114,15 @@ export function entryProblems(e: unknown): string[] {
       const r = validateGenericConfig(c);
       if (!r.ok) at(`${where} sai: ${(r as { field: string }).field} — ${(r as { message: string }).message}`);
       else if (usesSha1(c as Record<string, unknown>) && (typeof e.sha1Reason !== 'string' || e.sha1Reason.trim() === '')) at(`${where} dùng sha1: bắt buộc sha1Reason (ADR-203)`);
+      if (r.ok && usesBodyHash(c as Record<string, unknown>)) {
+        const m = bodyHashReasonProblem(e);
+        if (m) at(`${where} ${m}`);
+        // Body rỗng/hằng không băm được có nghĩa (E31: google-drive) — fingerprint chỉ có khuôn `empty` thì không nhận.
+        const formats = isObj(e.fingerprint) && isObj(e.fingerprint.body) ? [e.fingerprint.body.format].flat() : [];
+        if (formats.length > 0 && formats.every((f: unknown) => f === 'empty')) at(`${where} dùng bodyHash nhưng body luôn rỗng — không có byte để băm`);
+      }
     }
+    if (e.bodyHashReason !== undefined && !configs.some(([, c]) => isObj(c) && usesBodyHash(c))) at('bodyHashReason chỉ dùng khi config có idempotency.bodyHash');
   } else if (kinds[0] === 'native') {
     if (typeof h.native !== 'string' || NOT_NATIVE.has(h.native) || !ProviderRegistry.has(h.native)) at(`handler.native "${h.native}" không có adapter trong ProviderRegistry`);
   } else {

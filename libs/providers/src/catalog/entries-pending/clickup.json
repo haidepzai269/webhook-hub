@@ -10,5 +10,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng \"chưa xác minh\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): khoá chống trùng tài liệu khuyên là ghép webhook_id:history_items[].id — phần tử mảng + ghép hai trường, config không biểu đạt (cấm chỉ số mảng, §15); không xác nhận gửi lại giữ nguyên body -> không bodyHash. Nguồn: developer.clickup.com/docs/webhooks"
 }

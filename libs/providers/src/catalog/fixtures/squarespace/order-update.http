@@ -1,0 +1,6 @@
+# origin: constructed; source: https://developers.squarespace.com/webhooks/events/order-update
+POST /webhook HTTP/1.1
+Content-Type: application/json
+Squarespace-Signature: 0000000000000000000000000000000000000000000000000000000000000000
+
+{"id":"5c2ba184b63ed3cb411ce2b1","websiteId":"5f3c3d55ac435e1a051f77b3","subscriptionId":"5f3c2155d947844beedda991","topic":"order.update","createdOn":"2020-04-22T22:18+00:00","data":{"orderId":"5f3c39ce69e11e796f19990e","update":"FULFILLED"}}

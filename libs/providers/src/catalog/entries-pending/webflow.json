@@ -9,5 +9,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng payload.id (lồng, \"chưa xác minh\") — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): id lồng payload.id có (path được), nhưng mẫu chính thức ký timestamp + ':' + JSON.stringify(body đã parse), không phải bytes gốc — chưa xác minh HMAC trên body_raw khớp; webhook tạo từ dashboard không có chữ ký. Nguồn: developers.webflow.com/data/docs/working-with-webhooks"
 }

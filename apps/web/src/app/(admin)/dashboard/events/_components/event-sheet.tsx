@@ -9,7 +9,7 @@ import { SignatureBadge, UnverifiedBadge } from "@/components/flow/unverified-ba
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime } from "@/lib/hub/format";
 import { useEventDetail } from "@/lib/hub/queries";
@@ -39,7 +39,7 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
 
   return (
     <Sheet open={open && Boolean(eventId)} onOpenChange={(o) => !o && onClose()}>
-      <AdminSheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl">
+      <AdminSheetContent size="lg">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2 font-mono text-base">
             {ev?.type ?? t("page.events.sheet.title")}
@@ -59,7 +59,7 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
           )}
         </SheetHeader>
 
-        <div className="space-y-5 px-4 pb-6">
+        <SheetBody className="space-y-5 px-4 pt-4 pb-6">
           {isLoading ? (
             <Skeleton className="h-64 w-full" />
           ) : error ? (
@@ -105,7 +105,7 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
               </section>
             </>
           )}
-        </div>
+        </SheetBody>
       </AdminSheetContent>
     </Sheet>
   );

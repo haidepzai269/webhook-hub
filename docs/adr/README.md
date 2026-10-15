@@ -2267,6 +2267,51 @@ không thấy gì.
 **Chọn:** mục danh mục `unsupported` với `reason` + `workaround` "shop nhận IPN trực tiếp, xác nhận đơn, rồi đẩy `payment.received` vào hub qua `POST /v1/p/:project/events`" (E22). Console hiện tên, lý do, cách đi vòng; không có nút tạo source. Twilio voice/SMS muốn trả TwiML đồng bộ cũng thuộc nhóm này (mục twilio ghi rõ: hub chỉ trả 200 rỗng).
 **Đánh đổi:** dev phải viết điểm nhận riêng cho các bên S10. Trả "00 Confirm Success" thay shop là nói dối provider và phá BB-1 (hub không biết "đơn hàng") — không làm.
 
+## ADR-230 — Chống trùng theo id lồng (`idempotency.path`) và theo băm nội dung (`idempotency.bodyHash`) cho nguồn generic (PK10/E31, 2026-10-14)
+
+**Số ADR:** PK giữ 201–210 (209 dành cho PK6/E8, chưa ghi). SPEC-hub-sap giữ "từ ADR-211" không nêu trần và đã nhắc tới ADR-220, nên lấy 230 để không đụng dải đang mở của hub-sap.
+**Dải số PK đã dùng (review PK10 T-d):** **201–210 và 230**. 211–229 để trống cho hub-sap. Số PK kế tiếp lấy từ 231, grep trước khi ghi.
+**Vấn đề:** `validateGenericConfig` chỉ nhận khoá `{header}` hoặc `{field}` cấp một. Bên có id nằm lồng (Heroku `webhook_metadata.event.id`, Pipedrive `meta.id`) hoặc không có id thì không nạp được (REVIEW-PK9 §2). Dev buộc phải bỏ provider đó, vì khoá ngẫu nhiên bị cấm (BB-2: gửi lại sẽ thành 2 sự kiện).
+**Chọn:**
+- **`{path: "a.b.c"}`:** 1–3 cấp, mỗi cấp `^[A-Za-z0-9_-]{1,64}$`. Cấm `__proto__` / `prototype` / `constructor`. Không biểu thức, không chỉ số mảng (§15).
+  - Đọc chỉ thuộc tính riêng của object thường.
+  - Khoá là `generic:<giá trị>`.
+  - Thiếu giá trị thì dùng `generic:body:<bodyHashKey(rawBody)>`.
+- **`{bodyHash: true}`:** khoá là `generic:body:<bodyHashKey(rawBody)>`. Tiền tố `body:` để khoá không bao giờ trùng với id thật của provider.
+  - Body rỗng (cả khi `path` phải rơi về băm) bị REJECTED, `signature_valid=true`, trả 422 `empty_body` kèm `fix`.
+  - Chẩn đoán "Lắng nghe" trả `empty_body`.
+  - `standard-webhooks` không nhận `bodyHash` (luôn có `webhook-id` đã ký).
+  - `unverified` + `bodyHash` hành xử như bỏ trống (E7 giữ nguyên, kể cả body rỗng).
+- **Lõi ingest không đổi luồng.** Chỉ trả `err.code` của lỗi chung `IdempotencyKeyMissingError`, có lớp con `EmptyBodyIdempotencyError`. Không có `if provider`.
+- **Danh mục:**
+  - Mục dùng `bodyHash` bắt buộc có `bodyHashReason` trích URL nằm trong `sources`.
+  - Không được dùng `bodyHash` khi body luôn rỗng.
+  - Đợt này nạp 5 mục sau khi WebFetch tài liệu chính thức: heroku (path), pipedrive (path, Basic), circleci / squarespace / checkout-com (field `id` đã xác minh).
+  - 10 mục còn lại giữ pending kèm lý do. Không mục nào đạt điều kiện `bodyHash`, vì không tài liệu nào xác nhận gửi lại giữ nguyên body. Docusign, Pipedrive, Heroku, Coinbase còn có trường đổi theo lần gửi.
+- **Console:** form có bốn kiểu khoá. Chọn "băm nội dung" thì hiện câu đánh đổi. Luật `path` của form là bản sao của server, test đối chiếu.
+**Đánh đổi:**
+- `bodyHash`: gửi lại mà đổi một byte (timestamp, số lần thử trong body) sẽ thành sự kiện mới. Vì vậy chỉ dùng khi tài liệu xác nhận body giữ nguyên, và ưu tiên id khi có.
+- Với scheme chỉ ký body (S1), `bodyHash` lại mạnh hơn header id không được ký (T-e).
+- Với `static-token`, body không được ký: ai có token thì giả được mọi thứ, nhưng khoá vẫn tất định.
+- `path` thiếu giá trị rơi về băm body thay vì 422. Đổi lại, bản ghi sai khuôn của provider vẫn vào luồng (chống trùng theo bytes) thay vì kẹt 422 mãi.
+- Tài liệu Heroku / Pipedrive / Checkout không nói rõ id giữ nguyên khi gửi lại. Điều này được ghi ở `docsVersion` của từng mục.
+**Bổ sung sau review (REVIEW-PK10, 2026-10-14):**
+- **Pipedrive chỉ cho webhook v2.**
+  - Vấn đề: ở v1, `meta.id` là id ĐỐI TƯỢNG. Lần cập nhật thứ hai của cùng deal bị báo DUPLICATE, nên sự kiện mất vĩnh viễn.
+  - Chọn: fingerprint đòi `data` cấp một — khoá chỉ v2 có (v1 dùng `current`; `identify` chỉ đọc khoá cấp một). Nhãn field và `docsVersion` ghi "CHỈ webhook v2; v1 hãy tạo lại webhook v2". Có test: body v1 không khớp mục.
+  - Đánh đổi: dev vẫn chọn tay mục này cho webhook v1 được; chỉ có cảnh báo chặn.
+- **`path` không nhận cấp toàn số** (`items.0.id`), ở cả server lẫn form. Lý do: lúc đọc không đi qua mảng, nên cấu hình kiểu này sẽ âm thầm rơi về băm body.
+- **`path` trỏ vào object / mảng / boolean:**
+  - Vẫn rơi về băm body như trước.
+  - Thêm log warn có nhịp: một dòng mỗi nguồn mỗi 30s, `LogThrottle` dời về `@hub/common`, 0 lệnh Redis.
+  - "Lắng nghe" chẩn đoán `idempotency_path_not_scalar`, chỉ kèm TÊN path.
+- **Id dạng số ngoài `Number.isSafeInteger`** (cả `path` lẫn `field`):
+  - Đọc lại đúng chữ số từ bytes gốc (reviver `JSON.parse` có `source`, Node 22), chỉ ở nhánh hiếm này.
+  - Không đọc được thì `path` rơi về băm body, `field` giữ cách cũ.
+  - Đánh đổi: source có id số lớn đổi khoá một lần, từ dạng đã làm tròn sang dạng đúng. Sự kiện đang được gửi lại qua lúc deploy có thể vào hai lần (nhận trùng, không mất).
+- **Đổi kiểu khoá của nguồn đang chạy** từ `field`/`path` sang `bodyHash`: dải khoá khác, nên sự kiện đang được gửi lại có thể vào hai lần (nhận trùng, không mất). Chấp nhận.
+- **`empty_body`** vào catalog lỗi và `docs/ERRORS.md`. `EMPTY_BODY_FIX` của adapter lấy từ catalog (một nguồn câu).
+
 ## ADR-211 — Tách `HUB_INGEST_PUBLIC_URL` (URL provider gọi vào) khỏi `HUB_PUBLIC_URL` (API, console) (SPEC-hub-sap §9 + H4, `[LH:T17]`, 2026-10-14)
 
 **Vấn đề:** Một biến `HUB_PUBLIC_URL` dùng cho cả API/connection string lẫn URL ingest (F9: `projects.controller.ts`, `source-connection.service.ts`, `stripe.connector.ts`; H4 thêm `publicHooksUrl()` và `public-ingest-base.ts` do PK5 đưa vào, dùng cho `unverified` + `forwardUrl` và provider ký trên URL như Twilio). URL hiện thuộc domain Render (`*.onrender.com`), Cloudflare không đứng trước được domain mình không sở hữu, nên muốn lưới hứng (U-A `workers.dev` + U-C chạy song song, ADR-220) thì URL ingest phải đổi một lần sang domain khác — trong khi API và connection string vẫn ở Render. Không tách thì đổi URL ingest kéo theo đổi host trong mọi connection string đã phát cho service.
@@ -2284,3 +2329,38 @@ không thấy gì.
 **Vấn đề:** Source đặt `ack.rejectStatus: 503` khi chữ ký sai (ADR-205); nếu Worker coi mọi 5xx là "hub vắng" thì request chữ ký rác được ghi D1 + 2xx, vòng qua EG2 và làm đầy D1. Status một mình không phân biệt "hub từ chối" với "hub vắng".
 **Chọn:** header `x-hub-outcome`: `accepted` · `duplicate` · `handshake` · `rejected` (request sai: chữ ký kể cả 503 `rejectStatus`, 404, 400, 405, 413, 414, 422) · `refused` (chính sách: 429 cổng phạt/rate limit, 507, cờ unverified tắt) · `unavailable` (5xx tạm thời). Đặt ở: `outcomeOf(trace)` → controller; cổng phạt 429; lưới đỡ theo status ở gốc app (trước guard/cổng/parser; OPTIONS bỏ qua); nginx tự sinh trên `/hooks*` (429 refused, 413/404 rejected, 503 unavailable).
 **Đánh đổi:** Không phủ được phản hồi Node `clientError` (431/400 trước Express) — luật cho Worker LH2: 408/429 luôn retry (H2); 5xx không outcome hoặc `unavailable` = hub vắng; 4xx không outcome khác 404 = retry có hạn rồi `inbox_dead`; 404 hoặc 4xx `rejected`/`refused` = `inbox_dead`; 507 `refused` khi phát lại nên retry (LH2 quyết). Worker không chuyển header ra provider. Kết quả `ingestWebhook` có thêm trường `outcome`.
+
+## ADR-193 — Chaos BP chạy thật trên `hubv` nhưng KHÔNG vào nightly; đồ nghề "giết Postgres dưới tải" dùng chung ở `verify/lib/chaos.ts` (BP chaos phần b, 2026-10-15)
+
+**Vấn đề:** `[BP:T4]`/`[BP:T16]`/`[BP:T21]` mới có mô phỏng L0/L1. Spec đòi số đo LOCAL thật (C8), nhưng ba kịch bản cần khoảng 35–40 phút, trong khi job nightly có trần 45 phút. Muốn phá "dưới tải" thì cả hai lane phải có hàng thật, mà relay lại nằm trong worker. LH6 sẽ cần đúng các thao tác này.
+**Chọn:** `verify/scenarios/chaos-bp.ts` gắn tag `chaos-bp`, không gắn `chaos`; chạy tay bằng `npm run verify:chaos:bp`. Đồ nghề dùng chung đặt ở `verify/lib/chaos.ts` và chaos-l3 cũng dùng: `holdDown`, `preloadBacklog` (dừng worker → bắn N → bật lại → phá khi AMQP thấy READY ở cả hai lane), `MetricsSampler`, sổ cái Postgres, sink `PUT /_mode`. Mọi lệnh đi qua `docker compose -p hubv`. Kết quả ghi ở `CHAOS-BP-KET-QUA.md`.
+**Đánh đổi:** không có lưới nightly cho ba kịch bản này, hồi quy chỉ bị bắt khi có người chạy tay (L0/L1 phần a vẫn chạy mỗi push). "Lần chạm DB" đếm bằng bộ đếm lỗi của lane: bộ đếm tăng lúc lỗi chứ không phải lúc bắt đầu, nên cửa sổ dò tính từ mốc factor = 1 cộng 6 s. Cách đếm này không gồm truy vấn của scheduler (§7.5).
+
+## ADR-194 — `P2010` bọc SQLSTATE mất kết nối (57P0x, lớp 08) là lỗi hạ tầng `transient` (chaos `[BP:T4]` phần b, 2026-10-15)
+
+**Vấn đề:** chaos `[BP:T4]` phần b (giết Postgres giữa transaction) cho `$executeRaw` ném `PrismaClientKnownRequestError` **P2010** "Raw query failed. Code: `57P01`". `classifyInfraError` trả `unknown` cho mọi mã Prisma ngoài bảng — bảng 57P0x/lớp 08 của BP5 (C12) chỉ xét `UnknownRequestError` và lỗi driver — nên normalize coi là lỗi dữ liệu → `q.normalize.dlq` ngay lượt 0 (1/2000 event kẹt, phải renormalize tay), delivery đi nhánh `unknown` (hoãn 1 phút, 5 lần → DLQ).
+**Chọn:** P2010 có `meta.code` dạng SQLSTATE (`/^[0-9A-Z]{5}$/`) thì quyết **chỉ** theo nó: 57P01/57P02/57P03 hoặc lớp 08 → `transient`, mọi mã khác → `unknown`/`permanent`. Chỉ khi thiếu `meta.code` mới dò câu lỗi, và dò theo mẫu có neo đúng khuôn engine Prisma ghi: ``Code: `(57P0[123]|08\d{3})` `` (review TB-1). Lý do: câu lỗi của lỗi dữ liệu có thể chứa "08006" trong giá trị của người dùng, và nếu xếp nhầm thành transient thì delivery lặp mãi vì nhánh transient không có trần. Chỉ sửa một chỗ trong `classifyInfraError`; normalize, delivery và bộ điều khiển `db` đổi theo.
+**Đánh đổi:** cách này dựa vào `meta.code` và khuôn câu lỗi của Prisma 6. Nếu bản Prisma sau đổi khuôn thì lỗi sẽ quay về `unknown`. Test L1 `apps/hub-worker/test/infra-errors-db.spec.ts` (Postgres thật: `pg_terminate_backend(pg_backend_pid())` trong `$executeRaw` → `transient`; `'08006'::uuid` → `unknown`) sẽ đỏ ở `verify:db` khi chuyện đó xảy ra. Test L0 chỉ dùng lỗi dựng tay nên không bắt được việc đổi khuôn.
+
+## ADR-231 — Warn "Lỗi tạm ở normalize" gộp tối đa 1 dòng / 30s / tiến trình (thuộc BP, F2 của chaos `[BP:T4]` phần b; số BP 193/194 đã hết nên lấy số kế tiếp còn trống của dải PK, 2026-10-15)
+
+**Vấn đề:** chaos `[BP:T4]` phần b đo được 225 dòng warn/s. Khi Postgres vừa chết, factor vẫn còn 0 cho tới nhịp tick đầu tiên (khoảng 1 s), nên toàn bộ prefetch normalize lỗi cùng lúc và mỗi message ghi một dòng warn: 293 dòng trong khoảng 1 s. Delivery đã có `LogThrottle` từ BP1, normalize thì chưa.
+**Chọn:** nhánh transient của normalize dùng `LogThrottle` riêng cho mỗi consumer, tức mỗi tiến trình: tối đa 1 dòng warn mỗi 30 s, kèm `suppressedSinceLastLog`. Từng message vẫn ghi dòng debug (có `rawEventId`). Nhánh DLQ (`log.error`) và nhánh "hoãn quá NORMALIZE_MAX_DEFER_MS" giữ nguyên, không gộp. Metric `hub_normalize_retries_total` vẫn đếm đủ. Có test L0 cho đợt đầu khi factor = 0.
+**Đánh đổi:** một lỗi tạm lẻ tẻ của message cụ thể chỉ hiện ở mức warn nếu rơi đúng vào khe 30 s; muốn truy `rawEventId` thì phải bật debug. Đây là cùng đánh đổi mà delivery đã chấp nhận ở ADR-195.
+
+## ADR-232 — Khoá `:ramp` sống thêm một bậc và kẹp ở trần cuối (thuộc BP, F3 của chaos `[BP:T16]` phần b; số kế tiếp còn trống của dải 230+, 2026-10-15)
+
+**Vấn đề:** chaos `[BP:T16]` phần b đo được 60 s ramp chỉ xả 256/500 delivery, vì hàng về theo nhịp `retry.10s` và mỗi bậc chỉ dùng được khoảng 2 giây có trần. Khoá `:ramp` hết hạn thì 243 delivery còn lại dội vào đích với 123 và 120 rps, gần gấp đôi trần cuối 64. Đích chỉ chịu được khoảng 64 rps thì có thể sập lại ngay sau khi vừa hồi phục.
+**Chọn:** (Admin chọn hướng b) `LUA_CLOSE_AND_RAMP` đặt TTL `:ramp` = `seconds + stepSeconds` (70 s), và `LUA_GATE` kẹp bậc ở `ceil(seconds/step) − 1`, nên bậc thêm vẫn giữ 64 rps. Không thêm lệnh Redis nào: chỉ có thêm một ARGV và đổi TTL. `DELIVERY_RAMP_STEP_SECONDS` từ env chỉ được kẹp THẤP hơn mặc định (C2). Cửa sổ retry cộng 6 × 10 s, thành khoảng 7h23m10s. Có test L1 trên Redis thật: 500 message về theo nhịp `retry.10s`, rải 2 giây mỗi vòng như số đo chaos; sau khi khoá hết hạn không giây nào vượt 64.
+**Đánh đổi:** cách này chỉ thêm một bậc 64 rps, tức khoảng 128 message nữa với nhịp đo được. Hàng tồn lớn hơn nhiều, hoặc dồn hết vào một giây, vẫn dội về sau 70 s. Muốn chặn hẳn thì phải kéo ramp theo kích thước hàng, việc đó chưa làm. Lệnh dọn `olderThan` dưới khoảng 7h24m bị 400.
+**Đo lại (chaos `[BP:T16]` phần b, 2026-10-15, HEAD `9717787`):** cả 70 s không giây nào vượt trần, nhưng tiêu chí "sau ramp ≤ 64/s" **trượt**: 192 delivery còn lại về ở giây +70 và +71 với 43 và **149/s**. Lần chạy này mỗi vòng `retry.10s` dồn vào khoảng 1 giây (giây +60 có 64, giây +61 chỉ 4), nên bậc kẹp chỉ xả thêm 64. Mô hình "rải 2 giây/vòng" của test L1 lạc quan hơn thực tế. Hướng (b) chưa đủ cho 500 hàng tồn; cần Admin quyết hướng tiếp (ramp theo kích thước hàng, hoặc giữ trần cuối tới khi hàng hết).
+
+## ADR-233 — Gate báo "probe đang bị giữ": bên thua probe HALF_OPEN chỉ tốn 1 lệnh; đính chính ADR-196 (thuộc BP, R1, 2026-10-15)
+
+**Vấn đề:** ADR-196 ghi rằng HALF_OPEN không giành được probe thì hoãn với 1 lệnh Redis. Code thực tế tốn 2 lệnh: `LUA_GATE` + `LUA_ACQUIRE_PROBE` thua (`delivery.consumer.ts`, cả gate trước khi nạp lẫn gate sau khi nạp). Mỗi message trong hàng hoãn quay về đúng lúc một worker khác đang dò sẽ đốt thêm 1 lệnh, vi phạm R1 ("đường hoãn ≤ 1 lệnh", ADR-062/196). `DEPLOYMENT.md` cũng viết sai thành "thêm 1 EVAL giành probe nếu thắng".
+**Chọn:**
+- `LUA_GATE` nhận thêm `KEYS[5]` = `:probe` và trả cờ `probeHeld`. Cờ = 1 chỉ khi đang HALF_OPEN (hết `:open`, `:failures` ≥ ngưỡng) và `:probe` tồn tại.
+- Consumer: `probeHeld` → hoãn ngay, không gọi `tryAcquireProbe`. Kết quả là 1 lệnh và 0 truy vấn đọc.
+- Probe trống thì vẫn giành bằng `LUA_ACQUIRE_PROBE` riêng (nguyên tử). Giữ đúng C11/ADR-198: không gộp việc giành probe vào gate.
+- Test: `redis-budget.spec` `[BP:T22]` (phần d) khoá chuỗi lệnh `['eval']` cho bên thua; Redis thật kiểm cờ (có/không, OPEN không báo).
+**Đánh đổi:** vẫn có ca hiếm tốn 2 lệnh. Gate thấy probe trống nhưng worker khác giành mất ngay trước khi mình gọi `LUA_ACQUIRE_PROBE`, tức là tranh nhau đúng khe giữa hai lệnh. Gate đọc thêm một `EXISTS` trong script, nhưng số lệnh client không đổi.

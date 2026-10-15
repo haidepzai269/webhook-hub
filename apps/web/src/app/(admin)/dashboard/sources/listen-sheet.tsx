@@ -2,7 +2,7 @@
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/hub/format";
@@ -37,14 +37,16 @@ export function ListenSheet({ source, onClose }: { source: Source | null; onClos
   const t = useT();
   return (
     <Sheet open={Boolean(source)} onOpenChange={(o) => !o && onClose()}>
-      <AdminSheetContent className="w-full gap-0 overflow-y-auto data-[side=right]:sm:max-w-2xl">
+      <AdminSheetContent size="lg">
         {source && (
           <>
             <SheetHeader>
               <SheetTitle>{t("page.sources.listen.title", { name: source.name })}</SheetTitle>
               <SheetDescription>{t("page.sources.listen.description")}</SheetDescription>
             </SheetHeader>
-            <ListenBlock sourceId={source.id} />
+            <SheetBody>
+              <ListenBlock sourceId={source.id} />
+            </SheetBody>
           </>
         )}
       </AdminSheetContent>

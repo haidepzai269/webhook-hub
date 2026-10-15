@@ -9,7 +9,7 @@ import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { deliveryStatusKey } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -145,11 +145,13 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      {/* UI-MS: form nhiều ô -> cỡ lg, gộp cặp ô ngắn thành 2 cột để phần thường gặp không phải cuộn */}
+      <AdminDialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{t("page.destinations.endpoint.create-title")}</DialogTitle>
           <DialogDescription>{t("page.destinations.endpoint.create-description")}</DialogDescription>
         </DialogHeader>
+        <DialogBody>
         {result ? (
           <div className="flex flex-col gap-3">
             {result.signingSecret && <SecretOnce secret={result.signingSecret} />}
@@ -167,6 +169,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
           </div>
         ) : (
           <FieldGroup className="gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
             <Field className="gap-1.5">
               <FieldLabel htmlFor="ep-name">{t("common.name")}</FieldLabel>
               <Input
@@ -186,6 +189,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
               />
               <FieldDescription>{t("page.destinations.endpoint.url-hint")}</FieldDescription>
             </Field>
+            </div>
             <Field className="gap-1.5">
               <FieldLabel>{t("page.destinations.endpoint.types")}</FieldLabel>
               <div className="flex flex-wrap gap-2">
@@ -206,6 +210,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
                 placeholder={t("page.destinations.endpoint.extra-placeholder")}
               />
             </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
             <Field className="gap-1.5">
               <FieldLabel>{t("page.destinations.endpoint.sources")}</FieldLabel>
               <div className="flex flex-col gap-1">
@@ -228,8 +233,10 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
               </label>
               <FieldDescription>{t("page.destinations.endpoint.accept-unverified-hint")}</FieldDescription>
             </Field>
+            </div>
           </FieldGroup>
         )}
+        </DialogBody>
         <DialogFooter>
           {result ? (
             <Button onClick={() => close(false)}>{t("page.destinations.endpoint.saved-close")}</Button>
@@ -264,11 +271,12 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
   };
   return (
     <Dialog open={Boolean(id)} onOpenChange={(o) => !o && close()}>
-      <AdminDialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+      <AdminDialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{ep?.name ?? t("page.destinations.endpoint.fallback-title")}</DialogTitle>
           <DialogDescription className="font-mono text-xs">{ep?.url ?? ""}</DialogDescription>
         </DialogHeader>
+        <DialogBody>
         {ep && (
           <div className="flex flex-col gap-3">
             <VerificationLine verification={ep.verification} error={ep.verificationError} fix={ep.verificationFix} />
@@ -325,6 +333,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
             </div>
           </div>
         )}
+        </DialogBody>
       </AdminDialogContent>
     </Dialog>
   );

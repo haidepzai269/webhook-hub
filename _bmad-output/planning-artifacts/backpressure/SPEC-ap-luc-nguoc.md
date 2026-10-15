@@ -94,7 +94,7 @@
 - `LUA_GATE` trả thêm `rampCap` (không trả sẵn `throttleAllowed`): JS tính trần = min(rps, rampCap) để `recheckThrottle` (C9) kiểm lại với rps thật mà không INCR lần hai.
 - **Không gộp `tryAcquireProbe` vào gate** (C10 để ngỏ cho BP4): dù gộp, HALF_OPEN có probe vẫn > 3 lệnh vì PUBLISH circuit; gộp đổi ngữ nghĩa `getState` (mọi lần gate ở HALF_OPEN tự giành probe, mọi nhánh bỏ ngang phải nhả) — rủi ro hơn lợi cho ca hiếm. `[BP:T22]` phần b giữ chuỗi lệnh đầy đủ.
 - Cửa sổ retry cộng `6 × (DELIVERY_RAMP_SECONDS + 10s)` (message có thể bị ramp hoãn tới hết ramp mỗi lần thử) ≈ 6h15m40s; `DELIVERY_RAMP_SECONDS` chỉ được thấp hơn 60. Throttle `rate_limit_rps` do khách đặt vẫn không có trần thời gian (như trước BP).
-- `[BP:T16]` phần a: mô phỏng trên Redis thật (500 message, 60 giây giả lập). Kịch bản chaos LOCAL (đích chết 10 phút thật) chưa chạy (C8).
+- `[BP:T16]` phần a: mô phỏng trên Redis thật (500 message, 60 giây giả lập). ~~Kịch bản chaos LOCAL (đích chết 10 phút thật) chưa chạy (C8).~~ **Phần b đã chạy 2026-10-15 (C14): PASS.**
 - **Ngoại lệ của "mạch tự về CLOSED = chưa từng OPEN" (review BP4 TH-3):** mạch có thể đi OPEN 300s → HALF_OPEN (`:failures` sống thêm 120s) mà không message nào quay về kịp để làm probe; khi đó hàng ở `retry.5m` quay về sau khi khoá hết hạn, KHÔNG có ramp. Hệ quả nhỏ: hàng tồn tự rải ra trong ~240s (theo thời điểm từng message vào `retry.5m`); đích còn chết thì lỗi lại đủ ngưỡng và trip lại. Chấp nhận.
 - Mốc `:ramp` ở tương lai (lệch đồng hồ worker) bị kẹp về 0 → cap = start; không đổi sang `TIME` của Redis (Upstash chưa xác nhận) — review BP4 TH-1.
 
@@ -104,7 +104,7 @@
 - **Permit giới hạn ĐỒNG THỜI, không giới hạn tốc độ:** khi DB lỗi nhanh (ECONNREFUSED) vài giây đầu (tới khi factor lên 1, ~4s) số lần gọi/s vẫn theo prefetch × tốc độ broker; sau đó chế độ dò ≤ 1 / 5s. Lúc hồi phục permits tăng dần theo factor (đồng thời 2 → 20).
 - **Bảng mã (nợ §16 của BP1):** thêm 57P01/57P02/57P03 và lớp 08 (Postgres cắt kết nối) vào `transient` của `classifyInfraError` (cả `PrismaClientUnknownRequestError` theo nội dung lẫn lỗi driver có `code`) — `classifyNormalizeError` gọi lại hàm này nên đổi theo. amqplib "Channel closed" GIỮ `unknown` (không phải lỗi DB, không được làm lệch bộ điều khiển `db`).
 - **Channel zombie (nợ §16):** channel consumer đóng riêng → worker thoát như mất connection (orchestrator dựng lại).
-- **Một factor, hai semaphore (review BP5 TB-1):** §7.1 "một controller cho mỗi dependency" giữ nguyên (một tín hiệu, một factor), nhưng normalize và delivery mỗi bên một semaphore MAX = prefetch 20. Một semaphore chung làm 20 delivery treo HTTP ở đích chậm chiếm hết permit, normalize của mọi tenant xếp hàng sau — lỗi đích làm chậm tenant khác (§0). Lúc khoẻ thông lượng như trước BP5 (40 đồng thời / tiến trình). Chế độ dò: **nhịp dò tính theo lane** — 1 message / 5s cho MỖI lane, tức ≤ 2 lần gọi Prisma / 5s / tiến trình (`[BP:T4]` phần a bơm cả hai lane).
+- **Một factor, hai semaphore (review BP5 TB-1):** §7.1 "một controller cho mỗi dependency" giữ nguyên (một tín hiệu, một factor), nhưng normalize và delivery mỗi bên một semaphore MAX = prefetch 20. Một semaphore chung làm 20 delivery treo HTTP ở đích chậm chiếm hết permit, normalize của mọi tenant xếp hàng sau — lỗi đích làm chậm tenant khác (§0). Lúc khoẻ thông lượng như trước BP5 (40 đồng thời / tiến trình). Chế độ dò: **nhịp dò tính theo lane** — 1 message / 5s cho MỖI lane, tức ≤ 2 lần gọi Prisma / 5s trên đường consumer (normalize + delivery) — scheduler (relay, sweeper, alert, storage) không tính, §7.5 (`[BP:T4]` phần a bơm cả hai lane).
 - **Spill có trần (review BP5 TH-1):** spill normalize gắn/giữ `x-normalize-deferred-since`, dùng chung `NORMALIZE_MAX_DEFER_MS`; quá trần thì đốt lượt rồi DLQ. Cửa sổ retry cộng thêm một vòng 30s và (review lượt 2) `6 × BACKPRESSURE_HOLD_MAX_MS` (giữ chờ permit 60s mỗi lần thử; mặc định export từ `retry-window.ts`, env chỉ kẹp thấp hơn) ≈ 7h22m10s. Spill delivery không cần trần (Postgres giữ delivery đang chờ; QT/retention chừa chúng — ADR-199).
 - `gracefulStop` tách khỏi `main.ts` (`src/shutdown.ts`) để test thứ tự C5.
 
@@ -114,6 +114,22 @@
 - **Đối chiếu code của agent vẽ sơ đồ** — đã kiểm lại từng chỗ bằng code rồi mới sửa ARCHITECTURE: `provider_enum` (6 giá trị), số bảng mang `tenant_id` (17) và có RLS (17, khác tập), Grafana 10 panel, 13 luật cảnh báo, nhánh 400 khi không có adapter ở §3.1, trần Shop ~600 dòng; CLAUDE.md polling theo `events.poll_seq` + `cursor`.
 - **ADR-192:** liệt kê chính xác các chỗ truy vấn không qua `TenantScopedRepository` (chỉ `outbox`/`processed_messages` là ngoại lệ mới; `tx.rawEvent`/`tx.deliveryAttempt` trong `tenantTx` đã có ADR-108). Không tìm thấy chỗ nào chạm bảng nghiệp vụ mà không scope.
 - **Nợ parse lỗi delivery (BP1 §16) đã đóng:** commit `fix(delivery)` riêng — bản sao vào `q.delivery.dlq` (`x-dead-reason: parse_error`) rồi ack.
+
+**C14 — Chaos LOCAL đã chạy (2026-10-15).** Số chính thức là lượt cuối, chạy trên HEAD `9717787` của `feat/chaos-bp`, đã gộp master `4c9b6ac` (ADR-193/194/231/232/233). Kịch bản `verify/scenarios/chaos-bp.ts` (`npm run verify:chaos:bp`, tag `chaos-bp`, KHÔNG trong nightly). Số liệu đầy đủ ở `CHAOS-BP-KET-QUA.md`; các lượt cũ nằm ở §7 Lịch sử của file đó.
+- [x] `[BP:T4]` phần b — **PASS đủ 11/11 tiêu chí**:
+  - chế độ dò ≤ 2 lần chạm DB / 5 s trên đường consumer (normalize + delivery), ≤ 1 / lane, tính từ mốc factor = 1 + 6 s;
+  - factor lên 1 sau 4,2 s;
+  - đợt đầu 634 lần chạm DB trong khoảng 10 s (đo, không có ngưỡng);
+  - log consumer max 2 dòng/s;
+  - 2000/2000, `q.normalize.dlq` +0.
+- [x] `[BP:T21]` phần b — `q.normalize.dlq` **+0** (≤ 5) **PASS**; 1805/1805 xử lý xong **PASS**.
+- [x] `[BP:T16]` phần b — tiêu chí của spec ("không giây nào vượt trần ramp") **PASS**: 2..64 trong 60 s, bậc kẹp 64 tới 70 s (ADR-232); 23 request đập vào đích chết; 500/500 SUCCEEDED. Tiêu chí thêm của F3 ("sau ramp ≤ 64/s") **FAIL**: 192 còn lại về 43 rồi **149/s**. Nợ F3 vẫn mở, chờ Admin quyết hướng tiếp.
+- Đã vá:
+  - **F1** (ADR-194, siết theo TB-1): P2010 bọc 57P01 → `transient`; có L1 trên Postgres thật.
+  - **F2** (ADR-231): warn normalize gộp 1 dòng / 30 s.
+  - **F3 một phần** (ADR-232): `:ramp` sống thêm một bậc, kẹp 64.
+  - **R1** (ADR-233): bên thua probe HALF_OPEN chỉ 1 lệnh; đính chính ADR-196.
+- Ghi nhận: **F4** — relay outbox/storage log khoảng 2 dòng/s khi DB chết (§7.5 P2). **F5** — at-least-once ở đích, 20/2000.
 
 ## 0. Bối cảnh
 
@@ -460,4 +476,5 @@ T4, T16 và T21 là số liệu để đưa vào báo cáo. Chạy ở **LOCAL**
 - **Nợ (BP3 review lượt 2, 2026-10-13):** câu "Thử lại lúc …" (`libs/common/src/alerts/text.ts`) so `halfOpenAt` với `ctx.now`. Email dựng ở server nên dùng giờ server; web dùng `Date.now()` của trình duyệt qua `useMinuteClock` — lệch theo đồng hồ máy người dùng và tối đa ~1 phút do nhịp cập nhật. Web nên cộng độ lệch `asOf − Date.now()` (cùng hướng ADR-188). Không sửa code web trong đợt BP.
 - **Phát hiện trong review BP4 (TH-2, 2026-10-13), lỗi có từ trước BP:** retention `deleteExpiredEventsBatchAccounted` xoá event quá N ngày mà không xét delivery; FK `deliveries.event_id` CASCADE xoá luôn delivery đang chờ (vd. đích throttle chậm, hoặc hoãn lâu hơn retention), worker gặp `!row` thì ack -> mất webhook âm thầm. Đã sửa (ADR-199): `NOT EXISTS` delivery PENDING/DELIVERING/RETRYING, cùng tập trạng thái với `cleanStorageBatch` (hằng `IN_FLIGHT_DELIVERY_STATUSES`). Các đường xoá khác đã kiểm: lệnh dọn QT (đã chặn), mẫu REJECTED và raw mồ côi (không có event/delivery). Số ADR của BP5 dời sang 200 (§12).
 - **Nợ (review BP4 lượt 2, 2026-10-13):** race hẹp giữa replay một event cũ hơn retention và retention / `cleanStorageBatch`: `NOT EXISTS` (ADR-199) đọc snapshot cũ nên có thể CASCADE xoá delivery replay vừa COMMIT. Cách sửa sau này: replay khoá event `FOR SHARE` trước khi INSERT delivery. Không sửa trong đợt BP.
-- **BP5 đóng nợ:** vòng transient của BP1 nay có cận trên (permit + chế độ dò); 57P01/lớp 08 xếp `transient`; channel zombie thoát tiến trình. Probe HALF_OPEN đã nhả ở catch ngoài từ BP2 (TH-1). Chaos LOCAL `[BP:T4]`/`[BP:T16]`/`[BP:T21]` chưa chạy (C8) — có bản mô phỏng L0/L1.
+- **BP5 đóng nợ:** vòng transient của BP1 nay có cận trên (permit + chế độ dò); 57P01/lớp 08 xếp `transient`; channel zombie thoát tiến trình. Probe HALF_OPEN đã nhả ở catch ngoài từ BP2 (TH-1). ~~Chaos LOCAL `[BP:T4]`/`[BP:T16]`/`[BP:T21]` chưa chạy (C8) — có bản mô phỏng L0/L1.~~ **Đã chạy 2026-10-15 — C14, `CHAOS-BP-KET-QUA.md`.**
+- **Chaos phần b (2026-10-15, C14):** F1 vá (ADR-194, siết TB-1), F2 vá (ADR-231), R1 bên thua probe vá (ADR-233). **Nợ F3 (còn mở):** ADR-232 (hướng b) giữ trần 64 thêm một bậc nhưng sau ramp vẫn 149/s với 500 hàng (vòng `retry.10s` dồn khoảng 1 giây) — cần ramp theo kích thước hàng hoặc giữ trần tới khi hàng hết (Admin quyết). **Nợ F4:** relay outbox/storage log khoảng 2 dòng/s và khoảng 2 truy vấn/s khi DB chết (§7.5 P2).

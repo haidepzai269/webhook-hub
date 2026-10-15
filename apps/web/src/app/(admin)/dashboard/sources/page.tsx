@@ -44,6 +44,7 @@ import {
   HANDSHAKE_CHOICES,
   HANDSHAKE_FORM_DEFAULTS,
   HMAC_ALGO_CHOICES,
+  ID_KIND_CHOICES,
   KEY_ENCODING_CHOICES,
   KV_SEP_CHOICES,
   SECRET_MAX,
@@ -130,6 +131,7 @@ const ISSUE_KEY: Record<GenericFormIssue, MessageKey> = {
   "prefix-too-long": "page.sources.generic.prefix-too-long",
   "param-required": "page.sources.generic.param-required",
   "id-required": "page.sources.generic.id-required",
+  "id-path-invalid": "page.sources.generic.id-path-invalid",
   "event-type-invalid": "page.sources.generic.event-type-invalid",
   "event-type-reserved": "page.sources.generic.event-type-reserved",
   "secret-hex": "page.sources.generic.secret-hex",
@@ -176,7 +178,7 @@ const makeSchema = (t: TranslateFn) =>
       keyEncoding: z.enum(KEY_ENCODING_CHOICES),
       location: z.enum(TOKEN_LOCATION_CHOICES),
       param: z.string(),
-      idKind: z.enum(["header", "field"]),
+      idKind: z.enum(ID_KIND_CHOICES),
       idValue: z.string(),
       eventType: z.string(),
       // PK3 (ADR-204): signed-template.
@@ -490,6 +492,8 @@ export default function SourcesPage() {
         description={t("page.sources.form.description")}
         formId="source-form"
         submitting={create.isPending}
+        // UI-MS: một cỡ cố định (lg) — đổi provider không làm hộp nhảy cỡ (review T2); generic dùng lưới 2 cột
+        size="lg"
       >
         <form id="source-form" noValidate autoComplete="off" onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup className="gap-4">
@@ -550,12 +554,14 @@ export default function SourcesPage() {
             />
             )}
             {provider === "generic" && (
+              <div className="grid gap-4 sm:grid-cols-2 sm:[&>[role=note]]:col-span-2">
               <GenericFields
                 control={form.control}
                 scheme={scheme}
                 // PK3: điền nhanh chỉ ghi đè các ô ký (giữ tên, khoá bí mật, khoá chống trùng, kiểu sự kiện).
                 onPreset={(p: TemplatePreset) => form.reset({ ...form.getValues(), ...TEMPLATE_PRESETS[p] }, { keepDefaultValues: true })}
               />
+              </div>
             )}
           </FieldGroup>
         </form>

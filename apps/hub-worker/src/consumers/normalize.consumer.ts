@@ -13,6 +13,7 @@ import {
   isReservedType,
   validateCanonical,
   fastFailRedisOptions,
+  LogThrottle,
 } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import * as amqp from 'amqplib';
@@ -84,6 +85,8 @@ export class NormalizeConsumer {
    * — trên môi trường thật biến này bị bỏ qua hoàn toàn.
    */
   private faultsLeft: number;
+  /** F2 (ADR-231): warn "Lỗi tạm ở normalize" tối đa 1 dòng / 30s / tiến trình (như `infraLogThrottle` của delivery). */
+  readonly transientLogThrottle = new LogThrottle();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -288,10 +291,15 @@ export class NormalizeConsumer {
     }
 
     if (kind === 'transient' && retries < NORMALIZE_MAX_RETRIES) {
-      log.warn(
-        { err: err?.message, code: err?.code, [NORMALIZE_RETRY_HEADER]: retries + 1 },
-        'Lỗi tạm ở normalize -> q.normalize.retry.30s',
-      );
+      // F2 (chaos [BP:T4] phần b, ADR-231): DB vừa chết, factor còn 0 (trước nhịp tick đầu) -> cả prefetch lỗi trong ~1 s, mỗi
+      // message một dòng warn (đo được 225 dòng/s). Gộp như delivery (BP1): tối đa 1 dòng warn / 30s / tiến trình kèm số đã gộp;
+      // từng message vẫn có dòng debug (rawEventId nằm trong `log`). Nhánh DLQ (log.error) bên dưới KHÔNG gộp.
+      const detail = { err: err?.message, code: err?.code, [NORMALIZE_RETRY_HEADER]: retries + 1 };
+      log.debug(detail, 'Lỗi tạm ở normalize -> q.normalize.retry.30s');
+      const suppressed = this.transientLogThrottle.take();
+      if (suppressed !== null) {
+        log.warn({ ...detail, suppressedSinceLastLog: suppressed }, 'Lỗi tạm ở normalize -> q.normalize.retry.30s (log gộp tối đa 1 dòng/30s)');
+      }
       normalizeRetries.inc();
       channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, {
         persistent: true,

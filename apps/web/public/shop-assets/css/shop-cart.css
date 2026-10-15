@@ -277,9 +277,22 @@ button.sovcat {
   border-radius: 22px;
   width: 100%;
   max-width: 560px;
-  max-height: 92vh;
-  overflow-y: auto;
+  /* UI-MS: cỡ cố định, không bao giờ cao quá khung nhìn; bước (cksteps) đứng yên, chỉ .ckbody cuộn */
+  max-height: 90vh;
+  max-height: min(760px, 90dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 34px 30px 30px;
+}
+.ckbody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* chừa chỗ cho thanh cuộn + vòng focus của ô nhập (không bị cắt mép) */
+  margin: 0 -14px 0 -4px;
+  padding: 0 14px 4px 4px;
 }
 .cksteps {
   display: flex;
@@ -438,6 +451,10 @@ button.sovcat {
   .ckbox {
     padding: 28px 18px 22px;
   }
+  .ckbody {
+    margin-right: -10px;
+    padding-right: 10px;
+  }
   .ckcode {
     font-size: 1.8rem;
   }
@@ -474,4 +491,55 @@ button.sovcat {
 }
 .ckcurrent .ckcancel {
   margin: 0;
+}
+
+/* UI-MS: khung các overlay của storefront — không cao quá khung nhìn, cuộn bên trong, lề an toàn trên mobile */
+#checkoutPop,
+#menuPop {
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+}
+.mpbox {
+  max-height: 88vh;
+  max-height: min(640px, 88dvh);
+  overscroll-behavior: contain;
+}
+/* Popup món, màn rộng: ảnh trái đứng yên, chỉ cột chữ cuộn (nút đóng không trôi mất) */
+@media (min-width: 992px) {
+  .mpbox {
+    overflow: hidden;
+  }
+  .mpbox .mpbody {
+    max-height: inherit;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+/* Màn hẹp: ảnh thấp lại để phần chữ + nút thêm giỏ nằm gọn trong khung nhìn */
+@media (max-width: 991px) {
+  .mpbox .mpimg {
+    min-height: 0;
+    height: 30vh; /* dự phòng trình duyệt chưa có dvh (review T8) */
+    height: min(240px, 30dvh);
+  }
+  /* Review T4: hộp cuộn cả khối trên màn hẹp -> nút đóng dính trên cùng, không trôi mất.
+     Chiếm một dòng flex cao 0 (margin-bottom âm) nên ảnh vẫn nằm sát mép trên. */
+  .mpbox > .mpclose {
+    position: sticky;
+    top: 14px;
+    right: auto;
+    margin: 14px 14px -48px auto;
+  }
+}
+/* Review T3: hàng nút của thanh toán đứng yên dưới phần cuộn */
+.ckfoot {
+  flex-shrink: 0;
+  padding-top: 14px;
+  text-align: center;
+}
+.ckfoot:empty {
+  display: none;
+}
+.cartlist {
+  min-height: 0;
+  overscroll-behavior: contain;
 }

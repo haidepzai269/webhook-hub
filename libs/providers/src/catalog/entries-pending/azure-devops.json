@@ -12,5 +12,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng \"id (chưa xác minh trong phiên)\" — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): không ký body (Basic auth / header tuỳ chỉnh); trường id (GUID) có trong mẫu nhưng tài liệu không mô tả, không nói giữ nguyên khi gửi lại; mẫu trang webhooks dùng 'messages' khác trang events dùng 'message'. Nguồn: learn.microsoft.com/en-us/azure/devops/service-hooks/events, services/webhooks"
 }

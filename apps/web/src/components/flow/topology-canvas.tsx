@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 import {
   AlertDialog,
+  AlertDialogBody,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -848,7 +849,9 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
 
   return (
     <AlertDialog open={Boolean(node && kind)} onOpenChange={(o) => !o && !busy && onClose()}>
-      <AlertDialogContent>
+      {/* UI-MS: footer 3 nút + ghi chú dài -> cỡ md; thân cuộn, nút đứng yên */}
+      <AlertDialogContent size="md">
+        <AlertDialogBody>
         <AlertDialogHeader>
           <AlertDialogTitle>
             {t(disconnected ? "flow.manage.title-connect" : "flow.manage.title-disconnect", { noun, label: node?.label ?? "" })}
@@ -886,6 +889,7 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+        </AlertDialogBody>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t("common.cancel")}</AlertDialogCancel>
           <Button variant="outline" disabled={busy} onClick={toggle}>

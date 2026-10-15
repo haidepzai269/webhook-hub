@@ -107,6 +107,8 @@ export const LISTEN_REASON_KEYS: Record<string, MessageKey> = {
   timestamp_out_of_range: "page.sources.listen.reason.timestamp-out-of-range",
   missing_kv_key: "page.sources.listen.reason.missing-kv-key",
   missing_idempotency_key: "page.sources.listen.reason.missing-idempotency-key",
+  empty_body: "page.sources.listen.reason.empty-body",
+  idempotency_path_not_scalar: "page.sources.listen.reason.idempotency-path-not-scalar",
   mapping_field_missing: "page.sources.listen.reason.mapping-field-missing",
   mapping_field_invalid: "page.sources.listen.reason.mapping-field-invalid",
   config_invalid: "page.sources.listen.reason.config-invalid",
@@ -173,7 +175,7 @@ export interface GenericFormValues {
   keyEncoding: (typeof KEY_ENCODING_CHOICES)[number];
   location: (typeof TOKEN_LOCATION_CHOICES)[number];
   param: string;
-  idKind: "header" | "field";
+  idKind: IdKind;
   idValue: string;
   eventType: string;
   // PK3 (SPEC-provider-khac §5, E16, ADR-204): `signed-template`. `header` = tiêu đề chữ ký (kv: tiêu đề khoá=giá trị),
@@ -311,8 +313,38 @@ export const algoFromPrefix = (v: Pick<GenericFormValues, "scheme" | "algo" | "p
  * Review PK1 T-1: standard-webhooks lấy khoá chống trùng từ TIÊU ĐỀ (id của bộ header đang dùng, đã được ký) — không có
  * lựa chọn "trường body". Form ẩn ô chọn và dùng hàm này để biết loại khoá thật.
  */
-export const idKindOf = (v: Pick<GenericFormValues, "scheme" | "idKind">): "header" | "field" =>
+export const idKindOf = (v: Pick<GenericFormValues, "scheme" | "idKind">): IdKind =>
   v.scheme === "standard-webhooks" ? "header" : v.idKind;
+
+/**
+ * PK10 (SPEC-provider-khac E31, ADR-230): bốn kiểu khoá chống trùng của form — tiêu đề, trường cấp một, đường dẫn lồng
+ * (≤ 3 cấp, `data.id`), băm nội dung (`{bodyHash: true}`, không có ô tên). Như `IDEMPOTENCY_KINDS` của server.
+ */
+export const ID_KIND_CHOICES = ["field", "header", "path", "bodyHash"] as const;
+export type IdKind = (typeof ID_KIND_CHOICES)[number];
+/** PK10: như `PATH_SEGMENT_RE` / `PATH_MAX_DEPTH` / `idempotencyPathProblem` của server (test đối chiếu). */
+export const PATH_SEGMENT_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const PATH_MAX_DEPTH = 3;
+const PATH_FORBIDDEN_SEGMENTS = ["__proto__", "prototype", "constructor"];
+/** Review PK10 T-a: như `PATH_INDEX_SEGMENT_RE` của server — cấp toàn số là chỉ số mảng trá hình (`items.0.id`). */
+export const PATH_INDEX_SEGMENT_RE = /^[0-9]+$/;
+export function isIdempotencyPath(path: string): boolean {
+  const segs = path.split(".");
+  return (
+    segs.length <= PATH_MAX_DEPTH &&
+    segs.every((x) => PATH_SEGMENT_RE.test(x) && !PATH_FORBIDDEN_SEGMENTS.includes(x) && !PATH_INDEX_SEGMENT_RE.test(x))
+  );
+}
+
+/** PK10: `idempotency` của config từ ô form (null = bỏ trống: standard-webhooks dùng webhook-id, unverified chỉ băm body). */
+export function idempotencyOf(v: Pick<GenericFormValues, "scheme" | "idKind" | "idValue">): Record<string, unknown> | null {
+  const kind = idKindOf(v);
+  if (kind === "bodyHash") return { bodyHash: true };
+  const idv = v.idValue.trim();
+  if (!idv) return null;
+  if (kind === "header") return { header: idv.toLowerCase() };
+  return kind === "path" ? { path: idv } : { field: idv };
+}
 
 /**
  * Form tay (trước PK7) -> `verificationConfig` đúng khuôn `validateGenericConfig` (server vẫn kiểm lại, 422 có tên trường).
@@ -327,8 +359,8 @@ export function buildGenericConfig(v: GenericFormValues): Record<string, unknown
     const fh = forwardHeaderList(v);
     if (fh.length > 0) config.forwardHeaders = fh;
     if (v.forwardUrl === "yes") config.forwardUrl = true;
-    const idv = v.idValue.trim();
-    if (idv) config.idempotency = v.idKind === "header" ? { header: idv.toLowerCase() } : { field: idv };
+    const idem = idempotencyOf(v);
+    if (idem) config.idempotency = idem;
     config.eventType = v.eventType.trim();
     return withHandshakeAck(v, config);
   }
@@ -346,8 +378,8 @@ export function buildGenericConfig(v: GenericFormValues): Record<string, unknown
   }
   // Tiền tố KHÔNG trim (vd "Bearer " có dấu cách thật); rỗng = không có. `<algo>=` gõ tay đã xử lý ở trên.
   if (needsPrefix(v) && v.prefix !== "" && !algoFromPrefix(v)) config.prefix = v.prefix;
-  const idValue = v.idValue.trim();
-  if (idValue) config.idempotency = idKindOf(v) === "header" ? { header: idValue.toLowerCase() } : { field: idValue };
+  const idem = idempotencyOf(v);
+  if (idem) config.idempotency = idem;
   config.eventType = v.eventType.trim();
   return withHandshakeAck(v, config);
 }
@@ -418,8 +450,8 @@ function buildTemplateConfig(v: GenericFormValues, config: Record<string, unknow
     config.toleranceSec = Number(v.toleranceSec.trim());
   }
   if (templateHas(v, "id")) config.idHeader = v.idHeader.trim().toLowerCase();
-  const idValue = v.idValue.trim();
-  if (idValue) config.idempotency = idKindOf(v) === "header" ? { header: idValue.toLowerCase() } : { field: idValue };
+  const idem = idempotencyOf(v);
+  if (idem) config.idempotency = idem;
   config.eventType = v.eventType.trim();
   return config;
 }
@@ -465,6 +497,7 @@ export type GenericFormIssue =
   | "prefix-too-long"
   | "param-required"
   | "id-required"
+  | "id-path-invalid"
   | "event-type-invalid"
   | "event-type-reserved"
   | "secret-hex"
@@ -502,10 +535,12 @@ export function genericFormIssues(v: GenericFormValues, secret: string): { path:
   if (needsPrefix(v) && v.prefix.length > PREFIX_MAX) out.push({ path: "prefix", issue: "prefix-too-long" });
   if (v.scheme === "static-token" && v.location === "query" && !PARAM_RE.test(v.param.trim())) out.push({ path: "param", issue: "param-required" });
   const id = v.idValue.trim();
-  const idOk = idKindOf(v) === "header" ? HEADER_RE.test(id.toLowerCase()) : FIELD_RE.test(id);
+  const kind = idKindOf(v);
+  const idOk = kind === "header" ? HEADER_RE.test(id.toLowerCase()) : kind === "path" ? isIdempotencyPath(id) : FIELD_RE.test(id);
   // PK5: `unverified` — khoá chống trùng tuỳ chọn (vắng = băm body), như standard-webhooks (vắng = id của bộ header).
   const idOptional = v.scheme === "standard-webhooks" || v.scheme === UNVERIFIED_SCHEME;
-  if ((id || !idOptional) && !idOk) out.push({ path: "idValue", issue: "id-required" });
+  // PK10: băm nội dung không có ô tên.
+  if (kind !== "bodyHash" && (id || !idOptional) && !idOk) out.push({ path: "idValue", issue: kind === "path" ? "id-path-invalid" : "id-required" });
   const eventType = v.eventType.trim();
   if (!EVENT_TYPE_RE.test(eventType) || eventType.length > 128) out.push({ path: "eventType", issue: "event-type-invalid" });
   // Review PK1 T-2: kiểu chuẩn cần ánh xạ trường (PK7 / API) — form tay không có ô mapping, server sẽ 422.
@@ -619,7 +654,9 @@ function handshakeConflicts(v: GenericFormValues): { path: keyof GenericFormValu
   const usesWhen = v.hsKind === "body-echo" || v.hsKind === "hmac-echo" || v.hsKind === "manual-url";
   if (v.hsKind === "header-echo" && clash(v.hsHeader.trim().toLowerCase())) return [{ path: "hsHeader", issue: "hs-conflict" }];
   if (usesWhen && v.hsWhenKind === "header" && clash(v.hsWhenName.trim().toLowerCase())) return [{ path: "hsWhenName", issue: "hs-conflict" }];
-  if (usesWhen && v.hsWhenKind === "field" && idKindOf(v) === "field" && v.hsWhenName.trim() !== "" && v.hsWhenName.trim() === v.idValue.trim()) {
+  // PK10: trường cấp một mà khoá đọc — `field`, hoặc cấp đầu của `path` (như `idempotencyTopField` của server).
+  const idTop = idKindOf(v) === "field" ? v.idValue.trim() : idKindOf(v) === "path" ? v.idValue.trim().split(".")[0] : "";
+  if (usesWhen && v.hsWhenKind === "field" && v.hsWhenName.trim() !== "" && v.hsWhenName.trim() === idTop) {
     return [{ path: "hsWhenName", issue: "hs-conflict" }];
   }
   return [];

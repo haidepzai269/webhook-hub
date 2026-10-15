@@ -9,6 +9,11 @@
  *   GET    /_requests[?path=/x]  danh sách request đã ghi (cũ → mới)
  *   DELETE /_requests            xoá hết
  *   GET    /health               200
+ *   PUT    /_mode?path=/x        (BP chaos, ADR-193) đặt hành vi THEO PATH lúc chạy, body JSON {mode?: "fail"|"ok", delayMs?: số}
+ *                                — "đích chết N phút rồi sống lại" mà không đổi URL endpoint (URL đã xác minh challenge).
+ *                                mode "fail" → 500 cho mọi request vào path (VẪN ghi vào _requests: đếm được request đập vào
+ *                                đích chết); delayMs → ngủ rồi mới trả (đích chậm, giữ delivery đang bay). Body {} = xoá.
+ *   GET    /_mode                các path đang bị đặt · DELETE /_mode xoá hết
  *   /fake-google/*                Google OIDC giả cho e2e đăng nhập Google (fake-google.js, ADR-127) — KHÔNG ghi vào _requests
  *   /_fake/*                      PayOS/Stripe giả cho connector (fake-providers.js, SPEC-ket-noi §4.6) — CÓ ghi vào _requests
  */
@@ -21,6 +26,8 @@ function createSink(opts = {}) {
   const max = opts.max ?? 5000;
   /** @type {Array<{at:string,method:string,path:string,query:Record<string,string>,headers:Record<string,string>,body:string}>} */
   let requests = [];
+  /** @type {Map<string,{mode?:string,delayMs?:number}>} hành vi đặt theo path (PUT /_mode) — thắng ?mode= của URL */
+  const modes = new Map();
   const fakeGoogle = createFakeGoogle();
   const fakeProviders = createFakeProviders(opts.env);
 
@@ -31,6 +38,32 @@ function createSink(opts = {}) {
       res.end(JSON.stringify(obj));
     };
     if (url.pathname === '/health') return json(200, { ok: true });
+    if (url.pathname === '/_mode') {
+      if (req.method === 'DELETE') {
+        modes.clear();
+        return json(200, { ok: true });
+      }
+      if (req.method === 'GET') return json(200, Object.fromEntries(modes));
+      const p = url.searchParams.get('path');
+      if (!p || !p.startsWith('/')) return json(400, { error: 'path bắt buộc, bắt đầu bằng /' });
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        let b = {};
+        try {
+          b = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        } catch {
+          return json(400, { error: 'body phải là JSON' });
+        }
+        const m = {};
+        if (b.mode === 'fail') m.mode = 'fail';
+        if (Number.isFinite(b.delayMs) && b.delayMs > 0) m.delayMs = Math.min(b.delayMs, 60_000);
+        if (Object.keys(m).length) modes.set(p, m);
+        else modes.delete(p);
+        json(200, { path: p, ...m });
+      });
+      return;
+    }
     if (url.pathname === '/_requests') {
       if (req.method === 'DELETE') {
         requests = [];
@@ -56,8 +89,10 @@ function createSink(opts = {}) {
       if (requests.length > max) requests.shift();
       if (fakeProviders(req, res, url, body)) return;
 
-      const mode = url.searchParams.get('mode');
-      if (mode === 'fail') return json(500, { error: 'sink_mode_fail' });
+      const forced = modes.get(url.pathname);
+      const mode = forced?.mode ?? url.searchParams.get('mode');
+      const later = (fn) => (forced?.delayMs ? setTimeout(fn, forced.delayMs) : fn());
+      if (mode === 'fail') return later(() => json(500, { error: 'sink_mode_fail' }));
       let parsed = null;
       try {
         parsed = JSON.parse(body);
@@ -69,7 +104,7 @@ function createSink(opts = {}) {
           ? json(200, { challenge: parsed.challenge })
           : json(200, { ok: true });
       if (mode === 'slow') return setTimeout(reply, slowMs);
-      reply();
+      later(reply);
     });
   });
 }

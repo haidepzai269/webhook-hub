@@ -159,6 +159,13 @@ export const ERROR_CATALOG = {
     params: ['source'],
     fix: () => 'Send idempotencyKey (POST /events) or configure "idempotency" on the custom source.',
   },
+  // PK10 (E31, ADR-230): anh em của missing_idempotency_key ở /hooks — cùng câu với EMPTY_BODY_FIX của GenericAdapter.
+  empty_body: {
+    status: 422,
+    message: 'The body is empty, so a body-hash idempotency key cannot be derived.',
+    fix: () =>
+      'Empty body: this source deduplicates by hashing the body bytes ("idempotency": {"bodyHash": true} or a "path" fallback), and an empty body has nothing to hash. Use a header or body-field idempotency key, or have the provider send a body.',
+  },
   payload_too_large: {
     status: 413,
     message: 'The request body is too large.',

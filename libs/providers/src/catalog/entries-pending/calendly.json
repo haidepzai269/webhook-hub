@@ -9,5 +9,5 @@
   "blockedBy": [
     "docs"
   ],
-  "pendingReason": "khoá chống trùng \"chưa xác minh\" (body không có id sự kiện rõ) — config bắt buộc khoá chống trùng (header hoặc trường cấp một)"
+  "pendingReason": "đối chiếu tài liệu 2026-10-14 (PK10): không có id sự kiện/lần giao (gần nhất là payload.uri — id tài nguyên); tài liệu không nói gửi lại giữ nguyên body -> không đủ điều kiện bodyHash. Nguồn: developer.calendly.com/api-docs/overview/webhooks/webhook-signatures, webhook-errors"
 }

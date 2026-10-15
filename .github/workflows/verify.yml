@@ -30,7 +30,8 @@ jobs:
   unit:
     name: unit (L0 + map + gates)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # 15 → 25 (2026-10-15): L0 đã chạm 13–14m45s (1970 test), run 38717026349 bị huỷ vì quá 15 phút, không phải test đỏ.
+    timeout-minutes: 25
     env:
       # Ngoại lệ DUY NHẤT của luật --maxWorkers=2: runner CI có 4 vCPU / 16GB, máy dev thì không.
       VERIFY_JEST_WORKERS: '4'

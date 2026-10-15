@@ -11,142 +11,19 @@
  *
  * Chạy: `npm run verify:chaos` (~5–8 phút). Không chạy song song với phiên khác đang dùng hubv.
  */
-import { spawn } from 'child_process';
-import { childEnv, composeBaseArgs, composeOutput, ROOT } from '../lib/compose';
-import { closeWorld, createKey, createSource, Dev, psql, registerDev, RUN, sendFixture, SINK_INTERNAL, sleep, Source, svc, uniq } from '../lib/e2e-world';
+import { apiHealthy, assertExactlyOnce as exactlyOnce, blast as blastTo, dc, guarded, newIds, newState, pendingAt as pendingFor, redeliver as redeliverTo, stream as streamTo, StreamState } from '../lib/chaos';
+import { closeWorld, createKey, createSource, Dev, registerDev, RUN, SINK_INTERNAL, sleep, Source, svc } from '../lib/e2e-world';
 import { expect } from '../lib/http-session';
-import { ScenarioFile, waitFor } from '../lib/scenario';
+import { ScenarioFile } from '../lib/scenario';
 
 const w: { dev?: Dev; key: string; gh?: Source } = { key: '' };
 
-/**
- * `docker compose -p hubv …` KHÔNG chặn event loop (spawn, không spawnSync): loạt request phải tiếp tục bay TRONG lúc
- * container bị kill/restart — spawnSync làm loạt request đứng im đúng lúc cần phá.
- */
-function dc(args: string[], timeoutMs = 180_000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const p = spawn('docker', [...composeBaseArgs(), ...args], { cwd: ROOT, env: childEnv() });
-    let out = '';
-    let err = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (err += d));
-    const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
-    p.on('close', (code) => {
-      clearTimeout(t);
-      if (code === 0) resolve(out);
-      else reject(new Error(`docker compose ${args.join(' ')} → ${code}: ${err.trim().slice(0, 300)}`));
-    });
-  });
-}
-
-async function apiHealthy(timeoutMs = 90_000): Promise<void> {
-  await waitFor('hub-api /health 200', async () => (await fetch(`${process.env.VERIFY_API_URL || 'http://localhost:14000'}/health`).catch(() => null))?.ok, timeoutMs, 1000);
-}
-
-/** Gửi `ids` như provider: song song `conc`, ghi lại id đã nhận 2xx ở lần đầu. */
-async function blast(ids: string[], conc = 8): Promise<{ acked: Set<string>; failed: Set<string> }> {
-  const acked = new Set<string>();
-  const failed = new Set<string>();
-  let i = 0;
-  await Promise.all(
-    Array.from({ length: conc }, async () => {
-      while (i < ids.length) {
-        const id = ids[i++];
-        try {
-          const r = await sendFixture('github/push', w.gh!.webhookUrl, id);
-          (r.status >= 200 && r.status < 300 ? acked : failed).add(id);
-        } catch {
-          failed.add(id);
-        }
-      }
-    }),
-  );
-  return { acked, failed };
-}
-
-/** Provider gửi lại mọi id chưa 2xx tới khi 2xx (backoff 1 s, tối đa ~2 phút). */
-async function redeliver(ids: Iterable<string>): Promise<void> {
-  for (const id of ids) {
-    await waitFor(`gửi lại ${id} tới khi 2xx`, async () => {
-      const r = await sendFixture('github/push', w.gh!.webhookUrl, id).catch(() => null);
-      return r && r.status >= 200 && r.status < 300;
-    }, 120_000, 1000);
-  }
-}
-
-/** Bắn liên tục id MỚI trong `ms` mili-giây (để chắc chắn có request đang bay lúc phá). */
-type StreamState = { ids: string[]; acked: Set<string>; failed: Set<string> };
-async function stream(ms: number, conc = 6, st: StreamState = { ids: [], acked: new Set(), failed: new Set() }): Promise<StreamState> {
-  const { ids, acked, failed } = st;
-  const until = Date.now() + ms;
-  await Promise.all(
-    Array.from({ length: conc }, async () => {
-      while (Date.now() < until) {
-        const id = uniq();
-        ids.push(id);
-        try {
-          const r = await sendFixture('github/push', w.gh!.webhookUrl, id);
-          (r.status >= 200 && r.status < 300 ? acked : failed).add(id);
-        } catch {
-          failed.add(id);
-          await sleep(100); // api chết: lỗi kết nối tức thì — đừng quay vòng nóng
-        }
-      }
-    }),
-  );
-  return { ids, acked, failed };
-}
-
-function newIds(n: number): string[] {
-  return Array.from({ length: n }, () => uniq());
-}
-
-/** Đếm theo delivery id GitHub (`sim-push-<u>`): raw ACCEPTED, event, delivery/SUCCEEDED cho đúng tập id. */
-function ledger(ids: string[]) {
-  const list = ids.map((u) => `'sim-push-${u}'`).join(',');
-  const row = psql(
-    `with r as (select id, headers->>'x-github-delivery' d from hub.raw_events where source_id = '${w.gh!.id}' and status = 'ACCEPTED' and headers->>'x-github-delivery' in (${list})),
-          e as (select e.id, r.d from hub.events e join r on r.id = e.raw_event_id)
-     select (select count(*) from r), (select count(distinct d) from r), (select count(*) from e), (select count(distinct d) from e),
-            (select count(*) from hub.deliveries x join e on e.id = x.event_id),
-            (select count(*) from hub.deliveries x join e on e.id = x.event_id where x.status = 'SUCCEEDED'),
-            (select count(*) from (select x.event_id from hub.deliveries x join e on e.id = x.event_id group by x.event_id, x.subscription_id having count(*) > 1) z)`,
-  );
-  const [raw, rawIds, ev, evIds, del, ok, dupDel] = row.split('|').map(Number);
-  return { raw, rawIds, ev, evIds, del, ok, dupDel };
-}
-
-/**
- * M-2 (review VF): tiền đề "phá GIỮA CHỪNG" — ngay lúc phá phải có id đã nhận 2xx (đã COMMIT) mà delivery CHƯA
- * SUCCEEDED. Không có thì kịch bản không phá được gì (xanh suông) -> đỏ.
- */
-function pendingAt(st: StreamState, label: string): number {
-  const acked = [...st.acked];
-  if (acked.length === 0) throw new Error(`${label}: chưa id nào được nhận lúc phá — kịch bản phá quá sớm`);
-  const l = ledger(acked);
-  const pending = acked.length - l.ok;
-  console.log(`  ${label}: lúc phá có ${acked.length} id đã 2xx, ${pending} chưa giao xong`);
-  expect(pending > 0, `${label}: lúc phá KHÔNG có việc dở (mọi id đã giao) — kịch bản không phá được gì`);
-  return pending;
-}
-
-/** 0 mất / 0 trùng / mọi delivery SUCCEEDED, chờ tối đa `timeoutMs` cho worker xử lý xong. */
-async function assertExactlyOnce(ids: string[], acked: Set<string>, label: string, timeoutMs = 120_000): Promise<void> {
-  const n = ids.length;
-  const final = await waitFor(`${label}: ${n} id → ${n} event, ${n} delivery SUCCEEDED`, async () => {
-    const l = ledger(ids);
-    return l.ev >= n && l.ok >= n ? l : null;
-  }, timeoutMs, 2000).catch(() => ledger(ids));
-  // BB-3: mọi id đã nhận 2xx ở lần đầu phải có raw_event — đếm riêng tập acked.
-  const ackedList = [...acked];
-  const ackedHave = ackedList.length ? ledger(ackedList).rawIds : 0;
-  const msg = `${label}: gửi ${n} id (2xx lần đầu ${acked.size}) → raw ${final.raw}/${final.rawIds} id · event ${final.ev}/${final.evIds} id · delivery ${final.ok}/${final.del} SUCCEEDED · trùng delivery ${final.dupDel}`;
-  console.log(`  ${msg}`);
-  expect(ackedHave === acked.size, `BB-3: ${acked.size - ackedHave} id đã nhận 2xx mà KHÔNG có raw_event (ACK trước COMMIT)`);
-  expect(final.raw === n && final.rawIds === n, `mất/trùng ở ingest — ${msg}`);
-  expect(final.ev === n && final.evIds === n, `mất/trùng event — ${msg}`);
-  expect(final.del === n && final.ok === n && final.dupDel === 0, `delivery thiếu/trùng/chưa SUCCEEDED — ${msg}`);
-}
+// Đồ nghề chung ở verify/lib/chaos.ts (ADR-193, dùng lại cho chaos-bp + LH6) — ở đây chỉ gắn vào source GitHub của file này.
+const blast = (ids: string[], conc = 8) => blastTo(w.gh!, ids, conc);
+const redeliver = (ids: Iterable<string>) => redeliverTo(w.gh!, ids);
+const stream = (ms: number, conc = 6, st: StreamState = newState()) => streamTo(w.gh!, ms, conc, st);
+const pendingAt = (st: StreamState, label: string) => pendingFor(w.gh!, st, label);
+const assertExactlyOnce = (ids: string[], acked: Set<string>, label: string, timeoutMs = 120_000) => exactlyOnce(w.gh!, ids, acked, label, timeoutMs);
 
 async function setup(): Promise<void> {
   w.dev = await registerDev('l3');
@@ -156,21 +33,6 @@ async function setup(): Promise<void> {
   expect(e.status === 201 && e.body?.verification === 'VERIFIED', `endpoint → ${e.status} ${e.text}`);
   const s = await svc(w.key, w.dev.slug, 'POST', '/subscriptions', { endpointId: e.body.id, name: 'l3', eventTypes: ['repo.*'] });
   expect(s.status === 201, `subscription → ${s.status} ${s.text}`);
-}
-
-/** Dù kịch bản đỏ giữa chừng: mọi container hubv phải chạy lại (không để phá kịch bản sau). */
-async function heal(): Promise<void> {
-  composeOutput(['unpause', 'postgres'], 30_000);
-  composeOutput(['start', 'redis', 'rabbitmq', 'hub-api', 'hub-worker'], 120_000);
-  await apiHealthy().catch(() => undefined);
-}
-
-async function guarded(fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-  } finally {
-    await heal();
-  }
 }
 
 const file: ScenarioFile = {
@@ -200,7 +62,7 @@ const file: ScenarioFile = {
       tags: ['chaos', 'VF5', 'chaos-worker'],
       fn: () =>
         guarded(async () => {
-          const st: StreamState = { ids: [], acked: new Set(), failed: new Set() };
+          const st = newState();
           const run = stream(5000, 6, st);
           await sleep(1500); // worker đang normalize + giao những id đầu
           await dc(['kill', '-s', 'SIGKILL', 'hub-worker']);
@@ -218,7 +80,7 @@ const file: ScenarioFile = {
       tags: ['chaos', 'VF5', 'chaos-rabbit'],
       fn: () =>
         guarded(async () => {
-          const st: StreamState = { ids: [], acked: new Set(), failed: new Set() };
+          const st = newState();
           const run = stream(8000, 6, st);
           await sleep(1000);
           const restarting = dc(['restart', 'rabbitmq'], 180_000);

@@ -1,4 +1,6 @@
 import "@fortawesome/fontawesome-free/css/all.min.css";
+// Thanh cuộn dùng chung với admin (một kiểu cho mọi vùng cuộn) — CSS thuần, không kéo Tailwind vào storefront.
+import "@/styles/scrollbar.css";
 import type { ReactNode } from "react";
 
 import type { Metadata, Viewport } from "next";

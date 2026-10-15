@@ -105,6 +105,13 @@ export interface Diagnosis {
     /** Review PK3 T-6: signed-template dạng kv — header chữ ký có mặt nhưng thiếu khoá timestamp (`expectedKvKey`). */
     | 'missing_kv_key'
     | 'missing_idempotency_key'
+    /** PK10 (E31): nguồn chống trùng theo băm body (`bodyHash` / `path` thiếu giá trị) nhận body rỗng. */
+    | 'empty_body'
+    /**
+     * Review PK10 T-b: ACCEPTED nhưng `idempotency.path` trỏ object / mảng / boolean -> đã rơi về băm body. `ok: true` (nhận
+     * được), `field` = TÊN path.
+     */
+    | 'idempotency_path_not_scalar'
     | 'mapping_field_missing'
     | 'mapping_field_invalid'
     | 'config_invalid'

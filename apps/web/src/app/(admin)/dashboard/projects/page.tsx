@@ -11,7 +11,7 @@ import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -249,13 +249,14 @@ export default function ProjectsPage() {
       )}
 
       <Dialog open={open} onOpenChange={close}>
-        <AdminDialogContent className="sm:max-w-lg">
+        <AdminDialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t("page.projects.create")}</DialogTitle>
             <DialogDescription>
               {t("page.projects.dialog.description")}
             </DialogDescription>
           </DialogHeader>
+          <DialogBody>
           <form id="project-form" noValidate onSubmit={submit}>
             <FieldGroup className="gap-4">
               <Field className="gap-1.5">
@@ -297,6 +298,7 @@ export default function ProjectsPage() {
               {formError && <p className="text-destructive text-sm">{formError}</p>}
             </FieldGroup>
           </form>
+          </DialogBody>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => close(false)} disabled={create.isPending}>
               {t("common.cancel")}

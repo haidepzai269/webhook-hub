@@ -1,0 +1,63 @@
+{
+  "id": "squarespace",
+  "name": "Squarespace (Commerce webhooks)",
+  "aliases": [
+    "squarespace"
+  ],
+  "group": null,
+  "fingerprint": {
+    "method": "POST",
+    "headers": {
+      "required": [
+        "squarespace-signature"
+      ],
+      "optional": []
+    },
+    "userAgent": null,
+    "body": {
+      "format": "json-object",
+      "required": [
+        "id",
+        "websiteId",
+        "subscriptionId",
+        "topic",
+        "createdOn",
+        "data"
+      ],
+      "optional": []
+    },
+    "query": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "handler": {
+    "config": {
+      "scheme": "hmac",
+      "header": "squarespace-signature",
+      "algo": "sha256",
+      "encoding": "hex",
+      "keyEncoding": "hex",
+      "idempotency": {
+        "field": "id"
+      },
+      "eventType": "squarespace.notification"
+    }
+  },
+  "fields": [
+    {
+      "name": "secret",
+      "label": "Secret (hex) của webhook subscription Squarespace — hub giải mã hex trước khi ký",
+      "secret": true
+    }
+  ],
+  "secretSource": "provider",
+  "docs": "https://developers.squarespace.com/webhooks/verifying-notifications",
+  "docsVersion": "Đối chiếu 2026-10-14. Khoá = hexToBytes(secret). Khoá chống trùng id 'unique notification id'; trang notification-delivery: giao ít nhất một lần, 'track processed notification ids to handle duplicates'.",
+  "confidence": "trung bình",
+  "sources": [
+    "https://developers.squarespace.com/webhooks/verifying-notifications",
+    "https://developers.squarespace.com/webhooks/notification-delivery",
+    "https://developers.squarespace.com/webhooks/events/order-update"
+  ]
+}

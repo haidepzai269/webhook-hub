@@ -647,7 +647,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
       trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log, { path });
       trace.outcome = 'REJECTED';
-      return rejectAck(adapter, 422, 'missing_idempotency_key', log, ctx);
+      // PK10 (E31): `empty_body` = chống trùng theo băm body mà body rỗng (lỗi chung, không riêng provider nào).
+      return rejectAck(adapter, 422, err.code, log, ctx);
     }
     // PK5 (E6): meta adapter dựng lúc nhận (vd URL công khai khi `forwardUrl`) -> `headers.__hub_meta` của raw ACCEPTED.
     const meta = this.storedMetaOf(adapter, req, ctx, log);

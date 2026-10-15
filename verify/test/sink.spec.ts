@@ -46,4 +46,25 @@ describe('verify-sink', () => {
     expect((await fetch(`${base}/in/s?mode=slow`, { method: 'POST', body: '{}' })).status).toBe(200);
     expect(Date.now() - t).toBeGreaterThanOrEqual(45);
   });
+
+  it('PUT /_mode theo path (BP chaos): fail → 500 nhưng VẪN ghi request; delayMs → chậm rồi 200; body {} → về bình thường', async () => {
+    const put = (p: string, b: unknown) => fetch(`${base}/_mode?path=${encodeURIComponent(p)}`, { method: 'PUT', body: JSON.stringify(b) });
+    expect((await put('/in/d', { mode: 'fail' })).status).toBe(200);
+    expect((await fetch(`${base}/in/d`, { method: 'POST', body: '{}' })).status).toBe(500);
+    expect((await fetch(`${base}/in/khac`, { method: 'POST', body: '{}' })).status).toBe(200); // path khác không bị ảnh hưởng
+    expect(await (await fetch(`${base}/_requests?path=/in/d`)).json()).toHaveLength(1);
+    // challenge cũng 500 khi đích chết (như đích thật)
+    expect((await fetch(`${base}/in/d`, { method: 'POST', body: JSON.stringify({ type: 'endpoint.verification', challenge: 'c' }) })).status).toBe(500);
+    await put('/in/d', { delayMs: 60 });
+    const t = Date.now();
+    expect((await fetch(`${base}/in/d`, { method: 'POST', body: '{}' })).status).toBe(200);
+    expect(Date.now() - t).toBeGreaterThanOrEqual(55);
+    expect(await (await fetch(`${base}/_mode`)).json()).toEqual({ '/in/d': { delayMs: 60 } });
+    await put('/in/d', {});
+    expect(await (await fetch(`${base}/_mode`)).json()).toEqual({});
+    expect((await fetch(`${base}/_mode?path=x`, { method: 'PUT', body: '{}' })).status).toBe(400);
+    await put('/in/e', { mode: 'fail' });
+    await fetch(`${base}/_mode`, { method: 'DELETE' });
+    expect((await fetch(`${base}/in/e`, { method: 'POST', body: '{}' })).status).toBe(200);
+  });
 });
