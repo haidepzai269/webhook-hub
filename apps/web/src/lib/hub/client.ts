@@ -1,4 +1,5 @@
 import { createT, DEFAULT_LOCALE, isLocale, type TranslateFn } from "../i18n/dictionary";
+import { waitForAuthGate } from "./auth-gate";
 import { clearProjectSelection, currentProjectId } from "./project-store";
 import { errorMessageOf } from "./ui-logic";
 
@@ -10,6 +11,51 @@ export class HubApiError extends Error {
   ) {
     super(message);
     this.name = "HubApiError";
+  }
+}
+
+/**
+ * ADR-238: request quá `timeoutMs` — `status = 0` (không có phản hồi HTTP). Hub-api trên Render free ngủ sau 15 phút rảnh,
+ * thức dậy mất ~30–60s: hạn mặc định phải dài hơn thế, nhưng không được treo vô hạn (trang chờ mãi, không nút thử lại).
+ */
+export class HubTimeoutError extends HubApiError {
+  constructor(readonly timeoutMs: number) {
+    super(0, uiT()("errors.api.timeout", { seconds: Math.round(timeoutMs / 1000) }));
+    this.name = "HubTimeoutError";
+  }
+}
+
+/** 90s: phủ một lần cold start của Render (~60s) + dư. Áp cho MỌI request — server cũng ngủ lúc tab đang mở. */
+export const HUB_FETCH_TIMEOUT_MS = 90_000;
+
+export interface HubFetchInit extends RequestInit {
+  /** Hạn chờ (ms) cả header lẫn body; mặc định HUB_FETCH_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** Chỉ AuthGuard: đi qua cổng auth (ADR-238) — request của chính guard không thể chờ guard. */
+  bypassAuthGate?: boolean;
+}
+
+/** fetch + đọc body trong hạn `timeoutMs`; `signal` của caller vẫn huỷ được (lỗi abort gốc, không phải timeout). */
+async function fetchText(path: string, init: RequestInit, timeoutMs: number): Promise<{ res: Response; text: string }> {
+  const ctrl = new AbortController();
+  const outer = init.signal;
+  const onAbort = () => ctrl.abort(outer?.reason);
+  if (outer?.aborted) onAbort();
+  else outer?.addEventListener("abort", onAbort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, timeoutMs);
+  try {
+    const res = await fetch(path, { ...init, signal: ctrl.signal });
+    return { res, text: await res.text() };
+  } catch (err) {
+    if (timedOut) throw new HubTimeoutError(timeoutMs);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    outer?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -48,18 +94,30 @@ function redirectToLogin() {
  * còn lại chờ chung kết quả. `refresh_race` (tab khác vừa xoay vòng — cookie đã mới) vẫn coi là thử lại được.
  */
 let refreshing: Promise<boolean> | null = null;
+/**
+ * ADR-238: số lần refresh thành công. Guard gọi `/auth/me` + `/api/v1/projects` SONG SONG: request nào gặp 401 SAU khi
+ * refresh của request kia đã xong (single-flight đã nhả) mà vẫn gửi bằng cookie cũ thì chỉ cần thử lại — không refresh lần
+ * hai (xoay vòng refresh token thêm một lần vô ích, dễ thành `refresh_race`).
+ */
+let refreshGeneration = 0;
 export function refreshSession(): Promise<boolean> {
   refreshing ??= (async () => {
     try {
       const csrf = readCsrfCookie();
-      const res = await fetch("/auth/refresh", {
-        method: "POST",
-        credentials: "include",
-        headers: csrf ? { "x-csrf-token": csrf } : {},
-      });
-      if (res.ok) return true;
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      return body.error === "refresh_race";
+      const { res, text } = await fetchText(
+        "/auth/refresh",
+        { method: "POST", credentials: "include", headers: csrf ? { "x-csrf-token": csrf } : {} },
+        HUB_FETCH_TIMEOUT_MS,
+      );
+      let body: { error?: string } = {};
+      try {
+        body = text ? (JSON.parse(text) as { error?: string }) : {};
+      } catch {
+        /* body không phải JSON */
+      }
+      const ok = res.ok || body.error === "refresh_race";
+      if (ok) refreshGeneration++;
+      return ok;
     } catch {
       return false;
     } finally {
@@ -90,19 +148,23 @@ export function scopeToProject(path: string, projectId: string | null = currentP
  * fetch tới hub-api QUA PROXY của chính web (`/api/*`, `/auth/*` → rewrites): cookie first-party, URL tương đối,
  * `credentials:'include'`, gắn `x-csrf-token` cho method thay đổi dữ liệu, gắn `projectId` đang chọn.
  * 401 → refresh một lần (single-flight) rồi thử lại request gốc; refresh hỏng → về `/login`.
+ * ADR-238: chờ cổng auth khi AuthGuard đang xác nhận phiên; quá `timeoutMs` → HubTimeoutError (status 0).
  */
-export async function hubFetch<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
+export async function hubFetch<T>(path: string, init: HubFetchInit = {}, retried = false): Promise<T> {
+  const { timeoutMs = HUB_FETCH_TIMEOUT_MS, bypassAuthGate = false, ...reqInit } = init;
+  // ADR-238: chờ AuthGuard xác nhận phiên + chọn project (hạn timeout tính từ lúc ĐI, không tính thời gian chờ cổng).
+  if (!bypassAuthGate && !path.startsWith("/auth/")) await waitForAuthGate();
   path = scopeToProject(path);
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(reqInit.headers);
+  if (reqInit.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const method = (reqInit.method ?? "GET").toUpperCase();
   if (MUTATING.has(method)) {
     const csrf = readCsrfCookie();
     if (csrf) headers.set("x-csrf-token", csrf);
   }
 
-  const res = await fetch(path, { ...init, headers, credentials: "include" });
-  const text = await res.text();
+  const generation = refreshGeneration;
+  const { res, text } = await fetchText(path, { ...reqInit, headers, credentials: "include" }, timeoutMs);
   let body: unknown;
   try {
     body = text ? JSON.parse(text) : undefined;
@@ -111,7 +173,7 @@ export async function hubFetch<T>(path: string, init: RequestInit = {}, retried 
   }
 
   if (res.status === 401) {
-    if (!retried && (await refreshSession())) return hubFetch<T>(path, init, true);
+    if (!retried && (generation !== refreshGeneration || (await refreshSession()))) return hubFetch<T>(path, init, true);
     redirectToLogin();
     throw new HubApiError(401, uiT()("errors.api.session-invalid"), body);
   }

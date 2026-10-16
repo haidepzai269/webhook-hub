@@ -35,6 +35,8 @@ export const admin = defineMessages("admin", {
     "admin.table.next-page": "Trang sau",
     "admin.copy.json": "Sao chép JSON",
     "admin.copy.blocked": "Trình duyệt chặn bộ nhớ tạm (cần HTTPS hoặc localhost).",
+    "admin.boot.slow": "Máy chủ đang khởi động (có thể mất tới ~1 phút)…",
+    "admin.boot.failed": "Chưa kết nối được máy chủ — có thể nó vẫn đang khởi động.",
   },
   en: {
     "admin.meta.title": "Webhook Hub — Console",
@@ -66,5 +68,7 @@ export const admin = defineMessages("admin", {
     "admin.table.next-page": "Next page",
     "admin.copy.json": "Copy JSON",
     "admin.copy.blocked": "The browser blocked the clipboard (requires HTTPS or localhost).",
+    "admin.boot.slow": "The server is starting up (this can take up to ~1 minute)…",
+    "admin.boot.failed": "Could not reach the server yet — it may still be starting up.",
   },
 });

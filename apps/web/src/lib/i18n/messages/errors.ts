@@ -44,6 +44,7 @@ export const errors = defineMessages("errors", {
     "errors.api.slug-taken": "Mã định danh đã có dự án khác dùng.",
     "errors.api.with-request-id": "{text} (mã yêu cầu {requestId})",
     "errors.api.session-invalid": "Phiên đăng nhập đã hết hạn hoặc không hợp lệ.",
+    "errors.api.timeout": "Máy chủ không phản hồi sau {seconds} giây.",
     "errors.payos.data-not-object": "Nội dung PayOS phải có trường `data` là object.",
   },
   en: {
@@ -84,6 +85,7 @@ export const errors = defineMessages("errors", {
     "errors.api.slug-taken": "This slug is already used by another project.",
     "errors.api.with-request-id": "{text} (request ID {requestId})",
     "errors.api.session-invalid": "Your session has expired or is invalid.",
+    "errors.api.timeout": "The server did not respond within {seconds} seconds.",
     "errors.payos.data-not-object": "The PayOS body must have a `data` field that is an object.",
   },
 });

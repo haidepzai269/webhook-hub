@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { type ProjectSummary, restoreFlowProject, useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -28,12 +29,13 @@ import { projectItemTitle, projectPickerView, roleLabel } from "./project-picker
 import { ICON } from "./tokens";
 
 function useProjectPicker() {
-  const { data } = useProjects();
+  const { data, isPending } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const setProjectId = useFlowProjectStore((s) => s.setProjectId);
   const [createOpen, setCreateOpen] = useState(false);
   useEffect(() => restoreFlowProject(), []);
-  return { data, projectId, setProjectId, createOpen, setCreateOpen };
+  // ADR-238: đang tải (kể cả chờ AuthGuard) -> khung chờ cùng cỡ nút; chỉ ẩn khi đã biết là trống/lỗi.
+  return { data, loading: isPending && !data, projectId, setProjectId, createOpen, setCreateOpen };
 }
 
 /**
@@ -124,8 +126,10 @@ function ProjectList({
  * Đổi project: mọi query gắn projectId mới, socket xin vé mới (socket.ts).
  */
 export function ProjectPicker({ className }: { className?: string }) {
-  const { data, projectId, setProjectId, createOpen, setCreateOpen } = useProjectPicker();
+  const { data, loading, projectId, setProjectId, createOpen, setCreateOpen } = useProjectPicker();
   const t = useT();
+  // Cùng cỡ Button size="sm" (h-8) — không nhảy thanh công cụ khi danh sách về.
+  if (loading) return <Skeleton className={cn("h-8 w-40 rounded-md", className)} />;
   if (!data || data.length === 0) return null;
   const v = projectPickerView(data, projectId, t);
   return (
@@ -168,9 +172,10 @@ export function ProjectPicker({ className }: { className?: string }) {
  * - thu gọn (rail icon): chỉ còn icon folder (+ chấm vàng nếu operator), tooltip bên phải = tên project, bấm mở cùng dropdown.
  */
 export function SidebarProjectPicker() {
-  const { data, projectId, setProjectId, createOpen, setCreateOpen } = useProjectPicker();
+  const { data, loading, projectId, setProjectId, createOpen, setCreateOpen } = useProjectPicker();
   const { state, isMobile } = useSidebar();
   const t = useT();
+  if (loading) return <SidebarProjectPickerSkeleton />;
   if (!data || data.length === 0) return null;
   const v = projectPickerView(data, projectId, t);
   const collapsed = state === "collapsed" && !isMobile;
@@ -218,6 +223,20 @@ export function SidebarProjectPicker() {
           </DropdownMenuContent>
         </DropdownMenu>
         <PickerCreateDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={setProjectId} />
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
+/** Khung chờ đúng hình `SidebarMenuButton variant="outline"` (h-8, rail thu gọn còn ô vuông 8x8). */
+function SidebarProjectPickerSkeleton() {
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <div className="flex h-8 items-center gap-2 rounded-md border border-sidebar-border px-2 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
+          <Skeleton className="size-4 shrink-0 rounded-sm" />
+          <Skeleton className="h-3.5 flex-1 group-data-[collapsible=icon]:hidden" />
+        </div>
       </SidebarMenuItem>
     </SidebarMenu>
   );
