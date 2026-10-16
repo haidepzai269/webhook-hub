@@ -2365,6 +2365,43 @@ không thấy gì.
 - Test: `redis-budget.spec` `[BP:T22]` (phần d) khoá chuỗi lệnh `['eval']` cho bên thua; Redis thật kiểm cờ (có/không, OPEN không báo).
 **Đánh đổi:** vẫn có ca hiếm tốn 2 lệnh. Gate thấy probe trống nhưng worker khác giành mất ngay trước khi mình gọi `LUA_ACQUIRE_PROBE`, tức là tranh nhau đúng khe giữa hai lệnh. Gate đọc thêm một `EXISTS` trong script, nhưng số lệnh client không đổi.
 
+## ADR-214 — Lưới hứng Cloudflare Worker `hub-hooks` + D1, ghi xuyên timeout 4s; BB-3: COMMIT = lần ghi bền đầu tiên; Worker không giữ secret, không verify (LH2, SPEC-hub-sap §4 + H1/H6/H10, `[LH:T4]`–`[LH:T7]`, `[LH:T10]`, `[LH:T18]`, 2026-10-15)
+
+**Vấn đề:** Hub (Render) ngủ/sập thì webhook mất trừ khi provider tự retry; luôn hứng thì mọi sự kiện thêm một nhịp và mọi số k6 phải đo lại; status một mình không tách "hub từ chối" khỏi "hub vắng" (H1).
+**Chọn:** Worker `apps/catchnet` (ngoài workspaces, H10) chuyển tiếp `/hooks/*` đã ký (ADR-217); hub vắng (timeout, lỗi mạng, 5xx/2xx không outcome, `unavailable`) mới ghi D1 rồi 2xx, mọi nhánh chưa ghi bền trả 503; trần và ngân sách ở ADR-224, luồng chi tiết ở SPEC §16 "LH2".
+**Đánh đổi:** Thêm một chặng Cloudflare → Render; Worker + D1 cùng chết mà provider không retry thì vẫn mất; `CATCHNET_RETENTION_DAYS` phải ≤ `EVENT_RETENTION_DAYS` của hub (provider không ký timestamp có thể được giao lại lần hai nếu raw gốc đã bị dọn — DEPLOYMENT §3.6); **cổng: không deploy Worker thật, không trỏ source nào vào `workers.dev` trước khi LH2b ĐẠT** (sources_sync rỗng = Worker tệ hơn gọi thẳng).
+
+## ADR-215 — Ack "đã nhận" của source khi hub vắng, trả trước khi verify (LH2, SPEC-hub-sap §4.3 + H6, `[LH:T5]`, 2026-10-15)
+
+**Vấn đề:** Hub vắng thì Worker phải trả đúng khuôn provider mong đợi (MoMo 204, VNPay 200 `RspCode 00`, còn lại 200 JSON) mà không giữ secret để verify.
+**Chọn:** Hub đẩy `ack_status` (2xx), `ack_type`, `ack_body`, `catch_methods` vào `sources_sync` qua `/_admin/sources/*` (Bearer, constant-time; resync theo trang dọn key cũ); Worker trả nguyên ack đó sau khi ghi D1; GET/HEAD không hứng trừ khi source khai GET (H6). Phía hub đẩy dữ liệu là story **LH2b** (cổng ở ADR-214).
+**Đánh đổi:** Request chữ ký sai cũng nhận ack khi hub vắng (VNPay `00` thay `97`), vẫn bị hub từ chối khi phát lại (`inbox_dead` `rejected`); bắt tay trong body (Slack) bị hứng — provider báo xác minh lỗi, dev bấm lại; source chưa sync = 503 khi hub vắng.
+
+## ADR-216 — Worker tự phát lại vào `/hooks/*` bằng Cron, ≤ 10 dòng/phút có lease; hub không có đường ingest thứ hai (LH2, SPEC-hub-sap §4.4 + H2/T-5, `[LH:T8]`, `[LH:T9]`, 2026-10-15)
+
+**Vấn đề:** Hàng trong D1 phải về hub không qua cửa ingest thứ hai và không dội hub vừa thức; 429 `refused` không được thành hàng chết (H2); một lượt cron bị giết không được giữ đầu hàng (REVIEW-LH2 TB-3).
+**Chọn:** Cron mỗi phút: chọn ≤ 10 id theo index `next_at` (≤ 2 MB body), lease cả lô +5 phút, nạp + gửi từng dòng (song song 5, dừng khi hub vắng); 408/429/507 → retry trước outcome; accepted/duplicate/handshake → xoá; 404 hoặc rejected/refused → dead; 4xx không outcome retry 3 lần; lùi 1/2/5/10/30 phút, ≥ `Retry-After`; quá hạn giữ → dead `expired`.
+**Đánh đổi:** 10/phút: 5.000 dòng ≈ 8,3 giờ (spec cũ 25/phút vượt trần 50 truy vấn D1 của gói free, ADR-224); thứ tự không giữ (ADR-034); dòng bị 429 cổng phạt (IP gốc đang bị phạt) retry tới 7 ngày, giữ chỗ trong trần của key và tốn 1 subrequest/30 phút (REVIEW-LH2 L8); chọn và lease là hai câu (tài liệu D1 không xác nhận `UPDATE … RETURNING`, tra 2026-10-15) nên hai lượt chồng nhau (`__scheduled` bấm tay, lượt > 5 phút) có thể gửi trùng một dòng — `UNIQUE(source_id, idempotency_key)` của Postgres nuốt, hub trả `duplicate` → xoá.
+
+## ADR-222 — Phát lại gặp 507 thì thử lại, không chuyển `inbox_dead` (LH2, ADR-221 để ngỏ, `[LH:T8]`, 2026-10-15)
+
+**Vấn đề:** Hub trả 507 `refused` khi project vượt hạn mức lưu trữ. Coi như `refused` khác (→ dead) thì sự kiện thật bị vứt chỉ vì dung lượng tạm đầy — trong khi cleanup của hub-worker và việc dev nâng hạn mức đều giải phóng được.
+**Chọn:** 507 xét cùng nhóm 408/429, TRƯỚC outcome: retry theo lùi dần (tôn trọng `Retry-After`) tới hết hạn giữ, rồi `expired`. Chuyển tiếp (provider gọi lúc hub sống) vẫn trả nguyên 507 cho provider như cũ.
+**Đánh đổi:** 507 kéo dài chiếm chỗ trong trần `CATCHNET_MAX_PER_KEY` của source đó tới 7 ngày và đốt một subrequest mỗi 30 phút mỗi dòng; source bị 507 lâu có thể tự làm đầy trần của chính nó (503 cho request mới khi hub vắng) — chấp nhận, vì trần theo key không ảnh hưởng source khác.
+
+## ADR-223 — nginx chỉ nới cầu chì + `limit_conn` của `/hooks/*` cho dải IP Cloudflare (`geo`) khi lưới bật (LH2, REVIEW-LH3-R2 R2-L1, `[LH:T22]`, 2026-10-15)
+
+**Vấn đề:** ADR-217 tắt cầu chì + `limit_conn` theo IP cho `/hooks/*` với MỌI IP khi lưới bật. Source cũ vẫn gọi thẳng Render (U-C), nên một IP đơn lẻ giữ được tới `worker_connections` kết nối chậm vào `/hooks/*` → `/health` và `/api` chết theo.
+**Chọn:** khối `geo $edge_cf_ip` (dải Cloudflare công bố, IPv4 + IPv6) trong `nginx.conf.template`; khoá của cả hai map là `"<EDGE_HOOKS_IP_LIMITS>:<geo>"` — chỉ `0:1` (lưới bật + IP Cloudflare) rỗng, `0:0` vẫn đếm theo `$binary_remote_addr` như EG1. nginx vẫn không đọc header lưới.
+**Đánh đổi:** Danh sách dải là dữ liệu tĩnh — Cloudflare đổi thì phải sửa template (đối chiếu trước khi bật, DEPLOYMENT §3.6). IP egress của Worker nằm ngoài dải công bố thì request lưới bị đếm chung như trước (an toàn, dễ 429 hơn) — phải đo trong log edge. Kẻ xấu chạy Worker riêng trên Cloudflare vẫn được nới (còn `client_body_timeout` + cổng phạt hub-api).
+
+
+## ADR-224 — Trần của lưới hứng theo dòng, byte và lượt/ngày; ngân sách mỗi lượt cron theo giới hạn gói free (LH2, REVIEW-LH2 TB-2/TB-3, `[LH:T8]`, `[LH:T10]`, 2026-10-15)
+
+**Vấn đề:** Trần chỉ đếm dòng (2.000/key × 1 MB = 2 GB) vượt dung lượng D1 free và đốt hết quota ghi trước khi chạm trần — kẻ biết `sourceKey` xả rác lúc Render ngủ là đủ làm chết lưới cho mọi source; một lượt cron 25 dòng vượt trần truy vấn D1 rồi lặp lại mãi.
+**Chọn:** Số liệu tra 2026-10-15 trên developers.cloudflare.com (`/d1/platform/limits/`, `/d1/platform/pricing/`, `/workers/platform/limits/`): D1 free 500 MB/DB, dòng/BLOB ≤ 2 MB, 5M rows read + 100k rows written/ngày (index tính thêm, reset 00:00 UTC), 50 truy vấn D1/invocation; Workers free 50 subrequest/invocation, CPU 10 ms (cả Cron), 128 MB/isolate. Trần (bộ đếm bằng trigger, byte = body + header + target theo UTF-8; dòng chết vẫn tính vào trần toàn bảng và trần của key tới khi bị dọn): `MAX_BYTES` 300 MB, `MAX_KEY_BYTES` 50 MB, `MAX_ROWS` 15.000, `MAX_PER_DAY` 5.000 lần hứng; header > 16 KB hoặc target > 4 KB không hứng (Workers nhận tới 128 KB header + 16 KB URL); cron ≤ 10 dòng và ≤ 2 MB body/lượt (4 + 4×10 = 44 < 50 truy vấn).
+**Đánh đổi:** Ngày bị xả rác thì sự kiện thật thứ 5.001 nhận 503 (provider tự retry, đúng BB-3); trần theo key không bảo vệ trần chung khỏi nhiều key bị lộ; key có nhiều dòng bị hub từ chối bị khoá tới 7 ngày; 11 rows written/sự kiện chỉ là đường suôn sẻ — cron còn tốn lease ≈ 2, `markRetry` ≈ 2, `moveDead` ≈ 6–7 mỗi dòng: hub vắng cả ngày ≈ 43k + 25k lần hứng vẫn dưới 100k, nhưng ngày hub trở lại với 15.000 dòng tồn (≈ 86k) cộng lần hứng mới có thể vượt quota → `INSERT` 503 (BB-3 giữ), `deleteRow` lỗi thì dòng gửi lại sau lease và hub nuốt bản trùng — chậm, không mất; CPU 10 ms của một lượt chưa đo trên workerd thật (LH2-VIEC-MAY-CONG-TY).
+
 ## ADR-241 — Ramp: gia hạn `:ramp` ở bậc cuối khi còn bị chặn, trần RAMP_MAX 180 s, trần cuối tuyệt đối 64 rps; đính chính ADR-232 (thuộc BP, F3 + Thấp-9 của review chaos-bp lượt 2, 2026-10-15)
 
 > (đổi số từ ADR-234 trên nhánh feat/bp-f3 — trùng số với ADR-234 phân cấp console trên master)

@@ -144,20 +144,44 @@ describe('EG1 — template nginx + envsubst', () => {
     for (const l of ['= /health', '/socket.io/', '/']) expect(locs.find(([x]) => x === l)?.[1]).toBe(false);
   });
 
-  it('[LH:T22] (REVIEW-LH3 TB-1) lưới hứng bật -> nginx tắt cầu chì + limit_conn theo IP cho /hooks/* (không tin x-catchnet-client-ip), /v1/p/* giữ; phản hồi nginx tự sinh trên /hooks* mang x-hub-outcome', () => {
+  it('[LH:T22] (phần a) (LH2, R2-L1) lưới bật chỉ nới cầu chì + limit_conn cho IP thuộc dải Cloudflare (geo); IP khác gọi thẳng /hooks/* vẫn bị đếm', () => {
+    const on = render({ EDGE_IP_FUSE: '1', CATCHNET_FORWARD_SECRET: 's'.repeat(40) });
+    const geo = on.split('geo $edge_cf_ip {\n')[1]?.split('}')[0] ?? '';
+    expect(geo).toMatch(/default 0;/);
+    // Mỗi dòng dải = CIDR hợp lệ + giá trị 1; có cả IPv4 lẫn IPv6.
+    const ranges = geo.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('default'));
+    expect(ranges.length).toBeGreaterThanOrEqual(15);
+    for (const l of ranges) expect(l).toMatch(/^([0-9.]+\/\d{1,2}|[0-9a-f:]+\/\d{1,3}) 1;$/);
+    expect(ranges.some((l) => l.includes(':'))).toBe(true);
+    // Không có dải quá rộng (nới cho cả Internet = R2-L1 quay lại).
+    for (const l of ranges) {
+      const [cidr] = l.split(' ');
+      const bits = Number(cidr.split('/')[1]);
+      expect(bits).toBeGreaterThanOrEqual(cidr.includes(':') ? 16 : 8);
+    }
+    // "0:0" (lưới bật, IP không phải Cloudflare) vẫn mang khoá IP; chỉ "0:1" rơi về default "".
+    for (const [key, val] of [['edge_hooks_fuse_key', '$edge_fuse_key'], ['edge_hooks_conn_key', '$binary_remote_addr']]) {
+      const block = on.split(`$${key} {\n`)[1]?.split('}')[0] ?? '';
+      expect(block).toContain(`"0:0" ${val};`);
+      expect(block).not.toMatch(/"0:1"/);
+    }
+    expect(TEMPLATE).not.toMatch(/\$http_x_catchnet/i);
+  });
+
+  it('[LH:T22] (phần b) (REVIEW-LH3 TB-1) lưới hứng bật -> nginx tắt cầu chì + limit_conn theo IP cho /hooks/* (không tin x-catchnet-client-ip), /v1/p/* giữ; phản hồi nginx tự sinh trên /hooks* mang x-hub-outcome', () => {
     const SECRET = 's'.repeat(40);
     const block = (conf: string, head: string) => conf.split(`${head} {\n`)[1]?.split('}')[0] ?? '';
     const hooksLoc = 'location ~ "^/hooks/[a-z0-9-]+/[A-Za-z0-9_-]{1,64}$"';
     // Không có lưới (hoặc secret < 32 ký tự = hub cũng coi là tắt): như EG1 — khoá theo IP.
     for (const env of [{ EDGE_IP_FUSE: '1' }, { EDGE_IP_FUSE: '1', CATCHNET_FORWARD_SECRET: 'ngan' }]) {
       const conf = render(env);
-      expect(conf).toMatch(/map "1" \$edge_hooks_fuse_key \{\s*"1" \$edge_fuse_key;/);
-      expect(conf).toMatch(/map "1" \$edge_hooks_conn_key \{\s*"1" \$binary_remote_addr;/);
+      expect(conf).toMatch(/map "1:\$edge_cf_ip" \$edge_hooks_fuse_key \{\s*"~\^1:" \$edge_fuse_key;/);
+      expect(conf).toMatch(/map "1:\$edge_cf_ip" \$edge_hooks_conn_key \{\s*"~\^1:" \$binary_remote_addr;/);
       expect(edge.edgeVars(env, { listenPort: 1, upstream: 'a:1', prefix: '/tmp/x' }).vars.EDGE_HOOKS_IP_LIMITS).toBe('1');
     }
     const on = render({ EDGE_IP_FUSE: '1', CATCHNET_FORWARD_SECRET: `ngan,${SECRET}` });
-    expect(on).toMatch(/map "0" \$edge_hooks_fuse_key \{\s*"1" \$edge_fuse_key;\s*default "";/);
-    expect(on).toMatch(/map "0" \$edge_hooks_conn_key \{\s*"1" \$binary_remote_addr;\s*default "";/);
+    expect(on).toMatch(/map "0:\$edge_cf_ip" \$edge_hooks_fuse_key \{\s*"~\^1:" \$edge_fuse_key;\s*"0:0" \$edge_fuse_key;\s*default "";/);
+    expect(on).toMatch(/map "0:\$edge_cf_ip" \$edge_hooks_conn_key \{\s*"~\^1:" \$binary_remote_addr;\s*"0:0" \$binary_remote_addr;\s*default "";/);
     // Zone của /hooks/* và limit_conn khoá bằng map trên (rỗng = không đếm); /v1/p/* vẫn hooks_ip theo $edge_fuse_key.
     expect(on).toMatch(/limit_req_zone \$edge_hooks_fuse_key zone=hooks_path_ip:/);
     expect(on).toMatch(/limit_conn_zone \$edge_hooks_conn_key zone=hooks_conn:/);

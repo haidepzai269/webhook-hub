@@ -415,7 +415,7 @@ describe('[LH:T13] IP cho hộp phạt chỉ lấy từ header lưới ĐÃ KÝ'
   });
 });
 
-describe('[LH:T18] (phía hub) rejectStatus 503 + chữ ký sai -> 503 mang x-hub-outcome: rejected (Worker không coi là hub vắng)', () => {
+describe('[LH:T18] (phần c) (phía hub) rejectStatus 503 + chữ ký sai -> 503 mang x-hub-outcome: rejected (Worker không coi là hub vắng)', () => {
   it('gọi thẳng và qua lưới đều 503 rejected', async () => {
     const target = '/hooks/generic/src_gen_503';
     const e = genEvent(undefined, 'sai-secret');
