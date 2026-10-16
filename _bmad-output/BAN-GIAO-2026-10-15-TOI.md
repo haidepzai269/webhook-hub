@@ -1,5 +1,7 @@
 # Bàn giao 2026-10-15 (tối, máy nhà) → máy công ty
 
+> **Admin chốt 2026-10-16:** tới **thứ Hai (2026-10-19)** mới dùng máy công ty. Mọi việc trong các file `*-VIEC-MAY-CONG-TY.md` (chaos T16, workerd LH2) **tạm gác** tới lúc đó. Máy nhà vẫn làm các việc nhẹ, ví dụ LH2b.
+>
 > Bản trước: `BAN-GIAO-2026-10-15.md` (chiều, máy công ty). Luật mới của Admin: việc máy nhà không chạy nổi thì dừng lại, commit, ghi vào file `*-VIEC-MAY-CONG-TY.md` để máy công ty chạy tiếp.
 
 ## 1. Hai nhánh đã push, CHƯA gộp master
