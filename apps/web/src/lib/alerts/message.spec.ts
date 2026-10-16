@@ -183,6 +183,6 @@ describe("deep link theo luật", () => {
     expect(alertActions(mk("source.signature_failing", {}, "source"))[0].href).toBe(`/dashboard/events?source=${DEST}&status=rejected`);
     expect(alertActions(mk("delivery.dead_spike", {}, "project"))[0].href).toBe("/dashboard/dlq?age=1h");
     expect(alertActions({ rule: "destination.failing", subjectId: "x'><script>", facts: {} })[0].href).toBe("/dashboard/deliveries?status=RETRYING");
-    expect(primaryHref({ rule: "x.new", subjectId: DEST, project: { id: "p1" } })).toBe("/dashboard/alerts?project=p1");
+    expect(primaryHref({ rule: "x.new", subjectId: DEST, project: { id: "p1" } })).toBe("/alerts?project=p1");
   });
 });

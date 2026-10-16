@@ -1,6 +1,6 @@
 import { defineMessages } from "../locales";
 
-/** Trang Cảnh báo (dashboard/alerts, CB4 §8.4) — chỉ người vận hành hub thấy. Câu chữ từng luật ở messages/alerts.ts. */
+/** Trang Cảnh báo (/alerts tầng tài khoản — ADR-237; CB4 §8.4) — chỉ người vận hành hub thấy. Câu chữ từng luật ở messages/alerts.ts. */
 export const pageAlerts = defineMessages("page.alerts", {
   vi: {
     "page.alerts.title": "Cảnh báo",

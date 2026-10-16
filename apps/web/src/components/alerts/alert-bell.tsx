@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { primaryHref } from "@/lib/alerts/links";
 import { ackAllIds, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
 import type { AlertView } from "@/lib/alerts/types";
+import { ACCOUNT_ROUTES } from "@/lib/hub/account-routes";
 import { useAckAllAlerts, useAlertSummary, useOpenAlertFeed, useSubjectNames } from "@/lib/hub/alert-queries";
 import { formatRelative } from "@/lib/hub/format";
 import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
@@ -160,7 +161,7 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
                 {g.more > 0 && (
                   <li className="px-4 pt-0.5 pb-1">
                     <Link
-                      href={`/dashboard/alerts?project=${encodeURIComponent(g.project.id)}&state=OPEN`}
+                      href={`${ACCOUNT_ROUTES.alerts}?project=${encodeURIComponent(g.project.id)}&state=OPEN`}
                       onClick={onNavigate}
                       className="text-muted-foreground text-xs underline-offset-2 hover:underline"
                     >
@@ -190,7 +191,7 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
           {t("alerts.bell.ack-all")}
         </Button>
         <Button size="sm" variant="ghost" asChild>
-          <Link href="/dashboard/alerts" onClick={onNavigate}>
+          <Link href={ACCOUNT_ROUTES.alerts} onClick={onNavigate}>
             {t("alerts.bell.view-all")}
             <ArrowRight />
           </Link>

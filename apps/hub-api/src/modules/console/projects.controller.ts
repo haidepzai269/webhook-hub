@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   Put,
   Body,
   HttpException,
@@ -16,7 +17,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { PrismaService, TenantScopedRepository } from '@hub/database';
+import { PrismaService, ProjectStatsRow, TenantScopedRepository } from '@hub/database';
 import {
   API_SCOPES,
   OWNER_GRANTED_API_SCOPES,
@@ -99,6 +100,23 @@ export function emailNotVerified(): never {
   );
 }
 
+/** ADR-235: một dòng số đếm -> hình dạng API (số nguyên, nấc dung lượng đã chuẩn hoá, ngày tạo ISO). */
+export function projectStatsView(r: ProjectStatsRow) {
+  const n = (v: unknown) => Number(v ?? 0);
+  return {
+    createdAt: new Date(r.createdAt).toISOString(),
+    sources: n(r.sources),
+    endpoints: n(r.endpoints),
+    members: n(r.members),
+    events24h: n(r.events24h),
+    failedAttempts24h: n(r.failedAttempts24h),
+    dlq: n(r.dlq),
+    circuitOpen: n(r.circuitOpen),
+    storageLevel: parseStorageLevel(r.storageLevel),
+    openAlerts: { critical: n(r.openAlerts?.critical), warning: n(r.openAlerts?.warning), info: n(r.openAlerts?.info) },
+  };
+}
+
 /**
  * S2 (SPEC §4.3A) + AU3: console quản lý project và API key theo MEMBERSHIP (operator thấy mọi project). `projects` là bảng gốc -> escape hatch có tên trên PrismaService; `api_keys` mang tenant_id
  * -> đi qua `forTenant(projectId)` (BB-5). Key thô chỉ xuất hiện ĐÚNG MỘT LẦN ở response tạo.
@@ -108,11 +126,27 @@ export function emailNotVerified(): never {
 export class ProjectsController {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** AU1: chỉ project mình là thành viên (kèm role); operator thấy mọi project (ADR-056, role = owner). */
+  /**
+   * AU1: chỉ project mình là thành viên (kèm role); operator thấy mọi project (ADR-056, role = owner).
+   * ADR-235: `?include=stats` gắn `stats` (chỉ số đếm) cho từng project trong MỘT lượt đọc — escape hatch theo membership
+   * (người thường) hoặc của operator (cùng phạm vi danh sách). 0 lệnh Redis. Project không có dòng số liệu -> `stats: null`.
+   */
   @Get()
   @NoProjectScope('liệt kê project CỦA CHÍNH người gọi — lọc theo membership ngay trong handler')
-  async list(@Req() req: RequestWithPrincipal) {
+  async list(@Req() req: RequestWithPrincipal, @Query('include') include?: string) {
+    if (include !== undefined && include !== 'stats') invalid('include', "include chỉ nhận 'stats'");
     const p = me(req);
+    const items = await this.listItems(p);
+    if (include !== 'stats') return items;
+    const rows = p.isOperator ? await this.prisma.operatorProjectStatsAcrossTenants() : await this.prisma.memberProjectStatsAcrossTenants(p.id);
+    const byId = new Map(rows.map((r) => [r.tenantId, r] as const));
+    return items.map((x) => {
+      const r = byId.get(x.id);
+      return { ...x, stats: r ? projectStatsView(r) : null };
+    });
+  }
+
+  private async listItems(p: UserPrincipal) {
     const mine = await this.prisma.identity().listMemberships(p.id);
     if (!p.isOperator) return mine.map((m) => ({ id: m.projectId, slug: m.slug, name: m.name, environment: m.environment, role: m.role, member: true }));
     // `member` thật (sửa lỗi "stale project"): web mặc định project mình là thành viên, không tự rơi vào project người khác.

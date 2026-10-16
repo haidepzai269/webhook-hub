@@ -107,6 +107,7 @@ import { createHash, createHmac } from 'crypto';
 import { IngestController } from '../src/modules/ingest/ingest.controller';
 import { IngestService } from '../src/modules/ingest/ingest.service';
 import { RedisService } from '../src/modules/redis/redis.service';
+import { ProjectsController } from '../src/modules/console/projects.controller';
 import { NormalizeConsumer } from '../../hub-worker/src/consumers/normalize.consumer';
 import { DeliveryConsumer } from '../../hub-worker/src/consumers/delivery.consumer';
 import { CircuitBreakerService } from '../../hub-worker/src/circuit/circuit-breaker.service';
@@ -583,5 +584,20 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(again).toEqual({ status: 200, body: { duplicate: true } });
     expect(take()).toEqual(['eval', 'get']);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+  it('ADR-235: console GET /api/v1/projects?include=stats (thẻ "Tất cả dự án") = 0 lệnh Redis — số đếm chỉ đọc Postgres; controller không nhận RedisService', async () => {
+    const stats = async () => [{ tenantId: TENANT, createdAt: new Date(), sources: 1, endpoints: 1, members: 1, events24h: 1, failedAttempts24h: 0, dlq: 0, circuitOpen: 0, storageLevel: 'OK', openAlerts: { critical: 0, warning: 0, info: 0 } }];
+    const prisma: any = {
+      identity: () => ({ listMemberships: async () => [{ projectId: TENANT, slug: 't', name: 'T', environment: 'test', role: 'owner' }] }),
+      listProjects: async () => [{ id: TENANT, slug: 't', name: 'T', environment: 'test', storageQuotaMb: null }],
+      operatorProjectUsage: async () => [],
+      memberProjectStatsAcrossTenants: stats,
+      operatorProjectStatsAcrossTenants: stats,
+    };
+    const ctrl = new ProjectsController(prisma);
+    await ctrl.list({ principal: { kind: 'user', id: 'u', isOperator: false } } as any, 'stats');
+    await ctrl.list({ principal: { kind: 'user', id: 'u', isOperator: true } } as any, 'stats');
+    expect(take()).toEqual([]);
+    expect((Reflect.getMetadata('design:paramtypes', ProjectsController) ?? []).includes(RedisService)).toBe(false);
   });
 });

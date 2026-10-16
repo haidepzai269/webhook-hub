@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 
 import { cn } from "cn";
 
+import { AccountMenu } from "@/components/admin/account-menu";
 import { AppSidebar } from "@/components/admin/app-sidebar";
 import { AuthGuard } from "@/components/admin/auth-guard";
 import { LanguageSwitcher } from "@/components/admin/language-switcher";
@@ -62,13 +63,16 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
                   />
                   <span className="truncate font-medium text-sm">Webhook Hub</span>
                 </div>
-                <div className="flex items-center gap-2">
+                {/* Nút dùng chung không tự đặt con trỏ — gắn ở đây cho mọi nút của thanh. */}
+                <div className="flex items-center gap-2 [&_button]:cursor-pointer">
                   <RealtimeBadge />
                   <LayoutControls />
-                  {/* CB4: chuông cảnh báo — chỉ operator (component tự ẩn với người khác). */}
+                  {/* CB4/QT6: chuông cảnh báo — operator + owner (component tự ẩn với người khác); "Xem tất cả" -> /alerts. */}
                   <AlertBell />
                   <LanguageSwitcher />
                   <ThemeSwitcher />
+                  {/* ADR-237: menu tài khoản — Tất cả dự án, Cảnh báo, Cài đặt (tầng tài khoản, không trong sidebar dự án). */}
+                  <AccountMenu />
                 </div>
               </div>
             </header>

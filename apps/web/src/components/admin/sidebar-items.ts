@@ -1,9 +1,7 @@
 import {
   Activity,
-  BellRing,
   Cable,
   FlaskConical,
-  FolderKanban,
   HardDrive,
   Inbox,
   KeyRound,
@@ -12,7 +10,6 @@ import {
   Network,
   ScrollText,
   Send,
-  Settings,
   Skull,
   Workflow,
 } from "lucide-react";
@@ -28,10 +25,6 @@ export interface NavItem {
   titleKey: MessageKey;
   url: string;
   icon: LucideIcon;
-  /** CB4: chỉ người vận hành hub thấy (vd. Cảnh báo — API `/alerts*` trả 403 operator_required cho người khác). */
-  operatorOnly?: boolean;
-  /** QT6 (E3): mục operatorOnly mà owner của ít nhất một project cũng thấy (trang Cảnh báo — chỉ cảnh báo dung lượng). */
-  ownerToo?: boolean;
 }
 
 export interface NavGroup {
@@ -57,16 +50,14 @@ export const sidebarItems: NavGroup[] = [
     labelKey: "nav.group.overview",
     items: [
       { id: "dashboard", titleKey: "nav.item.dashboard", url: "/dashboard", icon: LayoutDashboard },
-      // CB4 (SPEC-canh-bao-nhan-dinh §8.4): cảnh báo xuyên project — chỉ operator.
-      { id: "alerts", titleKey: "nav.item.alerts", url: "/dashboard/alerts", icon: BellRing, operatorOnly: true, ownerToo: true },
+      // ADR-237: KHÔNG có "Cảnh báo" ở đây — cảnh báo xuyên dự án (ADR-190) ở tầng tài khoản `/alerts` (menu tài khoản, chuông).
     ],
   },
   {
     id: "project",
     labelKey: "nav.group.project",
     items: [
-      // SK1 (SPEC-shop-ket-noi-project §3): tạo project + API key (copy connection string một lần).
-      { id: "projects", titleKey: "nav.item.projects", url: "/dashboard/projects", icon: FolderKanban },
+      // ADR-234: KHÔNG có mục "Dự án" ở đây — sidebar thuộc MỘT dự án; tạo/đổi/xem mọi dự án ở bộ chọn dự án + `/projects`.
       { id: "api-keys", titleKey: "nav.item.api-keys", url: "/dashboard/api-keys", icon: KeyRound },
       // QT7 (SPEC-han-muc-dung-luong §9): Dung lượng của project đang chọn — ước tính, gợi ý dọn, dọn tự động.
       { id: "storage", titleKey: "nav.item.storage", url: "/dashboard/storage", icon: HardDrive },
@@ -87,8 +78,7 @@ export const sidebarItems: NavGroup[] = [
     items: [
       { id: "playground", titleKey: "nav.item.playground", url: "/dashboard/playground", icon: FlaskConical },
       { id: "audit", titleKey: "nav.item.audit", url: "/dashboard/audit", icon: ScrollText },
-      // CB5 (SPEC-canh-bao-nhan-dinh §8.5): Cài đặt -> mục Cảnh báo (email) — hiện chỉ có nội dung cho operator.
-      { id: "settings", titleKey: "nav.item.settings", url: "/dashboard/settings", icon: Settings, operatorOnly: true },
+      // ADR-237: "Cài đặt" (email cảnh báo của người vận hành, CB5) ở tầng tài khoản `/settings`, không theo dự án.
     ],
   },
 ];
