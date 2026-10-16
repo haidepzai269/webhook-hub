@@ -2456,3 +2456,11 @@ không thấy gì.
 **Chọn:** Ping keep-alive bằng cron-job.org, lịch `*/5 7-22 * * *`, múi giờ `Asia/Ho_Chi_Minh`, gọi `GET https://hub-api-c9hg.onrender.com/health`. Lượt ping cuối lúc 22:55, service ngủ khoảng 23:10, tức thức ~16 giờ/ngày, khoảng 500 giờ/tháng. Monitor UptimeRobot để ở trạng thái **tạm dừng** (không xoá, bật lại được). **Không ping `shop`:** trước buổi demo thì đánh thức tay (mở trang shop, chờ ~1 phút).
 
 **Đánh đổi:** Ngoài khung 7:00–23:10 giờ Việt Nam, người đầu tiên vào sẽ chờ một lần cold start (~80s, đo ngày 2026-10-16 được 83,6s). Webhook provider gửi vào lúc đó có thể timeout ở lần đầu và trông vào lượt gửi lại của provider. Phía console thì khung chờ + thông báo "Máy chủ đang khởi động" + "Thử lại" của ADR-238 làm nhẹ đi. cron-job.org là phụ thuộc bên ngoài, không nằm trong repo: lịch và URL chỉ được ghi ở đây và ở `docs/DEPLOYMENT.md` §8, đổi URL Render thì phải sửa job bằng tay.
+
+## ADR-241 — Bỏ thẻ "Sức khoẻ hệ thống" khỏi dashboard console; `GET /health` ở hub-api giữ nguyên (2026-10-16)
+
+**Vấn đề:** Thẻ gọi thẳng `${HUB_API_URL}/health` (cross-origin, không qua cổng/timeout của `hubFetch`) mỗi 15s và gộp mọi lỗi (kể cả 502 HTML khi Render cold start) thành badge đỏ "Không kết nối" — báo động giả rất thường xuyên, mâu thuẫn với thông báo "Máy chủ đang khởi động" của ADR-238, làm người dùng hoang mang.
+
+**Chọn:** Xoá phía web: `health-card.tsx`, `useHealth`, `hubKeys.health`, type `Health`/`HealthDependency`, khoá i18n `page.dashboard.health.*` (vi + en); cột phải dashboard chỉ còn `RealtimeCard` giãn theo chiều cao biểu đồ. Endpoint `GET /health` của hub-api không đổi (cron-job.org ping keep-alive — ADR-240; `demo:warm`; demo BB-2 bằng curl).
+
+**Đánh đổi:** Mất cảnh demo BB-2 trên giao diện (tắt Redis → thẻ "Suy giảm", vai trò từng dependency); thay bằng `curl -s localhost:4000/health` (LOCAL) trong lúc tắt Redis. Người dùng không còn chỉ báo trạng thái dependency trong console — chỉ còn badge realtime và thông báo khởi động/"Thử lại" của ADR-238.

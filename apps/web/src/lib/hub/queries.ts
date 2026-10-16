@@ -2,8 +2,6 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { HUB_API_URL } from "@/lib/env";
-
 import { HubApiError, hubFetch } from "./client";
 import type {
   AuditFacets,
@@ -12,7 +10,6 @@ import type {
   Delivery,
   Destination,
   EventsPage,
-  Health,
   HubEventDetail,
   OrphanRawEventsPage,
   Overview,
@@ -49,7 +46,6 @@ export const hubKeys = {
   sources: ["sources"] as const,
   destinations: ["destinations"] as const,
   subscriptions: ["subscriptions"] as const,
-  health: ["health"] as const,
   audit: (query = "") => ["audit", query] as const,
   auditFacets: ["audit", "facets"] as const,
 };
@@ -131,26 +127,6 @@ export function useSubscriptions() {
   return useQuery({
     queryKey: hubKeys.subscriptions,
     queryFn: () => hubFetch<Subscription[]>("/api/v1/subscriptions"),
-  });
-}
-
-/**
- * `/health` trả 503 kèm JSON khi một dependency chết — vẫn là dữ liệu hợp lệ để hiển thị,
- * nên không đi qua hubFetch (sẽ ném lỗi). Mất kết nối hẳn → "offline".
- */
-export function useHealth() {
-  return useQuery({
-    queryKey: hubKeys.health,
-    queryFn: async (): Promise<Health> => {
-      try {
-        const res = await fetch(`${HUB_API_URL}/health`, { cache: "no-store" });
-        return (await res.json()) as Health;
-      } catch {
-        return { status: "offline" };
-      }
-    },
-    refetchInterval: 15_000,
-    staleTime: 0,
   });
 }
 

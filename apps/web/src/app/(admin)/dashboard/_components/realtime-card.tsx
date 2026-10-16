@@ -18,7 +18,7 @@ export function RealtimeCard() {
   } satisfies ChartConfig;
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader>
         <CardTitle>{t("page.dashboard.realtime.title")}</CardTitle>
         <CardDescription>{t("page.dashboard.realtime.desc")}</CardDescription>
@@ -26,7 +26,7 @@ export function RealtimeCard() {
           <RealtimeBadge />
         </CardAction>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="flex flex-1 flex-col gap-2">
         <div className="flex items-baseline gap-4">
           <div>
             <div className="font-semibold text-2xl tabular-nums">{last ? Math.round(last.eventsPerMin) : "—"}</div>
@@ -40,7 +40,7 @@ export function RealtimeCard() {
           </div>
         </div>
         {ticks.length > 1 ? (
-          <ChartContainer config={config} className="aspect-auto h-16 w-full">
+          <ChartContainer config={config} className="aspect-auto min-h-16 w-full flex-1">
             <LineChart data={ticks} margin={{ top: 4, bottom: 4, left: 0, right: 0 }}>
               <YAxis hide domain={[0, "auto"]} />
               <Line

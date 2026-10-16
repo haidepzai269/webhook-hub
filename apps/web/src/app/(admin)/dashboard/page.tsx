@@ -1,5 +1,4 @@
 import { EventsChart } from "./_components/events-chart";
-import { HealthCard } from "./_components/health-card";
 import { InsightsCard } from "./_components/insights-card";
 import { KpiCards } from "./_components/kpi-cards";
 import { RealtimeCard } from "./_components/realtime-card";
@@ -14,8 +13,8 @@ export default function DashboardPage() {
         <div className="min-w-0 xl:col-span-2">
           <EventsChart />
         </div>
-        <div className="flex min-w-0 flex-col gap-4 md:gap-6">
-          <HealthCard />
+        {/* ADR-241: bỏ thẻ "Sức khoẻ hệ thống" — RealtimeCard đứng một mình, giãn theo chiều cao biểu đồ. */}
+        <div className="min-w-0">
           <RealtimeCard />
         </div>
       </div>
