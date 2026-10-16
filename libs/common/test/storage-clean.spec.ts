@@ -13,7 +13,7 @@ import { TOTAL_RETRY_WINDOW_MS } from '@hub/messaging';
 
 /** QT4 (SPEC-han-muc-dung-luong §5.1–§5.5, ADR-184): hợp đồng thuần của lệnh dọn. */
 const NOW = Date.parse('2026-10-12T12:00:00Z');
-// Sàn thật (BP2 C2 + BP3 + BP4 + BP5: ≈ 7h23m10s) — import, không viết cứng, để test luôn phản ánh cửa sổ retry hiện hành.
+// Sàn thật (BP2 C2 + BP3 + BP4 + BP5 + ADR-241: ≈ 7h34m10s) — import, không viết cứng, để test luôn phản ánh cửa sổ retry hiện hành.
 const FLOOR = TOTAL_RETRY_WINDOW_MS;
 
 describe('QT4: lệnh dọn — kiểm request (thuần)', () => {
@@ -23,7 +23,7 @@ describe('QT4: lệnh dọn — kiểm request (thuần)', () => {
     expect(tooNew).toMatchObject({ field: 'olderThan' });
     const iso = parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: new Date(NOW - 3_600_000).toISOString() }, FLOOR, NOW);
     expect(iso).toMatchObject({ field: 'olderThan' });
-    // '3h' từng hợp lệ (sàn 2h38m); sau BP2–BP5 sàn ≈ 7h23m10s -> '3h', '6h', '7h' bị từ chối.
+    // '3h' từng hợp lệ (sàn 2h38m); sau BP2–BP5 + ADR-241 sàn ≈ 7h34m10s -> '3h', '6h', '7h' bị từ chối.
     expect(parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '6h' }, FLOOR, NOW)).toMatchObject({ field: 'olderThan' });
     expect(parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '7h' }, FLOOR, NOW)).toMatchObject({ field: 'olderThan' });
     expect(parseCleanRequest({ action: 'trim', importance: ['low'], olderThan: '3h' }, FLOOR, NOW)).toMatchObject({ field: 'olderThan' });
