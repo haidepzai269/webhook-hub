@@ -39,11 +39,20 @@ export function HealthCard() {
       <CardHeader>
         <CardTitle>{t("page.dashboard.health.title")}</CardTitle>
         <CardDescription>{t("page.dashboard.health.desc")}</CardDescription>
-        <CardAction>{statusBadge}</CardAction>
+        <CardAction>{isLoading ? <Skeleton className="h-5 w-20 rounded-full" /> : statusBadge}</CardAction>
       </CardHeader>
       <CardContent className="space-y-2">
         {isLoading ? (
-          <Skeleton className="h-20 w-full" />
+          // ADR-238: một dòng chờ cho mỗi dependency (tên text-sm + vai trò text-xs | trạng thái) — cùng cao dòng thật.
+          Object.keys(DEP_LABEL).map((name) => (
+            <div key={name} className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <Skeleton className="my-0.5 h-4 w-24" />
+                <Skeleton className="my-0.5 h-3 w-3/4" />
+              </div>
+              <Skeleton className="mt-1 h-4 w-14" />
+            </div>
+          ))
         ) : status === "offline" || !data?.dependencies ? (
           <p className="text-muted-foreground text-sm">{t("page.dashboard.health.unreachable")}</p>
         ) : (

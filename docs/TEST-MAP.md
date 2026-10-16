@@ -360,6 +360,9 @@ Tổng: 462 mã khai báo · 381 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
+| `BP:T15` | SPEC-ap-luc-nguoc.md · BP4 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:393<br>apps/hub-worker/test/circuit-breaker.spec.ts:428<br>apps/hub-worker/test/circuit-breaker.spec.ts:481<br>apps/hub-worker/test/circuit-breaker.spec.ts:777<br>apps/hub-worker/test/delivery-gate.spec.ts:186 | chưa chạy (F3 ADR-241: L0 xanh máy nhà; L1 chờ CI db) |
+| `BP:T16` | SPEC-ap-luc-nguoc.md · BP4 | L1,L2 | apps/hub-worker/test/circuit-breaker.spec.ts:808<br>apps/hub-worker/test/circuit-breaker.spec.ts:916<br>apps/hub-worker/test/circuit-breaker.spec.ts:941<br>verify/scenarios/chaos-bp.ts:343 | L1 xanh CI run 38753284031 (F3 ADR-241); chaos phần b chưa chạy (máy công ty) |
+| `BP:T22` | SPEC-ap-luc-nguoc.md | L0 | apps/hub-api/test/redis-budget.spec.ts:352<br>apps/hub-api/test/redis-budget.spec.ts:367<br>apps/hub-api/test/redis-budget.spec.ts:378<br>apps/hub-api/test/redis-budget.spec.ts:389<br>apps/hub-api/test/redis-budget.spec.ts:400<br>apps/hub-api/test/redis-budget.spec.ts:436 | chưa chạy (F3 ADR-241: L0 xanh máy nhà; L1 chờ CI db) |
 
 ## File test (223 file, 1424 khai báo it/test)
 

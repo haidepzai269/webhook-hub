@@ -1,0 +1,39 @@
+/*
+ * ADR-238: khung chờ kiểu "shimmer" (Facebook) cho <Skeleton> — nền `--muted` + một dải sáng quét ngang.
+ * Dải quét pha từ `--foreground` (không mượn màu cố định) nên đúng ở cả sáng/tối và mọi preset (brutalist, soft-pop…):
+ * nền sáng -> dải hơi tối, nền tối -> dải hơi sáng. Giảm chuyển động: KHÔNG quét, chỉ còn khối tĩnh.
+ */
+:root {
+  --skeleton-sweep: color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.dark {
+  --skeleton-sweep: color-mix(in oklab, var(--foreground) 9%, transparent);
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 0%, var(--skeleton-sweep) 50%, transparent 100%);
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after {
+    animation: none;
+    display: none;
+  }
+}

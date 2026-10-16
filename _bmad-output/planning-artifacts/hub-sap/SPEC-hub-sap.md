@@ -90,7 +90,7 @@ Spec viết trên `57c81ad`. Từ đó PK0–PK5 đã lên master và sửa đú
 
 **H11. Dải ADR.**
 - LH dùng 211–229. Các số ở §12 giữ nguyên; ADR phát sinh thêm dùng từ 221.
-- PK dùng 230+ (PK10 đã dùng ADR-230).
+- PK: 230, 242+ (PK10 đã dùng ADR-230; 231–233 thuộc BP chaos-bp; 234–240 đã dùng ở console trên master/`feat/project-hierarchy`; ADR-241 thuộc BP F3 — đổi số từ ADR-234 vì trùng số với ADR-234 phân cấp console).
 
 **H12. Thứ tự (thay §11, Admin chốt 2026-10-14: lưới hứng làm TRƯỚC PK6–PK8).**
 

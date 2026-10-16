@@ -78,11 +78,12 @@ describe('CleanupJob (S1-4)', () => {
   it('retention mặc định (7 ngày) > tổng TTL retry; giá trị nhỏ hơn bị từ chối lúc load', () => {
     expect(DEFAULT_RETENTION_DAYS * 86_400_000).toBeGreaterThan(TOTAL_RETRY_WINDOW_MS);
     // 10s + 1m + 5m + 30m + 2h + 5×30s + NORMALIZE_MAX_DEFER_MS 60 phút + một vòng 30s [BP5] + 6 × (CIRCUIT_MAX_DEFER_MS 30 phút
-    // + một vòng hoãn DÀI NHẤT 5m [BP3] + ramp 60s + bậc kẹp 10s [F3] + 10s [BP4] + giữ chờ permit 60s [BP5]) ≈ 7h23m10s
-    expect(TOTAL_RETRY_WINDOW_MS).toBe(10_000 + 60_000 + 300_000 + 1_800_000 + 7_200_000 + 150_000 + 3_600_000 + 30_000 + 6 * (1_800_000 + 300_000 + 80_000 + 60_000));
+    // + một vòng hoãn DÀI NHẤT 5m [BP3] + ramp tối đa RAMP_MAX 180s [ADR-241, gồm bậc kẹp F3] + 10s [BP4] + giữ chờ permit 60s [BP5]) ≈ 7h34m10s
+    expect(TOTAL_RETRY_WINDOW_MS).toBe(10_000 + 60_000 + 300_000 + 1_800_000 + 7_200_000 + 150_000 + 3_600_000 + 30_000 + 6 * (1_800_000 + 300_000 + 190_000 + 60_000));
+    expect(TOTAL_RETRY_WINDOW_MS).toBe(27_250_000); // 7h34m10s
     expect(() => assertRetentionSafe(0)).toThrow(/không an toàn/);
-    expect(() => assertRetentionSafe(0.1)).toThrow(); // 2,4 giờ < 7h23m10s
-    expect(() => assertRetentionSafe(0.2)).toThrow(); // 4,8 giờ < 7h23m10s (trước BP2 thì hợp lệ)
+    expect(() => assertRetentionSafe(0.1)).toThrow(); // 2,4 giờ < 7h34m10s
+    expect(() => assertRetentionSafe(0.2)).toThrow(); // 4,8 giờ < 7h34m10s (trước BP2 thì hợp lệ)
     expect(() => assertRetentionSafe(1)).not.toThrow();
     process.env.CLEANUP_RETENTION_DAYS = '0';
     expect(() => resolveRetentionDays()).toThrow();

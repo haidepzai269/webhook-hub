@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import { Loader2, Mail, Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
@@ -39,14 +40,14 @@ import { useT } from "@/lib/i18n/use-t";
 export default function SettingsPage() {
   const t = useT();
   const operator = useIsOperator();
+  const booting = useAuthBooting();
   return (
     <>
       <PageHeader title={t("page.settings.title")} description={t("page.settings.description")} />
-      {operator ? (
-        <AlertSettings />
-      ) : (
-        <p className="text-muted-foreground text-sm">{t("page.settings.operator-only")}</p>
-      )}
+      {/* ADR-238: chưa có /auth/me -> chưa biết có phải operator; cùng khung chờ với AlertSettings đang tải. */}
+      {!operator && booting && <Skeleton className="h-64 w-full" />}
+      {operator && <AlertSettings />}
+      {!operator && !booting && <p className="text-muted-foreground text-sm">{t("page.settings.operator-only")}</p>}
     </>
   );
 }

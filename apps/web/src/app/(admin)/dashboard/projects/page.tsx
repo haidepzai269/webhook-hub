@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { CreateProjectDialog } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
+import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,11 +161,7 @@ export default function ProjectsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={operator ? 7 : 5}>{t("common.loading")}</TableCell>
-            </TableRow>
-          )}
+          {isLoading && <TableRowsSkeleton cols={operator ? 7 : 5} />}
           {(data ?? []).map((p) => (
             <TableRow key={p.id}>
               <TableCell className="font-medium">
