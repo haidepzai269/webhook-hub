@@ -2424,3 +2424,11 @@ không thấy gì.
 - Thêm ~36 KB path vào bundle client của các trang flow/events; thêm provider mới phải tải + sinh lại logo bằng tay (không tự có).
 - Một số thương hiệu chưa có logo dùng được (heroku, momo, pipedrive, zalopay; typeform/woocommerce chỉ có logo chữ) -> rơi về chữ tắt/icon chung.
 - Logo là nhãn hiệu của chủ sở hữu (kể cả bản CC0 của Simple Icons): dùng để nhận diện, không ngụ ý liên kết.
+
+## ADR-237 — Cảnh báo + Cài đặt lên tầng tài khoản (`/alerts`, `/settings`), lối vào ở menu tài khoản; đường cũ `/dashboard/*` chuyển hướng (2026-10-16)
+
+**Vấn đề:** Sidebar thuộc MỘT dự án (ADR-234) nhưng còn hai mục không thuộc dự án: "Cảnh báo" (API `/api/v1/alerts*` xuyên dự án — operator thấy mọi cảnh báo, owner thấy cảnh báo dung lượng các dự án mình là owner, ADR-190) và "Cài đặt" (email cảnh báo của người vận hành, CB5). Đặt trong sidebar dự án làm người dùng tưởng nội dung đổi theo dự án đang chọn.
+
+**Chọn:** Hai trang chuyển sang nhóm route `(admin)/(account)` — layout tầng tài khoản như `/projects` (thanh trên dùng chung `components/admin/account-menu.tsx`: chuông, ngôn ngữ, giao diện, avatar; không sidebar). Lối vào: menu avatar ở thanh trên của CẢ dashboard dự án lẫn trang tầng tài khoản, nhóm "Xuyên dự án" — điều kiện hiện giữ nguyên như sidebar cũ, gom vào hàm thuần `accountMenuItems` (`lib/hub/account-routes.ts`): Cảnh báo = operator hoặc owner ít nhất một dự án; Cài đặt = chỉ operator. Chuông "Xem tất cả" / "+N" trỏ `/alerts`. `/dashboard/alerts`, `/dashboard/settings` thành trang `redirect()` giữ nguyên query (link trong email đã gửi); link email (`libs/common/src/alerts/email.ts`) đổi sang đường mới. Không đổi hub-api.
+
+**Đánh đổi:** Mất một cú bấm thẳng từ sidebar (giờ là avatar -> Cảnh báo, hoặc chuông -> Xem tất cả); trang tầng tài khoản không có banner/toast cảnh báo của dashboard (chỉ chuông). Redirect chạy ở server component (một vòng 307) thay vì `next.config` redirects — để test được bằng jest; đường cũ phải giữ hai file page nhỏ đến khi bỏ hẳn.

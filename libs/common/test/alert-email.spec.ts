@@ -27,8 +27,8 @@ describe('CB5 mẫu thư cảnh báo', () => {
     expect(m.text).toContain('12 lần thử liên tiếp bị từ chối kể từ 14:02.');
     expect(m.text).toContain('Tác động: 12 sự kiện đã ngừng thử (DEAD)');
     expect(m.text).toContain('Cách xử lý: Thường do secret phía nhận đã đổi.');
-    expect(m.text).toContain('https://hub.example.vn/dashboard/alerts?project=11111111-1111-4111-8111-111111111111&rule=destination.auth_rejected');
-    expect(m.text).toContain('https://hub.example.vn/dashboard/settings');
+    expect(m.text).toContain('https://hub.example.vn/alerts?project=11111111-1111-4111-8111-111111111111&rule=destination.auth_rejected');
+    expect(m.text).toContain('https://hub.example.vn/settings');
     expect(m.html).toContain('Nhà sách &lt;b&gt;'); // mọi chuỗi động escape HTML
     expect(m.html).not.toContain('Nhà sách <b>');
     expect(m.text).not.toMatch(/cảnh báo khác/);
@@ -78,7 +78,7 @@ describe('CB5 mẫu thư cảnh báo', () => {
 
   it('URL console xấu (javascript:, rỗng) -> localhost, không chèn được vào href; thư thử có nhãn [THỬ]/[TEST]', () => {
     expect(mk({ webUrl: 'javascript:alert(1)' }).html).not.toContain('javascript:');
-    expect(mk({ webUrl: '' }).text).toContain('http://localhost:3000/dashboard/settings');
+    expect(mk({ webUrl: '' }).text).toContain('http://localhost:3000/settings');
     const t = sampleAlertEmail({ locale: 'vi', webUrl: 'https://hub.example.vn', project: PROJECT, now: NOW });
     expect(t.subject).toBe('[Webhook Hub][THỬ][CRITICAL][bookstore] Bên nhận từ chối xác thực (401)');
     expect(t.text).toContain('Đây là email THỬ');

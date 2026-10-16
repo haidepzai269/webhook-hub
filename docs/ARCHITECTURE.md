@@ -381,7 +381,7 @@ CB, ADR-165..173 — thay cho "tự cảnh báo" ⭐ cũ và cờ chết `alert_
   transaction, kiểm lại điều kiện lúc gửi, trần 6/giờ/người (vượt → `SUPPRESSED`, thư kế tiếp có "…và k cảnh báo khác"), 3 lần lỗi →
   `FAILED`; gửi lỗi không bao giờ chặn evaluator. Thư vi/en theo `users.locale`, câu luật dùng chung với console
   (`libs/common/src/alerts/text.ts`), không payload/header/secret/URL đích. Tuỳ chọn `alert_preferences` gắn người (ADR-166/167),
-  sửa ở `/dashboard/settings`; "Gửi email thử" 3/giờ đếm ở Postgres (`auth_audit`).
+  sửa ở `/settings` (tầng tài khoản, ADR-237); "Gửi email thử" 3/giờ đếm ở Postgres (`auth_audit`).
 - **Realtime:** chỉ khi trạng thái ĐỔI mới `PUBLISH hub:realtime:alerts` → `alert.changed` vào room `project:<id>:ops` (chỉ operator).
   Chuông xuyên project = `GET /api/v1/alerts/summary` poll 30s qua escape hatch có tên (ADR-169/170). Không nằm trên đường nóng:
   ngân sách Redis R1 không đổi.

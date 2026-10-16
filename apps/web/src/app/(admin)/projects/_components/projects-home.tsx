@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -16,7 +15,6 @@ import {
   FlaskConical,
   FolderKanban,
   Info,
-  LogOut,
   Plus,
   Radio,
   Search,
@@ -25,29 +23,18 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { AccountTopBar } from "@/components/admin/account-menu";
 import { AuthGuard } from "@/components/admin/auth-guard";
 import { CreateProjectDialog, type CreateProjectInput } from "@/components/admin/create-project-dialog";
-import { LanguageSwitcher } from "@/components/admin/language-switcher";
 import { PageHeader } from "@/components/admin/page-header";
-import { ThemeSwitcher } from "@/components/admin/theme-switcher";
 import { roleLabel } from "@/components/flow/project-picker-logic";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { APP_CONFIG } from "@/config/app-config";
-import { HubApiError, logout as serverLogout } from "@/lib/hub/client";
+import { HubApiError } from "@/lib/hub/client";
 import { type ProjectSummary, useProjectsWithStats } from "@/lib/hub/flow-project";
-import { useMeStore } from "@/lib/hub/me-store";
 import { type ProjectHealthTone, type ProjectStats, projectHealth, projectHealthLabel } from "@/lib/hub/project-health";
 import { useProjectStore } from "@/lib/hub/project-store";
 import type { MessageKey } from "@/lib/i18n/dictionary";
@@ -342,82 +329,6 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         {t("page.projects.create")}
       </Button>
     </div>
-  );
-}
-
-function UserMenu({ demo }: { demo: boolean }) {
-  const t = useT();
-  const me = useMeStore((s) => s.me);
-  const name = me?.user.name || (demo ? "Admin (demo)" : "");
-  const email = me?.user.email ?? (demo ? "admin@demo.local" : "");
-  const logout = () => {
-    void serverLogout().finally(() => window.location.replace("/login"));
-  };
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="cursor-pointer rounded-full"
-          aria-label={t("page.projects.home.account")}
-          title={email}
-        >
-          <span className="flex size-8 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
-            {initials(name || email || "?")}
-          </span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="flex flex-col gap-0.5">
-          <span className="truncate font-medium text-foreground text-sm">{name}</span>
-          <span className="truncate font-normal text-muted-foreground text-xs">{email}</span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer" asChild>
-          <Link href={demo ? "/projects?demo=1" : "/projects"}>
-            <FolderKanban />
-            {t("page.projects.home.all-projects")}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem className="cursor-pointer" asChild>
-          <Link href="/dashboard/projects">
-            <Settings2 />
-            {t("page.projects.home.manage")}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer" onSelect={logout}>
-          <LogOut />
-          {t("nav.footer.logout")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/** Thanh trên tầng TÀI KHOẢN — không sidebar dự án (phân cấp: Hub ⊃ Tài khoản ⊃ Dự án, ADR-234). */
-function AccountTopBar({ demo }: { demo: boolean }) {
-  const t = useT();
-  return (
-    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-2 px-4 md:px-6">
-        <Link href={demo ? "/projects?demo=1" : "/projects"} className="flex min-w-0 cursor-pointer items-center gap-2">
-          <Image src="/brand/webhook-hub-mark.png" alt="" width={24} height={24} className="size-6 shrink-0" />
-          <span className="truncate font-semibold">{APP_CONFIG.name}</span>
-          <span className="hidden text-muted-foreground sm:inline">/</span>
-          <span className="hidden truncate text-muted-foreground text-sm sm:inline">
-            {t("page.projects.home.title")}
-          </span>
-        </Link>
-        {/* Nút dùng chung (ngôn ngữ, giao diện) không tự đặt con trỏ — gắn ở đây cho mọi nút của thanh. */}
-        <div className="flex items-center gap-2 [&_button]:cursor-pointer">
-          <LanguageSwitcher />
-          <ThemeSwitcher />
-          <UserMenu demo={demo} />
-        </div>
-      </div>
-    </header>
   );
 }
 

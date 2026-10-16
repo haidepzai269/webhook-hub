@@ -158,8 +158,8 @@ describeDb('CB5 vòng gửi email cảnh báo (Postgres, hub_app)', () => {
     expect(vi.subject).toBe(`[Webhook Hub][CRITICAL][${P.slug}] Bên nhận từ chối xác thực (401)`);
     expect(vi.text).toContain(`bookstore-orders-${run}`);
     expect(vi.text).toContain('3 sự kiện đã ngừng thử (DEAD)'); // tác động
-    expect(vi.text).toContain(`https://console.example.test/dashboard/alerts?project=${P.id}&rule=destination.auth_rejected`);
-    expect(vi.text).toContain('https://console.example.test/dashboard/settings');
+    expect(vi.text).toContain(`https://console.example.test/alerts?project=${P.id}&rule=destination.auth_rejected`);
+    expect(vi.text).toContain('https://console.example.test/settings');
     expect(mails.find((m) => m.to === okEn.email)!.subject).toContain('Receiver rejected authentication (401)');
     expect(await s.sendOnce()).toMatchObject({ claimed: 0 }); // không còn gì đến hạn
   });
