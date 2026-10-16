@@ -94,7 +94,7 @@ function fakeRedis() {
       }
       if (script === LUA_GATE) {
         // BP2 §6 + BP4: KEYS open, failures, throttle, ramp, probe; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL,
-        // bậc cuối (F3 + Thấp-9), trần tuyệt đối ms (ADR-234). INCR chỉ khi CLOSED và có trần (rps > 0 hoặc còn :ramp).
+        // bậc cuối (F3 + Thấp-9), trần tuyệt đối ms (ADR-241). INCR chỉ khi CLOSED và có trần (rps > 0 hoặc còn :ramp).
         // Bậc cuối + bị chặn -> PEXPIRE :ramp trong script, CHỈ khi dài hơn PTTL (ghi vào `pexpires`).
         // PHẠM VI FAKE (review F3 TB-1): hạn khoá là `rampExp` theo đồng hồ GIẢ (nowMs của ARGV), không tự hết hạn; không có
         // = PTTL −1 như Redis. Bản sao JS chỉ để kiểm consumer/ngân sách — Lua THẬT kiểm ở khối Redis thật cuối file (CI db L1).
@@ -390,7 +390,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(deliveryRampConfig({ DELIVERY_RAMP_START_RPS: '1' }).startRps).toBe(1);
   });
 
-  it('[BP:T15] (phần d) ADR-234 L0 — kẹp cấu hình: RAMP_MAX chỉ kẹp xuống (≤ 180, ≥ ramp + một bậc); bậc cuối ≤ 5 lần nhân đôi dù bước 1s (Thấp-9)', () => {
+  it('[BP:T15] (phần d) ADR-241 L0 — kẹp cấu hình: RAMP_MAX chỉ kẹp xuống (≤ 180, ≥ ramp + một bậc); bậc cuối ≤ 5 lần nhân đôi dù bước 1s (Thấp-9)', () => {
     // RAMP_MAX: env chỉ kẹp THẤP hơn; nới lên 600 -> vẫn 180; thấp hơn khoá gốc (70s) -> nâng lên 70; bậy -> 180
     expect(deliveryRampConfig({ DELIVERY_RAMP_MAX_SECONDS: '600' }).maxSeconds).toBe(180);
     expect(deliveryRampConfig({ DELIVERY_RAMP_MAX_SECONDS: '120' }).maxSeconds).toBe(120);
@@ -425,7 +425,7 @@ describe('CircuitBreakerService — 3 trạng thái, probe SET NX (S2-1)', () =>
     expect(deliveryRampKeySeconds(d)).toBe(70);
   });
 
-  it('[BP:T15] (phần e) ADR-234 gate (fake): bậc cuối + bị chặn -> PEXPIRE :ramp = min(2 × step, còn lại tới RAMP_MAX) trong CÙNG EVAL; quá RAMP_MAX -> hết ramp; bước 1s không vượt start × 32', async () => {
+  it('[BP:T15] (phần e) ADR-241 gate (fake): bậc cuối + bị chặn -> PEXPIRE :ramp = min(2 × step, còn lại tới RAMP_MAX) trong CÙNG EVAL; quá RAMP_MAX -> hết ramp; bước 1s không vượt start × 32', async () => {
     const redis = fakeRedis();
     const cb = new CircuitBreakerService(fakePrisma().prisma, redis);
     const t0 = 1_800_000_000_000;
@@ -833,7 +833,7 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
   });
 
   /**
-   * Mô phỏng ramp theo ĐỒNG HỒ GIẢ trên Redis THẬT (ADR-234). TTL thật của `:ramp` không trôi theo đồng hồ giả, nên test giữ
+   * Mô phỏng ramp theo ĐỒNG HỒ GIẢ trên Redis THẬT (ADR-241). TTL thật của `:ramp` không trôi theo đồng hồ giả, nên test giữ
    * "hạn ảo" `virtExp`: trước mỗi giây đặt PTTL thật = virtExp − now (lệnh của TEST, không thuộc ngân sách), sau giây đó PTTL
    * tăng = gate vừa gia hạn trong script -> virtExp = now + PTTL. now ≥ virtExp -> xoá khoá (= hết hạn).
    * `arrivals(sec)` = số lần gate trong giây đó; phần bị chặn quay lại sau 10s nếu `requeue` (nhịp retry.10s).
@@ -896,10 +896,10 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     return { perSec, expiredAt, virtExp, exps, pttls };
   }
 
-  it('F3 (ADR-232 + ADR-234) trên Redis THẬT: 500 message hoãn dội về theo nhịp retry.10s (dồn 1 giây/vòng như chaos đo lại, và rải 2 giây/vòng) — gate gia hạn :ramp ở bậc cuối tới khi hàng hết; KHÔNG giây nào vượt 64, 500/500 trước RAMP_MAX', async () => {
+  it('F3 (ADR-232 + ADR-241) trên Redis THẬT: 500 message hoãn dội về theo nhịp retry.10s (dồn 1 giây/vòng như chaos đo lại, và rải 2 giây/vòng) — gate gia hạn :ramp ở bậc cuối tới khi hàng hết; KHÔNG giây nào vượt 64, 500/500 trước RAMP_MAX', async () => {
     await redis.del(k('failures'), k('open'), k('probe'), k('trips'), k('ramp'));
     expect(deliveryRampKeySeconds(deliveryRampConfig({}))).toBe(70);
-    // Mô hình "dồn 1 giây/vòng" (chaos [BP:T16] đo lại, ADR-232): trước ADR-234 còn 374 message dội về ở +70s (đo được 149/s).
+    // Mô hình "dồn 1 giây/vòng" (chaos [BP:T16] đo lại, ADR-232): trước ADR-241 còn 374 message dội về ở +70s (đo được 149/s).
     const a = await simulateRamp(1_950_000_000_000, (s) => (s === 0 ? 500 : 0), { requeue: true, maxSec: 400 });
     expect(a.perSec.reduce((x, r) => x + r.ok, 0)).toBe(500);
     for (const r of a.perSec) expect(r.ok).toBeLessThanOrEqual(64);
@@ -913,7 +913,7 @@ describeRedis('CircuitBreakerService — script Lua trên Redis THẬT (ADR-054)
     expect(b.perSec.map((r) => r.ok)).toEqual([2, 2, 4, 4, 8, 8, 16, 16, 32, 32, 64, 64, 64, 64, 60, 60]);
   });
 
-  it('[BP:T16] (phần c) ADR-234 L1 Redis THẬT: lưu lượng ĐỀU 100 rps — trần 2..64 rồi giữ 64 nhờ gia hạn ở bậc cuối, ramp hết ĐÚNG ở RAMP_MAX (180s) dù vẫn bị chặn; lưu lượng thấp (10 rps) không gia hạn -> hết ở 70s', async () => {
+  it('[BP:T16] (phần c) ADR-241 L1 Redis THẬT: lưu lượng ĐỀU 100 rps — trần 2..64 rồi giữ 64 nhờ gia hạn ở bậc cuối, ramp hết ĐÚNG ở RAMP_MAX (180s) dù vẫn bị chặn; lưu lượng thấp (10 rps) không gia hạn -> hết ở 70s', async () => {
     await redis.del(k('failures'), k('open'), k('probe'), k('trips'), k('ramp'));
     const start = 1_970_000_000_000;
     const RAMP_MAX = deliveryRampConfig({}).maxSeconds;

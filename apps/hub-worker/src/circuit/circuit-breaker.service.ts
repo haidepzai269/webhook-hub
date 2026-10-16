@@ -48,12 +48,12 @@ return n`;
 /**
  * BP2 §6 (ADR-196) + BP4 (ADR-198): GATE — MỘT script, LUÔN đúng 1 lệnh, có hay không có throttle/ramp.
  * KEYS: open, failures, throttle:{giây}, ramp, probe. ARGV: ngưỡng lỗi, rate_limit_rps, nowMs, ramp start rps, ramp step (giây),
- * TTL cửa sổ throttle (giây), bậc cuối (`deliveryRampLastStep`, F3 + Thấp-9), trần tuyệt đối ramp (ms, ADR-234), mức gia hạn
+ * TTL cửa sổ throttle (giây), bậc cuối (`deliveryRampLastStep`, F3 + Thấp-9), trần tuyệt đối ramp (ms, ADR-241), mức gia hạn
  * (ms, `deliveryRampExtendMs`).
  * - Trả PTTL của `:open` (BP3 hoãn tới hết OPEN, C4).
  * - CLOSED + còn `:ramp` (BP4, đặt lúc probe thành công): rampCap = start × 2^min(floor((now − rampStart)/step), bậc cuối) —
  *   khoá sống ramp + một bậc (F3), bậc thêm đó giữ trần cuối. Bậc cuối kẹp ≤ DELIVERY_RAMP_MAX_DOUBLINGS (Thấp-9).
- * - ADR-234 (đính chính ADR-232): CHỈ KHI ở bậc cuối VÀ lần này bị throttle (count > rampCap — hàng tồn còn dội) -> `PEXPIRE :ramp`
+ * - ADR-241 (đính chính ADR-232): CHỈ KHI ở bậc cuối VÀ lần này bị throttle (count > rampCap — hàng tồn còn dội) -> `PEXPIRE :ramp`
  *   = min(mức gia hạn, rampStart + RAMP_MAX − now), chỉ khi dài hơn PTTL hiện tại (không rút ngắn). Trong CÙNG EVAL: không thêm
  *   lệnh client. Quá RAMP_MAX (tính từ mốc trong khoá) -> coi như hết ramp dù khoá còn. Thời gian là đồng hồ WORKER (không dùng
  *   `TIME`, giữ script deterministic): lệch đồng hồ D giữa worker đặt mốc và worker gate -> ramp sống tới RAMP_MAX + D.
@@ -78,10 +78,10 @@ if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
   if rs then
     el = tonumber(ARGV[3]) - (tonumber(rs) or 0)
     if el < 0 then el = 0 end
-    -- ADR-234: quá trần tuyệt đối (ARGV[8] ms tính từ rampStart) -> hết ramp, dù khoá còn sống
+    -- ADR-241: quá trần tuyệt đối (ARGV[8] ms tính từ rampStart) -> hết ramp, dù khoá còn sống
     if el < tonumber(ARGV[8]) then
       local steps = math.floor(el / (tonumber(ARGV[5]) * 1000))
-      -- F3 (ADR-232) + Thấp-9 (ADR-234): kẹp ở bậc CUỐI (ARGV[7], JS đã kẹp ≤ ${DELIVERY_RAMP_MAX_DOUBLINGS}); kẹp lại ở đây phòng ARGV lạ
+      -- F3 (ADR-232) + Thấp-9 (ADR-241): kẹp ở bậc CUỐI (ARGV[7], JS đã kẹp ≤ ${DELIVERY_RAMP_MAX_DOUBLINGS}); kẹp lại ở đây phòng ARGV lạ
       local last = tonumber(ARGV[7])
       if last > ${DELIVERY_RAMP_MAX_DOUBLINGS} then last = ${DELIVERY_RAMP_MAX_DOUBLINGS} end
       if last < 0 then last = 0 end
@@ -92,7 +92,7 @@ if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
   if (tonumber(ARGV[2]) > 0) or (cap > 0) then
     t = redis.call('INCR', KEYS[3])
     if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[6]) end
-    -- ADR-234: bậc cuối mà vẫn bị ramp chặn -> gia hạn :ramp (ARGV[9] ms), không quá rampStart + RAMP_MAX; chỉ KÉO DÀI, không
+    -- ADR-241: bậc cuối mà vẫn bị ramp chặn -> gia hạn :ramp (ARGV[9] ms), không quá rampStart + RAMP_MAX; chỉ KÉO DÀI, không
     -- rút ngắn (bước nhỏ + kẹp Thấp-9 thì bậc cuối tới sớm, mức gia hạn có thể ngắn hơn TTL gốc)
     if atLast and t > cap then
       local ext = tonumber(ARGV[9])
@@ -168,7 +168,7 @@ export interface CircuitTarget {
  *  - `:open`     SET OPEN EX 60 ở lần trip đầu, EX `CIRCUIT_OPEN_MAX_SECONDS` (300) sau mỗi probe thất bại (BP3);
  *  - `:trips`    số probe thất bại liên tiếp (BP3), xoá khi CLOSED;
  *  - `:probe`    SET token NX EX 30 (Lua: chỉ khi thật sự HALF_OPEN) — người gửi thử DUY NHẤT; nhả theo token;
- *  - `:ramp`     mốc probe thành công, EX ramp + một bậc (BP4 + F3); gate gia hạn ở bậc cuối khi còn throttle, ≤ RAMP_MAX + lệch đồng hồ (ADR-234).
+ *  - `:ramp`     mốc probe thành công, EX ramp + một bậc (BP4 + F3); gate gia hạn ở bậc cuối khi còn throttle, ≤ RAMP_MAX + lệch đồng hồ (ADR-241).
  */
 @Injectable()
 export class CircuitBreakerService {

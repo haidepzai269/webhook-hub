@@ -1,4 +1,4 @@
-# F3 bậc cuối (ADR-234) — việc còn phải chạy ở máy công ty
+# F3 bậc cuối (ADR-241) — việc còn phải chạy ở máy công ty
 
 Nhánh `feat/bp-f3`, code ở commit `1c84d84` + bản vá review `REVIEW-F3` (commit sau `d1a1020`, xem `git log`; tách từ master `d417118`). Kéo nhánh về, ở **HEAD của nhánh** thì chạy hai việc dưới đây.
 
@@ -28,7 +28,7 @@ RUN_DB_TESTS=1 REDIS_URL=<redis hubv> npx jest --maxWorkers=1 apps/hub-worker/te
   - mọi lần gia hạn có hạn ≤ rampStart + 180 s;
   - khoá hết trong khoảng (rampStart + 179 s, rampStart + 180 s];
   - lưu lượng 10 rps thì không gia hạn lần nào và khoá hết đúng ở 70 s.
-- **`F3 (ADR-232 + ADR-234)`**, 500 hàng:
+- **`F3 (ADR-232 + ADR-241)`**, 500 hàng:
   - mô hình dồn 1 giây/vòng ra `[2,4,8,16,32,64,64,64,64,64,64,54]`, xả hết ở +110 s;
   - mô hình rải 2 giây/vòng ra `[2,2,4,4,8,8,16,16,32,32,64,64,64,64,60,60]`;
   - không giây nào vượt 64.
@@ -60,12 +60,12 @@ npm run verify:chaos:bp -- --tag bp-t16
   - worker không khởi động lại.
 - **Mới:** khoá `:ramp` không sống quá 180 s kể từ rampStart (`rampLenMs` ≤ 181 000).
 - Không giây nào trong ramp vượt trần (2..64, rồi giữ 64 tới khi khoá hết hạn).
-- **Sau ramp:** không giây nào > 64/s. Đây là tiêu chí F3 từng trượt với 149/s; ADR-234 đặt ra để sửa đúng chỗ này.
+- **Sau ramp:** không giây nào > 64/s. Đây là tiêu chí F3 từng trượt với 149/s; ADR-241 đặt ra để sửa đúng chỗ này.
 - 500/500 SUCCEEDED, 0 DEAD, 0 trùng.
 
 Ghi kết quả vào hai chỗ:
 
 - `CHAOS-BP-KET-QUA.md`, mục T16 / F3;
-- dòng "Đo lại" ở cuối ADR-234 (`docs/adr/README.md`).
+- dòng "Đo lại" ở cuối ADR-241 (`docs/adr/README.md`).
 
 Nếu T16 PASS, tách kịch bản khỏi trạng thái "đỏ có chủ đích" (nợ Thấp #7).

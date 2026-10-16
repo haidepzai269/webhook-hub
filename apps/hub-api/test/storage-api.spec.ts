@@ -78,7 +78,7 @@ const code = async (p: Promise<unknown>) => {
 describe('QT4: API dung lượng + lệnh dọn', () => {
   it('[QT:T9] (phần b) olderThan mới hơn sàn retry window -> 400 bad_request field=olderThan, KHÔNG ghi lệnh', async () => {
     const { s, calls } = store();
-    const hours = Math.floor(TOTAL_RETRY_WINDOW_MS / 3_600_000); // 7h < 7h34m10s (BP2 C2 + BP3 + BP4 + BP5 + ADR-234)
+    const hours = Math.floor(TOTAL_RETRY_WINDOW_MS / 3_600_000); // 7h < 7h34m10s (BP2 C2 + BP3 + BP4 + BP5 + ADR-241)
     expect(await code(createCleanJob(s, P, { action: 'trim', importance: ['low'], olderThan: `${hours}h` }, 'u1', { now: NOW }))).toMatchObject({
       status: 400,
       error: 'bad_request',

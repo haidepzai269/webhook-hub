@@ -14,7 +14,7 @@
 const calls: string[] = [];
 const store = new Map<string, string>();
 /**
- * ADR-234: PEXPIRE chạy TRONG `LUA_GATE` (không phải lệnh client) — ghi lại để kiểm gia hạn mà số lệnh vẫn 1.
+ * ADR-241: PEXPIRE chạy TRONG `LUA_GATE` (không phải lệnh client) — ghi lại để kiểm gia hạn mà số lệnh vẫn 1.
  * PHẠM VI FAKE (review F3 TB-1): file này đếm LỆNH CLIENT; logic Lua chỉ là bản sao đủ để consumer đi đúng nhánh. Hạn khoá là
  * `rampExp` theo đồng hồ giả, không có = PTTL −1. Lua THẬT được kiểm trên Redis thật ở circuit-breaker.spec (CI db L1).
  */
@@ -39,7 +39,7 @@ function fakeRedis() {
       const key = rest[0];
       if (/PTTL/.test(script)) {
         // LUA_GATE (BP2 §6 + BP4): KEYS open, failures, throttle, ramp, probe; ARGV ngưỡng, rps, nowMs, ramp start, ramp step, TTL,
-        // bậc cuối (F3 + Thấp-9), trần tuyệt đối ms (ADR-234).
+        // bậc cuối (F3 + Thấp-9), trần tuyệt đối ms (ADR-241).
         const [open, failures, throttle, ramp, probe] = rest.slice(0, n);
         let t = -1;
         let cap = -1;
@@ -397,7 +397,7 @@ describe('S3-5 ngân sách Redis (R1: ≤4 cố định/sự kiện + ≤2/deliv
     expect(store.get('circuit:dest-1:probe')).toBe('worker-khac:token');
   });
 
-  it('[BP:T22] (phần f) ADR-234: ramp ở BẬC CUỐI mà bị throttle -> gia hạn :ramp TRONG gate, vẫn đúng 1 lệnh, 0 DB; chưa bậc cuối hoặc không bị chặn -> không gia hạn', async () => {
+  it('[BP:T22] (phần f) ADR-241: ramp ở BẬC CUỐI mà bị throttle -> gia hạn :ramp TRONG gate, vẫn đúng 1 lệnh, 0 DB; chưa bậc cuối hoặc không bị chặn -> không gia hạn', async () => {
     const t0 = Date.parse('2026-10-13T12:00:00.200Z');
     const ramp = 'circuit:dest-1:ramp';
     store.set(ramp, String(t0));

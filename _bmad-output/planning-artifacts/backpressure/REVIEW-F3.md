@@ -1,5 +1,7 @@
 # REVIEW-F3 — `feat/bp-f3` (`1c84d84` code + `e6e3aec` docs) so với `origin/master` `d417118`
 
+> **Ghi chú đổi số (2026-10-16):** "ADR-234" trong review này là ADR ramp F3, nay là **ADR-241** — đổi số vì trùng với ADR-234 (phân cấp console) trên master. Giữ nguyên số cũ trong thân review vì đây là hồ sơ lượt review đã chạy.
+
 Reviewer: Murat 🧪 · 2026-10-15 · Worktree `C:\wt\ui`
 
 ## Kết luận: **CHƯA ĐẠT** (0 Nặng · 2 TB · 9 Thấp)
