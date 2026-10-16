@@ -1,0 +1,3 @@
+# Luật nhánh của Admin (2026-10-16) — xem BRANCH-POLICY.md
+[agent]
+persistent_facts = ["file:{project-root}/_bmad/custom/BRANCH-POLICY.md"]
