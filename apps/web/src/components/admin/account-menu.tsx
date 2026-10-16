@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import { APP_CONFIG } from "@/config/app-config";
 import { ACCOUNT_ROUTES, type AccountMenuId, accountMenuItems } from "@/lib/hub/account-routes";
 import { logout as serverLogout } from "@/lib/hub/client";
@@ -55,9 +56,14 @@ export function AccountMenu({ demo = false }: { demo?: boolean }) {
           aria-label={t("page.projects.home.account")}
           title={email}
         >
-          <span className="flex size-8 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
-            {initials(name || email || "?")}
-          </span>
+          {/* ADR-238: chưa có /auth/me (AuthGuard đang chờ) -> khung chờ tròn cùng cỡ, không hiện "?". */}
+          {me || demo ? (
+            <span className="flex size-8 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
+              {initials(name || email || "?")}
+            </span>
+          ) : (
+            <Skeleton className="size-8 rounded-full" />
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">

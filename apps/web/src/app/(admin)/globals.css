@@ -12,6 +12,8 @@
 @import "../../styles/alerts.css";
 /* Thanh cuộn dùng chung (admin + shop) — xem styles/scrollbar.css */
 @import "../../styles/scrollbar.css";
+/* ADR-238: khung chờ shimmer của <Skeleton> (tắt quét khi giảm chuyển động) */
+@import "../../styles/skeleton.css";
 
 @custom-variant dark (&:is(.dark *));
 

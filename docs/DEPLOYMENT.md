@@ -43,12 +43,14 @@
 | RabbitMQ | **CloudAMQP** — Little Lemur (free) | ⚠️ món dễ bị quên nhất |
 | Tunnel (local dev) | **cloudflared** named tunnel | Ngày 1–3, trước khi có URL Render |
 | CI + cron 5' | **GitHub Actions** | |
-| Uptime + keep-alive | **UptimeRobot** | ping 5 phút |
+| Keep-alive | **cron-job.org** | ping `/health` 5 phút, chỉ 7:00–22:55 giờ VN (ADR-240) — UptimeRobot tạm dừng |
 | Error tracking | **Sentry** (free) | tuỳ chọn |
 
 ### ⚠️ Region phải khớp — đây là thứ giết chỉ tiêu p95
 
-**Tất cả đặt ở Singapore** (`ap-southeast-1` hoặc tương đương): Render · Neon · Upstash · CloudAMQP.
+**Tất cả đặt ở Singapore** (`ap-southeast-1` hoặc tương đương): Render · Neon · Upstash · CloudAMQP · Vercel Functions.
+
+**Vercel Functions: nguồn sự thật là [`apps/web/vercel.json`](../apps/web/vercel.json) (`"regions": ["sin1"]`, ADR-239)**. Đừng chỉnh trong dashboard Vercel (Root Directory = `apps/web`, nên Vercel đọc file này). Mặc định của Vercel là `iad1` (Washington): khi đó mọi lượt proxy `/api/*`, `/auth/*` sang Render Singapore phải đi vòng qua Mỹ. File này chỉ có hiệu lực **sau lần redeploy kế tiếp**. Kiểm tra: `curl -sI https://<web>.vercel.app/auth/me | grep -i x-vercel-id`. Giá trị phải có dạng `hkg1::sin1::…` (edge gần người dùng :: function **sin1**). Thấy `::iad1::` nghĩa là chưa redeploy hoặc file chưa được đọc.
 
 Lệch một cái — ví dụ Render Singapore mà Neon US-East — thì mỗi lượt gọi DB tốn ~200ms. Luồng ingest có 1 transaction + 3–4 lệnh Redis → **p95 thành nửa giây**, và **không có cách tối ưu code nào cứu được**. Đây là lỗi cấu hình, không phải lỗi kiến trúc, nhưng nó giết chỉ tiêu quan trọng nhất của đề tài.
 
@@ -60,7 +62,7 @@ Lệch một cái — ví dụ Render Singapore mà Neon US-East — thì mỗi 
 
 | Ràng buộc | Hệ quả |
 |---|---|
-| Web Service free **ngủ sau ~15 phút** không request, đánh thức ~1 phút | ☠️ Webhook đầu tiên sau khi ngủ **sẽ timeout**. GitHub chỉ cho ~10s. → **phải có UptimeRobot ping 5 phút** |
+| Web Service free **ngủ sau ~15 phút** không request, đánh thức ~1 phút | ☠️ Webhook đầu tiên sau khi ngủ **sẽ timeout**. GitHub chỉ cho ~10s. → **ping keep-alive 5 phút trong giờ thức** (cron-job.org, §8, ADR-240) |
 | **Background Worker là loại service TRẢ PHÍ** | `hub-worker` không có chỗ đứng trên free tier dưới dạng Background Worker |
 | Free tier có **hạn mức tổng giờ instance/tháng** (thường nói ~750h) | ⚠️ **Một service always-on đã ăn ~730h/tháng.** Hai service always-on **vượt hạn mức.** Kiểm lại con số hiện hành |
 | RAM/CPU free hạn chế | Không chạy tải nặng ở đây (đã có môi trường local) |
@@ -86,8 +88,9 @@ vẫn giữ — vẫn hai process, mỗi process một AMQP connection + một p
   `HUB_ALL_WORKER_DB_CONNECTIONS` (mặc định 5) = 10 kết nối client tới pooler Neon (PgBouncer, giới hạn hàng nghìn — dư).
 - RAM (đo hubv, `mem_limit: 512m`, sau smoke + một đơn Shop PAID): xem ADR-129. Heap mỗi con giới hạn bằng
   `--max-old-space-size` (`HUB_ALL_API_HEAP_MB` = 200, `HUB_ALL_WORKER_HEAP_MB` = 220).
-- Giờ instance free: Render cho 750 giờ/tháng/tài khoản. `hub-all` luôn thức (UptimeRobot ping `/health` 5 phút) ≈ 730 giờ;
-  `shop` free để NGỦ khi không dùng (đánh thức ~1 phút) — đừng ping shop liên tục, không thì vượt 750 giờ.
+- Giờ instance free: Render cho 750 giờ/tháng **chung cả workspace**. `hub-all` chỉ được giữ thức 7:00–23:10 giờ VN
+  (cron-job.org, §8, ADR-240) ≈ 500 giờ; giữ 24/7 thì ≈ 744 giờ, không còn chỗ cho `shop`. `shop` free để NGỦ khi không
+  dùng — **không ping shop**, đánh thức tay trước demo (~1 phút).
 - Kiểm chứng: `bash scripts/hub-all-e2e.sh` (image thật trên hubv, `docker-compose.verify-allinone.yml`).
 - **EG1 (ADR-175):** `EDGE_NGINX=1` thêm con thứ ba `edge` = nginx nghe `$PORT`, hub-api lùi vào `127.0.0.1:4000`. Mặc định
   **tắt** — không đặt biến thì container chạy y như trên. Chi tiết, biến và cách đo IP thật: §3.6.
@@ -486,14 +489,21 @@ Vercel **không chạy được WebSocket server** — nhưng không cần: serv
 
 ---
 
-## 8. UptimeRobot
+## 8. Keep-alive — cron-job.org, chỉ trong giờ thức (ADR-240)
 
-| Ping | Mỗi | Mục đích |
-|---|---|---|
-| `https://hub-api.onrender.com/health` | 5 phút | ☠️ **Chống Render ngủ** + giám sát |
-| `https://shop-xxxx.onrender.com/products` | 5 phút | Giám sát + giữ shop (Render free) không ngủ |
+Render free cho **750 giờ instance/tháng dùng chung cả workspace**. Ping 24/7 thì `hub-all` ăn ~744 giờ, `shop` hết chỗ, và
+lố hạn mức là Render tạm dừng **mọi** service free. Vì vậy chỉ giữ thức trong giờ dùng thật:
 
-Bật **public status page** → chụp vào báo cáo. Mười phút cấu hình, và nó trả lời câu *"làm sao biết hệ thống đang sống?"*.
+| Job (cron-job.org) | Lịch | Múi giờ | Ghi chú |
+|---|---|---|---|
+| `GET https://hub-api-c9hg.onrender.com/health` | `*/5 7-22 * * *` | `Asia/Ho_Chi_Minh` | Ping cuối 22:55, ngủ ~23:10 → ~500 giờ/tháng |
+| ~~shop~~ | — | — | **Không ping.** Đánh thức tay trước demo (mở trang shop, chờ ~1 phút) |
+
+- **UptimeRobot: tạm dừng** (pause, không xoá). Đừng bật lại kiểu 24/7. Muốn có trang trạng thái để chụp vào báo cáo thì
+  bật trong giờ thức rồi tạm dừng lại.
+- Ngoài 7:00–23:10 giờ VN, người đầu tiên chờ một lần cold start (~80s, đo 2026-10-16 được 83,6s). Console hiện khung chờ +
+  "Máy chủ đang khởi động" + "Thử lại" (ADR-238). Webhook provider gửi vào lúc đó có thể timeout ở lần đầu, trông vào lượt gửi lại.
+- cron-job.org là phụ thuộc **ngoài repo**: lịch + URL chỉ ghi ở đây và ADR-240. Đổi URL Render thì sửa job bằng tay.
 
 ---
 
@@ -738,14 +748,14 @@ Deploy lần đầu **luôn** mất một ngày. Mất nó ở Ngày 3 khi còn 
 
 ### Checklist "deploy rỗng" (làm ngay khi xương sống chạy local)
 
-- [ ] Tạo 5 tài khoản, **tất cả region Singapore**: Render · Neon · Upstash · CloudAMQP · Vercel
+- [ ] Tạo 5 tài khoản, **tất cả region Singapore**: Render · Neon · Upstash · CloudAMQP · Vercel (Vercel Functions ghim bằng `apps/web/vercel.json` `regions: ["sin1"]`. Sau redeploy, header `x-vercel-id` phải là `hkg1::sin1::…`, không được là `::iad1::`, xem §2)
 - [ ] `render.yaml` Blueprint, một Dockerfile multi-stage
 - [ ] `prisma migrate deploy` chạy được lên Neon bằng `DIRECT_URL`
 - [ ] `hub-api` lên, `/health` trả 200 với **cả ba** phụ thuộc xanh
 - [ ] `hub-worker` lên, consume được `q.normalize` từ CloudAMQP
 - [ ] Đổi URL webhook GitHub từ tunnel → URL Render
 - [ ] **`git push` → tin nhắn Discord, đi qua hạ tầng thật**
-- [ ] UptimeRobot ping 5 phút cả hai
+- [ ] cron-job.org ping `hub-api` `/health` `*/5 7-22 * * *` (Asia/Ho_Chi_Minh); KHÔNG ping shop; UptimeRobot tạm dừng (§8, ADR-240)
 - [ ] `web` lên Vercel, gọi được `hub-api`, Socket.IO kết nối được qua CORS
 
 **DoD:** xương sống chạy **online**, không phải chỉ trên máy bạn.

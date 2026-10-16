@@ -4,9 +4,11 @@ import { Suspense, useMemo, useState } from "react";
 
 import { X } from "lucide-react";
 
+import { useAuthBooting } from "@/components/admin/auth-guard";
 import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
+import { PageSkeleton } from "@/components/admin/skeletons";
 import { ProjectChip, SeverityDot, useAlertText } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,6 +102,7 @@ function AlertsView() {
   const t = useT();
   const locale = useLocale();
   const operator = useCanSeeAlerts(); // QT6: owner thấy cảnh báo dung lượng của project mình
+  const booting = useAuthBooting();
   const isOperator = useIsOperator();
   const url = useUrlParams(ALERT_PARAMS);
   const v = url.values;
@@ -113,6 +116,8 @@ function AlertsView() {
   const selectedRow = rows?.find((r) => r.id === selected) ?? null;
   const filtered = Boolean(v.project || v.severity || v.state || v.rule);
 
+  // ADR-238: chưa có /auth/me (AuthGuard đang chờ) -> khung trang, chưa kết luận "chỉ người vận hành".
+  if (!operator && booting) return <PageSkeleton />;
   if (!operator) {
     return (
       <>

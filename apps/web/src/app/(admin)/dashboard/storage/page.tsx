@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { HardDrive, Info, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
 import {
@@ -70,11 +71,13 @@ export default function StoragePage() {
   const me = useMeStore((s) => s.me);
   const canWrite = me?.user.isOperator === true || (me?.memberships ?? []).some((m) => m.projectId === projectId && m.role === "owner");
   const q = useStorage(projectId, { poll: true });
+  const booting = useAuthBooting();
 
   return (
     <>
       <PageHeader title={t("page.storage.title")} description={t("page.storage.description")} />
-      {!projectId ? (
+      {/* ADR-238: chưa có project vì AuthGuard đang chọn -> rơi xuống khung chờ, chưa kết luận "không có dự án". */}
+      {!projectId && !booting ? (
         <p className="text-muted-foreground text-sm">{t("page.storage.no-project")}</p>
       ) : q.error ? (
         <p className="text-muted-foreground text-sm">

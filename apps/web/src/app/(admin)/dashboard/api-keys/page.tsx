@@ -5,9 +5,11 @@ import { useState } from "react";
 import { Ban, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuthBooting } from "@/components/admin/auth-guard";
 import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CopyButton } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
+import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,7 +65,11 @@ export default function ApiKeysPage() {
   const locale = useLocale();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const project = useProjects().data?.find((p) => p.id === projectId);
-  const { data, isLoading, error } = useApiKeys(projectId);
+  const keys = useApiKeys(projectId);
+  const { data, error } = keys;
+  const booting = useAuthBooting();
+  // ADR-238: query tắt khi chưa có project (AuthGuard đang chọn) — vẫn là "đang tải", không phải "chưa có khoá".
+  const isLoading = keys.isLoading || (!data && !projectId && booting);
   const create = useCreateApiKey(projectId);
   const revoke = useRevokeApiKey(projectId);
   const [open, setOpen] = useState(false);
@@ -122,11 +128,7 @@ export default function ApiKeysPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={6}>{t("common.loading")}</TableCell>
-            </TableRow>
-          )}
+          {isLoading && <TableRowsSkeleton cols={6} />}
           {!isLoading && (data ?? []).length === 0 && (
             <TableRow>
               <TableCell colSpan={6} className="text-muted-foreground">

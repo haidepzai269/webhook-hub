@@ -47,6 +47,9 @@ interface DataTableProps<T extends RowData> {
   toolbar?: ReactNode;
 }
 
+/** Độ rộng (%) xoay vòng của khung chờ từng ô — cố định (không random) để SSR/hydrate khớp. */
+const SKELETON_WIDTHS = [80, 55, 70, 40, 65] as const;
+
 /** Bảng dữ liệu chung của admin — khung data-table của Studio Admin (TanStack Table v9). */
 export function DataTable<T extends RowData>({
   data,
@@ -162,11 +165,15 @@ export function DataTable<T extends RowData>({
           </TableHeader>
           <TableBody>
             {isLoading && !data ? (
+              // ADR-238: khung chờ theo TỪNG cột (độ rộng lệch nhau như chữ thật), cao bằng dòng thật — không nhảy bảng.
               Array.from({ length: 5 }, (_, i) => (
                 <TableRow key={`sk-${i}`}>
-                  <TableCell colSpan={colCount} className="px-3">
-                    <Skeleton className="h-5 w-full" />
-                  </TableCell>
+                  {Array.from({ length: colCount }, (_, c) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: khung chờ tĩnh
+                    <TableCell key={`sk-${i}-${c}`} className="px-3">
+                      <Skeleton className="h-5" style={{ width: `${SKELETON_WIDTHS[(i + c) % SKELETON_WIDTHS.length]}%` }} />
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             ) : error ? (
