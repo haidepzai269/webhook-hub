@@ -11,6 +11,7 @@ import { HUB_API_URL } from "@/lib/env";
 
 import { emptyToastCursor, SOCKET_INVALIDATES, type ToastCursor } from "./ui-logic";
 import { hubFetch } from "./client";
+import { createRealtimeConnector, type RealtimeConnector, type RealtimeStatus } from "./realtime-connector";
 import { currentProjectId, useProjectStore } from "./project-store";
 import type { CircuitChangedNotice, DeliveryAttemptNotice, MetricsTick, TraceIngestedNotice } from "./types";
 
@@ -28,7 +29,8 @@ const MAX_TRACES = 20;
 const INVALIDATE_DEBOUNCE_MS = 400;
 
 interface RealtimeState {
-  connected: boolean;
+  /** ADR-242: ba mức — "connecting" (đang nối/nối lại, server có thể đang khởi động) chỉ thành "disconnected" sau ngưỡng. */
+  status: RealtimeStatus;
   ticks: MetricsTick[];
   /** `trace.ingested` gần nhất (mới nhất ở đầu) — chặng ①–④ trong hub-api (S2-2). */
   traces: (TraceIngestedNotice & { receivedAt: number })[];
@@ -37,14 +39,36 @@ interface RealtimeState {
 }
 
 export const useRealtimeStore = create<RealtimeState>(() => ({
-  connected: false,
+  status: "connecting",
   ticks: [],
   traces: [],
   toastCursor: emptyToastCursor(),
 }));
 
 let socket: Socket | null = null;
+let connector: RealtimeConnector | null = null;
 let refCount = 0;
+
+/** ADR-242: tab hiện lại / có mạng lại -> thử nối ngay (không chờ hết backoff). */
+function subscribeWake(wake: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onVisible = () => {
+    if (document.visibilityState === "visible") wake();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("online", wake);
+  return () => {
+    document.removeEventListener("visibilitychange", onVisible);
+    window.removeEventListener("online", wake);
+  };
+}
+
+/** Xin vé socket MỚI (60 giây) cho project đang chọn — mỗi lượt (re)connect một vé. */
+function fetchSocketTicket(): Promise<string> {
+  const projectId = realtimeProjectId();
+  const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+  return hubFetch<{ ticket: string }>(`/auth/socket-ticket${q}`).then(({ ticket }) => ticket);
+}
 
 /**
  * Bus cục bộ trên CÙNG kết nối Socket.IO (không mở kết nối thứ hai): component nghe sự kiện thô
@@ -134,19 +158,29 @@ export function useHubRealtime() {
     refCount++;
     if (!socket) {
       // SPEC-auth §5.7: mỗi lần (re)connect xin VÉ socket mới (60 giây) qua proxy của web — server kiểm quyền vào
-      // project bằng CÙNG luật console (resolveProjectScope), rồi ký vé. Không vé -> handshake bị từ chối
-      // (connect_error "UNAUTHORIZED") -> badge Socket tắt; hết phiên thì hubFetch tự đưa về /login.
-      // R-5: màn Event Flow đang xem project khác -> xin vé cho project đó; trống -> project đầu tiên của mình (AU1).
-      socket = io(HUB_API_URL, {
+      // project bằng CÙNG luật console (resolveProjectScope), rồi ký vé. ADR-242: xin vé lỗi tạm thời (cold start 502,
+      // timeout, mạng) -> KHÔNG handshake vô vé (bị UNAUTHORIZED rồi Socket.IO không tự nối lại) mà tự thử lại có backoff;
+      // 401 -> hubFetch tự đưa về /login. Trạng thái ba mức + vòng nối lại ở `realtime-connector.ts` (test được).
+      // `autoConnect: false`: gắn listener trạng thái TRƯỚC lượt nối đầu.
+      let c: RealtimeConnector | null = null;
+      const created = io(HUB_API_URL, {
         transports: ["websocket"],
-        auth: (cb) => {
-          const projectId = realtimeProjectId();
-          const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-          hubFetch<{ ticket: string }>(`/auth/socket-ticket${q}`)
-            .then(({ ticket }) => cb({ ticket }))
-            .catch(() => cb({}));
-        },
+        autoConnect: false,
+        auth: (cb) => c?.auth(cb),
       });
+      c = createRealtimeConnector({
+        socket: created,
+        fetchTicket: fetchSocketTicket,
+        onStatus: (status) => useRealtimeStore.setState({ status }),
+        subscribeWake,
+      });
+      created.on("connect", c.handleConnect);
+      created.on("disconnect", c.handleDisconnect);
+      created.on("connect_error", c.handleConnectError);
+      useRealtimeStore.setState({ status: c.status });
+      socket = created;
+      connector = c;
+      created.connect();
     }
     const s = socket;
     const { invalidate, cancel } = createInvalidator(qc);
@@ -156,11 +190,9 @@ export function useHubRealtime() {
       // L-6: trace của project trước không được hiện trên dải "Vừa nhận" của project mới.
       useRealtimeStore.setState({ traces: [], toastCursor: emptyToastCursor() });
       void qc.resetQueries();
-      if (s.connected) s.disconnect().connect();
+      connector?.restart(); // vé mới cho project mới; lượt đang dở (vé project cũ) bị bỏ
     });
 
-    const onConnect = () => useRealtimeStore.setState({ connected: true });
-    const onDisconnect = () => useRealtimeStore.setState({ connected: false });
     // "flow" (SPEC-event-flow-ui): hành trình/danh sách/bản đồ gọi lại API — không tự ghép trạng thái.
     // R-5: phòng thủ phía client — payload của tenant khác project đang xem thì bỏ (không chấm chạy, không refetch).
     const foreign = (n: { tenantId?: string }) => {
@@ -199,21 +231,16 @@ export function useHubRealtime() {
     const onTick = (tick: MetricsTick) =>
       useRealtimeStore.setState((st) => ({ ticks: [...st.ticks, tick].slice(-MAX_TICKS) }));
 
-    s.on("connect", onConnect);
-    s.on("disconnect", onDisconnect);
     s.on("event.received", onEvent);
     s.on("delivery.attempt", onDelivery);
     s.on("circuit.changed", onCircuit);
     s.on("trace.ingested", onTrace);
     s.on("alert.changed", onAlert);
     s.on("metrics.tick", onTick);
-    useRealtimeStore.setState({ connected: s.connected });
 
     return () => {
       unsubscribeProject();
       cancel();
-      s.off("connect", onConnect);
-      s.off("disconnect", onDisconnect);
       s.off("event.received", onEvent);
       s.off("delivery.attempt", onDelivery);
       s.off("circuit.changed", onCircuit);
@@ -222,9 +249,13 @@ export function useHubRealtime() {
       s.off("metrics.tick", onTick);
       refCount--;
       if (refCount === 0) {
+        // ADR-242: gỡ timer backoff/ngưỡng đỏ + listener visibility/online TRƯỚC khi ngắt (không rò sau logout/unmount).
+        connector?.dispose();
+        connector = null;
         s.disconnect();
+        s.removeAllListeners();
         socket = null;
-        useRealtimeStore.setState({ connected: false, ticks: [], traces: [] });
+        useRealtimeStore.setState({ status: "connecting", ticks: [], traces: [] });
       }
     };
   }, [qc]);
