@@ -130,6 +130,6 @@ describe('[QT:T30] (phần f) câu cảnh báo/email nói thật khi STORAGE_LOC
     expect(mail.text).toContain(`https://hub.example/dashboard/storage?project=${T}`);
     expect(mail.text).toContain('#auto-clean');
     expect(mail.text).toContain('chủ (owner)');
-    expect(mail.text).not.toContain('/dashboard/settings');
+    expect(mail.text).not.toContain('/settings');
   });
 });

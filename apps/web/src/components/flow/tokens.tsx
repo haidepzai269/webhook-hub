@@ -5,13 +5,13 @@
  *  - Mọi icon dùng Lucide (`lucide-react`). Không dùng icon mặc định của React Flow, không emoji,
  *    không dùng ký tự ✓/✗ làm icon.
  *  - Kích thước + nét đồng nhất: `ICON` (16px, nét 1.75) cho mọi chỗ; `ICON_SM` (13px) chỉ trong pill.
- *  - Provider không có trong Lucide (PayOS, SePay, GitHub, Stripe) → SVG inline (provider-icon.tsx),
- *    cùng viewBox 24, cùng nét 1.75, không ảnh raster.
+ *  - Provider/đích có thương hiệu (PayOS, SePay, GitHub, Stripe, Discord, Telegram, …) → LOGO THẬT dạng SVG inline
+ *    (brand-logos.ts, đã làm sạch; provider-icon.tsx / destinationIcon). Không ảnh raster, không tải ảnh lúc chạy.
  *  - Màu trạng thái KHÔNG BAO GIỜ đứng một mình: luôn có icon + nhãn (người mù màu đọc được).
  */
 import "./flow.css";
 
-import type { CSSProperties } from "react";
+import type { ComponentType, CSSProperties } from "react";
 
 import type { FlowNodeKind, Health, StageKey, StageStatus } from "@hub/flow";
 import {
@@ -36,6 +36,9 @@ import {
 } from "lucide-react";
 
 import type { MessageKey } from "@/lib/i18n/dictionary";
+
+import { brandIconComponent } from "./brand-logo";
+import { brandLogo } from "./brand-logos";
 
 /**
  * Khoá i18n cho nhãn chặng / trạng thái chặng / sức khoẻ — thay STAGE_LABELS, STAGE_STATUS_LABELS, HEALTH_LABELS
@@ -115,10 +118,20 @@ export function stageIcon(key: StageKey, status: StageStatus): LucideIcon {
   }
 }
 
-export function destinationIcon(type: string): LucideIcon {
-  if (type === "discord") return MessageSquare;
-  if (type === "telegram") return Send;
-  return Store;
+/** Icon đích: cùng khuôn props với Lucide (`size`, `strokeWidth`) để nơi gọi không đổi. */
+export type DestinationIcon = ComponentType<{ size?: number | string; strokeWidth?: number | string }>;
+
+/** Component logo tạo MỘT lần ở cấp module (tạo trong render sẽ làm React remount mỗi lần vẽ). */
+const DEST_BRAND: Record<string, DestinationIcon> = Object.fromEntries(
+  ["discord", "telegram"].flatMap((id) => {
+    const logo = brandLogo(id);
+    return logo ? [[id, brandIconComponent(logo)]] : [];
+  }),
+);
+const DEST_LUCIDE: Record<string, LucideIcon> = { discord: MessageSquare, telegram: Send };
+
+export function destinationIcon(type: string): DestinationIcon {
+  return DEST_BRAND[type] ?? DEST_LUCIDE[type] ?? Store;
 }
 
 export const KIND_ICON: Partial<Record<FlowNodeKind, LucideIcon>> = {

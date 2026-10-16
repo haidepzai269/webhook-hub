@@ -60,6 +60,19 @@ describe('grep gác cổng §7.3', () => {
     expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/storage/x.ts:1']);
   });
 
+  it('ADR-235: escape hatch số đếm xuyên dự án (member|operator)ProjectStatsAcrossTenants gọi ngoài projects.controller → đỏ; controller / prisma.service thì xanh', () => {
+    const member = 'const rows = await this.prisma.member' + 'ProjectStatsAcrossTenants(p.id);';
+    const op = 'await prisma.operator' + 'ProjectStatsAcrossTenants ()';
+    const f = files({
+      'apps/hub-api/src/modules/api/x.ts': member,
+      'apps/hub-worker/src/y.ts': op,
+      'apps/hub-api/src/modules/console/projects.controller.ts': member + '\n' + op,
+      'libs/database/src/prisma.service.ts': 'public member' + 'ProjectStatsAcrossTenants(userId) {}',
+    });
+    const r = runGates([byId('project-stats-cross-tenant')], f.list, f.read);
+    expect(r[0].violations.map((v) => `${v.file}:${v.line}`)).toEqual(['apps/hub-api/src/modules/api/x.ts:1', 'apps/hub-worker/src/y.ts:1']);
+  });
+
   it('[QT:T4] LOCKED: delivery đã có vẫn được giao và retry — đường giao/retry của hub-worker không đọc nấc/khoá dung lượng (gate trên repo thật = 0; thêm kiểm khoá vào relay/consumer → đỏ)', () => {
     const gate = byId('delivery-ignores-storage-lock');
     // Ca đỏ tổng hợp: ai đó thêm "LOCKED thì đừng giao" vào consumer / relay / sweeper.

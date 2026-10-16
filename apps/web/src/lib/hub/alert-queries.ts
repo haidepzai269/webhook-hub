@@ -48,7 +48,7 @@ export function useOpenAlertFeed() {
   });
 }
 
-/** Một trang của /dashboard/alerts — `query` = bộ lọc + cursor (list-url.toApiQuery). */
+/** Một trang của /alerts (tầng tài khoản, ADR-237) — `query` = bộ lọc + cursor (list-url.toApiQuery). */
 export function useAlertsPage(query: string) {
   const operator = useCanSeeAlerts(); // QT6: operator hoặc owner (server lọc theo quyền)
   return useQuery({
