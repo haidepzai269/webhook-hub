@@ -237,6 +237,14 @@ export const GATES: Gate[] = [
     check: grepLines(/\boperatorProjectUsage\s*\(/),
   },
   {
+    id: 'project-stats-cross-tenant',
+    rule:
+      'Escape hatch số đếm xuyên dự án `(member|operator)ProjectStatsAcrossTenants(` (thẻ "Tất cả dự án"; member = JOIN project_members của chính user, operator = sau kiểm isOperator) chỉ được gọi ở apps/hub-api/src/modules/console/projects.controller.ts và khai ở prisma.service.ts',
+    source: 'Trang Tất cả dự án, ADR-235',
+    include: (f) => isSrc(f) && f !== 'libs/database/src/prisma.service.ts' && f !== 'apps/hub-api/src/modules/console/projects.controller.ts',
+    check: grepLines(/\b(member|operator)ProjectStatsAcrossTenants\s*\(/),
+  },
+  {
     id: 'delivery-ignores-storage-lock',
     rule:
       'Khoá dung lượng chỉ chặn CHIỀU GHI ở ingest (hub-api): đường giao/retry/DLQ của hub-worker (consumers/, senders/, circuit/, outbox.relay, delivery.sweeper) không được đọc nấc/khoá dung lượng — delivery đã có vẫn được giao và retry khi LOCKED',

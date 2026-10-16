@@ -116,11 +116,11 @@ export function consoleBase(webUrl: string | undefined): string {
 /** Deep link: trang Cảnh báo lọc đúng project + luật (bộ lọc trên URL, ADR-163) — trang đó mở tiếp tới đối tượng. */
 export function alertConsoleLink(webUrl: string, a: { rule: string }, projectId: string): string {
   const p = new URLSearchParams({ project: projectId, rule: a.rule });
-  return `${consoleBase(webUrl)}/dashboard/alerts?${p.toString()}`;
+  return `${consoleBase(webUrl)}/alerts?${p.toString()}`;
 }
 
 export function alertSettingsLink(webUrl: string): string {
-  return `${consoleBase(webUrl)}/dashboard/settings`;
+  return `${consoleBase(webUrl)}/settings`;
 }
 
 /** QT6: trang Dung lượng của ĐÚNG project (luật `project.storage_*`) — nơi dọn, bật dọn tự động, tắt email 70/85. */

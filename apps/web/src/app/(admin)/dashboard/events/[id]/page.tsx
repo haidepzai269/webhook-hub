@@ -217,7 +217,7 @@ export default function EventJourneyPage() {
           </div>
           {event?.subject && <div className="mt-1 truncate font-mono text-muted-foreground text-xs">{event.subject}</div>}
         </InfoCard>
-        <InfoCard icon={raw ? <ProviderIcon provider={raw.provider} size={13} /> : <Tag {...ICON_SM} />} label={t("page.events.detail.source")}>
+        <InfoCard icon={raw ? <ProviderIcon provider={raw.provider} name={raw.sourceName} size={13} /> : <Tag {...ICON_SM} />} label={t("page.events.detail.source")}>
           <div className="truncate font-medium text-sm">{raw ? `${raw.providerLabel} · ${raw.sourceName}` : (event?.source ?? "—")}</div>
           <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs" title={t("page.events.detail.no-ip")}>
             {t("page.events.detail.ip-line", { id: event?.correlationId?.slice(0, 8) ?? "—" })}

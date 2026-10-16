@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { hubFetch } from "./client";
+import type { ProjectStats } from "./project-health";
 
 /**
  * F7 (§6A) -> AU3: project đang xem dùng CHUNG toàn dashboard (`project-store.ts`). Giữ tên cũ cho màn Event Flow.
@@ -26,9 +27,24 @@ export interface ProjectSummary {
   member?: boolean;
   /** QT7 (§9): chỉ operator nhận — mức sử dụng ước tính + hạn mức ghi đè (null = mặc định env). */
   usage?: { estimated: true; usedBytes: number; quotaBytes: number; usedPct: number; level: string; quotaOverrideMb: number | null };
+  /** ADR-235: chỉ có khi gọi `?include=stats` (trang "Tất cả dự án"); null = server không có dòng số liệu. */
+  stats?: ProjectStats | null;
 }
 
 /** `GET /api/v1/projects` (console đa service) — trả MẢNG. */
 export function useProjects() {
   return useQuery({ queryKey: ["projects"], queryFn: () => hubFetch<ProjectSummary[]>("/api/v1/projects"), staleTime: 60_000 });
+}
+
+/**
+ * ADR-235: `GET /api/v1/projects?include=stats` — cùng danh sách, mỗi dự án kèm số đếm (một lượt đọc, không N lần gọi).
+ * Khoá riêng (`["projects", "stats"]`) để bộ chọn dự án vẫn dùng bản nhẹ; `invalidateQueries(["projects"])` làm mới cả hai.
+ */
+export function useProjectsWithStats(enabled = true) {
+  return useQuery({
+    queryKey: ["projects", "stats"],
+    queryFn: () => hubFetch<ProjectSummary[]>("/api/v1/projects?include=stats"),
+    staleTime: 60_000,
+    enabled,
+  });
 }

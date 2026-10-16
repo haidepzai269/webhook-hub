@@ -336,7 +336,7 @@ function EventLogPanel() {
                   <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt, locale)}</span>
                   <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
                     <span className="shrink-0 text-muted-foreground">
-                      <ProviderIcon provider={i.provider} size={14} />
+                      <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
                     </span>
                     <span className="truncate">{i.providerLabel}</span>
                   </span>

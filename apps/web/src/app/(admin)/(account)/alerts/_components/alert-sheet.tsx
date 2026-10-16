@@ -23,7 +23,7 @@ import { useLocale, useT } from "@/lib/i18n/use-t";
 export function AlertSheet({ alert, subjectName, onClose }: { alert: AlertView | null; subjectName: string | null; onClose: () => void }) {
   return (
     <Sheet open={Boolean(alert)} onOpenChange={(o) => !o && onClose()}>
-      <AdminSheetContent size="md">{alert && <Body alert={alert} subjectName={subjectName} onClose={onClose} />}</AdminSheetContent>
+      <AdminSheetContent size="md" className="[&_button:not(:disabled)]:cursor-pointer">{alert && <Body alert={alert} subjectName={subjectName} onClose={onClose} />}</AdminSheetContent>
     </Sheet>
   );
 }

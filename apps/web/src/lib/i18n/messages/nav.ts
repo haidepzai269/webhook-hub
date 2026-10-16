@@ -1,6 +1,6 @@
 import { defineMessages } from "../locales";
 
-/** Sidebar. Khoá `nav.group.<NavGroup.id>` / `nav.item.<NavItem.id>` — id lấy từ components/admin/sidebar-items.ts. */
+/** Sidebar + menu tài khoản (`nav.account.*`, ADR-237). Khoá `nav.group.<NavGroup.id>` / `nav.item.<NavItem.id>` — id lấy từ components/admin/sidebar-items.ts. */
 export const nav = defineMessages("nav", {
   vi: {
     "nav.group.flow": "Luồng dữ liệu",
@@ -25,6 +25,7 @@ export const nav = defineMessages("nav", {
     "nav.item.audit": "Nhật ký thao tác",
     "nav.footer.open-shop": "Mở Shop",
     "nav.footer.logout": "Đăng xuất",
+    "nav.account.cross-project": "Xuyên dự án",
   },
   en: {
     "nav.group.flow": "Data flow",
@@ -49,5 +50,6 @@ export const nav = defineMessages("nav", {
     "nav.item.audit": "Audit log",
     "nav.footer.open-shop": "Open Shop",
     "nav.footer.logout": "Sign out",
+    "nav.account.cross-project": "Across projects",
   },
 });

@@ -84,5 +84,5 @@ export function alertActions(a: { rule: string; subjectId: string; facts?: Recor
 
 /** Link chính (chuông, toast "Xem"): hành động đầu, không có thì trang Cảnh báo lọc đúng project. */
 export function primaryHref(a: { rule: string; subjectId: string; facts?: Record<string, unknown> | null; project: { id: string } }): string {
-  return alertActions(a)[0]?.href ?? q("/dashboard/alerts", { project: a.project.id });
+  return alertActions(a)[0]?.href ?? q("/alerts", { project: a.project.id });
 }

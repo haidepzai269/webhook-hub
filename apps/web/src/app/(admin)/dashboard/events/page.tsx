@@ -242,7 +242,7 @@ function ExecutionsView() {
               </span>
               <span className="inline-flex min-w-0 items-center gap-1.5">
                 <span className="text-muted-foreground">
-                  <ProviderIcon provider={i.provider} size={14} />
+                  <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
                 </span>
                 <span className="truncate">{i.providerLabel}</span>
               </span>

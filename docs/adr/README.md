@@ -2401,3 +2401,71 @@ không thấy gì.
 **Vấn đề:** Trần chỉ đếm dòng (2.000/key × 1 MB = 2 GB) vượt dung lượng D1 free và đốt hết quota ghi trước khi chạm trần — kẻ biết `sourceKey` xả rác lúc Render ngủ là đủ làm chết lưới cho mọi source; một lượt cron 25 dòng vượt trần truy vấn D1 rồi lặp lại mãi.
 **Chọn:** Số liệu tra 2026-10-15 trên developers.cloudflare.com (`/d1/platform/limits/`, `/d1/platform/pricing/`, `/workers/platform/limits/`): D1 free 500 MB/DB, dòng/BLOB ≤ 2 MB, 5M rows read + 100k rows written/ngày (index tính thêm, reset 00:00 UTC), 50 truy vấn D1/invocation; Workers free 50 subrequest/invocation, CPU 10 ms (cả Cron), 128 MB/isolate. Trần (bộ đếm bằng trigger, byte = body + header + target theo UTF-8; dòng chết vẫn tính vào trần toàn bảng và trần của key tới khi bị dọn): `MAX_BYTES` 300 MB, `MAX_KEY_BYTES` 50 MB, `MAX_ROWS` 15.000, `MAX_PER_DAY` 5.000 lần hứng; header > 16 KB hoặc target > 4 KB không hứng (Workers nhận tới 128 KB header + 16 KB URL); cron ≤ 10 dòng và ≤ 2 MB body/lượt (4 + 4×10 = 44 < 50 truy vấn).
 **Đánh đổi:** Ngày bị xả rác thì sự kiện thật thứ 5.001 nhận 503 (provider tự retry, đúng BB-3); trần theo key không bảo vệ trần chung khỏi nhiều key bị lộ; key có nhiều dòng bị hub từ chối bị khoá tới 7 ngày; 11 rows written/sự kiện chỉ là đường suôn sẻ — cron còn tốn lease ≈ 2, `markRetry` ≈ 2, `moveDead` ≈ 6–7 mỗi dòng: hub vắng cả ngày ≈ 43k + 25k lần hứng vẫn dưới 100k, nhưng ngày hub trở lại với 15.000 dòng tồn (≈ 86k) cộng lần hứng mới có thể vượt quota → `INSERT` 503 (BB-3 giữ), `deleteRow` lỗi thì dòng gửi lại sau lease và hub nuốt bản trùng — chậm, không mất; CPU 10 ms của một lượt chưa đo trên workerd thật (LH2-VIEC-MAY-CONG-TY).
+
+## ADR-234 — Phân cấp console Hub ⊃ Tài khoản ⊃ Dự án: đăng nhập vào thẳng dự án gần nhất (phương án a), trang "Tất cả dự án" ở `/projects` (2026-10-16)
+
+**Vấn đề:** Mục "Dự án" (`/dashboard/projects`, có nút "Tạo dự án") nằm TRONG sidebar của một dự án, nên người dùng đọc thành "dự án tạo ra dự án". Không có nơi nào ở tầng tài khoản để xem mọi dự án của mình cùng lúc.
+**Chọn:** (Admin chốt phương án a)
+- Đăng nhập vẫn vào thẳng dự án gần nhất (`ensureProject` trong `project-store.ts` giữ nguyên).
+- Đổi dự án bằng bộ chọn dự án ở sidebar header / thanh trên. Bộ chọn có thêm hai dòng: "+ Tạo dự án mới" (mở `CreateProjectDialog` dùng chung) và "Tất cả dự án" (sang `/projects`).
+- `/projects` là trang thật ở tầng tài khoản, nằm ngoài layout dashboard nên không có sidebar dự án. Trang là lưới thẻ; bấm thẻ thì `setProjectId` rồi vào `/dashboard`. `?demo=1` vẫn dùng được với dữ liệu giả, không cần hub-api.
+- Bỏ mục `projects` khỏi sidebar dự án. Trang `/dashboard/projects` giữ nguyên chức năng (operator: cột mức sử dụng + ghi đè hạn mức; owner: "Nhận nguồn chưa xác thực") và vào được từ nút "Quản lý & hạn mức" trên `/projects`.
+
+**Đánh đổi:** Trang quản lý dạng bảng vẫn nằm dưới `/dashboard` (còn sidebar dự án), không chuyển hẳn sang tầng tài khoản. Lý do là để không phải viết lại các chức năng của operator/owner trong lần này. Người dùng phải mở thêm một lần bấm mới tới được trang đó.
+
+## ADR-235 — `GET /api/v1/projects?include=stats`: số đếm xuyên dự án theo membership, một lượt đọc, 0 lệnh Redis; định nghĩa "sức khoẻ" của thẻ dự án (2026-10-16)
+
+**Vấn đề:** Mỗi thẻ ở "Tất cả dự án" cần các con số: số source, số đích, số sự kiện nhận trong 24h, số lần gửi lỗi trong 24h, số tin trong DLQ, số thành viên, ngày tạo, cùng viền xanh/đỏ theo sức khoẻ. Nếu trình duyệt gọi N lần (mỗi dự án một lượt, mỗi lượt qua `ProjectScopeGuard`) thì vừa chậm vừa tốn kết nối. Còn đọc xuyên tenant mà không có lối có tên thì phạm BB-5.
+
+**Chọn:**
+- **API.** `GET /api/v1/projects?include=stats` trả lại đúng danh sách cũ (người thường thấy dự án mình là thành viên; operator thấy mọi dự án, như trước). Mỗi phần tử có thêm `stats: {createdAt, sources, endpoints, members, events24h, failedAttempts24h, dlq, circuitOpen, storageLevel, openAlerts:{critical,warning,info}}`, hoặc `null` khi thiếu dòng số liệu. `include` lạ thì trả 422 `validation_failed`.
+- **Escape hatch.** Có hai lối có tên trong `prisma.service.ts`, cùng khuôn `ownerAlertsAcrossTenants` (`systemTx`, lọc cứng trong SQL):
+  - `memberProjectStatsAcrossTenants(userId)` JOIN `project_members` của chính user;
+  - `operatorProjectStatsAcrossTenants()` lấy mọi project.
+  Gate `project-stats-cross-tenant` chỉ cho gọi hai hàm này từ `projects.controller.ts`.
+- **Truy vấn.** Một câu SQL, mỗi chỉ số là một CTE `GROUP BY tenant_id`, chạy trên index đã có:
+  - events `(tenant_id, received_at DESC)`;
+  - deliveries DEAD (index một phần `(tenant_id, updated_at)`);
+  - `delivery_attempts(created_at)` rồi JOIN deliveries theo PK (cùng khuôn với AlertEvaluator);
+  - alerts `(tenant_id, state, opened_at)`;
+  - PK của `project_members`.
+  Vì vậy không cần migration index. `sources` không có index theo tenant, nhưng mỗi dự án có trần 20 source nên bảng nhỏ.
+- **Định nghĩa từng số.**
+  - Source và đích: chỉ đếm cái chưa lưu trữ.
+  - "Gửi lỗi": attempt không trả 2xx, kể cả mất kết nối, đúng với `classifyHttpOutcome !== 'success'`.
+  - DLQ: cùng điều kiện với `countDeadDeliveries` (DEAD và chưa bị replay).
+  - `circuitOpen`: đích đang dùng có cột `circuit_state` ≠ CLOSED. Số này đọc từ DB, 0 lệnh Redis.
+- **Sức khoẻ.** Hàm thuần `projectHealth` ở `apps/web/src/lib/hub/project-health.ts` xếp mỗi thẻ vào một trong ba màu:
+  - **Đỏ** khi có ít nhất một điều sau: có đích circuit ≠ CLOSED; DLQ > 0; nấc dung lượng `LOCKED`/`HARD_LOCKED`; có cảnh báo OPEN mức critical hoặc warning.
+  - **Xám** (trung tính) khi không đỏ mà dự án chưa có source lẫn đích nào, hoặc khi `stats` là null.
+  - **Xanh** trong mọi trường hợp còn lại.
+  Nhãn trên thẻ nói lý do đỏ, ví dụ "2 tin trong DLQ".
+
+**Đánh đổi:**
+- Phần đếm "gửi lỗi 24h" quét mọi attempt của cả hub trong 24h rồi mới lọc theo tenant (attempt không mang `tenant_id`). Chi phí tăng theo lưu lượng toàn hub, không theo số dự án của user. Nếu bảng lớn thì cần thêm `tenant_id` vào `delivery_attempts` hoặc một bảng đếm theo giờ.
+- Cảnh báo mức info (ví dụ dung lượng 70%) và số lần gửi lỗi 24h không làm thẻ đỏ. Số lỗi 24h chỉ để tham khảo: lỗi đã được retry thành công thì không phải sự cố đang mở.
+- Viền dựa trên trạng thái tại lúc đọc (staleTime 60s), không cập nhật realtime.
+
+## ADR-236 — Console hiển thị logo thương hiệu thật (Simple Icons CC0 + logo chính thức), nhúng SVG đã làm sạch; nguồn không có logo -> chữ tắt theo tên (2026-10-16)
+
+**Vấn đề:** `ProviderIcon` vẽ glyph tự chế cho payos/sepay/github/stripe, còn mọi nguồn khác (GenericAdapter, provider lạ) cùng một icon chung — dev không nhận ra nguồn bằng mắt; đích Discord/Telegram cũng chỉ là icon Lucide.
+
+**Chọn:**
+- Logo thật nhúng tĩnh trong `apps/web/src/components/flow/brand-logos.ts` (SVG inline: `d`/`fill`/`fillRule`/`transform`, không ảnh, không dependency npm). Nguồn: Simple Icons `simple-icons@16.35.0` (CC0) cho github, stripe, discord, telegram và các mục catalog có sẵn; logo chính thức (cắt phần biểu tượng) cho PayOS, SePay, VNPAY, Checkout.com, Slack, Svix, Postmark, Twilio. Bảng nguồn + giấy phép ở đầu file.
+- SVG tải về coi là không tin cậy: dựng trong trình duyệt headless sau khi bỏ script/foreignObject/image/use/a/on*/href, chỉ trích `d` (regex lệnh path), fill (#hex), fill-rule, ma trận transform; `brand-logos.spec.ts` khoá khuôn này.
+- Logo đơn sắc tô màu thương hiệu, tự chuyển sang `--foreground` khi tương phản với nền theme < 2:1 (GitHub/Vercel đen -> trắng ở dark).
+- Nguồn không có logo + có tên source -> ô chữ tắt (1–2 ký tự) màu ổn định theo hash của tên (cùng công thức với ô dự án ở `/projects`); không có tên -> icon Lucide chung như cũ.
+- **Không bao giờ tải favicon/logo từ domain provider lúc chạy, không lưu URL ảnh do user nhập:** (1) riêng tư — trình duyệt của admin sẽ báo cho domain bên thứ ba biết họ dùng nguồn đó, (2) phụ thuộc ngoài — console vỡ/chậm khi domain đó chết hoặc chặn hotlink, (3) ảnh do user/bên thứ ba kiểm soát — có thể đổi thành nội dung lừa đảo/giả mạo thương hiệu khác hoặc dùng làm pixel theo dõi.
+
+**Đánh đổi:**
+- Thêm ~36 KB path vào bundle client của các trang flow/events; thêm provider mới phải tải + sinh lại logo bằng tay (không tự có).
+- Một số thương hiệu chưa có logo dùng được (heroku, momo, pipedrive, zalopay; typeform/woocommerce chỉ có logo chữ) -> rơi về chữ tắt/icon chung.
+- Logo là nhãn hiệu của chủ sở hữu (kể cả bản CC0 của Simple Icons): dùng để nhận diện, không ngụ ý liên kết.
+
+## ADR-237 — Cảnh báo + Cài đặt lên tầng tài khoản (`/alerts`, `/settings`), lối vào ở menu tài khoản; đường cũ `/dashboard/*` chuyển hướng (2026-10-16)
+
+**Vấn đề:** Sidebar thuộc MỘT dự án (ADR-234) nhưng còn hai mục không thuộc dự án: "Cảnh báo" (API `/api/v1/alerts*` xuyên dự án — operator thấy mọi cảnh báo, owner thấy cảnh báo dung lượng các dự án mình là owner, ADR-190) và "Cài đặt" (email cảnh báo của người vận hành, CB5). Đặt trong sidebar dự án làm người dùng tưởng nội dung đổi theo dự án đang chọn.
+
+**Chọn:** Hai trang chuyển sang nhóm route `(admin)/(account)` — layout tầng tài khoản như `/projects` (thanh trên dùng chung `components/admin/account-menu.tsx`: chuông, ngôn ngữ, giao diện, avatar; không sidebar). Lối vào: menu avatar ở thanh trên của CẢ dashboard dự án lẫn trang tầng tài khoản, nhóm "Xuyên dự án" — điều kiện hiện giữ nguyên như sidebar cũ, gom vào hàm thuần `accountMenuItems` (`lib/hub/account-routes.ts`): Cảnh báo = operator hoặc owner ít nhất một dự án; Cài đặt = chỉ operator. Chuông "Xem tất cả" / "+N" trỏ `/alerts`. `/dashboard/alerts`, `/dashboard/settings` thành trang `redirect()` giữ nguyên query (link trong email đã gửi); link email (`libs/common/src/alerts/email.ts`) đổi sang đường mới. Không đổi hub-api.
+
+**Đánh đổi:** Mất một cú bấm thẳng từ sidebar (giờ là avatar -> Cảnh báo, hoặc chuông -> Xem tất cả); trang tầng tài khoản không có banner/toast cảnh báo của dashboard (chỉ chuông). Redirect chạy ở server component (một vòng 307) thay vì `next.config` redirects — để test được bằng jest; đường cũ phải giữ hai file page nhỏ đến khi bỏ hẳn.

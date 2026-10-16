@@ -381,7 +381,7 @@ CB, ADR-165..173 — thay cho "tự cảnh báo" ⭐ cũ và cờ chết `alert_
   transaction, kiểm lại điều kiện lúc gửi, trần 6/giờ/người (vượt → `SUPPRESSED`, thư kế tiếp có "…và k cảnh báo khác"), 3 lần lỗi →
   `FAILED`; gửi lỗi không bao giờ chặn evaluator. Thư vi/en theo `users.locale`, câu luật dùng chung với console
   (`libs/common/src/alerts/text.ts`), không payload/header/secret/URL đích. Tuỳ chọn `alert_preferences` gắn người (ADR-166/167),
-  sửa ở `/dashboard/settings`; "Gửi email thử" 3/giờ đếm ở Postgres (`auth_audit`).
+  sửa ở `/settings` (tầng tài khoản, ADR-237); "Gửi email thử" 3/giờ đếm ở Postgres (`auth_audit`).
 - **Realtime:** chỉ khi trạng thái ĐỔI mới `PUBLISH hub:realtime:alerts` → `alert.changed` vào room `project:<id>:ops` (chỉ operator).
   Chuông xuyên project = `GET /api/v1/alerts/summary` poll 30s qua escape hatch có tên (ADR-169/170). Không nằm trên đường nóng:
   ngân sách Redis R1 không đổi.
@@ -978,7 +978,7 @@ FIFO đòi **single-flight theo partition key**: trong mỗi key chỉ được 
 | **Project** = biên cô lập | `hub.projects`; cột `tenant_id` ở mọi bảng GIỮ TÊN, nghĩa là `project_id` | Không project nào đọc/ghi được dữ liệu project khác, kể cả biết UUID (repo + khoá ngoại ghép subscription→đích) |
 | **Service** = một API key | `hub.api_keys` (sha256, `key_prefix` 12 ký tự), scope `publish:events` · `read:events` · `manage:endpoints` · `manage:sources`, `readTypes` | Key thô trả **một lần** lúc tạo; revoke chỉ ngắt đúng service đó |
 | **Connection string** | `hubs://<key>@<host>/<project>` (`hub://` cho http local) | `HUB_PUBLIC_URL`; SDK parse |
-| Console (người dùng) | `/api/v1/projects`, `/api/v1/projects/:id/keys`; `?projectId=` đọc ở **một** guard `ProjectScopeGuard` (luật `resolveProjectScope`: tồn tại + là thành viên, hoặc operator — HTTP và vé socket dùng chung) | Cookie phiên (`SessionGuard`, §7.4) |
+| Console (người dùng) | `/api/v1/projects`, `/api/v1/projects/:id/keys`; `?projectId=` đọc ở **một** guard `ProjectScopeGuard` (luật `resolveProjectScope`: tồn tại + là thành viên, hoặc operator — HTTP và vé socket dùng chung). `GET /api/v1/projects?include=stats` (trang "Tất cả dự án", ADR-235): mỗi project kèm `stats` chỉ gồm số đếm, một lượt đọc qua escape hatch `memberProjectStatsAcrossTenants` / `operatorProjectStatsAcrossTenants` (gate `project-stats-cross-tenant`), 0 lệnh Redis | Cookie phiên (`SessionGuard`, §7.4) |
 | API cho service | `/v1/p/:project/{me, events (POST/GET), endpoints, endpoints/:id/verify, subscriptions, sources, sources/:id/inspect}` | `ApiKeyGuard` + `@RequireScope`; lỗi đầu vào 422 có tên trường |
 
 ```

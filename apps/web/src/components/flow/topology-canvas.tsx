@@ -111,7 +111,7 @@ function fmtCount(n: number) {
 }
 
 function NodeIcon({ node }: { node: FlowNode }) {
-  if (node.kind === "source") return <ProviderIcon provider={(node as SourceFlowNode).provider} size={18} />;
+  if (node.kind === "source") return <ProviderIcon provider={(node as SourceFlowNode).provider} name={node.label} size={18} />;
   if (node.kind === "destination") {
     const I = destinationIcon((node as DestinationFlowNode).type);
     return <I size={18} strokeWidth={ICON.strokeWidth} />;
