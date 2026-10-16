@@ -1,10 +1,11 @@
 # TEST-MAP — mã spec → test (tự sinh, đừng sửa tay)
 
 > Sinh bởi `npm run verify:map` (VF2, SPEC-verification §3.2). Trạng thái (ghép tay sau rebase vì cột trạng thái sinh trên Windows không có L1/L2, báo sai `BB:4` ❌ do CRLF): mã đã có trên `feat/edge` giữ trạng thái của bản đó (lần `verify` 2026-10-12T09:44:55.433Z, commit 9dbad75); mã EG1 mới + `EG:T19` theo lần chạy Windows của 9d7b9f0 (L1/L2 chưa chạy). Sinh lại trên Linux/CI trước khi merge.
+> LH (2026-10-15, REVIEW-LH2 L10): bảng giữ trạng thái của master `d417118`; chỉ CHÈN dòng `LH:*`. Dòng chỉ có test `apps/catchnet` chạy bằng vitest (job CI `catchnet`); cột trạng thái của chúng không do jest gốc ghi. Sinh lại trên Linux/CI trước khi merge.
 > Chỉ liệt kê mã đã có test, hoặc mã của story đã xong (bắt buộc có test). Mã của story chưa làm được phép mồ côi.
 > `L2` = kịch bản e2e qua HTTP vào hubv (`npm run verify:e2e`, VF4). `L2*` = kịch bản tự kiểm của bộ kiểm chứng (`stack-isolation`), chạy bằng tay qua `npm run verify:selftest`.
 
-Tổng: 376 mã khai báo · 311 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
+Tổng: 462 mã khai báo · 381 mã có test · 0 mồ côi · 24 mồ côi có lý do · 0 ma · 0 trùng.
 
 | mã | spec · story | tầng | file:dòng | trạng thái lần chạy cuối |
 |---|---|---|---|---|
@@ -229,6 +230,22 @@ Tổng: 376 mã khai báo · 311 mã có test · 0 mồ côi · 24 mồ côi có
 | `KN:U27` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:227 | ✅ pass |
 | `KN:U28` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:243 | ✅ pass |
 | `KN:U29` | SPEC-ket-noi.md · KN2 | L1 | apps/hub-api/test/payos-connect-db.spec.ts:278 | ✅ pass |
+| `LH:T4` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/sign.spec.ts:31<br>apps/catchnet/test/sign.spec.ts:65<br>apps/catchnet/test/worker.spec.ts:117 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T5` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/worker.spec.ts:140<br>apps/catchnet/test/worker.spec.ts:162<br>apps/catchnet/test/worker.spec.ts:174<br>apps/catchnet/test/worker.spec.ts:273 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T6` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/worker.spec.ts:191 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T7` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/worker.spec.ts:204<br>apps/catchnet/test/worker.spec.ts:214<br>apps/catchnet/test/worker.spec.ts:585 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T8` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/classify.spec.ts:29<br>apps/catchnet/test/classify.spec.ts:64<br>apps/catchnet/test/worker.spec.ts:429<br>apps/catchnet/test/worker.spec.ts:464<br>apps/catchnet/test/worker.spec.ts:479<br>apps/catchnet/test/worker.spec.ts:502<br>apps/catchnet/test/worker.spec.ts:516<br>apps/catchnet/test/worker.spec.ts:525<br>apps/catchnet/test/worker.spec.ts:570 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T9` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/sign.spec.ts:46<br>apps/catchnet/test/worker.spec.ts:236<br>apps/catchnet/test/worker.spec.ts:553 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T10` | SPEC-hub-sap.md · LH2 | L0 | apps/catchnet/test/worker.spec.ts:251<br>apps/catchnet/test/worker.spec.ts:266<br>apps/catchnet/test/worker.spec.ts:296<br>apps/catchnet/test/worker.spec.ts:321<br>apps/catchnet/test/worker.spec.ts:339<br>apps/catchnet/test/worker.spec.ts:355<br>apps/catchnet/test/worker.spec.ts:374<br>apps/catchnet/test/worker.spec.ts:389<br>apps/catchnet/test/worker.spec.ts:408 | vitest `apps/catchnet` (job CI `catchnet`, ngoài jest gốc) |
+| `LH:T11` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/redis-budget.spec.ts:513 | chưa chạy |
+| `LH:T12` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/ingest-catchnet.spec.ts:192 | chưa chạy |
+| `LH:T13` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/ingest-catchnet.spec.ts:358 | chưa chạy |
+| `LH:T17` | SPEC-hub-sap.md · LH-URL | L0 | apps/hub-api/test/ingest-public-url.spec.ts:72<br>apps/hub-api/test/ingest-public-url.spec.ts:90<br>apps/hub-api/test/ingest-public-url.spec.ts:113 | chưa chạy |
+| `LH:T18` | SPEC-hub-sap.md · LH3 | L0 | apps/catchnet/test/classify.spec.ts:17<br>apps/catchnet/test/worker.spec.ts:225<br>apps/hub-api/test/ingest-catchnet.spec.ts:418 | chưa chạy |
+| `LH:T19` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/ingest-catchnet.spec.ts:429 | chưa chạy |
+| `LH:T20` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/ingest-catchnet.spec.ts:456 | chưa chạy |
+| `LH:T21` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/ingest-catchnet.spec.ts:502 | chưa chạy |
+| `LH:T22` | SPEC-hub-sap.md · LH3 | L0 | apps/hub-api/test/edge-nginx.spec.ts:147<br>apps/hub-api/test/edge-nginx.spec.ts:171 | chưa chạy |
 | `MS:T2` | SPEC-hub-multi-service.md · S3 | L0 | apps/hub-api/test/service-resources.spec.ts:184 | ✅ pass |
 | `MS:T4` | SPEC-hub-multi-service.md · S6 | L0 | apps/hub-api/test/endpoint-verifier.spec.ts:44<br>apps/hub-api/test/endpoint-verifier.spec.ts:53<br>apps/hub-api/test/service-resources.spec.ts:157<br>apps/hub-api/test/service-resources.spec.ts:174<br>libs/crypto/test/ssrf-metadata.spec.ts:11 | ✅ pass |
 | `MS:T5` | SPEC-hub-multi-service.md · S5 | L0 | apps/hub-api/test/service-resources.spec.ts:124<br>apps/hub-api/test/service-resources.spec.ts:131<br>apps/hub-api/test/service-resources.spec.ts:149 | ✅ pass |
@@ -343,6 +360,9 @@ Tổng: 376 mã khai báo · 311 mã có test · 0 mồ côi · 24 mồ côi có
 | `VF:VT13` | SPEC-verification.md · VF1 | L0 | libs/common/test/test-only-config.spec.ts:8 | ✅ pass |
 | `VF:VT14` | SPEC-verification.md · VF8 | — | — | mồ côi có lý do: demo:reset --env deployed CHƯA có (cần API operator xoá dữ liệu production — CAN-ADMIN-QUYET-VF Q4); lệnh hiện từ chối, không xoá gì |
 | `VF:VT15` | SPEC-verification.md · VF7 | — | — | mồ côi có lý do: Cần push + GitHub Actions thật + branch protection trên main; phiên này không push (chạy tay từng bước job ở local) |
+| `BP:T15` | SPEC-ap-luc-nguoc.md · BP4 | L1 | apps/hub-worker/test/circuit-breaker.spec.ts:393<br>apps/hub-worker/test/circuit-breaker.spec.ts:428<br>apps/hub-worker/test/circuit-breaker.spec.ts:481<br>apps/hub-worker/test/circuit-breaker.spec.ts:777<br>apps/hub-worker/test/delivery-gate.spec.ts:186 | chưa chạy (F3 ADR-241: L0 xanh máy nhà; L1 chờ CI db) |
+| `BP:T16` | SPEC-ap-luc-nguoc.md · BP4 | L1,L2 | apps/hub-worker/test/circuit-breaker.spec.ts:808<br>apps/hub-worker/test/circuit-breaker.spec.ts:916<br>apps/hub-worker/test/circuit-breaker.spec.ts:941<br>verify/scenarios/chaos-bp.ts:343 | L1 xanh CI run 38753284031 (F3 ADR-241); chaos phần b chưa chạy (máy công ty) |
+| `BP:T22` | SPEC-ap-luc-nguoc.md | L0 | apps/hub-api/test/redis-budget.spec.ts:352<br>apps/hub-api/test/redis-budget.spec.ts:367<br>apps/hub-api/test/redis-budget.spec.ts:378<br>apps/hub-api/test/redis-budget.spec.ts:389<br>apps/hub-api/test/redis-budget.spec.ts:400<br>apps/hub-api/test/redis-budget.spec.ts:436 | chưa chạy (F3 ADR-241: L0 xanh máy nhà; L1 chờ CI db) |
 
 ## File test (223 file, 1424 khai báo it/test)
 

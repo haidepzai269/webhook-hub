@@ -1,0 +1,18 @@
+{
+  "name": "catchnet",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LH2: lưới hứng Cloudflare Worker hub-hooks + D1 (ghi xuyên + phát lại). NGOÀI npm workspaces của hub (H10): lock riêng, job CI riêng.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "wrangler dev --local",
+    "db:local": "wrangler d1 migrations apply hub-hooks-db --local"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.0",
+    "typescript": "5.7.3",
+    "vitest": "3.2.4",
+    "wrangler": "4.145.0"
+  }
+}

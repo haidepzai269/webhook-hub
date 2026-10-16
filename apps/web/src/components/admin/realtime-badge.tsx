@@ -9,7 +9,7 @@ import { useT } from "@/lib/i18n/use-t";
 
 const DOT: Record<RealtimeStatus, string> = {
   connected: "bg-emerald-500",
-  // ADR-242: đang nối/nối lại (server có thể đang khởi động) — vàng nhạt, nhấp nháy nhẹ (tắt khi prefers-reduced-motion).
+  // ADR-243: đang nối/nối lại (server có thể đang khởi động) — vàng nhạt, nhấp nháy nhẹ (tắt khi prefers-reduced-motion).
   connecting: "bg-amber-300 motion-safe:animate-pulse",
   disconnected: "bg-rose-500",
 };

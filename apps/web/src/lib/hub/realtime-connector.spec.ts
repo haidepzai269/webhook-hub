@@ -10,7 +10,7 @@ import {
 } from "./realtime-connector";
 
 /**
- * ADR-242 — badge realtime đỏ suốt lúc Render cold start (~80s), và tệ hơn: xin vé `/auth/socket-ticket` lỗi (502/timeout)
+ * ADR-243 — badge realtime đỏ suốt lúc Render cold start (~80s), và tệ hơn: xin vé `/auth/socket-ticket` lỗi (502/timeout)
  * thì `cb({})` -> server UNAUTHORIZED -> Socket.IO client huỷ socket sau CONNECT_ERROR, không tự nối lại -> đỏ mãi tới reload.
  * Socket giả mô phỏng đúng hành vi socket.io-client 4.8: `connect()` -> (engine mở) -> gọi `auth(cb)`; `cb` -> server quyết.
  */

@@ -1,7 +1,7 @@
 import { HubApiError } from "./client";
 
 /**
- * ADR-242 — trạng thái + vòng nối lại của socket realtime, tách khỏi React/Socket.IO để test được (như auth-boot.ts).
+ * ADR-243 — trạng thái + vòng nối lại của socket realtime, tách khỏi React/Socket.IO để test được (như auth-boot.ts).
  *
  *   connecting ──(connect)──▶ connected ──(rớt)──▶ connecting ──(đứt LIÊN TỤC ≥ REALTIME_RED_AFTER_MS)──▶ disconnected
  *        └──────────(vé bị từ chối thật: 401/403/4xx)─────────────────────────────────────────────▶ disconnected
@@ -17,11 +17,11 @@ import { HubApiError } from "./client";
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 /**
- * ADR-242: chỉ báo đỏ khi đã đứt LIÊN TỤC quá ngưỡng này. = HUB_FETCH_TIMEOUT_MS (90s, ADR-238): phủ một lần cold start
+ * ADR-243: chỉ báo đỏ khi đã đứt LIÊN TỤC quá ngưỡng này. = HUB_FETCH_TIMEOUT_MS (90s, ADR-238): phủ một lần cold start
  * Render free (~60–84s đo được, ADR-240) hoặc redeploy — trong khoảng đó server "đang khởi động", không phải "mất".
  */
 export const REALTIME_RED_AFTER_MS = 90_000;
-/** Backoff xin lại vé: 1s, 2s, 4s, 8s, trần 10s (đo probe ADR-242: trần 30s làm chậm ~10–15s sau khi server đã lên; 1 request/10s/tab là rẻ); jitter "equal" (một nửa cố định + một nửa ngẫu nhiên) để nhiều tab không dồn cục. */
+/** Backoff xin lại vé: 1s, 2s, 4s, 8s, trần 10s (đo probe ADR-243: trần 30s làm chậm ~10–15s sau khi server đã lên; 1 request/10s/tab là rẻ); jitter "equal" (một nửa cố định + một nửa ngẫu nhiên) để nhiều tab không dồn cục. */
 export const TICKET_RETRY_BASE_MS = 1_000;
 export const TICKET_RETRY_MAX_MS = 10_000;
 

@@ -225,6 +225,22 @@ khoá CHUNG cả lưới (50 kết nối chậm của kẻ xấu = mọi provide
 **không bao giờ** đọc `x-catchnet-client-ip` (test khoá: template không có `$http_x_catchnet`). Giới hạn theo IP ĐÃ KÝ chỉ có ở
 cổng phạt của hub-api (D3). `/v1/p/*` giữ cầu chì (không đi qua lưới). `EDGE_IP_FUSE=1` + lưới bật → cảnh báo level 50 lúc
 khởi động. Đánh đổi: `/hooks/*` mất lớp chống slowloris theo IP ở nginx (còn `client_body_timeout 10s` + cổng phạt hub-api).
+**Chỉ nới cho IP Cloudflare (LH2, REVIEW-LH3-R2 R2-L1, ADR-223):** khối `geo $edge_cf_ip` trong `nginx.conf.template` chứa dải
+IP Cloudflare công bố (`https://www.cloudflare.com/ips-v4`, `/ips-v6`). Khoá rỗng chỉ áp cho IP thuộc dải đó; IP khác gọi
+**thẳng** `/hooks/*` (source cũ ở URL Render, U-C; kẻ giữ kết nối chậm) vẫn bị `limit_conn` (và cầu chì nếu bật) theo IP như
+EG1. Trước khi bật lưới: đối chiếu dải với trang Cloudflare và đo IP egress của Worker trong log edge (`ip` của request có
+`x-catchnet-id`) — IP egress nằm ngoài dải = request lưới bị đếm chung như trước (an toàn, chỉ dễ 429 hơn). Kẻ xấu đi qua
+Worker riêng của họ trên Cloudflare vẫn được nới: còn `client_body_timeout` + cổng phạt hub-api. Phải đo thêm trên Render
+(REVIEW-LH2 L9): `ip` của request **gọi thẳng** (`curl` từ máy nhà, không qua Worker) KHÔNG được rơi vào dải Cloudflare —
+nếu edge của Render chạy trên Cloudflare và phần tử cuối XFF là IP Cloudflare thì luật này nới cho MỌI IP (R2-L1 vô hiệu).
+
+**Cổng bật Worker `hub-hooks` (LH2, REVIEW-LH2 TB-4, ADR-214):** KHÔNG `wrangler deploy` Worker thật và KHÔNG đặt
+`HUB_INGEST_PUBLIC_URL` / trỏ source nào vào `workers.dev` trước khi **LH2b** (hub-api đẩy `sources_sync`) review ĐẠT.
+`sources_sync` rỗng thì mọi request lúc hub vắng nhận 503 sau 4 s chờ — tệ hơn gọi thẳng Render (cold start chờ được tới
+timeout của provider). Luật hạn giữ (REVIEW-LH2 L5): `CATCHNET_RETENTION_DAYS` của Worker ≤ `EVENT_RETENTION_DAYS` của hub.
+Trần của Worker (ADR-224, gói free tra 2026-10-15): `CATCHNET_MAX_BYTES` 300 MB (gồm `inbox_dead`; DB free 500 MB),
+`CATCHNET_MAX_KEY_BYTES` 50 MB, `CATCHNET_MAX_ROWS` 15000, `CATCHNET_MAX_PER_DAY` 5000 lần hứng (quota ghi 100k/ngày),
+`CATCHNET_REPLAY_BATCH` ≤ 10/lượt (50 truy vấn D1/invocation).
 Phản hồi nginx tự sinh trên `/hooks*` mang `x-hub-outcome` (429 `refused`, 413/404 `rejected`, 503 `unavailable`). Node
 `clientError` (431/400 trước Express) không có header — lưới hứng coi 4xx không outcome theo luật ở ADR-221.
 
@@ -596,9 +612,10 @@ METRICS_TICK_MS=5000
 NODE_ENV=production      # bật SSRF guard (§7.3 ARCHITECTURE); hub-api KHÔNG đăng ký /mock/* (ADR-054)
 CIRCUIT_MAX_DEFER_MS=1800000 # hub-worker: trần THỜI GIAN hoãn vì circuit cho một lần thử rồi tính là một lần thử thất bại (BP2, ADR-196; thay CIRCUIT_MAX_DEFERRALS). Chỉ đặt THẤP hơn mặc định
 CIRCUIT_OPEN_MAX_SECONDS=300 # hub-worker: OPEN sau probe thất bại (60..300s; BP3, ADR-197). Chỉ đặt THẤP hơn 300
-DELIVERY_RAMP_START_RPS=2    # hub-worker: slow-start sau hồi phục (BP4, ADR-198) — trần đầu (rps)
-DELIVERY_RAMP_STEP_SECONDS=10 # mỗi bước nhân đôi trần
+DELIVERY_RAMP_START_RPS=2    # hub-worker: slow-start sau hồi phục (BP4, ADR-198) — trần đầu (rps); chỉ đặt THẤP hơn 2 (ADR-241: trần cuối ≤ 64)
+DELIVERY_RAMP_STEP_SECONDS=10 # mỗi bước nhân đôi trần (≤ 10; tối đa 5 lần nhân đôi)
 DELIVERY_RAMP_SECONDS=60     # thời lượng ramp; 0 = tắt; chỉ đặt THẤP hơn 60
+DELIVERY_RAMP_MAX_SECONDS=180 # trần ramp kể cả gia hạn ở bậc cuối (ADR-241). Mặc định min(180, 3 × (RAMP_SECONDS + STEP)); chỉ đặt THẤP hơn mặc định đó; sàn = RAMP_SECONDS + STEP; 0/bậy -> mặc định (không phải tắt)
 BACKPRESSURE_SET_POINT=0.05  # hub-worker: áp lực ngược cho DB (BP5, ADR-200) — tỷ lệ lỗi hạ tầng để bắt đầu lùi
 BACKPRESSURE_PROBE_INTERVAL_MS=5000 # chế độ dò: 1 message / khoảng này khi lùi hẳn
 BACKPRESSURE_HOLD_MAX_MS=60000 # giữ message chờ permit tối đa (phải < consumer_timeout của RabbitMQ), quá thì hoãn không đốt lượt; chỉ đặt THẤP hơn 60000

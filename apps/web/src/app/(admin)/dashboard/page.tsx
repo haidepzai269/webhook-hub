@@ -13,7 +13,7 @@ export default function DashboardPage() {
         <div className="min-w-0 xl:col-span-2">
           <EventsChart />
         </div>
-        {/* ADR-241: bỏ thẻ "Sức khoẻ hệ thống" — RealtimeCard đứng một mình, giãn theo chiều cao biểu đồ. */}
+        {/* ADR-242: bỏ thẻ "Sức khoẻ hệ thống" — RealtimeCard đứng một mình, giãn theo chiều cao biểu đồ. */}
         <div className="min-w-0">
           <RealtimeCard />
         </div>

@@ -29,7 +29,7 @@ const MAX_TRACES = 20;
 const INVALIDATE_DEBOUNCE_MS = 400;
 
 interface RealtimeState {
-  /** ADR-242: ba mức — "connecting" (đang nối/nối lại, server có thể đang khởi động) chỉ thành "disconnected" sau ngưỡng. */
+  /** ADR-243: ba mức — "connecting" (đang nối/nối lại, server có thể đang khởi động) chỉ thành "disconnected" sau ngưỡng. */
   status: RealtimeStatus;
   ticks: MetricsTick[];
   /** `trace.ingested` gần nhất (mới nhất ở đầu) — chặng ①–④ trong hub-api (S2-2). */
@@ -49,7 +49,7 @@ let socket: Socket | null = null;
 let connector: RealtimeConnector | null = null;
 let refCount = 0;
 
-/** ADR-242: tab hiện lại / có mạng lại -> thử nối ngay (không chờ hết backoff). */
+/** ADR-243: tab hiện lại / có mạng lại -> thử nối ngay (không chờ hết backoff). */
 function subscribeWake(wake: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   const onVisible = () => {
@@ -158,7 +158,7 @@ export function useHubRealtime() {
     refCount++;
     if (!socket) {
       // SPEC-auth §5.7: mỗi lần (re)connect xin VÉ socket mới (60 giây) qua proxy của web — server kiểm quyền vào
-      // project bằng CÙNG luật console (resolveProjectScope), rồi ký vé. ADR-242: xin vé lỗi tạm thời (cold start 502,
+      // project bằng CÙNG luật console (resolveProjectScope), rồi ký vé. ADR-243: xin vé lỗi tạm thời (cold start 502,
       // timeout, mạng) -> KHÔNG handshake vô vé (bị UNAUTHORIZED rồi Socket.IO không tự nối lại) mà tự thử lại có backoff;
       // 401 -> hubFetch tự đưa về /login. Trạng thái ba mức + vòng nối lại ở `realtime-connector.ts` (test được).
       // `autoConnect: false`: gắn listener trạng thái TRƯỚC lượt nối đầu.
@@ -249,7 +249,7 @@ export function useHubRealtime() {
       s.off("metrics.tick", onTick);
       refCount--;
       if (refCount === 0) {
-        // ADR-242: gỡ timer backoff/ngưỡng đỏ + listener visibility/online TRƯỚC khi ngắt (không rò sau logout/unmount).
+        // ADR-243: gỡ timer backoff/ngưỡng đỏ + listener visibility/online TRƯỚC khi ngắt (không rò sau logout/unmount).
         connector?.dispose();
         connector = null;
         s.disconnect();

@@ -4,7 +4,15 @@ import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { CircuitState, fastFailRedisOptions, logger } from '@hub/common';
 import { PrismaService } from '@hub/database';
-import { CIRCUIT_OPEN_MS as OPEN_FIRST_MS, circuitOpenMaxSeconds, deliveryRampConfig, deliveryRampKeySeconds } from '@hub/messaging';
+import {
+  CIRCUIT_OPEN_MS as OPEN_FIRST_MS,
+  DELIVERY_RAMP_MAX_DOUBLINGS,
+  circuitOpenMaxSeconds,
+  deliveryRampConfig,
+  deliveryRampExtendMs,
+  deliveryRampKeySeconds,
+  deliveryRampLastStep,
+} from '@hub/messaging';
 
 /** Token DI tuỳ chọn để test tiêm Redis giả; production tự tạo client riêng. */
 export const CIRCUIT_REDIS = Symbol('CIRCUIT_REDIS');
@@ -40,10 +48,16 @@ return n`;
 /**
  * BP2 §6 (ADR-196) + BP4 (ADR-198): GATE — MỘT script, LUÔN đúng 1 lệnh, có hay không có throttle/ramp.
  * KEYS: open, failures, throttle:{giây}, ramp, probe. ARGV: ngưỡng lỗi, rate_limit_rps, nowMs, ramp start rps, ramp step (giây),
- * TTL cửa sổ throttle (giây), ramp giây (để kẹp trần ở bậc cuối — F3).
+ * TTL cửa sổ throttle (giây), bậc cuối (`deliveryRampLastStep`, F3 + Thấp-9), trần tuyệt đối ramp (ms, ADR-241), mức gia hạn
+ * (ms, `deliveryRampExtendMs`).
  * - Trả PTTL của `:open` (BP3 hoãn tới hết OPEN, C4).
  * - CLOSED + còn `:ramp` (BP4, đặt lúc probe thành công): rampCap = start × 2^min(floor((now − rampStart)/step), bậc cuối) —
- *   khoá sống ramp + một bậc (F3), bậc thêm đó giữ trần cuối.
+ *   khoá sống ramp + một bậc (F3), bậc thêm đó giữ trần cuối. Bậc cuối kẹp ≤ DELIVERY_RAMP_MAX_DOUBLINGS (Thấp-9).
+ * - ADR-241 (đính chính ADR-232): CHỈ KHI ở bậc cuối VÀ lần này bị throttle (count > rampCap — hàng tồn còn dội) -> `PEXPIRE :ramp`
+ *   = min(mức gia hạn, rampStart + RAMP_MAX − now), chỉ khi dài hơn PTTL hiện tại (không rút ngắn). Trong CÙNG EVAL: không thêm
+ *   lệnh client. Quá RAMP_MAX (tính từ mốc trong khoá) -> coi như hết ramp dù khoá còn. Thời gian là đồng hồ WORKER (không dùng
+ *   `TIME`, giữ script deterministic): lệch đồng hồ D giữa worker đặt mốc và worker gate -> ramp sống tới RAMP_MAX + D.
+ * - `:ramp` hỏng (không phải số) -> el rất lớn > RAMP_MAX -> không ramp (như mất khoá, BB-2); khoá hỏng không được gia hạn.
  * - INCR bộ đếm throttle chỉ khi CLOSED VÀ có trần (rps > 0 hoặc còn `:ramp`) — không trần thì 0 lệnh throttle như cũ.
  * Cap thật = min(rps nếu > 0, rampCap) tính ở JS từ hai giá trị trả về (để kiểm lại với rps thật mà không INCR lần hai, C9).
  * - HALF_OPEN (hết `:open`, `:failures` ≥ ngưỡng): trả thêm cờ `:probe` ĐANG bị giữ (ADR-233) — bên thua bỏ qua
@@ -57,23 +71,35 @@ if open then pttl = redis.call('PTTL', KEYS[1]) end
 local failures = redis.call('GET', KEYS[2])
 local t = -1
 local cap = -1
+local atLast = false
+local el = 0
 if (not open) and (tonumber(failures or '0') < tonumber(ARGV[1])) then
   local rs = redis.call('GET', KEYS[4])
   if rs then
-    local el = tonumber(ARGV[3]) - (tonumber(rs) or 0)
+    el = tonumber(ARGV[3]) - (tonumber(rs) or 0)
     if el < 0 then el = 0 end
-    local steps = math.floor(el / (tonumber(ARGV[5]) * 1000))
-    -- F3 (ADR-232): khoá sống thêm một bậc sau ramp -> kẹp ở bậc CUỐI của ramp (ARGV[7] = ramp giây): 60s/10s -> bậc 5 = 64 rps
-    local last = math.ceil(tonumber(ARGV[7]) / tonumber(ARGV[5])) - 1
-    if last < 0 then last = 0 end
-    if steps > last then steps = last end
-    -- phòng thủ: env đã kẹp (ramp ≤ 60s, bước ≥ 1s) nên steps ≤ 59; kẹp 20 chỉ giữ cap hữu hạn nếu ai nới kẹp env
-    if steps > 20 then steps = 20 end
-    cap = tonumber(ARGV[4]) * (2 ^ steps)
+    -- ADR-241: quá trần tuyệt đối (ARGV[8] ms tính từ rampStart) -> hết ramp, dù khoá còn sống
+    if el < tonumber(ARGV[8]) then
+      local steps = math.floor(el / (tonumber(ARGV[5]) * 1000))
+      -- F3 (ADR-232) + Thấp-9 (ADR-241): kẹp ở bậc CUỐI (ARGV[7], JS đã kẹp ≤ ${DELIVERY_RAMP_MAX_DOUBLINGS}); kẹp lại ở đây phòng ARGV lạ
+      local last = tonumber(ARGV[7])
+      if last > ${DELIVERY_RAMP_MAX_DOUBLINGS} then last = ${DELIVERY_RAMP_MAX_DOUBLINGS} end
+      if last < 0 then last = 0 end
+      if steps >= last then steps = last; atLast = true end
+      cap = tonumber(ARGV[4]) * (2 ^ steps)
+    end
   end
   if (tonumber(ARGV[2]) > 0) or (cap > 0) then
     t = redis.call('INCR', KEYS[3])
     if t == 1 then redis.call('EXPIRE', KEYS[3], ARGV[6]) end
+    -- ADR-241: bậc cuối mà vẫn bị ramp chặn -> gia hạn :ramp (ARGV[9] ms), không quá rampStart + RAMP_MAX; chỉ KÉO DÀI, không
+    -- rút ngắn (bước nhỏ + kẹp Thấp-9 thì bậc cuối tới sớm, mức gia hạn có thể ngắn hơn TTL gốc)
+    if atLast and t > cap then
+      local ext = tonumber(ARGV[9])
+      local left = tonumber(ARGV[8]) - el
+      if left < ext then ext = left end
+      if ext > redis.call('PTTL', KEYS[4]) then redis.call('PEXPIRE', KEYS[4], math.floor(ext)) end
+    end
   end
 end
 local held = 0
@@ -142,7 +168,7 @@ export interface CircuitTarget {
  *  - `:open`     SET OPEN EX 60 ở lần trip đầu, EX `CIRCUIT_OPEN_MAX_SECONDS` (300) sau mỗi probe thất bại (BP3);
  *  - `:trips`    số probe thất bại liên tiếp (BP3), xoá khi CLOSED;
  *  - `:probe`    SET token NX EX 30 (Lua: chỉ khi thật sự HALF_OPEN) — người gửi thử DUY NHẤT; nhả theo token;
- *  - `:ramp`     mốc probe thành công, EX ramp + một bậc (BP4 + F3) — slow-start trong gate.
+ *  - `:ramp`     mốc probe thành công, EX ramp + một bậc (BP4 + F3); gate gia hạn ở bậc cuối khi còn throttle, ≤ RAMP_MAX + lệch đồng hồ (ADR-241).
  */
 @Injectable()
 export class CircuitBreakerService {
@@ -182,7 +208,7 @@ export class CircuitBreakerService {
       const throttleKey = `throttle:destination:${destinationId}:${Math.floor(now / 1000)}`;
       const [openFlag, failuresRaw, pttl, count, capRaw, probeHeld] = (await this.redis.eval(
         LUA_GATE, 5, k.open, k.failures, throttleKey, k.ramp, k.probe,
-        CIRCUIT_FAILURE_THRESHOLD, rps, now, ramp.startRps, ramp.stepSeconds, 2, ramp.seconds,
+        CIRCUIT_FAILURE_THRESHOLD, rps, now, ramp.startRps, ramp.stepSeconds, 2, deliveryRampLastStep(ramp), ramp.maxSeconds * 1000, deliveryRampExtendMs(ramp),
       )) as [number, string, number, number, number, number];
       const failures = parseInt(failuresRaw || '0', 10) || 0;
       if (Number(openFlag) === 1) {
