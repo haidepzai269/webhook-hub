@@ -120,7 +120,7 @@ export default function FlowMapPage() {
                 <DropdownMenuSeparator />
                 {sources.map((s) => (
                   <DropdownMenuItem key={s.id} onSelect={() => setSourceFilter(s.id.slice(4))}>
-                    <ProviderIcon provider={"provider" in s ? s.provider : ""} />
+                    <ProviderIcon provider={"provider" in s ? s.provider : ""} name={s.label} />
                     {s.label}
                   </DropdownMenuItem>
                 ))}
