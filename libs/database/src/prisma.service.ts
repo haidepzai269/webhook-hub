@@ -214,6 +214,101 @@ export class PrismaService {
     });
   }
 
+  // ================== Thẻ "Tất cả dự án": số đếm xuyên project (ADR-235) ==================
+  // Trang `/projects` của console hiện mỗi dự án một thẻ kèm số đếm + viền sức khoẻ. Đọc xuyên project trong MỘT lượt (không
+  // N lần gọi từ trình duyệt) qua HAI hàm có tên dưới đây (systemTx), CHỈ trả số đếm — không dòng dữ liệu nào. Phạm vi lọc
+  // CỨNG trong SQL: `member…` = JOIN `project_members` của CHÍNH user (như `ownerAlertsAcrossTenants`); `operator…` = mọi
+  // project (GET /projects vốn trả mọi project cho operator, ADR-056). Chỉ projects.controller gọi — gate `project-stats-cross-tenant`.
+  // 0 lệnh Redis (circuit đọc cột `destinations.circuit_state`, không đọc khoá Redis).
+
+  /** Số đếm của các project mà `userId` là thành viên (bất kể vai trò). */
+  public memberProjectStatsAcrossTenants(userId: string): Promise<ProjectStatsRow[]> {
+    return this.projectStatsAcrossTenants(
+      'console: số đếm các dự án của mình',
+      Prisma.sql`SELECT p.id, p.created_at FROM hub.projects p
+                 JOIN hub.project_members m ON m.tenant_id = p.id AND m.user_id = ${userId}::uuid`,
+    );
+  }
+
+  /** Số đếm của MỌI project — người gọi đã kiểm `isOperator` (cùng phạm vi với danh sách project của operator). */
+  public operatorProjectStatsAcrossTenants(): Promise<ProjectStatsRow[]> {
+    return this.projectStatsAcrossTenants('operator: số đếm mọi dự án', Prisma.sql`SELECT p.id, p.created_at FROM hub.projects p`);
+  }
+
+  /**
+   * Mỗi chỉ số là MỘT truy vấn gộp `GROUP BY tenant_id` trên tập project `scope` (không subquery lặp theo từng project), đi
+   * theo index có tiền tố tenant: events `(tenant_id, received_at DESC)`, deliveries DEAD một phần `(tenant_id, updated_at)`,
+   * alerts `(tenant_id, state, opened_at)`, project_members PK. Lần gửi lỗi 24h đi index `delivery_attempts(created_at)` (attempt
+   * không mang tenant_id) rồi JOIN deliveries theo PK — cùng khuôn `countAttemptStatusesByDestination` của AlertEvaluator.
+   * "Lỗi" = mọi attempt không 2xx (kể cả mất kết nối: status NULL/< 100) — đúng `classifyHttpOutcome(...) !== 'success'`.
+   * DLQ = cùng điều kiện `countDeadDeliveries` (DEAD chưa bị replay) để số trên thẻ khớp trang DLQ.
+   */
+  private projectStatsAcrossTenants(reason: string, scope: Prisma.Sql): Promise<ProjectStatsRow[]> {
+    return this.systemTx(reason, async (tx) => {
+      const rows = await tx.$queryRaw<
+        {
+          tenantId: string;
+          createdAt: Date;
+          sources: number;
+          endpoints: number;
+          circuitOpen: number;
+          members: number;
+          events24h: number;
+          failedAttempts24h: number;
+          dlq: number;
+          storageLevel: string | null;
+          alertsCritical: number;
+          alertsWarning: number;
+          alertsInfo: number;
+        }[]
+      >(Prisma.sql`
+        WITH t AS (${scope}),
+        src AS (SELECT s.tenant_id, count(*) AS n FROM hub.sources s
+                WHERE s.tenant_id IN (SELECT id FROM t) AND s.archived_at IS NULL GROUP BY 1),
+        dst AS (SELECT d.tenant_id, count(*) AS n,
+                       count(*) FILTER (WHERE d.is_active AND d.circuit_state <> 'CLOSED') AS open
+                FROM hub.destinations d
+                WHERE d.tenant_id IN (SELECT id FROM t) AND d.archived_at IS NULL GROUP BY 1),
+        mem AS (SELECT m.tenant_id, count(*) AS n FROM hub.project_members m
+                WHERE m.tenant_id IN (SELECT id FROM t) GROUP BY 1),
+        ev AS (SELECT e.tenant_id, count(*) AS n FROM hub.events e
+               WHERE e.tenant_id IN (SELECT id FROM t) AND e.received_at >= now() - interval '24 hours' GROUP BY 1),
+        fa AS (SELECT d.tenant_id, count(*) AS n FROM hub.delivery_attempts a JOIN hub.deliveries d ON d.id = a.delivery_id
+               WHERE a.created_at >= now() - interval '24 hours' AND d.tenant_id IN (SELECT id FROM t)
+                 AND COALESCE(a.response_status, 0) NOT BETWEEN 200 AND 299 GROUP BY 1),
+        dl AS (SELECT d.tenant_id, count(*) AS n FROM hub.deliveries d
+               WHERE d.tenant_id IN (SELECT id FROM t) AND d.status = 'DEAD'
+                 AND NOT EXISTS (SELECT 1 FROM hub.deliveries n
+                                 WHERE n.tenant_id = d.tenant_id AND n.event_id = d.event_id
+                                   AND n.subscription_id = d.subscription_id AND n.attempt_generation > d.attempt_generation)
+               GROUP BY 1),
+        al AS (SELECT a.tenant_id,
+                      count(*) FILTER (WHERE a.severity = 'critical') AS c,
+                      count(*) FILTER (WHERE a.severity = 'warning') AS w,
+                      count(*) FILTER (WHERE a.severity = 'info') AS i
+               FROM hub.alerts a WHERE a.tenant_id IN (SELECT id FROM t) AND a.state = 'OPEN' GROUP BY 1)
+        SELECT t.id AS "tenantId", t.created_at AS "createdAt",
+               COALESCE(src.n, 0)::int AS sources, COALESCE(dst.n, 0)::int AS endpoints, COALESCE(dst.open, 0)::int AS "circuitOpen",
+               COALESCE(mem.n, 0)::int AS members, COALESCE(ev.n, 0)::int AS "events24h", COALESCE(fa.n, 0)::int AS "failedAttempts24h",
+               COALESCE(dl.n, 0)::int AS dlq, pu.level AS "storageLevel",
+               COALESCE(al.c, 0)::int AS "alertsCritical", COALESCE(al.w, 0)::int AS "alertsWarning", COALESCE(al.i, 0)::int AS "alertsInfo"
+        FROM t
+        LEFT JOIN src ON src.tenant_id = t.id
+        LEFT JOIN dst ON dst.tenant_id = t.id
+        LEFT JOIN mem ON mem.tenant_id = t.id
+        LEFT JOIN ev ON ev.tenant_id = t.id
+        LEFT JOIN fa ON fa.tenant_id = t.id
+        LEFT JOIN dl ON dl.tenant_id = t.id
+        LEFT JOIN al ON al.tenant_id = t.id
+        LEFT JOIN hub.project_usage pu ON pu.tenant_id = t.id
+        ORDER BY t.created_at, t.id`);
+      return rows.map(({ alertsCritical, alertsWarning, alertsInfo, ...r }) => ({
+        ...r,
+        openAlerts: { critical: alertsCritical, warning: alertsWarning, info: alertsInfo },
+      }));
+    });
+  }
+
   /** QT7 (§2, §9): operator ghi đè hạn mức của MỘT project (`projects` là bảng gốc, không tenant_id). null = về mặc định env. */
   public setProjectStorageQuota(id: string, storageQuotaMb: number | null, client: PrismaClient | Prisma.TransactionClient = this.client) {
     return client.project.update({ where: { id }, data: { storageQuotaMb } });
@@ -876,6 +971,29 @@ export function withSystemRlsUrl(url: string): string {
   const existing = u.searchParams.get('options');
   u.searchParams.set('options', `${existing ? existing + ' ' : ''}-c app.rls_system=on`);
   return u.toString();
+}
+
+/** ADR-235: số đếm của MỘT project cho thẻ "Tất cả dự án" — chỉ con số, không dòng dữ liệu. */
+export interface ProjectStatsRow {
+  tenantId: string;
+  createdAt: Date;
+  /** source chưa lưu trữ */
+  sources: number;
+  /** đích (endpoint) chưa lưu trữ */
+  endpoints: number;
+  /** đích đang dùng (is_active, chưa lưu trữ) có `circuit_state` khác CLOSED (OPEN hoặc HALF_OPEN) */
+  circuitOpen: number;
+  members: number;
+  /** event có `received_at` trong 24h */
+  events24h: number;
+  /** attempt không 2xx (kể cả mất kết nối) trong 24h */
+  failedAttempts24h: number;
+  /** DEAD chưa bị replay — khớp trang DLQ */
+  dlq: number;
+  /** `project_usage.level` (null = chưa đo) */
+  storageLevel: string | null;
+  /** cảnh báo OPEN theo mức */
+  openAlerts: { critical: number; warning: number; info: number };
 }
 
 /** QT2 (ADR-183): một dòng của truy vấn gộp job cập nhật nấc. */
