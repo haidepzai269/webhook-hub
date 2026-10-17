@@ -170,7 +170,7 @@ function BulkReplayDialog({
                 {preview.truncated ? t("page.dlq.bulk.truncated", { limit: preview.limit }) : ""}.
               </p>
               {preview.sample.length > 0 && (
-                <ul className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
+                <ul className="space-y-0.5 font-mono text-2xs text-muted-foreground">
                   {preview.sample.map((r) => (
                     <li key={r.id} className="truncate" title={r.lastError ?? ""}>
                       {formatDateTime(r.createdAt, locale)} · {r.eventType} → {destName(r.destinationId)} · {r.lastError ?? "—"}

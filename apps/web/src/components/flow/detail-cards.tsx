@@ -160,7 +160,7 @@ function AttemptRow({ attempt }: { attempt: StageView }) {
                 <p className="text-muted-foreground text-xs">{t("flow.attempt.no-body")}</p>
               )}
               {/* §6A "header gửi đi": delivery_attempts chỉ lưu body đã gửi, KHÔNG lưu header — không bịa lại. */}
-              <p className="text-muted-foreground text-[11px]">{t("flow.attempt.headers-note")}</p>
+              <p className="text-muted-foreground text-2xs">{t("flow.attempt.headers-note")}</p>
             </div>
           )}
         </div>

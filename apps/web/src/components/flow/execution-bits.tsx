@@ -99,7 +99,7 @@ export function MiniPipeline({
                   {asProbe ? <Info {...ICON_SM} aria-hidden /> : <StatusGlyph status={d.status} small />}
                   {!decorative && <span className="sr-only">{`${stageLabel}: ${statusLabel}${destsText ? ` (${destsText})` : ""}`}</span>}
                   {dests && (
-                    <span className="font-medium text-[11px] tabular-nums" aria-hidden>
+                    <span className="font-medium text-2xs tabular-nums" aria-hidden>
                       {dests}
                     </span>
                   )}

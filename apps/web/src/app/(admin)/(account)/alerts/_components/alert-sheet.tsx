@@ -60,10 +60,10 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
       <SheetHeader className="gap-2 border-b pb-4">
         <div className="flex items-center gap-2">
           <SeverityIcon severity={a.severity} resolved={resolved} />
-          <Badge variant="outline" className="text-[11px]">
+          <Badge size="sm" variant="outline">
             {t(`alerts.severity.${a.severity}`)}
           </Badge>
-          <Badge variant={resolved ? "secondary" : "outline"} className="text-[11px]">
+          <Badge size="sm" variant={resolved ? "secondary" : "outline"}>
             {t(resolved ? "alerts.state.resolved" : "alerts.state.open")}
           </Badge>
           <ProjectChip name={a.project.name} />

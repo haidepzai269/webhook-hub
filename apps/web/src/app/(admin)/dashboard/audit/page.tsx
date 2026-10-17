@@ -68,7 +68,7 @@ const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
     header: t("page.audit.col.action"),
     accessorFn: (a) => a.action,
     cell: ({ row }) => (
-      <Badge variant="outline" className={`font-mono text-[11px] ${actionTone(row.original.action)}`}>
+      <Badge size="sm" variant="outline" className={`font-mono ${actionTone(row.original.action)}`}>
         {row.original.action}
       </Badge>
     ),
@@ -88,7 +88,7 @@ const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
           </div>
           {summary && (
             <CellTooltip text={summary}>
-              <span data-cell-text className="truncate text-[11px] text-muted-foreground">{summary}</span>
+              <span data-cell-text className="truncate text-2xs text-muted-foreground">{summary}</span>
             </CellTooltip>
           )}
         </div>

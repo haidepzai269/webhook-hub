@@ -148,7 +148,7 @@ function StatGrid({ stats }: { stats: ProjectStats }) {
         const warn = n > 0 && stat === "failedAttempts24h";
         return (
           <div key={stat} className="min-w-0">
-            <dt className="truncate text-[11px] text-muted-foreground leading-4" title={t(label)}>
+            <dt className="truncate text-2xs text-muted-foreground leading-4" title={t(label)}>
               {t(label)}
             </dt>
             <dd

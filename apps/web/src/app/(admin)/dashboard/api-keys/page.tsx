@@ -95,7 +95,7 @@ export default function ApiKeysPage() {
         cell: ({ row }) => (
           <div className="flex flex-wrap gap-1">
             {row.original.scopes.map((s) => (
-              <Badge key={s} variant="secondary" className="font-mono text-[10px]">
+              <Badge size="sm" key={s} variant="secondary" className="font-mono">
                 {s}
               </Badge>
             ))}

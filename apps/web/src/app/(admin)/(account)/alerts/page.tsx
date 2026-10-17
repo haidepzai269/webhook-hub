@@ -86,10 +86,10 @@ const buildColumns = (t: TranslateFn): HubColumn<Row>[] => [
       const a = row.original;
       return (
         <div className="flex flex-col items-start gap-0.5">
-          <Badge variant={a.state === "OPEN" ? "outline" : "secondary"} className="text-[11px]">
+          <Badge size="sm" variant={a.state === "OPEN" ? "outline" : "secondary"}>
             {t(a.state === "OPEN" ? "alerts.state.open" : "alerts.state.resolved")}
           </Badge>
-          {a.acknowledgedAt && <span className="text-[11px] text-muted-foreground">{t("alerts.bell.acked")}</span>}
+          {a.acknowledgedAt && <span className="text-2xs text-muted-foreground">{t("alerts.bell.acked")}</span>}
         </div>
       );
     },

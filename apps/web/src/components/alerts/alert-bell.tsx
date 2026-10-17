@@ -70,7 +70,7 @@ function OperatorBell() {
                 <span
                   aria-hidden
                   className={cn(
-                    "absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-semibold text-[10px] tabular-nums leading-none ring-2 ring-background",
+                    "absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-semibold text-2xs tabular-nums leading-none ring-2 ring-background",
                     badge.tone === "critical" && "alert-bell-pulse",
                   )}
                   style={
@@ -156,7 +156,7 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
                         <span className="truncate text-sm" title={msg.title}>
                           {msg.title}
                         </span>
-                        <span className="whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
+                        <span className="whitespace-nowrap text-2xs text-muted-foreground tabular-nums">
                           {formatRelative(a.openedAt, now, locale)}
                         </span>
                         <span />
