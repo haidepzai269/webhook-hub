@@ -13,6 +13,7 @@ import { ThemeSwitcher } from "@/components/admin/theme-switcher";
 import { AlertBell } from "@/components/alerts/alert-bell";
 import { initials } from "@/components/flow/brand-fallback";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,24 +49,23 @@ export function AccountMenu({ demo = false }: { demo?: boolean }) {
   };
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="cursor-pointer rounded-full"
-          aria-label={t("page.projects.home.account")}
-          title={email}
-        >
-          {/* ADR-238: chưa có /auth/me (AuthGuard đang chờ) -> khung chờ tròn cùng cỡ, không hiện "?". */}
-          {me || demo ? (
-            <span className="flex size-8 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
-              {initials(name || email || "?")}
-            </span>
-          ) : (
-            <Skeleton className="size-8 rounded-full" />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="rounded-full" aria-label={t("page.projects.home.account")}>
+              {/* ADR-238: chưa có /auth/me (AuthGuard đang chờ) -> khung chờ tròn cùng cỡ, không hiện "?". */}
+              {me || demo ? (
+                <span className="flex size-8 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
+                  {initials(name || email || "?")}
+                </span>
+              ) : (
+                <Skeleton className="size-8 rounded-full" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{email || t("page.projects.home.account")}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuLabel className="flex flex-col gap-0.5">
           <span className="truncate font-medium text-foreground text-sm">{name}</span>
@@ -139,8 +139,7 @@ export function AccountTopBar({ demo = false }: { demo?: boolean }) {
           <span className="hidden text-muted-foreground sm:inline">/</span>
           <span className="hidden truncate text-muted-foreground text-sm sm:inline">{t(sectionKey)}</span>
         </Link>
-        {/* Nút dùng chung (chuông, ngôn ngữ, giao diện) không tự đặt con trỏ — gắn ở đây cho mọi nút của thanh. */}
-        <div className="flex items-center gap-2 [&_button]:cursor-pointer">
+        <div className="flex items-center gap-2">
           {/* Chuông tự ẩn với người không xem được cảnh báo (và ở demo — chưa có /auth/me). */}
           <AlertBell />
           <LanguageSwitcher />

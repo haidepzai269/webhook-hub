@@ -12,13 +12,14 @@ import { stepToasts } from "@/lib/hub/ui-logic";
 import type { TraceIngestedNotice } from "@/lib/hub/types";
 import { INTL_LOCALE, type MessageKey, type TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { type StatusTone, toneBadgeClass } from "@/components/admin/status-badge";
 
-const OUTCOME_STYLE: Record<TraceIngestedNotice["outcome"], string> = {
-  ACCEPTED: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
-  DUPLICATE: "border-sky-500/40 text-sky-700 dark:text-sky-300",
-  REJECTED: "border-rose-500/40 text-rose-700 dark:text-rose-300",
-  RATE_LIMITED: "border-amber-500/40 text-amber-700 dark:text-amber-300",
-  ERROR: "border-rose-500/40 text-rose-700 dark:text-rose-300",
+const OUTCOME_TONE: Record<TraceIngestedNotice["outcome"], StatusTone> = {
+  ACCEPTED: "ok",
+  DUPLICATE: "info",
+  REJECTED: "bad",
+  RATE_LIMITED: "warn",
+  ERROR: "bad",
 };
 
 const OUTCOME_LABEL: Record<TraceIngestedNotice["outcome"], MessageKey> = {
@@ -88,7 +89,7 @@ export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {})
         <ul className="space-y-1">
           {traces.slice(0, SHOW).map((tr) => (
             <li key={`${tr.correlationId}-${tr.receivedAt}`} className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline" className={`font-mono text-[11px] ${OUTCOME_STYLE[tr.outcome]}`}>
+              <Badge variant="outline" className={`font-mono text-[11px] ${toneBadgeClass(OUTCOME_TONE[tr.outcome])}`}>
                 {tr.outcome}
               </Badge>
               <span className="font-mono">{tr.provider}</span>

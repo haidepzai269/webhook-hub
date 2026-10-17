@@ -2,11 +2,11 @@
 
 import type { ReactNode } from "react";
 
-import { DeliveryStatusBadge } from "@/components/admin/status-badge";
+import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { SignatureBadge } from "@/components/flow/unverified-badge";
 import { Badge } from "@/components/ui/badge";
-import { formatDateTime } from "@/lib/hub/format";
-import type { DeliveryAttempt, HubEventDetail } from "@/lib/hub/types";
+import { formatDateTime, httpTone } from "@/lib/hub/format";
+import type { HubEventDetail } from "@/lib/hub/types";
 import { isUnverified, SIGNATURE_VIEW, signatureView } from "@/lib/hub/unverified";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
@@ -54,13 +54,6 @@ function fanoutTone(deliveries: HubEventDetail["deliveries"] & object): Tone {
   if (deliveries.some((d) => d.status === "DEAD")) return "bad";
   if (deliveries.every((d) => d.status === "SUCCEEDED")) return "ok";
   return "warn";
-}
-
-function httpTone(a: DeliveryAttempt): string {
-  const s = a.responseStatus ?? 0;
-  if (s >= 200 && s < 300) return "text-emerald-600 dark:text-emerald-400";
-  if (!s || s >= 500 || s === 408 || s === 429) return "text-amber-600 dark:text-amber-400";
-  return "text-rose-600 dark:text-rose-400";
 }
 
 /**
@@ -137,7 +130,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                       {attempts.map((a) => (
                         <li key={a.id} className="flex flex-wrap gap-x-2">
                           <span className="text-muted-foreground">#{a.attemptNo}</span>
-                          <span className={httpTone(a)}>HTTP {a.responseStatus || "—"}</span>
+                          <span className={toneTextClass(httpTone(a.responseStatus ?? 0))}>HTTP {a.responseStatus || "—"}</span>
                           <span>{a.durationMs ?? "—"}ms</span>
                           <span className="text-muted-foreground">{formatDateTime(a.createdAt, locale)}</span>
                           {a.error && <span className="basis-full break-all text-rose-600">{a.error}</span>}

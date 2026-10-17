@@ -22,6 +22,7 @@ import { useSetStorageQuota } from "@/lib/hub/storage-queries";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 import { formatBytes, levelSeg, levelTone, parseLevel, parseQuotaInput } from "@/lib/storage/storage-logic";
+import { toneBadgeClass } from "@/components/admin/status-badge";
 
 const ROLE_KEY: Record<string, MessageKey> = { owner: "page.projects.role.owner", member: "page.projects.role.member" };
 const ENV_KEY: Record<string, MessageKey> = { test: "page.projects.env.test", live: "page.projects.env.live" };
@@ -98,7 +99,7 @@ function UnverifiedSourcesSetting({ projectId, canEdit }: { projectId: string; c
           <p className="font-medium text-sm">{t("page.projects.unverified.title")}</p>
           <p className="text-muted-foreground text-xs">{t("page.projects.unverified.hint")}</p>
         </div>
-        <Badge variant={on ? "outline" : "secondary"} className={on ? "border-amber-500/50 text-amber-700 dark:text-amber-400" : undefined}>
+        <Badge variant={on ? "outline" : "secondary"} className={on ? toneBadgeClass("warn") : undefined}>
           {t(on ? "page.projects.unverified.on" : "page.projects.unverified.off")}
         </Badge>
       </div>

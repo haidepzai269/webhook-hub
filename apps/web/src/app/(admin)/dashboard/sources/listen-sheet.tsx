@@ -19,6 +19,7 @@ import { useSourceInspect } from "@/lib/hub/queries";
 import type { Source } from "@/lib/hub/types";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
 /** Câu chẩn đoán — chỉ TÊN header/trường (API không bao giờ trả giá trị). */
@@ -126,21 +127,23 @@ function SubscribeUrlNotice({ url }: { url: string | null }) {
   // Review PK4 T-1: link ConfirmSubscription THẬT của topic người khác vẫn qua kiểm tên miền — hiện TopicArn để dev đối chiếu.
   const topicArn = subscribeTopicArn(url);
   return (
-    <div className="rounded-md border border-amber-500/50 p-3 text-sm">
-      <p className="font-medium">{t("page.sources.listen.subscribe-url.title")}</p>
-      {trusted ? (
-        <a href={url} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-primary underline">
-          {url}
-        </a>
-      ) : (
-        <code className="break-all">{url}</code>
-      )}
-      <p className="mt-1">
-        {t("page.sources.listen.subscribe-url.topic")} <code className="break-all">{topicArn ?? t("page.sources.listen.subscribe-url.topic-unknown")}</code>
-      </p>
-      <p className={trusted ? "mt-1 text-muted-foreground" : "mt-1 text-destructive"}>
-        {t(trusted ? "page.sources.listen.subscribe-url.warning" : "page.sources.listen.subscribe-url.untrusted")}
-      </p>
-    </div>
+    <Alert variant="warning">
+      <AlertTitle>{t("page.sources.listen.subscribe-url.title")}</AlertTitle>
+      <AlertDescription>
+        {trusted ? (
+          <a href={url} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-primary underline">
+            {url}
+          </a>
+        ) : (
+          <code className="break-all">{url}</code>
+        )}
+        <p>
+          {t("page.sources.listen.subscribe-url.topic")} <code className="break-all">{topicArn ?? t("page.sources.listen.subscribe-url.topic-unknown")}</code>
+        </p>
+        <p className={trusted ? undefined : "font-medium text-destructive"}>
+          {t(trusted ? "page.sources.listen.subscribe-url.warning" : "page.sources.listen.subscribe-url.untrusted")}
+        </p>
+      </AlertDescription>
+    </Alert>
   );
 }

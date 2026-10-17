@@ -6,12 +6,15 @@ import { Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { AdminDialogContent } from "@/components/admin/overlay-content";
-import { deliveryStatusKey } from "@/components/admin/status-badge";
+import { DeliveryStatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { AcceptUnverifiedField } from "@/components/admin/accept-unverified-field";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useConfirm } from "@/components/admin/confirm-dialog";
 import {
   type CreateEndpointResult,
   useCreateEndpoint,
@@ -25,15 +28,17 @@ import { DELIVERY_STATUS_VALUES } from "@/lib/hub/list-url";
 import { useSources } from "@/lib/hub/queries";
 import { describeVerification } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** Trạng thái lượt giao của hub -> nhãn dịch; mã lạ (API mới hơn console) giữ nguyên. */
 function DeliveryStatusLabel({ status }: { status: string }) {
-  const t = useT();
   const known = (DELIVERY_STATUS_VALUES as readonly string[]).includes(status);
   return (
-    <Badge variant="outline" title={status}>
-      {known ? t(deliveryStatusKey(status as (typeof DELIVERY_STATUS_VALUES)[number])) : status}
-    </Badge>
+    known ? (
+      <DeliveryStatusBadge status={status as (typeof DELIVERY_STATUS_VALUES)[number]} />
+    ) : (
+      <Badge variant="outline">{status}</Badge>
+    )
   );
 }
 
@@ -63,13 +68,15 @@ export function SecretOnce({ secret }: { secret: string }) {
   const t = useT();
   const envLine = `HUB_SIGNING_SECRET=${secret}`;
   return (
-    <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-sm">
-      <p className="mb-2 font-medium">{t("page.destinations.endpoint.secret-once")}</p>
-      <div className="flex items-center gap-2">
-        <code className="bg-muted flex-1 overflow-x-auto rounded px-2 py-1 font-mono text-xs">{envLine}</code>
-        <CopyButton text={envLine} />
-      </div>
-    </div>
+    <Alert variant="warning">
+      <AlertTitle>{t("page.destinations.endpoint.secret-once")}</AlertTitle>
+      <AlertDescription className="w-full">
+        <div className="flex w-full items-center gap-2">
+          <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-foreground text-xs">{envLine}</code>
+          <CopyButton text={envLine} />
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -195,11 +202,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
               <div className="flex flex-wrap gap-2">
                 {[...(catalog.data?.wildcards ?? []), ...(catalog.data?.types ?? [])].map((type) => (
                   <label key={type} className="flex items-center gap-1 font-mono text-xs">
-                    <input
-                      type="checkbox"
-                      checked={types.includes(type)}
-                      onChange={() => setTypes(toggle(types, type))}
-                    />
+                    <Checkbox checked={types.includes(type)} onCheckedChange={() => setTypes(toggle(types, type))} />
                     {type}
                   </label>
                 ))}
@@ -216,23 +219,18 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
               <div className="flex flex-col gap-1">
                 {(sources.data ?? []).map((s) => (
                   <label key={s.id} className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={sourceIds.includes(s.id)}
-                      onChange={() => setSourceIds(toggle(sourceIds, s.id))}
-                    />
+                    <Checkbox checked={sourceIds.includes(s.id)} onCheckedChange={() => setSourceIds(toggle(sourceIds, s.id))} />
                     {s.name} <Badge variant="secondary">{s.provider}</Badge>
                   </label>
                 ))}
               </div>
             </Field>
-            <Field className="gap-1.5">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={acceptUnverified} onChange={(e) => setAcceptUnverified(e.target.checked)} />
-                {t("page.destinations.endpoint.accept-unverified")}
-              </label>
-              <FieldDescription>{t("page.destinations.endpoint.accept-unverified-hint")}</FieldDescription>
-            </Field>
+            <AcceptUnverifiedField
+              checked={acceptUnverified}
+              onChange={setAcceptUnverified}
+              label={t("page.destinations.endpoint.accept-unverified")}
+              hint={t("page.destinations.endpoint.accept-unverified-hint")}
+            />
             </div>
           </FieldGroup>
         )}
@@ -259,6 +257,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
 /** Chi tiết endpoint: delivery gần đây, Verify lại, Xoay secret (chỉ endpoint do console quản). */
 export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
   const t = useT();
+  const { confirm, confirmDialog } = useConfirm();
   const locale = useLocale();
   const detail = useEndpointDetail(id);
   const verify = useVerifyEndpoint();
@@ -301,10 +300,10 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
               {ep.managedBy !== "service" && (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="destructive"
                   disabled={rotate.isPending}
-                  onClick={() => {
-                    if (!window.confirm(t("page.destinations.endpoint.rotate-confirm"))) return;
+                  onClick={async () => {
+                    if (!(await confirm({ title: t("page.destinations.endpoint.rotate-confirm"), destructive: true }))) return;
                     rotate.mutate(ep.id, {
                       onSuccess: (r) => setSecret(r.signingSecret),
                       onError: (e) => toast.error(e.message),
@@ -335,6 +334,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
         )}
         </DialogBody>
       </AdminDialogContent>
+      {confirmDialog}
     </Dialog>
   );
 }

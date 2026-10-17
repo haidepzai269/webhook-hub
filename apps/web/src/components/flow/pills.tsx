@@ -6,6 +6,7 @@ import { cn } from "cn";
 
 import type { Health, StageStatus } from "@hub/flow";
 
+import { httpTone, type HttpToneName } from "@/lib/hub/format";
 import { useT } from "@/lib/i18n/use-t";
 
 import { HEALTH_TONE, HealthGlyph, healthKey, STATUS_TONE, StatusGlyph, stageStatusKey, type Tone, toneStyle } from "./tokens";
@@ -41,10 +42,12 @@ export function HealthPill({ health, label }: { health: Health; label?: string }
   );
 }
 
+const HTTP_TONE: Record<HttpToneName, Tone> = { ok: "healthy", warn: "warning", bad: "crashed", info: "progress", idle: "idle", progress: "progress" };
+
 /** Pill HTTP: 2xx xanh, 4xx/5xx đỏ, không phản hồi xám. */
 export function HttpPill({ status }: { status: number | null | undefined }) {
   const t = useT();
-  const tone: Tone = !status ? "idle" : status < 300 ? "healthy" : status === 408 || status === 429 ? "warning" : "crashed";
+  const tone: Tone = HTTP_TONE[httpTone(status)];
   return (
     <TonePill tone={tone} className="font-mono">
       {status ? `HTTP ${status}` : t("journey.http.no-response")}

@@ -9,17 +9,6 @@ import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -27,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { HubApiError } from "@/lib/hub/client";
 import { formatDateTime, shortId } from "@/lib/hub/format";
 import { ageRange, DLQ_AGE_VALUES, DLQ_ERROR_KIND_VALUES, DLQ_PARAMS, toApiQuery } from "@/lib/hub/list-url";
@@ -251,7 +241,7 @@ function DlqView() {
         header: "",
         enableHiding: false,
         cell: ({ row }) => (
-          <Button size="sm" variant="outline" onClick={() => setTarget(row.original)}>
+          <Button size="sm" variant="replay" onClick={() => setTarget(row.original)}>
             <RotateCcw />
             {t("page.dlq.replay")}
           </Button>
@@ -371,62 +361,42 @@ function DlqView() {
 
       <BulkReplayDialog open={bulkOpen} onOpenChange={setBulkOpen} filter={bulkFilter} summary={summary} />
 
-      <AlertDialog
+      <ConfirmDialog
         open={Boolean(target)}
         onOpenChange={(open) => {
-          if (!open && !replay.isPending) {
+          if (!open) {
             setTarget(null);
             setReason("");
           }
         }}
+        title={t("page.dlq.confirm.title")}
+        description={
+          <div className="space-y-2 text-sm">
+            <p>
+              {t("page.dlq.confirm.send")} <span className="font-mono">{target?.event?.type}</span> {t("page.dlq.confirm.to")}{" "}
+              <span className="font-medium">{target?.subscription?.destination?.name ?? t("page.dlq.confirm.destination")}</span>.
+            </p>
+            <p>
+              {t("page.dlq.confirm.new")} <span className="font-mono">attempt_generation</span> ={" "}
+              <span className="font-mono">{(target?.attemptGeneration ?? 0) + 1}</span> {t("page.dlq.confirm.idempotent")}
+            </p>
+          </div>
+        }
+        confirmLabel={replay.isPending ? t("page.dlq.replaying") : t("page.dlq.replay")}
+        pending={replay.isPending}
+        onConfirm={confirmReplay}
       >
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("page.dlq.confirm.title")}</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm">
-                <p>
-                  {t("page.dlq.confirm.send")} <span className="font-mono">{target?.event?.type}</span>{" "}
-                  {t("page.dlq.confirm.to")}{" "}
-                  <span className="font-medium">
-                    {target?.subscription?.destination?.name ?? t("page.dlq.confirm.destination")}
-                  </span>
-                  .
-                </p>
-                <p>
-                  {t("page.dlq.confirm.new")} <span className="font-mono">attempt_generation</span> ={" "}
-                  <span className="font-mono">{(target?.attemptGeneration ?? 0) + 1}</span>{" "}
-                  {t("page.dlq.confirm.idempotent")}
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Field className="gap-1.5">
-            <FieldLabel htmlFor="replay-reason">{t("page.dlq.reason-optional")}</FieldLabel>
-            <Input
-              id="replay-reason"
-              value={reason}
-              placeholder={t("page.dlq.reason-placeholder")}
-              onChange={(e) => setReason(e.target.value)}
-              disabled={replay.isPending}
-            />
-          </Field>
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={replay.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={replay.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                confirmReplay();
-              }}
-            >
-              {replay.isPending ? t("page.dlq.replaying") : t("page.dlq.replay")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="replay-reason">{t("page.dlq.reason-optional")}</FieldLabel>
+          <Input
+            id="replay-reason"
+            value={reason}
+            placeholder={t("page.dlq.reason-placeholder")}
+            onChange={(e) => setReason(e.target.value)}
+            disabled={replay.isPending}
+          />
+        </Field>
+      </ConfirmDialog>
     </>
   );
 }

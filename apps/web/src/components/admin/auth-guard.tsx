@@ -97,7 +97,7 @@ function BootNotice({ failed, onRetry }: { failed: boolean; onRetry: () => void 
         )}
         <span className="min-w-0">{t(failed ? "admin.boot.failed" : "admin.boot.slow")}</span>
         {failed && (
-          <Button size="sm" variant="outline" className="h-7 shrink-0 cursor-pointer rounded-full" onClick={onRetry}>
+          <Button size="sm" variant="outline" className="h-7 shrink-0 rounded-full" onClick={onRetry}>
             <RotateCw />
             {t("common.retry")}
           </Button>

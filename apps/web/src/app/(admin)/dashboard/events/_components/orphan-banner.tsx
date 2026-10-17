@@ -5,21 +5,12 @@ import { useState } from "react";
 import { RotateCcw, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useOrphanRawEvents, useRenormalizeRawEvents } from "@/lib/hub/queries";
 import { useT } from "@/lib/i18n/use-t";
+import { Alert, AlertAction, AlertDescription, } from "@/components/ui/alert";
 
 /**
  * S1-3: dải cảnh báo "N sự kiện thô chưa được chuẩn hoá". Nguồn là Postgres (raw_events ACCEPTED
@@ -53,49 +44,41 @@ export function OrphanBanner() {
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-        <div className="flex items-center gap-2">
-          <TriangleAlert className="size-4 text-amber-600" />
+      <Alert variant="warning" className="mb-4 has-data-[slot=alert-action]:pr-44">
+        <TriangleAlert />
+        <AlertDescription>
           <span>
             <span className="font-medium">{total}</span> {t("page.events.orphan.banner")}
           </span>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          <RotateCcw />
-          {t("page.events.orphan.action")}
-        </Button>
-      </div>
+        </AlertDescription>
+        <AlertAction className="top-1/2 -translate-y-1/2">
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+            <RotateCcw />
+            {t("page.events.orphan.action")}
+          </Button>
+        </AlertAction>
+      </Alert>
 
-      <AlertDialog open={open} onOpenChange={(o) => !renormalize.isPending && setOpen(o)}>
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("page.events.orphan.confirm-title", { count: Math.min(total, 500) })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("page.events.orphan.confirm-before")} <span className="font-mono">event.received</span>{" "}
-              {t("page.events.orphan.confirm-after")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Textarea
-            placeholder={t("page.events.orphan.reason-placeholder")}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={renormalize.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={renormalize.isPending || reason.trim() === ""}
-              onClick={(e) => {
-                e.preventDefault();
-                submit();
-              }}
-            >
-              {renormalize.isPending ? t("page.events.orphan.queuing") : t("page.events.orphan.action")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={t("page.events.orphan.confirm-title", { count: Math.min(total, 500) })}
+        description={
+          <>
+            {t("page.events.orphan.confirm-before")} <span className="font-mono">event.received</span> {t("page.events.orphan.confirm-after")}
+          </>
+        }
+        confirmLabel={renormalize.isPending ? t("page.events.orphan.queuing") : t("page.events.orphan.action")}
+        pending={renormalize.isPending}
+        confirmDisabled={reason.trim() === ""}
+        onConfirm={submit}
+      >
+        <Textarea
+          placeholder={t("page.events.orphan.reason-placeholder")}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </ConfirmDialog>
     </>
   );
 }

@@ -5,8 +5,8 @@ import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n/use-t";
+import { IconButton } from "@/components/admin/icon-button";
 
 export function CopyButton({ value, label }: { value: string; label?: string }) {
   const t = useT();
@@ -22,19 +22,15 @@ export function CopyButton({ value, label }: { value: string; label?: string }) 
     }
   };
   return (
-    <Button
-      type="button"
-      variant="ghost"
+    <IconButton
       size="icon-xs"
       onClick={(e) => {
         e.stopPropagation();
         void copy();
       }}
-      aria-label={text}
-      title={text}
-    >
-      {done ? <Check /> : <Copy />}
-    </Button>
+      label={text}
+      icon={done ? <Check /> : <Copy />}
+    />
   );
 }
 

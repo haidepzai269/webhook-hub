@@ -46,7 +46,7 @@ export const SIGNATURE_VIEW = {
     key: "page.events.unverified",
     tone: "warn",
     variant: "outline",
-    className: "border-amber-500/50 text-amber-700 dark:text-amber-400",
+    className: "tone-badge [--tone:var(--flow-warning)]", // = toneBadgeClass("warn") (lib thuần TS, không import React)
   },
   valid: { key: "page.events.sheet.signature-valid", tone: "ok", variant: "secondary", className: "" },
   invalid: { key: "page.events.sheet.signature-invalid", tone: "bad", variant: "destructive", className: "" },

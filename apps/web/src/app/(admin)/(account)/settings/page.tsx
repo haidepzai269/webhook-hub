@@ -14,6 +14,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { ruleName } from "@/lib/alerts/message";
 import {
   type AlertPreferencesPatch,
@@ -64,14 +66,7 @@ function Check({
   label: string;
 }) {
   return (
-    <input
-      type="checkbox"
-      className="size-4 accent-primary disabled:cursor-not-allowed"
-      checked={checked}
-      disabled={disabled}
-      aria-label={label}
-      onChange={(e) => onChange(e.target.checked)}
-    />
+    <Checkbox checked={checked} disabled={disabled} aria-label={label} onCheckedChange={(v) => onChange(v === true)} />
   );
 }
 
@@ -111,28 +106,24 @@ function AlertSettings() {
       <CardContent className="space-y-6">
         <section className="space-y-1">
           <div className="flex items-center gap-3">
-            <input
+            <Switch
               id={switchId}
-              type="checkbox"
-              role="switch"
-              aria-checked={p.emailEnabled}
-              className="size-4 accent-primary disabled:cursor-not-allowed"
               checked={p.emailEnabled}
               disabled={sw.disabled || busy}
-              onChange={(e) => put({ emailEnabled: e.target.checked })}
+              onCheckedChange={(v) => put({ emailEnabled: v })}
             />
             <label htmlFor={switchId} className="font-medium text-sm">
               {t("page.settings.alerts.email-toggle")}
             </label>
           </div>
           {p.email && (
-            <p className="flex items-center gap-1.5 pl-7 text-muted-foreground text-xs">
+            <p className="flex items-center gap-1.5 pl-12 text-muted-foreground text-xs">
               <Mail className="size-3.5" />
               {t("page.settings.alerts.email-to", { email: p.email })}
             </p>
           )}
           {sw.reasonKey && (
-            <p className="pl-7 text-amber-700 text-xs dark:text-amber-400">
+            <p className="pl-12 text-amber-700 text-xs dark:text-amber-400">
               {t(sw.reasonKey, { email: p.email ?? "" })}
             </p>
           )}
@@ -199,13 +190,11 @@ function AlertSettings() {
 
             <section className="space-y-1">
               <div className="flex items-center gap-3">
-                <input
+                <Checkbox
                   id={resolveId}
-                  type="checkbox"
-                  className="size-4 accent-primary"
                   checked={p.emailOnResolve}
                   disabled={busy}
-                  onChange={(e) => put({ emailOnResolve: e.target.checked })}
+                  onCheckedChange={(v) => put({ emailOnResolve: v === true })}
                 />
                 <label htmlFor={resolveId} className="text-sm">
                   {t("page.settings.alerts.on-resolve")}

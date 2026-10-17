@@ -156,14 +156,6 @@
   border: 1px solid color-mix(in oklch, var(--tone) 55%, transparent);
   color: color-mix(in oklch, var(--tone) 70%, var(--foreground));
 }
-.flow-replay-btn {
-  background: var(--flow-replay);
-  color: var(--flow-replay-fg);
-}
-.flow-replay-btn:hover {
-  background: color-mix(in oklch, var(--flow-replay) 88%, white);
-}
-
 @keyframes flow-pulse {
   50% {
     box-shadow:

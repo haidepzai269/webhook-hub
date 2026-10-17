@@ -8,23 +8,15 @@ import { toast } from "sonner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { HubApiError } from "@/lib/hub/client";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
@@ -310,49 +302,34 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
           </div>
         ))}
       </CardContent>
-      <AlertDialog open={!!pending} onOpenChange={(o) => !o && !clean.isPending && !apply.isPending && setPending(null)}>
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pending && ck ? t(ck.titleKey, { importance: impName(pending.s.importance), age: ageLabel(t, pending.s.olderThan) }) : ""}
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                {ck?.bodyKeys.map((k) => (
-                  <p key={k}>{t(k)}</p>
-                ))}
-                {/* Review QT-S3 L3: số ước tính là của hành động GỢI Ý — chọn hành động khác thì nói rõ, không giả là số của nó. */}
-                {pending && (
-                  <p className="font-medium">
-                    {pending.action === pending.s.action
-                      ? t("page.storage.suggestion.frees", { size: formatBytes(pending.s.estimatedBytes), count: pending.s.estimatedEvents })
-                      : t("page.storage.suggestion.frees-of-suggested", {
-                          action: t(`page.storage.action.${pending.s.action}` as MessageKey),
-                          size: formatBytes(pending.s.estimatedBytes),
-                          count: pending.s.estimatedEvents,
-                        })}
-                  </p>
-                )}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={clean.isPending || apply.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={clean.isPending || apply.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                run();
-              }}
-            >
-              {(clean.isPending || apply.isPending) && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              {pending ? t("page.storage.confirm.ok", { action: t(`page.storage.action.${pending.action}` as MessageKey) }) : ""}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={!!pending}
+        onOpenChange={(o) => !o && setPending(null)}
+        title={pending && ck ? t(ck.titleKey, { importance: impName(pending.s.importance), age: ageLabel(t, pending.s.olderThan) }) : ""}
+        description={
+          <div className="space-y-2">
+            {ck?.bodyKeys.map((k) => (
+              <p key={k}>{t(k)}</p>
+            ))}
+            {/* Review QT-S3 L3: số ước tính là của hành động GỢI Ý — chọn hành động khác thì nói rõ, không giả là số của nó. */}
+            {pending && (
+              <p className="font-medium">
+                {pending.action === pending.s.action
+                  ? t("page.storage.suggestion.frees", { size: formatBytes(pending.s.estimatedBytes), count: pending.s.estimatedEvents })
+                  : t("page.storage.suggestion.frees-of-suggested", {
+                      action: t(`page.storage.action.${pending.s.action}` as MessageKey),
+                      size: formatBytes(pending.s.estimatedBytes),
+                      count: pending.s.estimatedEvents,
+                    })}
+              </p>
+            )}
+          </div>
+        }
+        confirmLabel={pending ? t("page.storage.confirm.ok", { action: t(`page.storage.action.${pending.action}` as MessageKey) }) : ""}
+        destructive={pending?.action === "delete"}
+        pending={clean.isPending || apply.isPending}
+        onConfirm={run}
+      />
     </Card>
   );
 }
@@ -405,19 +382,18 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
               <TableRow key={r.importance}>
                 <TableCell className="font-medium">{t(`page.storage.importance.${r.importance}` as MessageKey)}</TableCell>
                 <TableCell>
-                  <select
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
-                    value={r.action}
-                    disabled={!canWrite}
-                    aria-label={t("page.storage.auto.col.action")}
-                    onChange={(e) => set(i, { action: e.target.value as PolicyDraft["action"] })}
-                  >
-                    {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
-                      <option key={a} value={a}>
-                        {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={r.action} disabled={!canWrite} onValueChange={(v) => set(i, { action: v as PolicyDraft["action"] })}>
+                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.action")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
+                        <SelectItem key={a} value={a}>
+                          {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
                   <Input
@@ -432,16 +408,19 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
                   />
                 </TableCell>
                 <TableCell>
-                  <select
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                  <Select
                     value={r.trigger}
                     disabled={!canWrite || r.action === "off"}
-                    aria-label={t("page.storage.auto.col.trigger")}
-                    onChange={(e) => set(i, { trigger: e.target.value as PolicyDraft["trigger"] })}
+                    onValueChange={(v) => set(i, { trigger: v as PolicyDraft["trigger"] })}
                   >
-                    <option value="always">{t("page.storage.auto.trigger.always")}</option>
-                    <option value="above_85">{t("page.storage.auto.trigger.above-85")}</option>
-                  </select>
+                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.trigger")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="always">{t("page.storage.auto.trigger.always")}</SelectItem>
+                      <SelectItem value="above_85">{t("page.storage.auto.trigger.above-85")}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </TableCell>
               </TableRow>
             ))}
@@ -486,13 +465,10 @@ function EmailCard() {
       <CardContent>
         {q.data.member ? (
           <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              role="switch"
-              className="size-4 accent-primary"
+            <Switch
               checked={q.data.warnEmail}
               disabled={save.isPending}
-              onChange={(e) => save.mutate(e.target.checked, { onError: (err) => toast.error(err instanceof HubApiError ? errorMessageOf(err.body, t) : String(err)) })}
+              onCheckedChange={(v) => save.mutate(v, { onError: (err) => toast.error(err instanceof HubApiError ? errorMessageOf(err.body, t) : String(err)) })}
             />
             {t("page.storage.email.warn")}
           </label>

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { IconButton } from "@/components/admin/icon-button";
 import { type FontKey, fontOptions } from "@/lib/fonts/registry";
 import { useT } from "@/lib/i18n/use-t";
 import type { ContentLayout, NavbarStyle, SidebarCollapsible, SidebarVariant } from "@/lib/preferences/layout";
@@ -35,14 +36,7 @@ export function LayoutControls() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
-          size="icon"
-          variant="outline"
-          aria-label={t("header.layout-controls")}
-          title={t("header.layout-controls")}
-        >
-          <Settings />
-        </Button>
+        <IconButton size="icon" variant="outline" icon={<Settings />} label={t("header.layout-controls")} />
       </PopoverTrigger>
       <PopoverContent align="end">
         <div className="flex flex-col gap-5">

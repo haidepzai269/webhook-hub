@@ -11,6 +11,7 @@ import { cn } from "cn";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { IconButton } from "@/components/admin/icon-button";
 import { primaryHref } from "@/lib/alerts/links";
 import { ackAllIds, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
 import type { AlertView } from "@/lib/alerts/types";
@@ -56,25 +57,33 @@ function OperatorBell() {
       onOpenChange={setOpen}
     >
       <PopoverTrigger asChild>
-        <Button size="icon" variant="outline" aria-label={label} title={label} className="relative">
-          <Bell />
-          {badge && (
-            <span
-              aria-hidden
-              className={cn(
-                "absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-semibold text-[10px] tabular-nums leading-none ring-2 ring-background",
-                badge.tone === "critical" && "alert-bell-pulse",
+        <IconButton
+          size="icon"
+          variant="outline"
+          label={label}
+          className="relative"
+          icon={
+            <>
+              <Bell />
+              {badge && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-semibold text-[10px] tabular-nums leading-none ring-2 ring-background",
+                    badge.tone === "critical" && "alert-bell-pulse",
+                  )}
+                  style={
+                    badge.tone === "critical"
+                      ? { backgroundColor: "var(--danger-solid)", color: "var(--on-danger-solid)" }
+                      : { backgroundColor: "var(--warning-solid)", color: "var(--on-warning-solid)" }
+                  }
+                >
+                  {badge.label}
+                </span>
               )}
-              style={
-                badge.tone === "critical"
-                  ? { backgroundColor: "var(--danger-solid)", color: "var(--on-danger-solid)" }
-                  : { backgroundColor: "var(--warning-solid)", color: "var(--on-warning-solid)" }
-              }
-            >
-              {badge.label}
-            </span>
-          )}
-        </Button>
+            </>
+          }
+        />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-[380px] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0">
         <BellPanel onNavigate={() => setOpen(false)} />

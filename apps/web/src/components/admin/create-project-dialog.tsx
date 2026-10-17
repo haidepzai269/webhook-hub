@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { HubApiError } from "@/lib/hub/client";
 import type { ProjectSummary } from "@/lib/hub/flow-project";
 import { projectCreateError, slugFromName } from "@/lib/hub/keys-logic";
@@ -81,7 +82,7 @@ export function CreateProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <AdminDialogContent size="md" className="[&_button]:cursor-pointer">
+      <AdminDialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t("page.projects.create")}</DialogTitle>
           <DialogDescription>{t("page.projects.dialog.description")}</DialogDescription>
@@ -116,20 +117,14 @@ export function CreateProjectDialog({
               </Field>
               <Field className="gap-1.5">
                 <FieldLabel>{t("page.projects.field.environment")}</FieldLabel>
-                <div className="flex gap-4 text-sm">
+                <RadioGroup value={env} onValueChange={(v) => setEnv(v as "test" | "live")} className="flex gap-4 text-sm">
                   {(["test", "live"] as const).map((v) => (
-                    <label key={v} className="flex cursor-pointer items-center gap-1">
-                      <input
-                        type="radio"
-                        name="pj-env"
-                        className="cursor-pointer"
-                        checked={env === v}
-                        onChange={() => setEnv(v)}
-                      />
+                    <label key={v} className="flex cursor-pointer items-center gap-1.5">
+                      <RadioGroupItem value={v} />
                       {t(v === "test" ? "page.projects.field.env-test" : "page.projects.field.env-live")}
                     </label>
                   ))}
-                </div>
+                </RadioGroup>
               </Field>
               {formError && <p className="text-destructive text-sm">{formError}</p>}
             </FieldGroup>
@@ -139,7 +134,6 @@ export function CreateProjectDialog({
           <Button
             type="button"
             variant="outline"
-            className="cursor-pointer"
             onClick={() => close(false)}
             disabled={pending}
           >
@@ -148,7 +142,6 @@ export function CreateProjectDialog({
           <Button
             type="submit"
             form="project-form"
-            className="cursor-pointer"
             disabled={pending || !name.trim() || !slug.trim()}
           >
             {pending ? t("common.creating") : t("common.create")}

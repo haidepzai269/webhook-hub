@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/admin/page-header";
 import { TimeRange } from "@/components/admin/time-range";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +21,7 @@ import type { AuditLog } from "@/lib/hub/types";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { toneBadgeClass } from "@/components/admin/status-badge";
 
 const ALL = "__all";
 const ACTOR_MAX = 128;
@@ -27,11 +29,11 @@ const isActor = (x: string) => x.length <= ACTOR_MAX;
 
 /** Hành động "nguy hiểm" (gửi lại / xoá) tô màu để nhìn ra ngay. */
 function actionTone(action: string) {
-  if (action.endsWith(".delete")) return "border-rose-500/40 text-rose-700 dark:text-rose-300";
+  if (action.endsWith(".delete")) return toneBadgeClass("bad");
   if (action.startsWith("delivery.replay") || action.startsWith("raw_event.")) {
-    return "border-amber-500/40 text-amber-700 dark:text-amber-300";
+    return toneBadgeClass("warn");
   }
-  if (action.endsWith(".create")) return "border-emerald-500/40 text-emerald-700 dark:text-emerald-300";
+  if (action.endsWith(".create")) return toneBadgeClass("ok");
   return "";
 }
 
@@ -90,7 +92,11 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
               {shortId(a.entityId, 12)}
             </span>
           </div>
-          {summary && <div className="truncate text-[11px] text-muted-foreground">{summary}</div>}
+          {summary && (
+            <CellTooltip text={summary}>
+              <span data-cell-text className="truncate text-[11px] text-muted-foreground">{summary}</span>
+            </CellTooltip>
+          )}
         </div>
       );
     },
@@ -101,9 +107,11 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
     accessorFn: (a) => a.reason ?? "",
     cell: ({ row }) =>
       row.original.reason ? (
-        <span className="block max-w-80 truncate text-sm" title={row.original.reason}>
-          {row.original.reason}
-        </span>
+        <CellTooltip text={row.original.reason}>
+          <span data-cell-text className="block max-w-80 truncate text-sm">
+            {row.original.reason}
+          </span>
+        </CellTooltip>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),

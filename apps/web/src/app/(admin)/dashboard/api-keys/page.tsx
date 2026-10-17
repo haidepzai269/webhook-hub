@@ -10,23 +10,14 @@ import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CopyButton } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { formatDateTime } from "@/lib/hub/format";
 import {
@@ -39,23 +30,26 @@ import {
 } from "@/lib/hub/keys-logic";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Hộp "Chỉ hiện một lần" — key thô chỉ sống trong state của hộp này; đóng là mất (SK1, SPEC §3). */
 function ConnectionStringOnce({ connectionString }: { connectionString: string }) {
   const line = envLine(connectionString);
   const t = useT();
   return (
-    <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-sm">
-      <p className="mb-2 font-medium">{t("page.api-keys.once.title")}</p>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">{line}</code>
-        <CopyButton value={line} label={t("page.api-keys.once.copy")} />
-      </div>
-      <p className="mt-2 text-muted-foreground text-xs">
-        {t("page.api-keys.once.hint-before")} <b>{t("page.api-keys.once.hint-target")}</b>{" "}
-        {t("page.api-keys.once.hint-after")}
-      </p>
-    </div>
+    <Alert variant="warning">
+      <AlertTitle>{t("page.api-keys.once.title")}</AlertTitle>
+      <AlertDescription className="w-full">
+        <div className="flex w-full items-center gap-2">
+          <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-foreground text-xs">{line}</code>
+          <CopyButton value={line} label={t("page.api-keys.once.copy")} />
+        </div>
+        <p className="text-xs">
+          {t("page.api-keys.once.hint-before")} <b>{t("page.api-keys.once.hint-target")}</b> {t("page.api-keys.once.hint-after")}
+        </p>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -155,10 +149,15 @@ export default function ApiKeysPage() {
               </TableCell>
               <TableCell className="text-right">
                 {!k.revokedAt && (
-                  <Button size="sm" variant="ghost" onClick={() => setTarget(k)} title={t("page.api-keys.revoke-title")}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                  <Button size="sm" variant="ghost" onClick={() => setTarget(k)}>
                     <Ban />
                     {t("page.api-keys.revoke")}
                   </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("page.api-keys.revoke-title")}</TooltipContent>
+                  </Tooltip>
                 )}
               </TableCell>
             </TableRow>
@@ -192,7 +191,7 @@ export default function ApiKeysPage() {
                   <FieldLabel>{t("page.api-keys.field.scopes")}</FieldLabel>
                   {KEY_SCOPES.map(({ scope, hintKey }) => (
                     <label key={scope} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={scopes.includes(scope)} onChange={() => toggle(scope)} />
+                      <Checkbox checked={scopes.includes(scope)} onCheckedChange={() => toggle(scope)} />
                       <span className="font-mono text-xs">{scope}</span>
                       <span className="text-muted-foreground text-xs">— {t(hintKey)}</span>
                     </label>
@@ -221,39 +220,25 @@ export default function ApiKeysPage() {
         </AdminDialogContent>
       </Dialog>
 
-      <AlertDialog open={Boolean(target)} onOpenChange={(o) => !o && !revoke.isPending && setTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("page.api-keys.revoke-confirm", { service: target?.serviceName ?? "" })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("page.api-keys.revoke-warning", { tail: target ? prefixTail(target.keyPrefix) : "" })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoke.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={revoke.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                if (!target) return;
-                revoke.mutate(target.id, {
-                  onSuccess: () => {
-                    toast.success(t("page.api-keys.revoked"));
-                    setTarget(null);
-                  },
-                  onError: (err) => toast.error(t("page.api-keys.revoke-failed", { message: err.message })),
-                });
-              }}
-            >
-              {t("page.api-keys.revoke")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={Boolean(target)}
+        onOpenChange={(o) => !o && setTarget(null)}
+        title={t("page.api-keys.revoke-confirm", { service: target?.serviceName ?? "" })}
+        description={t("page.api-keys.revoke-warning", { tail: target ? prefixTail(target.keyPrefix) : "" })}
+        confirmLabel={t("page.api-keys.revoke")}
+        destructive
+        pending={revoke.isPending}
+        onConfirm={() => {
+          if (!target) return;
+          revoke.mutate(target.id, {
+            onSuccess: () => {
+              toast.success(t("page.api-keys.revoked"));
+              setTarget(null);
+            },
+            onError: (err) => toast.error(t("page.api-keys.revoke-failed", { message: err.message })),
+          });
+        }}
+      />
     </>
   );
 }

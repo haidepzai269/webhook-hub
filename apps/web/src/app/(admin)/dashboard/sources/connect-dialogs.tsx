@@ -10,12 +10,17 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useConfirm } from "@/components/admin/confirm-dialog";
+import { StatusBadge } from "@/components/admin/status-badge";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
 import { connectionDialogMode } from "@/lib/hub/ui-logic";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+import { Alert, AlertDescription, } from "@/components/ui/alert";
 
 /** KN2 (SPEC-ket-noi §4, ADR-138): form dựng từ `spec.fields` của connector — UI không biết provider nào có ô gì. */
 interface ConnectorInfo {
@@ -69,7 +74,9 @@ function StatusLine({ c }: { c: ConnectionView }) {
   return (
     <div className="flex flex-col gap-1 text-sm">
       <p>
-        {c.status === "PENDING" ? "⏳" : "❌"} <span title={c.status}>{t(CONNECTION_STATUS[c.status])}</span>
+        <StatusBadge tone={c.status === "PENDING" ? "progress" : "bad"} pulse={c.status === "PENDING"} tooltip={c.status}>
+          {t(CONNECTION_STATUS[c.status])}
+        </StatusBadge>
         {c.lastError ? ` · ${c.lastError}` : ""}
       </p>
       {c.fix && <p className="text-muted-foreground text-xs">{t("page.sources.connect.fix", { fix: c.fix })}</p>}
@@ -176,12 +183,14 @@ export function ConnectSourceDialog({
           <div className="flex flex-col gap-2">
             <StatusLine c={result} />
             {secretChanged && (
-              <p className="rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                {rich(t("page.sources.connect.secret-changed"), {
-                  both: <b>{t("page.sources.connect.secret-changed.both")}</b>,
-                  code: <code>secret_mismatch</code>,
-                })}
-              </p>
+              <Alert variant="warning">
+                <AlertDescription className="text-xs">
+                  {rich(t("page.sources.connect.secret-changed"), {
+                    both: <b>{t("page.sources.connect.secret-changed.both")}</b>,
+                    code: <code>secret_mismatch</code>,
+                  })}
+                </AlertDescription>
+              </Alert>
             )}
           </div>
         ) : !connectors.data?.length ? (
@@ -239,18 +248,18 @@ export function ConnectSourceDialog({
                   </FieldDescription>
                 ) : effMode === "existing" && target ? (
                   <>
-                    <select
-                      aria-label={t("page.sources.connect.existing-aria")}
-                      className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                      value={target.id}
-                      onChange={(e) => setExistingId(e.target.value)}
-                    >
-                      {candidates.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} · {s.sourceKey}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={target.id} onValueChange={setExistingId}>
+                      <SelectTrigger size="sm" className="w-full" aria-label={t("page.sources.connect.existing-aria")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {candidates.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name} · {s.sourceKey}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FieldDescription>{t("page.sources.connect.existing-keeps-both")}</FieldDescription>
                     <FieldDescription>
                       {t("page.sources.connect.existing-same-url", {
@@ -299,12 +308,16 @@ export function ConnectSourceDialog({
               ))}
               {spec && <p className="text-muted-foreground text-xs">{spec.keyHint}</p>}
               {spec?.overwriteWarning && (
-                <label className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-                  <span>
-                    <b>{t("page.sources.connect.ack-overwrite")}</b> {spec.overwriteWarning}
-                  </span>
-                </label>
+                <Alert variant="warning">
+                  <AlertDescription className="text-xs">
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <Checkbox checked={ack} onCheckedChange={(v) => setAck(v === true)} className="mt-0.5" />
+                      <span>
+                        <b>{t("page.sources.connect.ack-overwrite")}</b> {spec.overwriteWarning}
+                      </span>
+                    </label>
+                  </AlertDescription>
+                </Alert>
               )}
             </FieldGroup>
           </form>
@@ -335,6 +348,7 @@ export function ConnectionDialog({
   onConnect: (s: { id: string; provider: string }) => void;
 }) {
   const t = useT();
+  const { confirm, confirmDialog } = useConfirm();
   const sourceId = source?.id ?? null;
   const refresh = useRefresh();
   const connectors = useQuery({
@@ -410,21 +424,21 @@ export function ConnectionDialog({
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={act.isPending}
-                onClick={() =>
-                  window.confirm(t("page.sources.connection.disconnect-confirm")) && act.mutate("disconnect")
-                }
+                onClick={async () => {
+                  if (await confirm({ title: t("page.sources.connection.disconnect-confirm"), destructive: true })) act.mutate("disconnect");
+                }}
               >
                 {t("page.sources.connection.disconnect")}
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={act.isPending || !c.hasCredentials}
-                onClick={() =>
-                  window.confirm(t("page.sources.connection.delete-credentials-confirm")) && act.mutate("credentials")
-                }
+                onClick={async () => {
+                  if (await confirm({ title: t("page.sources.connection.delete-credentials-confirm"), destructive: true })) act.mutate("credentials");
+                }}
               >
                 {t("page.sources.connection.delete-credentials")}
               </Button>
@@ -433,6 +447,7 @@ export function ConnectionDialog({
         )}
         </DialogBody>
       </AdminDialogContent>
+      {confirmDialog}
     </Dialog>
   );
 }

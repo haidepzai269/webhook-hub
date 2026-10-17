@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, ChevronsLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n/use-t";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Trước / Sau theo cursor keyset (ADR-163) — không số trang, không OFFSET: "Sau" gửi `before=next` (cũ hơn),
@@ -36,17 +37,15 @@ export function CursorPager({
         {prev ? t("common.pager.older") : t("common.pager.at-newest")}
         {loading ? ` · ${t("common.pager.loading")}` : ""}
       </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className={off}
-        aria-disabled={!canPrev}
-        onClick={() => canPrev && onNewest()}
-        title={t("common.pager.newest")}
-      >
-        <ChevronsLeft />
-        <span className="sr-only sm:not-sr-only">{t("common.pager.newest")}</span>
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="sm" className={off} aria-disabled={!canPrev} onClick={() => canPrev && onNewest()}>
+            <ChevronsLeft />
+            <span className="sr-only sm:not-sr-only">{t("common.pager.newest")}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("common.pager.newest")}</TooltipContent>
+      </Tooltip>
       <Button variant="outline" size="sm" className={off} aria-disabled={!canPrev} onClick={() => canPrev && prev && onPrev(prev)}>
         <ChevronLeft />
         {t("common.pager.prev")}

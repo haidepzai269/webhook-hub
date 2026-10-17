@@ -13,10 +13,15 @@ import { FormDialog } from "@/components/admin/form-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { AcceptUnverifiedField } from "@/components/admin/accept-unverified-field";
+import { IconButton } from "@/components/admin/icon-button";
+import { useConfirm } from "@/components/admin/confirm-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDateTime } from "@/lib/hub/format";
 import {
   useCreateSubscription,
@@ -29,6 +34,7 @@ import type { Subscription } from "@/lib/hub/types";
 import { describeDeleteConflict } from "@/lib/hub/ui-logic";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { toneBadgeClass } from "@/components/admin/status-badge";
 
 /** Câu dịch có chỗ chèn phần tử (`{wildcard}`…): tách theo `{tên}` và thay bằng node tương ứng. */
 function rich(template: string, nodes: Record<string, ReactNode>): ReactNode {
@@ -87,8 +93,9 @@ function SubscriptionActions({ sub }: { sub: Subscription }) {
       },
     );
 
-  const remove = () => {
-    if (!window.confirm(t("page.subscriptions.delete-confirm", { name: sub.name }))) return;
+  const { confirm, confirmDialog } = useConfirm();
+  const remove = async () => {
+    if (!(await confirm({ title: t("page.subscriptions.delete-confirm", { name: sub.name }), confirmLabel: t("common.delete"), destructive: true }))) return;
     del.mutate(sub.id, {
       onSuccess: () => toast.success(t("page.subscriptions.toast.deleted", { name: sub.name })),
       onError: (e) => {
@@ -106,32 +113,29 @@ function SubscriptionActions({ sub }: { sub: Subscription }) {
   return (
     <div className="flex justify-end gap-1">
       {sub.isActive ? (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => toggle(false)}
-          title={t("page.subscriptions.toggle-off-title")}
-        >
-          <PowerOff />
-          {t("common.disable")}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(false)}>
+              <PowerOff />
+              {t("common.disable")}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("page.subscriptions.toggle-off-title")}</TooltipContent>
+        </Tooltip>
       ) : (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(true)}>
           <Power />
           {t("common.enable")}
         </Button>
       )}
-      <Button
-        size="sm"
-        variant="ghost"
+      <IconButton
+        icon={<Trash2 />}
         disabled={busy}
         onClick={remove}
-        aria-label={t("page.subscriptions.delete-aria", { name: sub.name })}
-        title={t("page.subscriptions.delete-title")}
-      >
-        <Trash2 />
-      </Button>
+        label={t("page.subscriptions.delete-aria", { name: sub.name })}
+        tooltip={t("page.subscriptions.delete-title")}
+      />
+      {confirmDialog}
     </div>
   );
 }
@@ -177,9 +181,11 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] 
     accessorFn: (s) => s.template ?? "",
     cell: ({ row }) =>
       row.original.template ? (
-        <span className="block max-w-56 truncate font-mono text-xs" title={row.original.template}>
-          {row.original.template}
-        </span>
+        <CellTooltip text={row.original.template}>
+          <span data-cell-text className="block max-w-56 truncate font-mono text-xs">
+            {row.original.template}
+          </span>
+        </CellTooltip>
       ) : (
         <span className="text-muted-foreground text-xs">{t("page.subscriptions.template-default")}</span>
       ),
@@ -197,7 +203,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] 
         )}
         {/* PK5 khoá 4: subscription nhận cả sự kiện chưa xác thực — nơi nhận phải tự kiểm chữ ký gốc. */}
         {row.original.acceptUnverified && (
-          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
+          <Badge variant="outline" className={toneBadgeClass("warn")}>
             {t("page.subscriptions.accept-unverified-badge")}
           </Badge>
         )}
@@ -376,13 +382,12 @@ export default function SubscriptionsPage() {
               control={form.control}
               name="acceptUnverified"
               render={({ field }) => (
-                <Field className="gap-1.5">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />
-                    {t("page.subscriptions.form.accept-unverified")}
-                  </label>
-                  <FieldDescription>{t("page.subscriptions.form.accept-unverified-hint")}</FieldDescription>
-                </Field>
+                <AcceptUnverifiedField
+                  checked={field.value}
+                  onChange={field.onChange}
+                  label={t("page.subscriptions.form.accept-unverified")}
+                  hint={t("page.subscriptions.form.accept-unverified-hint")}
+                />
               )}
             />
           </FieldGroup>

@@ -22,6 +22,7 @@ import {
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
 import { Settings2, RotateCcw, Skull } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -152,19 +153,35 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
             const AI = ACTION_ICON[a];
             const primary = a === "replay_delivery" || a === "renormalize";
             return (
-              <button
-                key={a}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onAction(a, stage, branch);
-                }}
-                className={`inline-flex h-6 items-center gap-1 rounded-md px-2 font-medium text-[11px] ${primary ? "flow-replay-btn" : "flow-pill"}`}
-                style={primary ? undefined : toneStyle("idle")}
-              >
-                <AI {...ICON_SM} aria-hidden />
-                {t(ACTION_LABEL[a])}
-              </button>
+              primary ? (
+                <Button
+                  key={a}
+                  type="button"
+                  variant="replay"
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAction(a, stage, branch);
+                  }}
+                >
+                  <AI {...ICON_SM} aria-hidden />
+                  {t(ACTION_LABEL[a])}
+                </Button>
+              ) : (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAction(a, stage, branch);
+                  }}
+                  className="flow-pill inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 font-medium text-[11px]"
+                  style={toneStyle("idle")}
+                >
+                  <AI {...ICON_SM} aria-hidden />
+                  {t(ACTION_LABEL[a])}
+                </button>
+              )
             );
           })}
         </div>

@@ -15,10 +15,13 @@ import { clock } from "@/components/flow/time";
 import { ICON, TONE_VAR } from "@/components/flow/tokens";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TimeRange } from "@/components/admin/time-range";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IconButton } from "@/components/admin/icon-button";
 import { formatRelative } from "@/lib/hub/format";
 import type { ExecutionFilters } from "@/lib/hub/flow-types";
 import { EXECUTION_PARAMS } from "@/lib/hub/list-url";
@@ -44,6 +47,12 @@ const TABS: { id: ExecutionStatus | "all"; label: MessageKey }[] = [
 const ALL = "__all";
 const isTypePattern = (x: string) => /^[a-z0-9_]+(\.[a-z0-9_]+)*(\.\*)?$/.test(x);
 const isIdPrefix = (x: string) => /^[0-9A-Za-z_-]{4,36}$/.test(x);
+
+/**
+ * Grid cố định 7 cột: Thời gian | Nhà cung cấp | Kiểu·đối tượng | Đường ống | Trạng thái | Hỏng ở | Mắt.
+ * Pipeline cố 9rem (đủ 6 chấm + khoảng cách), Status cố 7.5rem, FailedAt co giãn.
+ */
+const GRID_COLS = "grid-cols-[7rem_7.5rem_minmax(0,1fr)_9rem_7.5rem_minmax(0,1fr)_2rem]";
 
 /**
  * V2 — Danh sách hành trình (SPEC-event-flow-ui §4). Dùng `/flow/executions` (KHÔNG dùng
@@ -133,21 +142,16 @@ function ExecutionsView() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border p-0.5" role="tablist">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={status === tab.id}
-              onClick={() => url.setFilter({ status: tab.id === "all" ? null : tab.id })}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm ${status === tab.id ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {tab.id !== "all" && <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[EXECUTION_TONE[tab.id]] }} />}
-              {t(tab.label)}
-            </button>
-          ))}
-        </div>
+        <Tabs value={status} onValueChange={(id) => url.setFilter({ status: id === "all" ? null : id })}>
+          <TabsList variant="segmented">
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab.id} value={tab.id}>
+                {tab.id !== "all" && <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[EXECUTION_TONE[tab.id]] }} />}
+                {t(tab.label)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <Select value={source || ALL} onValueChange={(x) => url.setFilter({ source: x === ALL ? null : x })}>
           <SelectTrigger size="sm" className="w-48">
             <SelectValue placeholder={t("page.events.filter.source")} />
@@ -199,7 +203,7 @@ function ExecutionsView() {
       </div>
 
       <div className="flow-surface overflow-hidden rounded-2xl">
-        <div className="grid grid-cols-[7rem_8rem_minmax(10rem,1fr)_auto_7.5rem_minmax(12rem,1.2fr)_2rem] items-center gap-3 border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs">
+        <div className={`grid ${GRID_COLS} items-center gap-3 border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs`}>
           <span>{t("page.events.col.time")}</span>
           <span>{t("page.events.col.provider")}</span>
           <span>{t("page.events.col.type")}</span>
@@ -229,7 +233,7 @@ function ExecutionsView() {
               tabIndex={0}
               onClick={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
               onKeyDown={(e) => e.key === "Enter" && router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
-              className={`grid cursor-pointer grid-cols-[7rem_8rem_minmax(10rem,1fr)_auto_7.5rem_minmax(12rem,1.2fr)_2rem] items-center gap-3 border-b border-l-2 px-4 py-2 text-sm last:border-b-0 hover:bg-muted/40 ${anim.className ?? ""}`}
+              className={`grid cursor-pointer ${GRID_COLS} items-center gap-3 border-b border-l-2 px-4 py-2 text-sm last:border-b-0 hover:bg-muted/40 ${anim.className ?? ""}`}
               style={{
                 borderLeftColor: probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]],
                 contentVisibility: "auto",
@@ -237,40 +241,52 @@ function ExecutionsView() {
                 ...anim.style,
               }}
             >
+              {/* Thời gian */}
               <span className="text-xs tabular-nums" title={formatRelative(i.receivedAt, undefined, locale)}>
                 {clock(i.receivedAt)}
               </span>
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span className="text-muted-foreground">
-                  <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
+              {/* Nhà cung cấp */}
+              <CellTooltip text={i.providerLabel}>
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-muted-foreground">
+                    <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
+                  </span>
+                  <span data-cell-text className="truncate text-sm">{i.providerLabel}</span>
                 </span>
-                <span className="truncate">{i.providerLabel}</span>
-              </span>
+              </CellTooltip>
+              {/* Kiểu · đối tượng */}
               <span className="min-w-0">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate font-mono text-xs">{i.type ?? "—"}</span>
-                  {/* PK5 (E4): nhãn ở mọi nơi có event — hub không xác thực nguồn này. */}
-                  <UnverifiedBadge of={i} />
-                </span>
-                {i.subject && <span className="block truncate text-muted-foreground text-xs">{i.subject}</span>}
+                <CellTooltip text={i.type} className="flex">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span data-cell-text className="truncate font-mono text-xs">{i.type ?? "—"}</span>
+                    {/* PK5 (E4): nhãn ở mọi nơi có event — hub không xác thực nguồn này. */}
+                    <UnverifiedBadge of={i} />
+                  </span>
+                </CellTooltip>
+                {i.subject && (
+                  <CellTooltip text={i.subject} className="flex">
+                    <span data-cell-text className="block truncate text-muted-foreground text-xs">{i.subject}</span>
+                  </CellTooltip>
+                )}
               </span>
+              {/* Đường ống */}
               <MiniPipeline summary={i.summary} context={i} />
+              {/* Trạng thái */}
               <ExecutionStatusPill status={i.status} probe={probe} />
+              {/* Hỏng ở */}
               <FailedAt failedAt={i.failedAt} status={i.status} />
+              {/* Xem nhanh */}
               <span>
                 {i.eventId && (
-                  <Button
-                    variant="ghost"
+                  <IconButton
                     size="icon-xs"
-                    aria-label={t("page.events.quick-view")}
-                    title={t("page.events.quick-view")}
+                    icon={<Eye />}
+                    label={t("page.events.quick-view")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setQuick({ id: i.eventId, open: true });
                     }}
-                  >
-                    <Eye />
-                  </Button>
+                  />
                 )}
               </span>
             </div>
