@@ -6,6 +6,7 @@ import type { FlowBranch, StageView } from "@hub/flow";
 import { ChevronDown, ChevronRight, History, RotateCcw } from "lucide-react";
 
 import { CopyButton } from "@/components/admin/copy-button";
+import { EmptyState } from "@/components/admin/state";
 import { deliveryStatusKey } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -93,7 +94,7 @@ export function HeadersCard({ headers }: { headers: Record<string, unknown> | nu
   return (
     <FlowCard title={t("flow.card.headers")} right={<CopyButton value={JSON.stringify(headers ?? {}, null, 2)} label={t("flow.card.headers.copy")} />}>
       {entries.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("flow.card.headers.empty")}</p>
+        <EmptyState size="sm" title={t("flow.card.headers.empty")} />
       ) : (
         <div className="max-h-[26rem] overflow-auto rounded-lg border">
           {entries.map(([k, v]) => {
@@ -184,7 +185,7 @@ export function AttemptsCard({ branches, onReplay, replaying }: { branches: Flow
       title={t("flow.attempts.title")}
       right={<span className="text-muted-foreground text-xs tabular-nums">{t("flow.attempts.total", { count: total })}</span>}
     >
-      {branches.length === 0 && <p className="text-muted-foreground text-sm">{t("flow.attempts.empty")}</p>}
+      {branches.length === 0 && <EmptyState size="sm" title={t("flow.attempts.empty")} />}
       <div className="space-y-4">
         {branches.map((b) => {
           const done = b.stages[b.stages.length - 1];

@@ -9,6 +9,7 @@ import { useAuthBooting } from "@/components/admin/auth-guard";
 import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CopyButton } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
+import { ErrorState } from "@/components/admin/state";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,7 +110,7 @@ export default function ApiKeysPage() {
           </Button>
         }
       />
-      {error && <p className="text-destructive text-sm">{t("page.api-keys.load-error", { message: error.message })}</p>}
+      {error && <ErrorState className="mb-3" message={t("page.api-keys.load-error", { message: error.message })} onRetry={() => void keys.refetch()} />}
       <Table>
         <TableHeader>
           <TableRow>

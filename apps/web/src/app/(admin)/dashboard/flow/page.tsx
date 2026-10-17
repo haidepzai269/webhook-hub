@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTopology } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { ErrorState } from "@/components/admin/state";
 import { useT } from "@/lib/i18n/use-t";
 
 import { TraceFeed } from "../events/_components/trace-feed";
@@ -47,7 +48,7 @@ export default function FlowMapPage() {
   const [showSubscriptions, setShowSubscriptions] = useState(false);
   const [showUnused, setShowUnused] = useState(true);
   const [layoutVersion, setLayoutVersion] = useState(0);
-  const { data, error, isLoading } = useTopology(window);
+  const { data, error, isLoading, refetch } = useTopology(window);
   // ADR-161 (L5): source đang lọc vừa bị Xoá (lưu trữ) khỏi bản đồ -> bỏ lọc, không để bản đồ trống không lý do.
   useEffect(() => {
     if (sourceFilter && data && !data.nodes.some((n) => n.id === `src:${sourceFilter}`)) setSourceFilter(null);
@@ -168,7 +169,9 @@ export default function FlowMapPage() {
             <Skeleton className="h-40 w-2/3" />
           </div>
         ) : error ? (
-          <div className="grid h-full place-items-center text-destructive text-sm">{t("flow.load-error", { message: error.message })}</div>
+          <div className="grid h-full place-items-center p-4">
+            <ErrorState message={t("flow.load-error", { message: error.message })} onRetry={() => void refetch()} />
+          </div>
         ) : data ? (
           <TopologyCanvas
             topology={data}

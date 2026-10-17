@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useTimeseries } from "@/lib/hub/queries";
 import type { TimeseriesRange } from "@/lib/hub/types";
+import { ErrorState } from "@/components/admin/state";
 import { INTL_LOCALE } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
@@ -44,7 +45,7 @@ export function EventsChart() {
     [locale],
   );
   const [range, setRange] = useState<TimeseriesRange>("24h");
-  const { data, isLoading, isPlaceholderData, error } = useTimeseries(range);
+  const { data, isLoading, isPlaceholderData, error, refetch } = useTimeseries(range);
   // Định dạng nhãn theo range CỦA DỮ LIỆU đang vẽ, không theo nút vừa bấm — tránh vẽ bucket giờ bằng nhãn ngày.
   const dataRange: TimeseriesRange =
     data && data.length > 1 && new Date(data[1].bucket).getTime() - new Date(data[0].bucket).getTime() > 3_600_000
@@ -75,7 +76,7 @@ export function EventsChart() {
       </CardHeader>
       <CardContent>
         {error ? (
-          <p className="text-destructive text-sm">{t("page.dashboard.chart.load-error", { message: error.message })}</p>
+          <ErrorState inline message={t("page.dashboard.chart.load-error", { message: error.message })} onRetry={() => void refetch()} />
         ) : isLoading && !data ? (
           <Skeleton className="h-64 w-full" />
         ) : (

@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { SignatureBadge, UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +36,7 @@ function Row({ label, value, copy }: { label: string; value: string; copy?: bool
 export function EventSheet({ eventId, open, onClose }: { eventId: string | null; open: boolean; onClose: () => void }) {
   const t = useT();
   const locale = useLocale();
-  const { data: ev, isLoading, error } = useEventDetail(eventId);
+  const { data: ev, isLoading, error, refetch } = useEventDetail(eventId);
 
   return (
     <Sheet open={open && Boolean(eventId)} onOpenChange={(o) => !o && onClose()}>
@@ -63,9 +64,9 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
           {isLoading ? (
             <Skeleton className="h-64 w-full" />
           ) : error ? (
-            <p className="text-destructive text-sm">{t("page.events.load-error", { message: error.message })}</p>
+            <ErrorState message={t("page.events.load-error", { message: error.message })} onRetry={() => void refetch()} />
           ) : !ev ? (
-            <p className="text-muted-foreground text-sm">{t("page.events.sheet.not-found")}</p>
+            <EmptyState size="sm" title={t("page.events.sheet.not-found")} />
           ) : (
             <>
               <section className="space-y-1.5">

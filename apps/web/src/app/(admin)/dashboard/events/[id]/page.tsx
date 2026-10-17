@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/admin/copy-button";
+import { ErrorState } from "@/components/admin/state";
 import { AttemptsCard, FlowCard, HeadersCard, PayloadCard, Waterfall } from "@/components/flow/detail-cards";
 import { ExecutionStatusPill } from "@/components/flow/execution-bits";
 import { JourneyCanvas, journeyHeight } from "@/components/flow/journey-canvas";
@@ -62,7 +63,7 @@ export default function EventJourneyPage() {
   // F7: project đang xem (chọn ở V2/V3, nhớ trong localStorage) → `?projectId=` cho mọi gọi của trang.
   useEffect(() => restoreFlowProject(), []);
   const router = useRouter();
-  const { data, isLoading, error } = useEventFlow(id ? decodeURIComponent(id) : null);
+  const { data, isLoading, error, refetch } = useEventFlow(id ? decodeURIComponent(id) : null);
   useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
   const [selected, setSelected] = useState<{ stage: StageView; branch?: FlowBranch } | null>(null);
   const replay = useFlowReplayDelivery();
@@ -110,7 +111,7 @@ export default function EventJourneyPage() {
   const onSelect = useCallback((stage: StageView, branch?: FlowBranch) => setSelected({ stage, branch }), []);
 
   if (isLoading) return <Skeleton className="h-[70vh] w-full rounded-2xl" />;
-  if (error) return <p className="text-destructive text-sm">{t("page.events.load-error", { message: error.message })}</p>;
+  if (error) return <ErrorState message={t("page.events.load-error", { message: error.message })} onRetry={() => void refetch()} />;
   if (!data)
     return (
       <div className="space-y-3">

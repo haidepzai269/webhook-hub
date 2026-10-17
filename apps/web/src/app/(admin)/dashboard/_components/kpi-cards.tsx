@@ -7,6 +7,7 @@ import { Activity, Cable, CircleCheck, Inbox, Send, Skull } from "lucide-react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverview } from "@/lib/hub/queries";
+import { ErrorState } from "@/components/admin/state";
 import { INTL_LOCALE } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
@@ -16,7 +17,7 @@ function formatRate(rate: number | null): string {
 }
 
 export function KpiCards() {
-  const { data, isLoading, error } = useOverview();
+  const { data, isLoading, error, refetch } = useOverview();
   const t = useT();
   const nf = new Intl.NumberFormat(INTL_LOCALE[useLocale()]);
 
@@ -45,14 +46,7 @@ export function KpiCards() {
   ];
 
   if (error) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-destructive text-base">{t("page.dashboard.kpi.load-error")}</CardTitle>
-          <CardDescription>{error.message}</CardDescription>
-        </CardHeader>
-      </Card>
-    );
+    return <ErrorState message={`${t("page.dashboard.kpi.load-error")}: ${error.message}`} onRetry={() => void refetch()} />;
   }
 
   return (

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import {
   type ChartConfig,
   ChartContainer,
@@ -75,7 +76,7 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
   const t = useT();
   const locale = useLocale();
   const [range, setRange] = useState<TrafficRange>("1h");
-  const { data, isLoading, isPlaceholderData, error } = useSourceTraffic(sourceId, range);
+  const { data, isLoading, isPlaceholderData, error, refetch } = useSourceTraffic(sourceId, range);
   const chartConfig = useMemo<ChartConfig>(
     () => Object.fromEntries(TRAFFIC_OUTCOMES.map((k) => [k, { label: t(SERIES[k].key), color: SERIES[k].color }])),
     [t],
@@ -113,9 +114,9 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
       </ToggleGroup>
 
       {forbidden ? (
-        <p className="rounded-lg border px-3 py-2 text-muted-foreground text-sm">{t("traffic.forbidden")}</p>
+        <EmptyState size="sm" className="rounded-lg border" title={t("traffic.forbidden")} />
       ) : error ? (
-        <p className="text-destructive text-sm">{t("traffic.load-error", { message: error.message })}</p>
+        <ErrorState message={t("traffic.load-error", { message: error.message })} onRetry={() => void refetch()} />
       ) : isLoading && !data ? (
         <Skeleton className="h-64 w-full" />
       ) : data && text ? (

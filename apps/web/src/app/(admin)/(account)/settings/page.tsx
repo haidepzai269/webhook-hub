@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,7 +85,7 @@ function AlertSettings() {
   const put = (patch: AlertPreferencesPatch) => save.mutate(patch, { onError: (err) => toast.error(errorText(err)) });
 
   if (prefs.isLoading) return <Skeleton className="h-64 w-full" />;
-  if (prefs.isError || !prefs.data) return <p className="text-destructive text-sm">{t("page.settings.load-error")}</p>;
+  if (prefs.isError || !prefs.data) return <ErrorState message={t("page.settings.load-error")} onRetry={() => void prefs.refetch()} />;
   const p = prefs.data;
   const sw = emailSwitchState(p);
   const rows = ruleRows(p.rules, p.emailRules);
@@ -207,7 +208,7 @@ function AlertSettings() {
               <h3 className="font-medium text-sm">{t("page.settings.alerts.muted.title")}</h3>
               <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.hint")}</p>
               {(projects.data ?? []).length === 0 ? (
-                <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.empty")}</p>
+                <EmptyState size="sm" title={t("page.settings.alerts.muted.empty")} />
               ) : (
                 <MuteList
                   projects={projects.data ?? []}
@@ -266,7 +267,7 @@ function MuteList({
         />
       </div>
       {view.matched === 0 ? (
-        <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.no-match")}</p>
+        <EmptyState size="sm" title={t("page.settings.alerts.muted.no-match")} />
       ) : (
         <ul className="grid gap-1.5 sm:grid-cols-2">
           {view.rows.map((pr) => (

@@ -1,6 +1,7 @@
 "use client";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
+import { ErrorState } from "@/components/admin/state";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -58,9 +59,9 @@ export function ListenSheet({ source, onClose }: { source: Source | null; onClos
 function ListenBlock({ sourceId }: { sourceId: string }) {
   const t = useT();
   const locale = useLocale();
-  const { data, isLoading, error } = useSourceInspect(sourceId);
+  const { data, isLoading, error, refetch } = useSourceInspect(sourceId);
   if (isLoading) return <Skeleton className="m-4 h-24" />;
-  const errorLine = error && <p className="text-destructive text-sm">{t("page.sources.listen.error", { message: error.message })}</p>;
+  const errorLine = error && <ErrorState message={t("page.sources.listen.error", { message: error.message })} onRetry={() => void refetch()} />;
   // Review PK1 T-5: chưa có dữ liệu thì chỉ báo lỗi; đã có thì lỗi là băng-rôn phía trên, bảng cũ giữ nguyên.
   if (!data) return <div className="p-4">{errorLine}</div>;
   const state = connectionState(data);

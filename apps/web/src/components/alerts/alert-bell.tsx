@@ -12,6 +12,7 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { IconButton } from "@/components/admin/icon-button";
+import { EmptyState } from "@/components/admin/state";
 import { primaryHref } from "@/lib/alerts/links";
 import { ackAllIds, bellBadge, groupForBell } from "@/lib/alerts/notify-logic";
 import type { AlertView } from "@/lib/alerts/types";
@@ -130,7 +131,7 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
 
       <div className="scroll-area min-h-0 flex-1">
         {status !== "ready" && <p className="px-4 py-6 text-center text-muted-foreground text-sm">{t(STATUS_TEXT[status])}</p>}
-        {status === "ready" && groups.length === 0 && <EmptyState />}
+        {status === "ready" && groups.length === 0 && <BellEmpty />}
         {status === "ready" &&
           groups.map((g) => (
             <section key={g.project.id} className="border-b last:border-b-0">
@@ -211,10 +212,15 @@ function BellPanel({ onNavigate }: { onNavigate: () => void }) {
 }
 
 /** Trống: minh hoạ nhỏ vẽ tay bằng SVG (không ảnh nặng) + câu trấn an. */
-function EmptyState() {
+function BellEmpty() {
   const t = useT();
   return (
-    <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
+    <EmptyState
+      size="sm"
+      className="px-6 py-8"
+      title={t("alerts.bell.empty-title")}
+      description={t("alerts.bell.empty-body")}
+      illustration={
       <svg width="64" height="56" viewBox="0 0 64 56" aria-hidden className="text-muted-foreground">
         <circle cx="32" cy="28" r="26" fill="currentColor" opacity="0.08" />
         <path
@@ -228,8 +234,7 @@ function EmptyState() {
         <circle cx="45" cy="15" r="7" fill="var(--ok)" />
         <path d="m41.8 15 2.2 2.2 4-4.2" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
-      <p className="font-medium text-sm">{t("alerts.bell.empty-title")}</p>
-      <p className="text-muted-foreground text-xs">{t("alerts.bell.empty-body")}</p>
-    </div>
+      }
+    />
   );
 }

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,11 +73,14 @@ export default function StoragePage() {
       {!projectId && !booting ? (
         <p className="text-muted-foreground text-sm">{t("page.storage.no-project")}</p>
       ) : q.error ? (
-        <p className="text-muted-foreground text-sm">
-          {q.error instanceof HubApiError && q.error.status === 403
-            ? t("page.storage.forbidden")
-            : t("page.storage.load-error", { message: q.error instanceof HubApiError ? errorMessageOf(q.error.body, t) : String(q.error) })}
-        </p>
+        <ErrorState
+          message={
+            q.error instanceof HubApiError && q.error.status === 403
+              ? t("page.storage.forbidden")
+              : t("page.storage.load-error", { message: q.error instanceof HubApiError ? errorMessageOf(q.error.body, t) : String(q.error) })
+          }
+          onRetry={() => void q.refetch()}
+        />
       ) : !q.data ? (
         <Skeleton className="h-40 w-full" />
       ) : (
@@ -282,7 +286,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
         <CardDescription>{t("page.storage.computed-at", { at: fmt(data.suggestionsAt) })}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        {data.suggestions.length === 0 && <p className="text-muted-foreground text-sm">{t("page.storage.suggestions-empty")}</p>}
+        {data.suggestions.length === 0 && <EmptyState size="sm" title={t("page.storage.suggestions-empty")} />}
         {data.suggestions.map((s) => (
           <div key={s.id} className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-0.5 text-sm">

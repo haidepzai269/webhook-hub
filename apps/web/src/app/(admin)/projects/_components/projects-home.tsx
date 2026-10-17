@@ -27,6 +27,7 @@ import { AccountTopBar } from "@/components/admin/account-menu";
 import { AuthGuard } from "@/components/admin/auth-guard";
 import { CreateProjectDialog, type CreateProjectInput } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { roleLabel } from "@/components/flow/project-picker-logic";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -313,22 +314,20 @@ export function GridSkeleton() {
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function ProjectsEmpty({ onCreate }: { onCreate: () => void }) {
   const t = useT();
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
-      <span className="flex size-12 items-center justify-center rounded-full bg-muted">
-        <FolderKanban className="size-6 text-muted-foreground" />
-      </span>
-      <div className="space-y-1">
-        <p className="font-medium">{t("page.projects.home.empty.title")}</p>
-        <p className="max-w-sm text-muted-foreground text-sm">{t("page.projects.home.empty.body")}</p>
-      </div>
-      <Button onClick={onCreate}>
-        <Plus />
-        {t("page.projects.create")}
-      </Button>
-    </div>
+    <EmptyState
+      icon={<FolderKanban />}
+      title={t("page.projects.home.empty.title")}
+      description={t("page.projects.home.empty.body")}
+      action={
+        <Button onClick={onCreate}>
+          <Plus />
+          {t("page.projects.create")}
+        </Button>
+      }
+    />
   );
 }
 
@@ -389,7 +388,7 @@ function Home({ demo }: { demo: boolean }) {
 
   const renderBody = () => {
     if (loading) return <GridSkeleton />;
-    if (projects.length === 0) return <EmptyState onCreate={() => setOpen(true)} />;
+    if (projects.length === 0) return <ProjectsEmpty onCreate={() => setOpen(true)} />;
     if (shown.length === 0)
       return (
         <p className="rounded-xl border border-dashed px-6 py-12 text-center text-muted-foreground text-sm">
@@ -457,9 +456,11 @@ function Home({ demo }: { demo: boolean }) {
         )}
 
         {real.error && !demo && (
-          <p className="mb-4 text-destructive text-sm">
-            {t("page.projects.home.stats-error", { message: real.error.message })}
-          </p>
+          <ErrorState
+            className="mb-4"
+            message={t("page.projects.home.stats-error", { message: real.error.message })}
+            onRetry={() => void real.refetch()}
+          />
         )}
 
         {renderBody()}

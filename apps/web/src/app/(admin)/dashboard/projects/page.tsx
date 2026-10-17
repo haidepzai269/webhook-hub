@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { CreateProjectDialog } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
+import { ErrorState } from "@/components/admin/state";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -131,7 +132,7 @@ export default function ProjectsPage() {
   const t = useT();
   const operator = useIsOperator();
   const roleLabel = (role: string | undefined) => (role && ROLE_KEY[role] ? t(ROLE_KEY[role]) : (role ?? "—"));
-  const { data, isLoading, error } = useProjects();
+  const { data, isLoading, error, refetch } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const setProjectId = useFlowProjectStore((s) => s.setProjectId);
   const [open, setOpen] = useState(false);
@@ -148,7 +149,7 @@ export default function ProjectsPage() {
           </Button>
         }
       />
-      {error && <p className="text-destructive text-sm">{t("page.projects.load-error", { message: error.message })}</p>}
+      {error && <ErrorState className="mb-3" message={t("page.projects.load-error", { message: error.message })} onRetry={() => void refetch()} />}
       <Table>
         <TableHeader>
           <TableRow>

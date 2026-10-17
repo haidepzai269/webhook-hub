@@ -7,6 +7,7 @@ import { Eye, Pause, Play, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { expectedProbe } from "@/components/flow/event-notes";
 import { EXECUTION_TONE, ExecutionStatusPill, FailedAt, MiniPipeline } from "@/components/flow/execution-bits";
 import { ProjectPicker } from "@/components/flow/project-picker";
@@ -219,8 +220,8 @@ function ExecutionsView() {
             ))}
           </div>
         )}
-        {q.error && <p className="p-4 text-destructive text-sm">{t("page.events.load-error", { message: q.error.message })}</p>}
-        {!q.isLoading && items.length === 0 && <p className="p-6 text-center text-muted-foreground text-sm">{t("page.events.no-match")}</p>}
+        {q.error && <ErrorState inline className="p-4" message={t("page.events.load-error", { message: q.error.message })} onRetry={() => void q.refetch()} />}
+        {!q.isLoading && items.length === 0 && <EmptyState size="sm" className="py-8" title={t("page.events.no-match")} />}
         {items.map((i) => {
           // Request kiểm tra kết nối của provider (ADR-159) → viền xám + pill "Kiểm tra kết nối", như ngăn Nhật ký.
           const probe = expectedProbe(i);

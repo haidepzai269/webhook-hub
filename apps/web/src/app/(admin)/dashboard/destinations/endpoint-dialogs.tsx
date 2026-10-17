@@ -6,6 +6,7 @@ import { Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { AdminDialogContent } from "@/components/admin/overlay-content";
+import { EmptyState } from "@/components/admin/state";
 import { DeliveryStatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -317,7 +318,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
             <div className="text-sm">
               <p className="mb-1 font-medium">{t("page.destinations.endpoint.recent")}</p>
               {(detail.data?.deliveries ?? []).length === 0 && (
-                <p className="text-muted-foreground text-xs">{t("page.destinations.endpoint.recent-empty")}</p>
+                <EmptyState size="sm" className="items-start py-2 text-left" title={t("page.destinations.endpoint.recent-empty")} />
               )}
               <ul className="flex flex-col gap-1">
                 {(detail.data?.deliveries ?? []).map((d) => (
