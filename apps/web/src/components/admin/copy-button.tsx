@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useT } from "@/lib/i18n/use-t";
 import { Button } from "@/components/ui/button";
+import { JsonViewer } from "@/components/flow/json-viewer";
 import { IconButton } from "@/components/admin/icon-button";
 
 /**
@@ -64,17 +65,19 @@ export function CopyButton({
   );
 }
 
+/**
+ * Khối JSON MỘT kiểu (ADR-247): `JsonViewer` (tô cú pháp, gập/mở, số dòng) + nút chép JSON ở góc. Event-sheet, playground và
+ * thẻ chi tiết hành trình đều đi qua đây/`JsonViewer` — không còn `<pre>` riêng.
+ */
 export function JsonBlock({ value, maxHeight = "24rem" }: { value: unknown; maxHeight?: string }) {
   const t = useT();
   const text = JSON.stringify(value, null, 2) ?? "null";
   return (
-    <div className="relative rounded-md border bg-muted/40">
-      <div className="absolute top-1 right-1">
+    <div className="relative">
+      <div className="absolute top-1 right-1 z-10 rounded-md bg-background/80">
         <CopyButton value={text} label={t("admin.copy.json")} />
       </div>
-      <pre className="overflow-auto p-3 pr-9 font-mono text-xs leading-relaxed" style={{ maxHeight }}>
-        {text}
-      </pre>
+      <JsonViewer value={value} maxHeight={maxHeight} />
     </div>
   );
 }
