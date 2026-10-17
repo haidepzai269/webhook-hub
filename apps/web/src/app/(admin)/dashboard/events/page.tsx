@@ -7,7 +7,7 @@ import { Eye, Pause, Play, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
-import { EmptyState, ErrorState } from "@/components/admin/state";
+import { GridList, GridListRow } from "@/components/admin/grid-list";
 import { expectedProbe } from "@/components/flow/event-notes";
 import { EXECUTION_TONE, ExecutionStatusPill, FailedAt, MiniPipeline } from "@/components/flow/execution-bits";
 import { ProjectPicker } from "@/components/flow/project-picker";
@@ -20,7 +20,6 @@ import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageSkeleton } from "@/components/admin/skeletons";
-import { Skeleton } from "@/components/ui/skeleton";
 import { TimeRange } from "@/components/admin/time-range";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconButton } from "@/components/admin/icon-button";
@@ -205,43 +204,34 @@ function ExecutionsView() {
       </div>
 
       <div className="flow-surface overflow-hidden rounded-2xl">
-        <div className={`grid ${GRID_COLS} items-center gap-3 border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs`}>
-          <span>{t("page.events.col.time")}</span>
-          <span>{t("page.events.col.provider")}</span>
-          <span>{t("page.events.col.type")}</span>
-          <span>{t("page.events.col.pipeline")}</span>
-          <span>{t("page.events.col.status")}</span>
-          <span>{t("page.events.col.failed-at")}</span>
-          <span />
-        </div>
-        {q.isLoading && (
-          <div className="space-y-2 p-4">
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
-          </div>
-        )}
-        {q.error && <ErrorState inline className="p-4" message={t("page.events.load-error", { message: q.error.message })} onRetry={() => void q.refetch()} />}
-        {!q.isLoading && items.length === 0 && <EmptyState size="sm" className="py-8" title={t("page.events.no-match")} />}
+        <GridList
+          template={GRID_COLS}
+          headers={[
+            t("page.events.col.time"),
+            t("page.events.col.provider"),
+            t("page.events.col.type"),
+            t("page.events.col.pipeline"),
+            t("page.events.col.status"),
+            t("page.events.col.failed-at"),
+            null,
+          ]}
+          loading={q.isLoading}
+          error={q.error}
+          onRetry={() => void q.refetch()}
+          isEmpty={items.length === 0}
+          emptyText={t("page.events.no-match")}
+        >
         {items.map((i) => {
           // Request kiểm tra kết nối của provider (ADR-159) → viền xám + pill "Kiểm tra kết nối", như ngăn Nhật ký.
           const probe = expectedProbe(i);
           const anim = unroll(i.id);
           return (
-            // biome-ignore lint/a11y/useSemanticElements: hàng bảng bấm được
-            <div
+            <GridListRow
               key={i.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
-              onKeyDown={(e) => e.key === "Enter" && router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
-              className={`grid cursor-pointer ${GRID_COLS} items-center gap-3 border-b border-l-2 px-4 py-2 text-sm last:border-b-0 hover:bg-muted/40 ${anim.className ?? ""}`}
-              style={{
-                borderLeftColor: probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]],
-                contentVisibility: "auto",
-                containIntrinsicSize: "auto 44px",
-                ...anim.style,
-              }}
+              onActivate={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
+              className={anim.className}
+              tone={probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]]}
+              style={{ contentVisibility: "auto", containIntrinsicSize: "auto 44px", ...anim.style }}
             >
               {/* Thời gian */}
               <span className="text-xs tabular-nums" title={formatRelative(i.receivedAt, undefined, locale)}>
@@ -291,12 +281,13 @@ function ExecutionsView() {
                   />
                 )}
               </span>
-            </div>
+            </GridListRow>
           );
         })}
         <div ref={sentinel} className="h-6" />
         {q.isFetchingNextPage && <p className="pb-3 text-center text-muted-foreground text-xs">{t("page.events.loading-more")}</p>}
         {!q.hasNextPage && items.length > 0 && <p className="pb-3 text-center text-muted-foreground text-xs">{t("page.events.end")}</p>}
+        </GridList>
       </div>
 
       <EventSheet eventId={quick.id} open={quick.open} onClose={() => setQuick((s) => ({ ...s, open: false }))} />

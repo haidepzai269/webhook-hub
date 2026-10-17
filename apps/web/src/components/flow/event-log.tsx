@@ -13,8 +13,8 @@ import {
 
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, EyeOff, Pause, Play, Search, Terminal } from "lucide-react";
-import Link from "next/link";
 
+import { GridList, GridListRow } from "@/components/admin/grid-list";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -310,19 +310,17 @@ function EventLogPanel() {
           onScroll={(e) => setAwayFromTop(e.currentTarget.scrollTop > 24)}
         >
           {/* Hẹp hơn tổng min cột → cuộn ngang trong ngăn (log-layout.ts) thay vì đè chữ. */}
-          <div style={{ minWidth: MIN_WIDTH }}>
-            <div
-              className="sticky top-0 z-[1] grid items-center gap-3 border-b border-l-2 border-l-transparent px-3 py-1 font-sans text-[11px] text-muted-foreground uppercase tracking-wide"
-              style={{ gridTemplateColumns: GRID_TEMPLATE, borderBottomColor: "var(--flow-card-border)", background: "var(--flow-card-solid)" }}
-            >
-              {LOG_COLUMNS.map((c) => (
-                <span key={c.key} className="truncate">
-                  {t(c.labelKey)}
-                </span>
-              ))}
-            </div>
-            {isLoading && <div className="px-3 py-2 text-muted-foreground">{t("common.loading")}</div>}
-            {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">{t("journey.log.empty")}</div>}
+          <GridList
+            template={GRID_TEMPLATE}
+            minWidth={MIN_WIDTH}
+            density="sm"
+            sticky
+            headerStyle={{ borderBottomColor: "var(--flow-card-border)", background: "var(--flow-card-solid)" }}
+            headers={LOG_COLUMNS.map((c) => t(c.labelKey))}
+            loading={isLoading}
+            isEmpty={items.length === 0}
+            emptyText={t("journey.log.empty")}
+          >
             {items.map((i) => {
               // Request kiểm tra kết nối của provider đúng thiết kế (ADR-159) → viền + nhãn trung tính, không "Thành công" xanh.
               const probe = expectedProbe(i);
@@ -331,11 +329,12 @@ function EventLogPanel() {
               const note = describeEvent(i, t);
               const anim = unroll(i.id);
               return (
-                <Link
+                <GridListRow
                   key={i.id}
                   href={`/dashboard/events/${encodeURIComponent(i.id)}`}
-                  className={`grid items-center gap-3 border-l-2 px-3 py-1 hover:bg-muted/50 ${anim.className ?? ""}`}
-                  style={{ gridTemplateColumns: GRID_TEMPLATE, borderLeftColor: color, ...anim.style }}
+                  className={anim.className}
+                  tone={color}
+                  style={anim.style}
                 >
                   <span className="truncate text-muted-foreground tabular-nums">{clock(i.receivedAt)}</span>
                   <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
@@ -364,7 +363,7 @@ function EventLogPanel() {
                   <span className="min-w-0 truncate font-sans text-xs" style={{ color: NOTE_COLOR[note.tone] }} title={note.text}>
                     {note.text}
                   </span>
-                </Link>
+                </GridListRow>
               );
             })}
             <div ref={sentinel} className="h-4" />
@@ -378,7 +377,7 @@ function EventLogPanel() {
               </div>
             )}
             {!hasNextPage && all.length > 0 && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">{t("journey.log.end")}</div>}
-          </div>
+          </GridList>
         </div>
       )}
     </div>
