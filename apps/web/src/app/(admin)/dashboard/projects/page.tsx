@@ -21,29 +21,12 @@ import { useSetUnverifiedSources, useUnverifiedSources } from "@/lib/hub/project
 import { useSetStorageQuota } from "@/lib/hub/storage-queries";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
-import { formatBytes, levelSeg, levelTone, parseLevel, parseQuotaInput } from "@/lib/storage/storage-logic";
+import { parseQuotaInput } from "@/lib/storage/storage-logic";
+import { UsageMeter } from "@/components/storage/usage-meter";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
 const ROLE_KEY: Record<string, MessageKey> = { owner: "page.projects.role.owner", member: "page.projects.role.member" };
 const ENV_KEY: Record<string, MessageKey> = { test: "page.projects.env.test", live: "page.projects.env.live" };
-
-/** QT7 (§9): cột mức sử dụng (ước tính) của người vận hành — % + nấc, màu theo nấc. */
-function UsageCell({ usage }: { usage: NonNullable<ProjectSummary["usage"]> }) {
-  const t = useT();
-  const level = parseLevel(usage.level);
-  const color = { ok: "var(--muted-foreground)", warning: "var(--warning)", danger: "var(--danger)" }[levelTone(level)];
-  return (
-    <span className="whitespace-nowrap text-xs tabular-nums" title={t("page.storage.estimated")}>
-      <span style={{ color }} className="font-medium">
-        {usage.usedPct}%
-      </span>{" "}
-      <span className="text-muted-foreground">
-        {formatBytes(usage.usedBytes)} / {formatBytes(usage.quotaBytes)}
-        {level !== "OK" ? ` · ${t(`page.storage.level.${levelSeg(level)}` as MessageKey)}` : ""}
-      </span>
-    </span>
-  );
-}
 
 /** QT7 (§2, §9): ô ghi đè `storage_quota_mb` — trống = mặc định env. Chỉ operator (server: OperatorGuard). */
 function QuotaOverride({ projectId, name, value }: { projectId: string; name: string; value: number | null }) {
@@ -173,7 +156,7 @@ export default function ProjectsPage() {
               id: "usage",
               header: t("page.storage.col.usage"),
               enableSorting: false,
-              cell: ({ row }) => (row.original.usage ? <UsageCell usage={row.original.usage} /> : "—"),
+              cell: ({ row }) => (row.original.usage ? <UsageMeter usage={row.original.usage} /> : "—"),
             },
             {
               id: "quota",

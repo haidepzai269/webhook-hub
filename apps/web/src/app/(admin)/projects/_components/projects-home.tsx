@@ -41,15 +41,13 @@ import { useProjectStore } from "@/lib/hub/project-store";
 import { formatDate, formatNumber } from "@/lib/hub/format";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
-import { barPct, formatBytes, levelSeg, levelTone, parseLevel } from "@/lib/storage/storage-logic";
+import { UsageMeter } from "@/components/storage/usage-meter";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 import { DEMO_CURRENT_ID, DEMO_PROJECTS } from "./demo-projects";
 
 const ROLE_ICON = { owner: Crown, developer: CodeXml, viewer: Eye } as const;
-const TONE_COLOR = { ok: "var(--primary)", warning: "var(--warning)", danger: "var(--danger)" } as const;
-
 /** ADR-235: viền thẻ theo sức khoẻ — xanh / đỏ / trung tính (ring mặc định của Card). */
 const HEALTH_RING: Record<ProjectHealthTone, string> = {
   ok: "ring-2 ring-[var(--ok)]/70",
@@ -89,37 +87,6 @@ function ProjectAvatar({ p }: { p: ProjectSummary }) {
     >
       {initials(p.name)}
     </span>
-  );
-}
-
-function UsageBar({ usage }: { usage: NonNullable<ProjectSummary["usage"]> }) {
-  const t = useT();
-  const level = parseLevel(usage.level);
-  const color = TONE_COLOR[levelTone(level)];
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="text-muted-foreground">{t("page.projects.home.usage")}</span>
-        <span className="tabular-nums">
-          <span className="font-medium" style={{ color: level === "OK" ? undefined : color }}>
-            {usage.usedPct}%
-          </span>
-          <span className="text-muted-foreground">
-            {" "}
-            · {formatBytes(usage.usedBytes)} / {formatBytes(usage.quotaBytes)}
-          </span>
-        </span>
-      </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-muted"
-        title={level !== "OK" ? t(`page.storage.level.${levelSeg(level)}` as MessageKey) : undefined}
-      >
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${barPct(usage.usedPct)}%`, background: color }}
-        />
-      </div>
-    </div>
   );
 }
 
@@ -227,7 +194,7 @@ function ProjectCard({ p, current, onOpen }: { p: ProjectSummary; current: boole
 
         {p.stats && <StatGrid stats={p.stats} />}
 
-        {p.usage && <UsageBar usage={p.usage} />}
+        {p.usage && <UsageMeter variant="bar" usage={p.usage} label={t("page.projects.home.usage")} />}
 
         <div className="mt-auto flex items-center justify-between gap-2 border-t pt-3">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
