@@ -14,12 +14,13 @@ import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageSkeleton } from "@/components/admin/skeletons";
-import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
+import { shortId } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import { AUDIT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
 import type { AuditLog } from "@/lib/hub/types";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
-import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
@@ -48,16 +49,13 @@ function metaSummary(meta: unknown, t: TranslateFn): string {
   return "";
 }
 
-const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => [
+const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
   {
     id: "createdAt",
     header: t("page.audit.col.time"),
     accessorFn: (a) => a.createdAt,
     cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.createdAt, locale)}>
-        {formatDateTime(row.original.createdAt, locale)}
-        <span className="block text-[11px] text-muted-foreground">{formatRelative(row.original.createdAt, undefined, locale)}</span>
-      </span>
+<TimeCell iso={row.original.createdAt} mode="both" />
     ),
     enableHiding: false,
   },
@@ -125,8 +123,8 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
  */
 function AuditView() {
   const t = useT();
-  const locale = useLocale();
-  const columns = useMemo(() => buildColumns(t, locale), [t, locale]);
+  const _locale = useLocale();
+  const columns = useMemo(() => buildColumns(t), [t]);
   const url = useUrlParams(AUDIT_PARAMS);
   const v = url.values;
   const facets = useAuditFacets();

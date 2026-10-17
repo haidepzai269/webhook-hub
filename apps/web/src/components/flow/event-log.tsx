@@ -23,7 +23,7 @@ import { EVENT_LOG_PARAMS, EXECUTION_STATUS_VALUES } from "@/lib/hub/list-url";
 import type { ExecutionsPage } from "@/lib/hub/flow-types";
 import { flowKeys, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
-import { INTL_LOCALE, type Locale } from "@/lib/i18n/dictionary";
+import { clock } from "./time";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { useUnroll } from "@/lib/ui/use-unroll";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -69,11 +69,6 @@ const NOTE_COLOR: Record<NoteTone, string> = {
   error: TONE_VAR.crashed,
 };
 
-function time(iso: string, locale: Locale) {
-  const d = new Date(iso);
-  return `${d.toLocaleTimeString(INTL_LOCALE[locale], { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-}
-
 /**
  * Nhật ký sự kiện trực tiếp (SPEC §0A.C): ngăn dưới kiểu console trên V3. Mỗi dòng = một hành trình
  * rút gọn (cùng `/flow/executions` với V2), màu theo kết quả, bấm → V1. Cập nhật bằng invalidate
@@ -93,7 +88,7 @@ export function EventLog() {
 
 function EventLogPanel() {
   const t = useT();
-  const locale = useLocale();
+  const _locale = useLocale();
   const [open, setOpen] = useState(true);
   const [paused, setPaused] = useState(false);
   const [q, setQ] = useState("");
@@ -342,7 +337,7 @@ function EventLogPanel() {
                   className={`grid items-center gap-3 border-l-2 px-3 py-1 hover:bg-muted/50 ${anim.className ?? ""}`}
                   style={{ gridTemplateColumns: GRID_TEMPLATE, borderLeftColor: color, ...anim.style }}
                 >
-                  <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt, locale)}</span>
+                  <span className="truncate text-muted-foreground tabular-nums">{clock(i.receivedAt)}</span>
                   <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
                     <span className="shrink-0 text-muted-foreground">
                       <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />

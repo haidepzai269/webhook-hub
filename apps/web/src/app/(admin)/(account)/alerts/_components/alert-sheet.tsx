@@ -12,7 +12,8 @@ import { factRows } from "@/lib/alerts/facts";
 import { alertActions } from "@/lib/alerts/links";
 import type { AlertView } from "@/lib/alerts/types";
 import { useAckAlert } from "@/lib/hub/alert-queries";
-import { formatRelative, formatStamp, shortId } from "@/lib/hub/format";
+import { formatRelative, shortId } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import { useIsOperator, useMeId } from "@/lib/hub/me-store";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
@@ -126,8 +127,8 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
                 />
                 <div className={s.done ? "text-sm" : "text-muted-foreground text-sm"}>{s.label}</div>
                 {s.at && (
-                  <div className="text-muted-foreground text-xs" title={s.at}>
-                    {formatStamp(s.at, { seconds: true })} · {formatRelative(s.at, undefined, locale)}
+                  <div className="flex gap-1 text-muted-foreground text-xs">
+                    <TimeCell iso={s.at} mode="absolute" /> · <TimeCell iso={s.at} />
                   </div>
                 )}
               </li>

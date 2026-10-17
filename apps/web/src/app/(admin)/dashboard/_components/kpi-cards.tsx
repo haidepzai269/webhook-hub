@@ -8,7 +8,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverview } from "@/lib/hub/queries";
 import { ErrorState } from "@/components/admin/state";
-import { INTL_LOCALE } from "@/lib/i18n/dictionary";
+import { formatNumber } from "@/lib/hub/format";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 /** `successRate = null` khi chưa có delivery nào (S2-2) — hiện "—", không bịa 100%. */
@@ -19,7 +19,7 @@ function formatRate(rate: number | null): string {
 export function KpiCards() {
   const { data, isLoading, error, refetch } = useOverview();
   const t = useT();
-  const nf = new Intl.NumberFormat(INTL_LOCALE[useLocale()]);
+  const locale = useLocale();
 
   const items = [
     { label: t("page.dashboard.kpi.sources"), value: data?.totalSources, icon: Inbox, href: "/dashboard/sources" },
@@ -63,7 +63,7 @@ export function KpiCards() {
                 {isLoading || it.value === undefined ? (
                   <Skeleton className="h-8 w-16" />
                 ) : typeof it.value === "number" ? (
-                  nf.format(it.value)
+                  formatNumber(it.value, locale)
                 ) : (
                   it.value
                 )}

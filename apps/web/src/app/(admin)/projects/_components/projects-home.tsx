@@ -38,6 +38,7 @@ import { HubApiError } from "@/lib/hub/client";
 import { type ProjectSummary, useProjectsWithStats } from "@/lib/hub/flow-project";
 import { type ProjectHealthTone, type ProjectStats, projectHealth, projectHealthLabel } from "@/lib/hub/project-health";
 import { useProjectStore } from "@/lib/hub/project-store";
+import { formatDate, formatNumber } from "@/lib/hub/format";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { barPct, formatBytes, levelSeg, levelTone, parseLevel } from "@/lib/storage/storage-logic";
@@ -138,7 +139,6 @@ const STAT_CELLS: {
 function StatGrid({ stats }: { stats: ProjectStats }) {
   const t = useT();
   const locale = useLocale();
-  const fmt = new Intl.NumberFormat(locale === "vi" ? "vi-VN" : "en-US");
   return (
     <dl className="grid grid-cols-3 gap-x-2 gap-y-2 rounded-lg bg-muted/40 px-3 py-2">
       {STAT_CELLS.map(({ stat, label }) => {
@@ -157,20 +157,13 @@ function StatGrid({ stats }: { stats: ProjectStats }) {
                 warn && "text-[var(--warning)]",
               )}
             >
-              {fmt.format(n)}
+              {formatNumber(n, locale)}
             </dd>
           </div>
         );
       })}
     </dl>
   );
-}
-
-function formatDate(iso: string, locale: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-US", { dateStyle: "medium" }).format(d);
 }
 
 function ProjectCard({ p, current, onOpen }: { p: ProjectSummary; current: boolean; onOpen: () => void }) {

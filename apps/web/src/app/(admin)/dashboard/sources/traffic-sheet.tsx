@@ -21,7 +21,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { HubApiError } from "@/lib/hub/client";
 import { useSourceTraffic } from "@/lib/hub/traffic-queries";
 import type { Source } from "@/lib/hub/types";
-import { INTL_LOCALE, type MessageKey } from "@/lib/i18n/dictionary";
+import { formatNumber, chartTimeFormatters } from "@/lib/hub/format";
+import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { INSIGHT_DOT, INSIGHT_TONE } from "@/lib/insights/message";
 import {
@@ -33,7 +34,6 @@ import {
 } from "@/lib/traffic/message";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-const TZ = "Asia/Ho_Chi_Minh";
 
 /** Màu từng kết quả — cùng bảng màu với biểu đồ Tổng quan (xanh = nhận, đỏ = lỗi, hổ phách = vượt trần). */
 const SERIES: Record<TrafficOutcome, { key: MessageKey; color: string }> = {
@@ -81,14 +81,8 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
     () => Object.fromEntries(TRAFFIC_OUTCOMES.map((k) => [k, { label: t(SERIES[k].key), color: SERIES[k].color }])),
     [t],
   );
-  const [timeFmt, dayFmt] = useMemo(
-    () => [
-      new Intl.DateTimeFormat(INTL_LOCALE[locale], { hour: "2-digit", minute: "2-digit", timeZone: TZ }),
-      new Intl.DateTimeFormat(INTL_LOCALE[locale], { day: "2-digit", month: "2-digit", timeZone: TZ }),
-    ],
-    [locale],
-  );
-  const nf = useMemo(() => new Intl.NumberFormat(INTL_LOCALE[locale]), [locale]);
+  // Bucket lưu lượng cắt theo epoch (UTC, không theo múi giờ cố định) → nhãn theo giờ máy người xem (ADR-246).
+  const { time: timeFmt, day: dayFmt } = chartTimeFormatters(locale);
   const dataRange = data?.range ?? range;
   const tick = (v: string) => (dataRange === "7d" ? dayFmt.format(new Date(v)) : timeFmt.format(new Date(v)));
 
@@ -190,7 +184,7 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
                       {data.topIps.map((r) => (
                         <TableRow key={r.ip}>
                           <TableCell className="font-mono text-xs">{r.ip}</TableCell>
-                          <TableCell className="text-right tabular-nums">{nf.format(r.count)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatNumber(r.count, locale)}</TableCell>
                           <TableCell className="text-right tabular-nums">
                             {r.count > 0 ? `${Math.round((r.rejected / r.count) * 100)}%` : "—"}
                           </TableCell>

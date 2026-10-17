@@ -18,7 +18,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useTimeseries } from "@/lib/hub/queries";
 import type { TimeseriesRange } from "@/lib/hub/types";
 import { ErrorState } from "@/components/admin/state";
-import { INTL_LOCALE } from "@/lib/i18n/dictionary";
+import { chartTimeFormatters } from "@/lib/hub/format";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 const SERIES = {
@@ -28,6 +28,10 @@ const SERIES = {
   dead: { labelKey: "page.dashboard.chart.dead", color: "oklch(0.63 0.22 25)" },
 } as const;
 
+/**
+ * Bucket do SERVER cắt theo giờ Việt Nam (`TIMESERIES_TZ = 'Asia/Ho_Chi_Minh'`, libs/database tenant-scoped.repository) —
+ * nhãn phải dùng ĐÚNG múi giờ đó (không dùng giờ máy) để ranh giới ngày khớp bucket; hiển thị kèm nhãn múi giờ (ADR-246).
+ */
 const TZ = "Asia/Ho_Chi_Minh";
 
 export function EventsChart() {
@@ -37,13 +41,7 @@ export function EventsChart() {
     () => Object.fromEntries(Object.entries(SERIES).map(([k, v]) => [k, { label: t(v.labelKey), color: v.color }])),
     [t],
   );
-  const [hourFmt, dayFmt] = useMemo(
-    () => [
-      new Intl.DateTimeFormat(INTL_LOCALE[locale], { hour: "2-digit", minute: "2-digit", timeZone: TZ }),
-      new Intl.DateTimeFormat(INTL_LOCALE[locale], { day: "2-digit", month: "2-digit", timeZone: TZ }),
-    ],
-    [locale],
-  );
+  const { time: hourFmt, day: dayFmt } = chartTimeFormatters(locale, TZ);
   const [range, setRange] = useState<TimeseriesRange>("24h");
   const { data, isLoading, isPlaceholderData, error, refetch } = useTimeseries(range);
   // Định dạng nhãn theo range CỦA DỮ LIỆU đang vẽ, không theo nút vừa bấm — tránh vẽ bucket giờ bằng nhãn ngày.
@@ -59,7 +57,7 @@ export function EventsChart() {
         <CardTitle>{t("page.dashboard.chart.title")}</CardTitle>
         <CardDescription>
           {t(range === "24h" ? "page.dashboard.chart.desc-24h" : "page.dashboard.chart.desc-7d")} ·{" "}
-          {t("page.dashboard.chart.desc-note")}
+          {t("page.dashboard.chart.desc-note")} · {t("page.dashboard.chart.tz")}
         </CardDescription>
         <CardAction>
           <ToggleGroup

@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconButton } from "@/components/admin/icon-button";
 import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
-import { formatDateTime } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import { useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
 import { isUnverifiedSource, unverifiedSourceBlocked } from "@/lib/hub/unverified";
@@ -59,7 +59,7 @@ import {
   WHEN_KIND_CHOICES,
 } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
-import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
@@ -214,7 +214,7 @@ void _formShape;
 // ADR-211: hub trả URL ingest (HUB_INGEST_PUBLIC_URL) khi có URL công khai; không có thì ghép như cũ.
 const fullUrl = (s: Source) => s.ingestUrl || `${HUB_API_URL}${s.webhookUrl}`;
 
-const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubColumn<Source>[] => [
+const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] => [
   {
     id: "name",
     header: t("common.name"),
@@ -288,7 +288,7 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     id: "createdAt",
     header: t("common.created-at"),
     accessorFn: (s) => s.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
+    cell: ({ row }) => <TimeCell iso={row.original.createdAt} mode="absolute" />,
   },
   {
     id: "connection",
@@ -351,9 +351,9 @@ function SourceCount() {
 
 export default function SourcesPage() {
   const t = useT();
-  const locale = useLocale();
+  const _locale = useLocale();
   const canTraffic = useCanViewTraffic();
-  const columns = useMemo(() => makeColumns(t, locale, canTraffic), [t, locale, canTraffic]);
+  const columns = useMemo(() => makeColumns(t, canTraffic), [t, canTraffic]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSources();
   const create = useCreateSource();

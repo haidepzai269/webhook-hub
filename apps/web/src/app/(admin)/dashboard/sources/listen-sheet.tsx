@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DetailSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatDateTime } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import {
   connectionState,
   diagnosisParts,
@@ -58,7 +58,7 @@ export function ListenSheet({ source, onClose }: { source: Source | null; onClos
 
 function ListenBlock({ sourceId }: { sourceId: string }) {
   const t = useT();
-  const locale = useLocale();
+  const _locale = useLocale();
   const { data, isLoading, error, refetch } = useSourceInspect(sourceId);
   if (isLoading) return <DetailSkeleton rows={3} className="p-4" />;
   const errorLine = error && <ErrorState message={t("page.sources.listen.error", { message: error.message })} onRetry={() => void refetch()} />;
@@ -101,7 +101,9 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
           <TableBody>
             {data.map((r) => (
               <TableRow key={r.id}>
-                <TableCell className="whitespace-nowrap text-xs">{formatDateTime(r.receivedAt, locale)}</TableCell>
+                <TableCell>
+                  <TimeCell iso={r.receivedAt} mode="absolute" />
+                </TableCell>
                 <TableCell>
                   <Badge variant={r.status === "ACCEPTED" || r.diagnosis?.reason === "handshake" ? "outline" : r.status === "REJECTED" ? "destructive" : "secondary"}>
                     {r.status}

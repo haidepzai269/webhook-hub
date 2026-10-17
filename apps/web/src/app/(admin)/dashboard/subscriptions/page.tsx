@@ -22,7 +22,7 @@ import { AcceptUnverifiedField } from "@/components/admin/accept-unverified-fiel
 import { IconButton } from "@/components/admin/icon-button";
 import { useConfirm } from "@/components/admin/confirm-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatDateTime } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import {
   useCreateSubscription,
   useDeleteSubscription,
@@ -32,7 +32,7 @@ import {
 } from "@/lib/hub/queries";
 import type { Subscription } from "@/lib/hub/types";
 import { describeDeleteConflict } from "@/lib/hub/ui-logic";
-import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
@@ -140,7 +140,7 @@ function SubscriptionActions({ sub }: { sub: Subscription }) {
   );
 }
 
-const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] => [
+const makeColumns = (t: TranslateFn): HubColumn<Subscription>[] => [
   {
     id: "name",
     header: t("common.name"),
@@ -214,7 +214,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] 
     id: "createdAt",
     header: t("common.created-at"),
     accessorFn: (s) => s.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
+    cell: ({ row }) => <TimeCell iso={row.original.createdAt} mode="absolute" />,
   },
   {
     id: "actions",
@@ -227,8 +227,8 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] 
 
 export default function SubscriptionsPage() {
   const t = useT();
-  const locale = useLocale();
-  const columns = useMemo(() => makeColumns(t, locale), [t, locale]);
+  const _locale = useLocale();
+  const columns = useMemo(() => makeColumns(t), [t]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSubscriptions();
   const destinations = useDestinations();

@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
-import { formatDateTime } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import {
   type ApiKeySummary,
   envLine,
@@ -57,7 +57,7 @@ function ConnectionStringOnce({ connectionString }: { connectionString: string }
 /** SK1 (SPEC-shop-ket-noi-project §3): API key của project ĐANG CHỌN — tạo (copy connection string một lần), thu hồi. */
 export default function ApiKeysPage() {
   const t = useT();
-  const locale = useLocale();
+  const _locale = useLocale();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const project = useProjects().data?.find((p) => p.id === projectId);
   const keys = useApiKeys(projectId);
@@ -144,7 +144,7 @@ export default function ApiKeysPage() {
                 </div>
               </TableCell>
               <TableCell className="font-mono text-xs">…{prefixTail(k.keyPrefix)}</TableCell>
-              <TableCell className="text-xs">{k.lastUsedAt ? formatDateTime(k.lastUsedAt, locale) : t("page.api-keys.never-used")}</TableCell>
+              <TableCell>{k.lastUsedAt ? <TimeCell iso={k.lastUsedAt} /> : <span className="text-xs">{t("page.api-keys.never-used")}</span>}</TableCell>
               <TableCell>
                 <Badge variant={k.revokedAt ? "destructive" : "outline"}>{t(keyStatus(k))}</Badge>
               </TableCell>

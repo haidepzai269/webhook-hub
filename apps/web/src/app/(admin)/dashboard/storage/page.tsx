@@ -32,8 +32,9 @@ import {
   useStoragePolicies,
 } from "@/lib/hub/storage-queries";
 import { errorMessageOf } from "@/lib/hub/ui-logic";
+import { formatStamp } from "@/lib/hub/format";
 import type { MessageKey } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import {
   IMPORTANCES,
   type Importance,
@@ -106,10 +107,9 @@ function useOverview() {
   return { projectId, data: useStorage(projectId, { poll: true }).data };
 }
 
+/** Mốc ngày giờ gọn (dd/MM HH:mm, 24 giờ ở mọi ngôn ngữ) — dùng chung `formatStamp` của lib/hub/format. */
 function useDateTime() {
-  const locale = useLocale();
-  return (iso: string | null | undefined) =>
-    iso ? new Intl.DateTimeFormat(locale === "en" ? "en-US" : "vi-VN", { dateStyle: "short", timeStyle: "short", hourCycle: "h23" }).format(new Date(iso)) : "—";
+  return (iso: string | null | undefined) => formatStamp(iso);
 }
 
 function UsageCard() {

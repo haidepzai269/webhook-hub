@@ -5,10 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { HubColumn } from "@/components/admin/data-table";
 import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
-import { formatDateTime, formatRelative, httpTone, shortId } from "@/lib/hub/format";
+import { formatDateTime, httpTone, shortId } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
 import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
-import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 
@@ -50,7 +51,7 @@ export function RetryCountdown({ iso }: { iso: string }) {
 }
 
 /** Cột bảng lượt giao theo ngôn ngữ — header là chuỗi để menu ẩn/hiện cột của DataTable đọc được. */
-export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<Delivery>[] => [
+export const buildDeliveryColumns = (t: TranslateFn): HubColumn<Delivery>[] => [
   {
     id: "status",
     header: t("page.deliveries.col.status"),
@@ -157,15 +158,13 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
     header: t("page.deliveries.col.updated"),
     accessorFn: (d) => d.updatedAt,
     cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.updatedAt, locale)}>
-        {formatRelative(row.original.updatedAt, undefined, locale)}
-      </span>
+<TimeCell iso={row.original.updatedAt} />
     ),
   },
 ];
 
 export function useDeliveryColumns(): HubColumn<Delivery>[] {
   const t = useT();
-  const locale = useLocale();
-  return useMemo(() => buildDeliveryColumns(t, locale), [t, locale]);
+  const _locale = useLocale();
+  return useMemo(() => buildDeliveryColumns(t), [t]);
 }
