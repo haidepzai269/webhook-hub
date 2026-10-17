@@ -53,3 +53,14 @@ export function formatRelative(iso: string | null | undefined, now = Date.now(),
 export function shortId(id: string, n = 8): string {
   return id.length > n ? `${id.slice(0, n)}…` : id;
 }
+
+/** Tone trạng thái chung (khớp `StatusTone` của components/admin/status-badge). */
+export type HttpToneName = "ok" | "warn" | "bad" | "info" | "idle" | "progress";
+
+/** Tone của mã HTTP phản hồi — MỘT chuẩn cho pill, cột bảng, dòng thời gian: không phản hồi = idle, 2xx = ok, 408/429 = warn, còn lại = bad. */
+export function httpTone(status: number | null | undefined): HttpToneName {
+  if (!status) return "idle";
+  if (status < 300) return "ok";
+  if (status === 408 || status === 429) return "warn";
+  return "bad";
+}

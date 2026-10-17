@@ -225,3 +225,14 @@ html {
     translate: none !important;
   }
 }
+
+/* Màu trạng thái dùng chung (StatusBadge): đặt --tone rồi thêm class này. */
+.tone-badge {
+  border-color: color-mix(in oklch, var(--tone) 45%, transparent);
+  background-color: color-mix(in oklch, var(--tone) 12%, transparent);
+  color: color-mix(in oklch, var(--tone) 70%, var(--foreground));
+}
+
+.tone-text {
+  color: color-mix(in oklch, var(--tone) 70%, var(--foreground));
+}

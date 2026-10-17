@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { HubColumn } from "@/components/admin/data-table";
-import { DeliveryStatusBadge } from "@/components/admin/status-badge";
+import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
-import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
+import { formatDateTime, formatRelative, httpTone, shortId } from "@/lib/hub/format";
 import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
@@ -18,13 +18,6 @@ function lastAttempt(d: Delivery): DeliveryAttempt | undefined {
     (a, b) => (!a || b.attemptNo > a.attemptNo ? b : a),
     undefined,
   );
-}
-
-function httpTone(status: number | null | undefined) {
-  if (!status) return "text-muted-foreground";
-  if (status >= 200 && status < 300) return "text-emerald-600 dark:text-emerald-400";
-  if (status >= 500 || status === 408 || status === 429) return "text-amber-600 dark:text-amber-400";
-  return "text-rose-600 dark:text-rose-400";
 }
 
 /** Đếm ngược tới `next_attempt_at` (S2-2) — tick mỗi giây, tự dừng khi đã tới giờ. */
@@ -118,7 +111,7 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
     accessorFn: (d) => String(lastAttempt(d)?.responseStatus ?? ""),
     cell: ({ row }) => {
       const a = lastAttempt(row.original);
-      return <span className={`font-mono text-xs ${httpTone(a?.responseStatus)}`}>{a?.responseStatus ?? "—"}</span>;
+      return <span className={`font-mono text-xs ${toneTextClass(httpTone(a?.responseStatus))}`}>{a?.responseStatus ?? "—"}</span>;
     },
   },
   {
