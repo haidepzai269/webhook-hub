@@ -284,7 +284,7 @@ export function GenericFields({
       {unv && (
         // PK5 (SPEC-provider-khac §7, ADR-206): bốn khoá phải nói rõ TRƯỚC khi tạo — hub không xác thực, project phải bật cờ,
         // đích phải tự bật nhận và tự verify chữ ký gốc; trần 45KB (E17); dung lượng ≈ 2,33× body (E26).
-        <Alert variant="warning">
+        <Alert variant="warning" role="note">
           <AlertTitle>{t("page.sources.generic.unverified.title")}</AlertTitle>
           <AlertDescription>
             {t("page.sources.generic.unverified.note", { kb: UNVERIFIED_MAX_BODY_KB, factor: UNVERIFIED_STORAGE_FACTOR.toLocaleString() })}

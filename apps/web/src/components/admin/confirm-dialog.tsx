@@ -40,7 +40,11 @@ export interface ConfirmDialogProps {
   extraActions?: ReactNode;
 }
 
-/** Hộp xác nhận dùng chung (thay `window.confirm` và AlertDialog chép tay). */
+/**
+ * Hộp xác nhận dùng chung (thay `window.confirm` và AlertDialog chép tay) — dạng CONTROLLED.
+ * Bấm xác nhận KHÔNG tự đóng: nơi gọi giữ `open`, truyền `pending` khi mutation chạy và tự đóng khi xong
+ * (lỗi thì hộp vẫn mở). Hộp hỏi nhanh không cần pending -> dùng `useConfirm()`.
+ */
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -102,15 +106,19 @@ export interface ConfirmOptions {
 /**
  * Thay `window.confirm` kiểu Promise: `const { confirm, confirmDialog } = useConfirm();`
  * rồi `if (!(await confirm({ title, destructive: true }))) return;` — nhớ render `{confirmDialog}` trong JSX.
+ * Khác `ConfirmDialog` controlled: hộp ĐÓNG NGAY khi người dùng chọn (Xác nhận/Huỷ/Esc), KHÔNG có `pending`;
+ * việc chạy sau khi xác nhận thuộc nơi gọi. Cần giữ hộp mở lúc chạy -> dùng `ConfirmDialog` + `pending`.
  */
 export function useConfirm() {
+  const [open, setOpen] = useState(false);
+  // Giữ nội dung cuối để hộp còn chữ trong lúc chạy animation đóng (không co lại thành rỗng).
   const [opts, setOpts] = useState<ConfirmOptions | null>(null);
   const resolver = useRef<((ok: boolean) => void) | null>(null);
 
   const settle = useCallback((ok: boolean) => {
     resolver.current?.(ok);
     resolver.current = null;
-    setOpts(null);
+    setOpen(false);
   }, []);
 
   const confirm = useCallback((o: ConfirmOptions) => {
@@ -118,12 +126,13 @@ export function useConfirm() {
     return new Promise<boolean>((resolve) => {
       resolver.current = resolve;
       setOpts(o);
+      setOpen(true);
     });
   }, []);
 
   const confirmDialog = (
     <ConfirmDialog
-      open={opts !== null}
+      open={open}
       onOpenChange={(o) => !o && settle(false)}
       title={opts?.title}
       description={opts?.description}

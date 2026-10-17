@@ -117,13 +117,13 @@ function AlertSettings() {
             </label>
           </div>
           {p.email && (
-            <p className="flex items-center gap-1.5 pl-7 text-muted-foreground text-xs">
+            <p className="flex items-center gap-1.5 pl-12 text-muted-foreground text-xs">
               <Mail className="size-3.5" />
               {t("page.settings.alerts.email-to", { email: p.email })}
             </p>
           )}
           {sw.reasonKey && (
-            <p className="pl-7 text-amber-700 text-xs dark:text-amber-400">
+            <p className="pl-12 text-amber-700 text-xs dark:text-amber-400">
               {t(sw.reasonKey, { email: p.email ?? "" })}
             </p>
           )}

@@ -32,6 +32,7 @@ import { type FlowItemKind, useFlowArchive, useFlowSetActive } from "@/lib/hub/f
 import { subscribeHubSocket } from "@/lib/hub/socket";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { layoutLR } from "./layout";
 import {
@@ -258,22 +259,26 @@ const TopologyCard = memo(function TopologyCard({ data, selected }: NodeProps<No
       </div>
       {manageKind && (
         // L4: nút mở hộp "Ngắt / Kết nối lại / Xoá" — nằm NGOÀI phần bị làm mờ của thẻ đã ngắt (flow.css) nên luôn đủ tương phản.
-        <button
-          type="button"
-          className="flow-manage-btn nodrag nopan absolute right-2 bottom-2 grid size-6 place-items-center rounded-md transition hover:bg-[var(--flow-card-border)]"
-          style={{ color: "var(--flow-text-dim)" }}
-          aria-label={t(disconnected ? "flow.node.manage-aria-connect" : "flow.node.manage-aria-disconnect", {
-            noun: t(KIND_NOUN[manageKind]),
-            label: node.label,
-          })}
-          title={t(disconnected ? "flow.node.manage-title-connect" : "flow.node.manage-title-disconnect")}
-          onClick={(e) => {
-            e.stopPropagation();
-            onManage(node);
-          }}
-        >
-          <Ellipsis {...ICON_SM} aria-hidden />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="flow-manage-btn nodrag nopan absolute right-2 bottom-2 grid size-6 place-items-center rounded-md transition hover:bg-[var(--flow-card-border)]"
+            style={{ color: "var(--flow-text-dim)" }}
+            aria-label={t(disconnected ? "flow.node.manage-aria-connect" : "flow.node.manage-aria-disconnect", {
+              noun: t(KIND_NOUN[manageKind]),
+              label: node.label,
+            })}
+            onClick={(e) => {
+              e.stopPropagation();
+              onManage(node);
+            }}
+          >
+            <Ellipsis {...ICON_SM} aria-hidden />
+          </button>
+          </TooltipTrigger>
+          <TooltipContent>{t(disconnected ? "flow.node.manage-title-connect" : "flow.node.manage-title-disconnect")}</TooltipContent>
+        </Tooltip>
       )}
       {((dst && ((dst.verification && dst.verification !== "VERIFIED") || dst.circuitState !== "CLOSED" || dst.throttleRps > 0 || dst.retrying > 0 || dst.dead > 0)) || (src && src.rejected > 0)) && (
         <div className="mt-2 flex flex-wrap items-center gap-1">

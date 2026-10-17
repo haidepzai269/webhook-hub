@@ -17,16 +17,18 @@ const alertVariants = cva(
   }
 )
 
+/** `role` mặc định `status` (thông tin, không ngắt trình đọc màn hình); `destructive` mặc định `alert`. Truyền `role="note"` cho ghi chú tĩnh. */
 function Alert({
   className,
   variant = "info",
+  role,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
     <div
       data-slot="alert"
       data-variant={variant}
-      role="alert"
+      role={role ?? (variant === "destructive" ? "alert" : "status")}
       className={cn(alertVariants({ variant }), className)}
       {...props}
     />

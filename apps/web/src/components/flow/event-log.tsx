@@ -26,6 +26,7 @@ import { useUrlParams } from "@/lib/hub/use-url-params";
 import { INTL_LOCALE, type Locale } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { useUnroll } from "@/lib/ui/use-unroll";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { shouldAutoLoadMore, shouldResetHead } from "./event-log-logic";
 import { describeEvent, expectedProbe, type NoteTone } from "./event-notes";
@@ -219,7 +220,9 @@ function EventLogPanel() {
       style={open ? { height: height ?? "25svh" } : undefined}
     >
       {/* Tay kéo mép trên: hover hiện con trỏ row-resize + vạch nhỏ. */}
-      {/* biome-ignore lint/a11y/useSemanticElements: <hr> không nhận pointer kéo; separator ngang là vai trò đúng */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* biome-ignore lint/a11y/useSemanticElements: <hr> không nhận pointer kéo; separator ngang là vai trò đúng */}
       <div
         role="separator"
         aria-orientation="horizontal"
@@ -229,7 +232,6 @@ function EventLogPanel() {
         aria-valuemax={aria?.max}
         aria-valuetext={aria ? t("journey.log.resize-value", { n: aria.now }) : undefined}
         tabIndex={0}
-        title={t("journey.log.resize-title")}
         className="flow-log-resizer absolute inset-x-0 top-0 z-10 h-2 cursor-row-resize touch-none"
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
@@ -237,6 +239,9 @@ function EventLogPanel() {
         onPointerCancel={onDragEnd}
         onKeyDown={onResizeKey}
       />
+        </TooltipTrigger>
+        <TooltipContent>{t("journey.log.resize-title")}</TooltipContent>
+      </Tooltip>
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5" style={{ borderColor: "var(--flow-card-border)" }}>
         <Terminal {...ICON} className="text-muted-foreground" aria-hidden />
         <span className="font-medium text-sm">{t("journey.log.title")}</span>
@@ -272,16 +277,20 @@ function EventLogPanel() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                variant={logProbes === "hide" ? "secondary" : "ghost"}
-                size="sm"
-                aria-pressed={logProbes === "hide"}
-                title={t("journey.log.hide-probes-title")}
-                onClick={() => url.setFilter({ logProbes: logProbes === "hide" ? null : "hide" })}
-              >
-                <EyeOff {...ICON} />
-                {t("journey.log.hide-probes")}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={logProbes === "hide" ? "secondary" : "ghost"}
+                    size="sm"
+                    aria-pressed={logProbes === "hide"}
+                    onClick={() => url.setFilter({ logProbes: logProbes === "hide" ? null : "hide" })}
+                  >
+                    <EyeOff {...ICON} />
+                    {t("journey.log.hide-probes")}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("journey.log.hide-probes-title")}</TooltipContent>
+              </Tooltip>
             </>
           )}
           {open && (

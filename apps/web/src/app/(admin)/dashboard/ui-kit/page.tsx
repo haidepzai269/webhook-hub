@@ -76,7 +76,7 @@ export default function UiKitPage() {
           <IconButton icon={<Eye />} label="Cỡ xs" size="icon-xs" />
         </Section>
 
-        <Section title="ConfirmDialog / useConfirm" hint="Thay hộp confirm của trình duyệt. Hộp không tự đóng — nơi gọi đóng khi mutation xong.">
+        <Section title="ConfirmDialog / useConfirm" hint="Thay hộp confirm của trình duyệt. ConfirmDialog (controlled) KHÔNG tự đóng khi xác nhận — nơi gọi truyền pending và đóng khi xong. useConfirm() đóng ngay khi chọn, không có pending.">
           <Button variant="outline" onClick={() => setOpen(true)}>
             ConfirmDialog (controlled)
           </Button>

@@ -217,9 +217,12 @@ html {
   .animate-out {
     animation-duration: 1ms !important;
   }
-  .animate-spin,
   .animate-pulse {
     animation: none !important;
+  }
+  /* Spinner vẫn phải báo "đang chạy": chỉ làm chậm, không tắt. */
+  .animate-spin {
+    animation-duration: 2s !important;
   }
   [data-slot="button"]:active {
     translate: none !important;

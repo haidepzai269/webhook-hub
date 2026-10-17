@@ -31,6 +31,7 @@ import {
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Hộp "Chỉ hiện một lần" — key thô chỉ sống trong state của hộp này; đóng là mất (SK1, SPEC §3). */
 function ConnectionStringOnce({ connectionString }: { connectionString: string }) {
@@ -148,10 +149,15 @@ export default function ApiKeysPage() {
               </TableCell>
               <TableCell className="text-right">
                 {!k.revokedAt && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                   <Button size="sm" variant="ghost" onClick={() => setTarget(k)}>
                     <Ban />
                     {t("page.api-keys.revoke")}
                   </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("page.api-keys.revoke-title")}</TooltipContent>
+                  </Tooltip>
                 )}
               </TableCell>
             </TableRow>
