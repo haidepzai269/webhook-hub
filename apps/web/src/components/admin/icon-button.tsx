@@ -8,8 +8,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 type ButtonProps = ComponentProps<typeof Button>;
 
 export interface IconButtonProps extends Omit<ButtonProps, "children" | "title" | "aria-label" | "size"> {
-  /** Nhãn: vừa là `aria-label` vừa là nội dung tooltip (thay `title=` trần — chậm, không có trên cảm ứng). */
+  /** Nhãn đọc cho trình đọc màn hình (`aria-label`); cũng là nội dung tooltip nếu không có `tooltip`. */
   label: string;
+  /** Nội dung tooltip khác nhãn (vd nhãn aria có tên dòng, tooltip chỉ nói hành động). Thay `title=` trần. */
+  tooltip?: string;
   /** Icon (lucide) — nút chỉ có icon. */
   icon: ReactNode;
   size?: "icon" | "icon-xs" | "icon-sm" | "icon-lg";
@@ -17,7 +19,7 @@ export interface IconButtonProps extends Omit<ButtonProps, "children" | "title" 
 }
 
 /** Nút chỉ có icon: Button + Tooltip + aria-label. TooltipProvider gốc đã bọc ở layout admin. */
-export function IconButton({ label, icon, size = "icon-sm", variant = "ghost", tooltipSide, type = "button", ...props }: IconButtonProps) {
+export function IconButton({ label, tooltip, icon, size = "icon-sm", variant = "ghost", tooltipSide, type = "button", ...props }: IconButtonProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -25,7 +27,7 @@ export function IconButton({ label, icon, size = "icon-sm", variant = "ghost", t
           {icon}
         </Button>
       </TooltipTrigger>
-      <TooltipContent side={tooltipSide}>{label}</TooltipContent>
+      <TooltipContent side={tooltipSide}>{tooltip ?? label}</TooltipContent>
     </Tooltip>
   );
 }

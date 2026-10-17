@@ -63,8 +63,7 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
                   />
                   <span className="truncate font-medium text-sm">Webhook Hub</span>
                 </div>
-                {/* Nút dùng chung không tự đặt con trỏ — gắn ở đây cho mọi nút của thanh. */}
-                <div className="flex items-center gap-2 [&_button]:cursor-pointer">
+                <div className="flex items-center gap-2">
                   <RealtimeBadge />
                   <LayoutControls />
                   {/* CB4/QT6: chuông cảnh báo — operator + owner (component tự ẩn với người khác); "Xem tất cả" -> /alerts. */}

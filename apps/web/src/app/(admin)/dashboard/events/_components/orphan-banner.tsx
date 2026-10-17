@@ -5,19 +5,9 @@ import { useState } from "react";
 import { RotateCcw, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useOrphanRawEvents, useRenormalizeRawEvents } from "@/lib/hub/queries";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -66,36 +56,26 @@ export function OrphanBanner() {
         </Button>
       </div>
 
-      <AlertDialog open={open} onOpenChange={(o) => !renormalize.isPending && setOpen(o)}>
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("page.events.orphan.confirm-title", { count: Math.min(total, 500) })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("page.events.orphan.confirm-before")} <span className="font-mono">event.received</span>{" "}
-              {t("page.events.orphan.confirm-after")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Textarea
-            placeholder={t("page.events.orphan.reason-placeholder")}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={renormalize.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={renormalize.isPending || reason.trim() === ""}
-              onClick={(e) => {
-                e.preventDefault();
-                submit();
-              }}
-            >
-              {renormalize.isPending ? t("page.events.orphan.queuing") : t("page.events.orphan.action")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={t("page.events.orphan.confirm-title", { count: Math.min(total, 500) })}
+        description={
+          <>
+            {t("page.events.orphan.confirm-before")} <span className="font-mono">event.received</span> {t("page.events.orphan.confirm-after")}
+          </>
+        }
+        confirmLabel={renormalize.isPending ? t("page.events.orphan.queuing") : t("page.events.orphan.action")}
+        pending={renormalize.isPending}
+        confirmDisabled={reason.trim() === ""}
+        onConfirm={submit}
+      >
+        <Textarea
+          placeholder={t("page.events.orphan.reason-placeholder")}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </ConfirmDialog>
     </>
   );
 }

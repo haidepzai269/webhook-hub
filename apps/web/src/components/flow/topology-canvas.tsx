@@ -25,16 +25,8 @@ import { CircleAlert, CircleCheck, CircleX, Gauge, LoaderCircle, Ellipsis, Power
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import {
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { type FlowItemKind, useFlowArchive, useFlowSetActive } from "@/lib/hub/flow-queries";
 import { subscribeHubSocket } from "@/lib/hub/socket";
@@ -848,26 +840,25 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
   };
 
   return (
-    <AlertDialog open={Boolean(node && kind)} onOpenChange={(o) => !o && !busy && onClose()}>
-      {/* UI-MS: footer 3 nút + ghi chú dài -> cỡ md; thân cuộn, nút đứng yên */}
-      <AlertDialogContent size="md">
-        <AlertDialogBody>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {t(disconnected ? "flow.manage.title-connect" : "flow.manage.title-disconnect", { noun, label: node?.label ?? "" })}
-          </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-2">
-              <p>
-                <strong>{t(disconnected ? "flow.manage.connect" : "flow.manage.disconnect")}:</strong>{" "}
-                {t(disconnected ? "flow.manage.connect-desc" : "flow.manage.disconnect-desc", { noun: capitalize(noun) })}
-              </p>
-              <p>
-                <strong>{t("flow.manage.delete-label")}</strong> {t("flow.manage.delete-desc", { noun })}
-                {cascade} {t("flow.manage.history-kept")}
-              </p>
-              {node?.kind === "source" && (node as SourceFlowNode).providerConnected && (
-                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
+    <ConfirmDialog
+      open={Boolean(node && kind)}
+      onOpenChange={(o) => !o && onClose()}
+      size="md"
+      title={t(disconnected ? "flow.manage.title-connect" : "flow.manage.title-disconnect", { noun, label: node?.label ?? "" })}
+      description={
+        <div className="space-y-2">
+          <p>
+            <strong>{t(disconnected ? "flow.manage.connect" : "flow.manage.disconnect")}:</strong>{" "}
+            {t(disconnected ? "flow.manage.connect-desc" : "flow.manage.disconnect-desc", { noun: capitalize(noun) })}
+          </p>
+          <p>
+            <strong>{t("flow.manage.delete-label")}</strong> {t("flow.manage.delete-desc", { noun })}
+            {cascade} {t("flow.manage.history-kept")}
+          </p>
+          {node?.kind === "source" && (node as SourceFlowNode).providerConnected && (
+            <Alert variant="warning">
+              <AlertDescription>
+                <p>
                   <strong>{t("flow.manage.note")}</strong> {t("flow.manage.provider-note-1")}{" "}
                   <strong>{t("flow.manage.provider-note-btn")}</strong> {t("flow.manage.provider-note-2")}{" "}
                   <a className="underline" href="/dashboard/sources">
@@ -875,31 +866,38 @@ function ManageNodeDialog({ node, topology, onClose }: { node: FlowNode | null; 
                   </a>{" "}
                   {t("flow.manage.provider-note-3")}
                 </p>
-              )}
-              {destStillOff && (
-                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
+              </AlertDescription>
+            </Alert>
+          )}
+          {destStillOff && (
+            <Alert variant="warning">
+              <AlertDescription>
+                <p>
                   <strong>{t("flow.manage.note")}</strong> {t("flow.manage.dest-off-note", { label: dstOfSub?.label ?? "" })}
                 </p>
-              )}
-              {serviceManaged && (
-                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
+              </AlertDescription>
+            </Alert>
+          )}
+          {serviceManaged && (
+            <Alert variant="warning">
+              <AlertDescription>
+                <p>
                   <strong>{t("flow.manage.note")}</strong> {t("flow.manage.service-note")}
                 </p>
-              )}
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        </AlertDialogBody>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>{t("common.cancel")}</AlertDialogCancel>
-          <Button variant="outline" disabled={busy} onClick={toggle}>
-            {setActive.isPending ? t("common.saving") : t(disconnected ? "flow.manage.connect" : "flow.manage.disconnect")}
-          </Button>
-          <Button variant="destructive" disabled={busy} onClick={remove}>
-            {archive.isPending ? t("flow.manage.deleting") : t("common.delete")}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+      }
+      pending={busy}
+      destructive
+      confirmLabel={archive.isPending ? t("flow.manage.deleting") : t("common.delete")}
+      onConfirm={remove}
+      extraActions={
+        <Button variant="outline" disabled={busy} onClick={toggle}>
+          {setActive.isPending ? t("common.saving") : t(disconnected ? "flow.manage.connect" : "flow.manage.disconnect")}
+        </Button>
+      }
+    />
   );
 }

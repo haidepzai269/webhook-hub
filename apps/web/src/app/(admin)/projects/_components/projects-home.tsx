@@ -40,6 +40,7 @@ import { useProjectStore } from "@/lib/hub/project-store";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { barPct, formatBytes, levelSeg, levelTone, parseLevel } from "@/lib/storage/storage-logic";
+import { toneBadgeClass } from "@/components/admin/status-badge";
 
 import { DEMO_CURRENT_ID, DEMO_PROJECTS } from "./demo-projects";
 
@@ -206,9 +207,7 @@ function ProjectCard({ p, current, onOpen }: { p: ProjectSummary; current: boole
             variant="outline"
             className={cn(
               "shrink-0",
-              live
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+              toneBadgeClass(live ? "ok" : "warn"),
             )}
           >
             {live ? <Radio /> : <FlaskConical />}
@@ -236,7 +235,7 @@ function ProjectCard({ p, current, onOpen }: { p: ProjectSummary; current: boole
             {p.member === false ? (
               <Badge
                 variant="outline"
-                className="border-amber-500/40 text-amber-700 dark:text-amber-400"
+                className={toneBadgeClass("warn")}
                 title={t("admin.project.operator-note")}
               >
                 <ShieldCheck />
@@ -324,7 +323,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <p className="font-medium">{t("page.projects.home.empty.title")}</p>
         <p className="max-w-sm text-muted-foreground text-sm">{t("page.projects.home.empty.body")}</p>
       </div>
-      <Button className="cursor-pointer" onClick={onCreate}>
+      <Button onClick={onCreate}>
         <Plus />
         {t("page.projects.create")}
       </Button>
@@ -421,13 +420,13 @@ function Home({ demo }: { demo: boolean }) {
           description={t("page.projects.home.description")}
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" className="cursor-pointer" asChild>
+              <Button variant="outline" asChild>
                 <Link href="/dashboard/projects" title={t("page.projects.home.manage-hint")}>
                   <Settings2 />
                   {t("page.projects.home.manage")}
                 </Link>
               </Button>
-              <Button className="cursor-pointer" onClick={() => setOpen(true)}>
+              <Button onClick={() => setOpen(true)}>
                 <Plus />
                 {t("page.projects.create")}
               </Button>

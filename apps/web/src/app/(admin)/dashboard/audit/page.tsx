@@ -21,6 +21,7 @@ import type { AuditLog } from "@/lib/hub/types";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { toneBadgeClass } from "@/components/admin/status-badge";
 
 const ALL = "__all";
 const ACTOR_MAX = 128;
@@ -28,11 +29,11 @@ const isActor = (x: string) => x.length <= ACTOR_MAX;
 
 /** Hành động "nguy hiểm" (gửi lại / xoá) tô màu để nhìn ra ngay. */
 function actionTone(action: string) {
-  if (action.endsWith(".delete")) return "border-rose-500/40 text-rose-700 dark:text-rose-300";
+  if (action.endsWith(".delete")) return toneBadgeClass("bad");
   if (action.startsWith("delivery.replay") || action.startsWith("raw_event.")) {
-    return "border-amber-500/40 text-amber-700 dark:text-amber-300";
+    return toneBadgeClass("warn");
   }
-  if (action.endsWith(".create")) return "border-emerald-500/40 text-emerald-700 dark:text-emerald-300";
+  if (action.endsWith(".create")) return toneBadgeClass("ok");
   return "";
 }
 

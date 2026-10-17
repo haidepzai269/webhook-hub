@@ -10,17 +10,6 @@ import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CopyButton } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -28,6 +17,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { formatDateTime } from "@/lib/hub/format";
 import {
@@ -156,7 +146,7 @@ export default function ApiKeysPage() {
               </TableCell>
               <TableCell className="text-right">
                 {!k.revokedAt && (
-                  <Button size="sm" variant="ghost" onClick={() => setTarget(k)} title={t("page.api-keys.revoke-title")}>
+                  <Button size="sm" variant="ghost" onClick={() => setTarget(k)}>
                     <Ban />
                     {t("page.api-keys.revoke")}
                   </Button>
@@ -222,39 +212,25 @@ export default function ApiKeysPage() {
         </AdminDialogContent>
       </Dialog>
 
-      <AlertDialog open={Boolean(target)} onOpenChange={(o) => !o && !revoke.isPending && setTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("page.api-keys.revoke-confirm", { service: target?.serviceName ?? "" })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("page.api-keys.revoke-warning", { tail: target ? prefixTail(target.keyPrefix) : "" })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoke.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={revoke.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                if (!target) return;
-                revoke.mutate(target.id, {
-                  onSuccess: () => {
-                    toast.success(t("page.api-keys.revoked"));
-                    setTarget(null);
-                  },
-                  onError: (err) => toast.error(t("page.api-keys.revoke-failed", { message: err.message })),
-                });
-              }}
-            >
-              {t("page.api-keys.revoke")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={Boolean(target)}
+        onOpenChange={(o) => !o && setTarget(null)}
+        title={t("page.api-keys.revoke-confirm", { service: target?.serviceName ?? "" })}
+        description={t("page.api-keys.revoke-warning", { tail: target ? prefixTail(target.keyPrefix) : "" })}
+        confirmLabel={t("page.api-keys.revoke")}
+        destructive
+        pending={revoke.isPending}
+        onConfirm={() => {
+          if (!target) return;
+          revoke.mutate(target.id, {
+            onSuccess: () => {
+              toast.success(t("page.api-keys.revoked"));
+              setTarget(null);
+            },
+            onError: (err) => toast.error(t("page.api-keys.revoke-failed", { message: err.message })),
+          });
+        }}
+      />
     </>
   );
 }

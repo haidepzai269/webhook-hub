@@ -167,11 +167,11 @@ export default function EventJourneyPage() {
             {!event?.trimmedAt && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="flow-replay-btn inline-flex h-8 items-center gap-1.5 rounded-lg px-3 font-medium text-sm">
+                <Button variant="replay">
                   <RotateCcw {...ICON} />
                   {t("page.events.detail.replay")}
                   <ChevronDown {...ICON} />
-                </button>
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-72">
                 <DropdownMenuLabel>{t("page.events.detail.replay-menu")}</DropdownMenuLabel>

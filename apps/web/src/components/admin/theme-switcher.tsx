@@ -4,6 +4,7 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/admin/icon-button";
 import { useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -26,10 +27,18 @@ export function ThemeSwitcher() {
   const label = t("header.theme.aria", { mode: t(`common.theme.${themeMode}`) });
 
   return (
-    <Button size="icon" variant="outline" onClick={cycleTheme} aria-label={label} title={label}>
-      <Monitor className="hidden [html[data-theme-mode=system]_&]:block" />
-      <Sun className="hidden dark:block [html[data-theme-mode=system]_&]:hidden" />
-      <Moon className="block dark:hidden [html[data-theme-mode=system]_&]:hidden" />
-    </Button>
+    <IconButton
+      size="icon"
+      variant="outline"
+      onClick={cycleTheme}
+      label={label}
+      icon={
+        <>
+          <Monitor className="hidden [html[data-theme-mode=system]_&]:block" />
+          <Sun className="hidden dark:block [html[data-theme-mode=system]_&]:hidden" />
+          <Moon className="block dark:hidden [html[data-theme-mode=system]_&]:hidden" />
+        </>
+      }
+    />
   );
 }

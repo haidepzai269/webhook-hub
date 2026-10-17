@@ -9,6 +9,7 @@ import { hubFetch } from "@/lib/hub/client";
 import { nextLocale } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Bấm để đổi vi ⇄ en. Lưu như theme: preference `language` (cookie, ghi đồng bộ trong setPreference) rồi
@@ -29,6 +30,8 @@ export function LanguageSwitcher() {
   });
 
   return (
+    <Tooltip>
+      <TooltipTrigger asChild>
     <Button
       variant="outline"
       onClick={() => {
@@ -37,11 +40,13 @@ export function LanguageSwitcher() {
         void hubFetch("/api/v1/me/locale", { method: "PUT", body: JSON.stringify({ locale: next }) }).catch(() => undefined);
       }}
       aria-label={label}
-      title={label}
       className="px-2"
     >
       <Languages />
       <span className="font-mono text-xs uppercase">{locale}</span>
     </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

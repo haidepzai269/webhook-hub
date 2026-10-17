@@ -6,7 +6,7 @@ import { Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { AdminDialogContent } from "@/components/admin/overlay-content";
-import { deliveryStatusKey } from "@/components/admin/status-badge";
+import { DeliveryStatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { AcceptUnverifiedField } from "@/components/admin/accept-unverified-field";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useConfirm } from "@/components/admin/confirm-dialog";
 import {
   type CreateEndpointResult,
   useCreateEndpoint,
@@ -30,12 +31,13 @@ import { useLocale, useT } from "@/lib/i18n/use-t";
 
 /** Trạng thái lượt giao của hub -> nhãn dịch; mã lạ (API mới hơn console) giữ nguyên. */
 function DeliveryStatusLabel({ status }: { status: string }) {
-  const t = useT();
   const known = (DELIVERY_STATUS_VALUES as readonly string[]).includes(status);
   return (
-    <Badge variant="outline" title={status}>
-      {known ? t(deliveryStatusKey(status as (typeof DELIVERY_STATUS_VALUES)[number])) : status}
-    </Badge>
+    known ? (
+      <DeliveryStatusBadge status={status as (typeof DELIVERY_STATUS_VALUES)[number]} />
+    ) : (
+      <Badge variant="outline">{status}</Badge>
+    )
   );
 }
 
@@ -252,6 +254,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
 /** Chi tiết endpoint: delivery gần đây, Verify lại, Xoay secret (chỉ endpoint do console quản). */
 export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
   const t = useT();
+  const { confirm, confirmDialog } = useConfirm();
   const locale = useLocale();
   const detail = useEndpointDetail(id);
   const verify = useVerifyEndpoint();
@@ -294,10 +297,10 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
               {ep.managedBy !== "service" && (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="destructive"
                   disabled={rotate.isPending}
-                  onClick={() => {
-                    if (!window.confirm(t("page.destinations.endpoint.rotate-confirm"))) return;
+                  onClick={async () => {
+                    if (!(await confirm({ title: t("page.destinations.endpoint.rotate-confirm"), destructive: true }))) return;
                     rotate.mutate(ep.id, {
                       onSuccess: (r) => setSecret(r.signingSecret),
                       onError: (e) => toast.error(e.message),
@@ -328,6 +331,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
         )}
         </DialogBody>
       </AdminDialogContent>
+      {confirmDialog}
     </Dialog>
   );
 }

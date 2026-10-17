@@ -82,7 +82,7 @@ export function CreateProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <AdminDialogContent size="md" className="[&_button]:cursor-pointer">
+      <AdminDialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t("page.projects.create")}</DialogTitle>
           <DialogDescription>{t("page.projects.dialog.description")}</DialogDescription>
@@ -134,7 +134,6 @@ export function CreateProjectDialog({
           <Button
             type="button"
             variant="outline"
-            className="cursor-pointer"
             onClick={() => close(false)}
             disabled={pending}
           >
@@ -143,7 +142,6 @@ export function CreateProjectDialog({
           <Button
             type="submit"
             form="project-form"
-            className="cursor-pointer"
             disabled={pending || !name.trim() || !slug.trim()}
           >
             {pending ? t("common.creating") : t("common.create")}

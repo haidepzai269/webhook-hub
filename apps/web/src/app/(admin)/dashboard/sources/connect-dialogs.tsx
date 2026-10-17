@@ -12,6 +12,8 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useConfirm } from "@/components/admin/confirm-dialog";
+import { StatusBadge } from "@/components/admin/status-badge";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
@@ -71,7 +73,9 @@ function StatusLine({ c }: { c: ConnectionView }) {
   return (
     <div className="flex flex-col gap-1 text-sm">
       <p>
-        {c.status === "PENDING" ? "⏳" : "❌"} <span title={c.status}>{t(CONNECTION_STATUS[c.status])}</span>
+        <StatusBadge tone={c.status === "PENDING" ? "progress" : "bad"} pulse={c.status === "PENDING"} tooltip={c.status}>
+          {t(CONNECTION_STATUS[c.status])}
+        </StatusBadge>
         {c.lastError ? ` · ${c.lastError}` : ""}
       </p>
       {c.fix && <p className="text-muted-foreground text-xs">{t("page.sources.connect.fix", { fix: c.fix })}</p>}
@@ -337,6 +341,7 @@ export function ConnectionDialog({
   onConnect: (s: { id: string; provider: string }) => void;
 }) {
   const t = useT();
+  const { confirm, confirmDialog } = useConfirm();
   const sourceId = source?.id ?? null;
   const refresh = useRefresh();
   const connectors = useQuery({
@@ -412,21 +417,21 @@ export function ConnectionDialog({
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={act.isPending}
-                onClick={() =>
-                  window.confirm(t("page.sources.connection.disconnect-confirm")) && act.mutate("disconnect")
-                }
+                onClick={async () => {
+                  if (await confirm({ title: t("page.sources.connection.disconnect-confirm"), destructive: true })) act.mutate("disconnect");
+                }}
               >
                 {t("page.sources.connection.disconnect")}
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={act.isPending || !c.hasCredentials}
-                onClick={() =>
-                  window.confirm(t("page.sources.connection.delete-credentials-confirm")) && act.mutate("credentials")
-                }
+                onClick={async () => {
+                  if (await confirm({ title: t("page.sources.connection.delete-credentials-confirm"), destructive: true })) act.mutate("credentials");
+                }}
               >
                 {t("page.sources.connection.delete-credentials")}
               </Button>
@@ -435,6 +440,7 @@ export function ConnectionDialog({
         )}
         </DialogBody>
       </AdminDialogContent>
+      {confirmDialog}
     </Dialog>
   );
 }

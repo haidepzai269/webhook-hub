@@ -8,17 +8,6 @@ import { toast } from "sonner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogBody,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { HubApiError } from "@/lib/hub/client";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
@@ -312,49 +302,34 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
           </div>
         ))}
       </CardContent>
-      <AlertDialog open={!!pending} onOpenChange={(o) => !o && !clean.isPending && !apply.isPending && setPending(null)}>
-        <AlertDialogContent>
-          <AlertDialogBody>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pending && ck ? t(ck.titleKey, { importance: impName(pending.s.importance), age: ageLabel(t, pending.s.olderThan) }) : ""}
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                {ck?.bodyKeys.map((k) => (
-                  <p key={k}>{t(k)}</p>
-                ))}
-                {/* Review QT-S3 L3: số ước tính là của hành động GỢI Ý — chọn hành động khác thì nói rõ, không giả là số của nó. */}
-                {pending && (
-                  <p className="font-medium">
-                    {pending.action === pending.s.action
-                      ? t("page.storage.suggestion.frees", { size: formatBytes(pending.s.estimatedBytes), count: pending.s.estimatedEvents })
-                      : t("page.storage.suggestion.frees-of-suggested", {
-                          action: t(`page.storage.action.${pending.s.action}` as MessageKey),
-                          size: formatBytes(pending.s.estimatedBytes),
-                          count: pending.s.estimatedEvents,
-                        })}
-                  </p>
-                )}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          </AlertDialogBody>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={clean.isPending || apply.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={clean.isPending || apply.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                run();
-              }}
-            >
-              {(clean.isPending || apply.isPending) && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              {pending ? t("page.storage.confirm.ok", { action: t(`page.storage.action.${pending.action}` as MessageKey) }) : ""}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={!!pending}
+        onOpenChange={(o) => !o && setPending(null)}
+        title={pending && ck ? t(ck.titleKey, { importance: impName(pending.s.importance), age: ageLabel(t, pending.s.olderThan) }) : ""}
+        description={
+          <div className="space-y-2">
+            {ck?.bodyKeys.map((k) => (
+              <p key={k}>{t(k)}</p>
+            ))}
+            {/* Review QT-S3 L3: số ước tính là của hành động GỢI Ý — chọn hành động khác thì nói rõ, không giả là số của nó. */}
+            {pending && (
+              <p className="font-medium">
+                {pending.action === pending.s.action
+                  ? t("page.storage.suggestion.frees", { size: formatBytes(pending.s.estimatedBytes), count: pending.s.estimatedEvents })
+                  : t("page.storage.suggestion.frees-of-suggested", {
+                      action: t(`page.storage.action.${pending.s.action}` as MessageKey),
+                      size: formatBytes(pending.s.estimatedBytes),
+                      count: pending.s.estimatedEvents,
+                    })}
+              </p>
+            )}
+          </div>
+        }
+        confirmLabel={pending ? t("page.storage.confirm.ok", { action: t(`page.storage.action.${pending.action}` as MessageKey) }) : ""}
+        destructive={pending?.action === "delete"}
+        pending={clean.isPending || apply.isPending}
+        onConfirm={run}
+      />
     </Card>
   );
 }

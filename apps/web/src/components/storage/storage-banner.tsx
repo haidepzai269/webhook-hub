@@ -14,6 +14,7 @@ import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useCanReadStorage, useStorage } from "@/lib/hub/storage-queries";
 import { useT } from "@/lib/i18n/use-t";
 import { storageBannerFor } from "@/lib/storage/storage-logic";
+import { IconButton } from "@/components/admin/icon-button";
 
 /**
  * QT7 (SPEC-han-muc-dung-luong §3, §9 + E1/E5): banner dung lượng của DỰ ÁN ĐANG CHỌN, dính đầu vùng nội dung (cùng chỗ với
@@ -96,18 +97,14 @@ export function StorageBanner() {
           </Popover>
         )}
         {banner.dismissible && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            aria-label={t("page.storage.banner.dismiss")}
+          <IconButton
+            icon={<X className="size-4" aria-hidden />}
+            label={t("page.storage.banner.dismiss")}
             onClick={() => {
               if (key) session.set(`${key}:hidden`, "1");
               setHidden(true);
             }}
-          >
-            <X className="size-4" aria-hidden />
-          </Button>
+          />
         )}
       </div>
     </div>

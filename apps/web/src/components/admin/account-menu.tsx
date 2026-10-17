@@ -52,7 +52,7 @@ export function AccountMenu({ demo = false }: { demo?: boolean }) {
         <Button
           variant="ghost"
           size="icon"
-          className="cursor-pointer rounded-full"
+          className="rounded-full"
           aria-label={t("page.projects.home.account")}
           title={email}
         >
@@ -139,8 +139,7 @@ export function AccountTopBar({ demo = false }: { demo?: boolean }) {
           <span className="hidden text-muted-foreground sm:inline">/</span>
           <span className="hidden truncate text-muted-foreground text-sm sm:inline">{t(sectionKey)}</span>
         </Link>
-        {/* Nút dùng chung (chuông, ngôn ngữ, giao diện) không tự đặt con trỏ — gắn ở đây cho mọi nút của thanh. */}
-        <div className="flex items-center gap-2 [&_button]:cursor-pointer">
+        <div className="flex items-center gap-2">
           {/* Chuông tự ẩn với người không xem được cảnh báo (và ở demo — chưa có /auth/me). */}
           <AlertBell />
           <LanguageSwitcher />

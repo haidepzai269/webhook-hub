@@ -18,12 +18,15 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { IconButton } from "@/components/admin/icon-button";
+import { useConfirm } from "@/components/admin/confirm-dialog";
 import { formatDateTime } from "@/lib/hub/format";
 import { useCreateDestination, useDeleteDestination, useDestinations } from "@/lib/hub/queries";
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
 import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
 import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { toneBadgeClass } from "@/components/admin/status-badge";
 
 import { CreateEndpointDialog, EndpointDetailDialog } from "./endpoint-dialogs";
 
@@ -63,17 +66,8 @@ const makeSchema = (t: TranslateFn) =>
 type FormIn = z.input<ReturnType<typeof makeSchema>>;
 type FormOut = z.output<ReturnType<typeof makeSchema>>;
 
-const CIRCUIT_STYLE = {
-  CLOSED: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
-  HALF_OPEN: "border-amber-500/40 text-amber-700 dark:text-amber-300",
-  OPEN: "border-rose-500/40 text-rose-700 dark:text-rose-300",
-} as const;
-
-const VERIFY_STYLE = {
-  ok: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
-  wait: "border-amber-500/40 text-amber-700 dark:text-amber-300",
-  bad: "border-rose-500/40 text-rose-700 dark:text-rose-300",
-} as const;
+const CIRCUIT_TONE = { CLOSED: "ok", HALF_OPEN: "warn", OPEN: "bad" } as const;
+const VERIFY_TONE = { ok: "ok", wait: "warn", bad: "bad" } as const;
 
 /** P2 (ADR-140): đích FAILED (vd ssrf_blocked) phải thấy được — hub KHÔNG giao tới đích chưa VERIFIED. */
 function VerificationCell({ dest }: { dest: Destination }) {
@@ -83,7 +77,7 @@ function VerificationCell({ dest }: { dest: Destination }) {
     <div className="flex max-w-xs flex-col gap-0.5">
       <Badge
         variant="outline"
-        className={`w-fit font-mono text-[11px] ${VERIFY_STYLE[v.tone]}`}
+        className={`w-fit font-mono text-[11px] ${toneBadgeClass(VERIFY_TONE[v.tone])}`}
         title={dest.verificationFix ?? v.label}
       >
         {t(v.labelKey)}
@@ -115,8 +109,9 @@ function DestinationActions({ dest }: { dest: Destination }) {
   const t = useT();
   const del = useDeleteDestination();
   const openDetail = useContext(OpenDetail);
-  const remove = () => {
-    if (!window.confirm(t("page.destinations.delete-confirm", { name: dest.name }))) return;
+  const { confirm, confirmDialog } = useConfirm();
+  const remove = async () => {
+    if (!(await confirm({ title: t("page.destinations.delete-confirm", { name: dest.name }), confirmLabel: t("common.delete"), destructive: true }))) return;
     del.mutate(dest.id, {
       onSuccess: () => toast.success(t("page.destinations.toast.deleted", { name: dest.name })),
       onError: (e) => {
@@ -129,26 +124,21 @@ function DestinationActions({ dest }: { dest: Destination }) {
   return (
     <div className="flex justify-end">
       {dest.type === "webhook" && (
-        <Button
-          size="sm"
-          variant="ghost"
+        <IconButton
+          icon={<Eye />}
           onClick={() => openDetail(dest.id)}
-          aria-label={t("page.destinations.detail-aria", { name: dest.name })}
-          title={t("page.destinations.detail-title")}
-        >
-          <Eye />
-        </Button>
+          label={t("page.destinations.detail-aria", { name: dest.name })}
+          tooltip={t("page.destinations.detail-title")}
+        />
       )}
-      <Button
-        size="sm"
-        variant="ghost"
+      <IconButton
+        icon={<Trash2 />}
         disabled={del.isPending}
         onClick={remove}
-        aria-label={t("page.destinations.delete-aria", { name: dest.name })}
-        title={t("page.destinations.delete-title")}
-      >
-        <Trash2 />
-      </Button>
+        label={t("page.destinations.delete-aria", { name: dest.name })}
+        tooltip={t("page.destinations.delete-title")}
+      />
+      {confirmDialog}
     </div>
   );
 }
@@ -181,7 +171,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] =
     cell: ({ row }) => (
       <Badge
         variant="outline"
-        className={`gap-1.5 font-mono text-[11px] ${CIRCUIT_STYLE[row.original.circuitState]}`}
+        className={`gap-1.5 font-mono text-[11px] ${toneBadgeClass(CIRCUIT_TONE[row.original.circuitState])}`}
         title={`${row.original.circuitState} — ${t(CIRCUIT_HINT[row.original.circuitState])}`}
       >
         <span

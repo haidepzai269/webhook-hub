@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { TimeRange } from "@/components/admin/time-range";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IconButton } from "@/components/admin/icon-button";
 import { formatRelative } from "@/lib/hub/format";
 import type { ExecutionFilters } from "@/lib/hub/flow-types";
 import { EXECUTION_PARAMS } from "@/lib/hub/list-url";
@@ -277,18 +278,15 @@ function ExecutionsView() {
               {/* Xem nhanh */}
               <span>
                 {i.eventId && (
-                  <Button
-                    variant="ghost"
+                  <IconButton
                     size="icon-xs"
-                    aria-label={t("page.events.quick-view")}
-                    title={t("page.events.quick-view")}
+                    icon={<Eye />}
+                    label={t("page.events.quick-view")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setQuick({ id: i.eventId, open: true });
                     }}
-                  >
-                    <Eye />
-                  </Button>
+                  />
                 )}
               </span>
             </div>

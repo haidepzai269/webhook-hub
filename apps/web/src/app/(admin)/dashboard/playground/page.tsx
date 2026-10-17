@@ -24,6 +24,7 @@ import { useSources } from "@/lib/hub/queries";
 import type { Provider } from "@/lib/hub/types";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+import { StatusBadge } from "@/components/admin/status-badge";
 
 import { buildRequest, samplePayload } from "./_components/build-request";
 
@@ -235,9 +236,9 @@ export default function PlaygroundPage() {
             <CardTitle className="flex items-center gap-2">
               {t("page.playground.response.title")}
               {result && (
-                <Badge className={ok ? "bg-emerald-600 text-white" : "bg-rose-600 text-white"}>
+                <StatusBadge tone={ok ? "ok" : "bad"} className="font-mono">
                   HTTP {result.status}
-                </Badge>
+                </StatusBadge>
               )}
               {result && <span className="font-normal text-muted-foreground text-xs">{result.ms}ms</span>}
             </CardTitle>

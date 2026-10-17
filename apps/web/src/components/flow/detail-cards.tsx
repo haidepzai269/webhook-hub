@@ -7,6 +7,7 @@ import { ChevronDown, ChevronRight, History, RotateCcw } from "lucide-react";
 
 import { CopyButton } from "@/components/admin/copy-button";
 import { deliveryStatusKey } from "@/components/admin/status-badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DeliveryStatus } from "@/lib/hub/types";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
@@ -213,15 +214,10 @@ export function AttemptsCard({ branches, onReplay, replaying }: { branches: Flow
                   </TonePill>
                 )}
                 {canReplay && (
-                  <button
-                    type="button"
-                    disabled={replaying === b.deliveryId}
-                    onClick={() => onReplay(b)}
-                    className="flow-replay-btn ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 font-medium text-xs disabled:opacity-60"
-                  >
+                  <Button type="button" variant="replay" size="sm" className="ml-auto" disabled={replaying === b.deliveryId} onClick={() => onReplay(b)}>
                     <RotateCcw {...ICON_SM} aria-hidden />
                     {t("flow.attempts.replay")}
-                  </button>
+                  </Button>
                 )}
               </div>
               {attempts.map((a) => (

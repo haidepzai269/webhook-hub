@@ -34,6 +34,10 @@ export interface ConfirmDialogProps {
   /** Hộp KHÔNG tự đóng sau khi xác nhận — nơi gọi đóng khi mutation xong (giữ hộp mở nếu lỗi). */
   onConfirm: () => void | Promise<void>;
   confirmDisabled?: boolean;
+  /** Hộp rộng hơn (`md`) khi footer có nút phụ / mô tả dài. */
+  size?: "default" | "sm" | "md";
+  /** Nút phụ đặt giữa Huỷ và nút xác nhận (vd "Ngắt kết nối" cạnh "Xoá"). */
+  extraActions?: ReactNode;
 }
 
 /** Hộp xác nhận dùng chung (thay `window.confirm` và AlertDialog chép tay). */
@@ -49,23 +53,30 @@ export function ConfirmDialog({
   children,
   onConfirm,
   confirmDisabled,
+  size,
+  extraActions,
 }: ConfirmDialogProps) {
   const t = useT();
   return (
     <AlertDialog open={open} onOpenChange={(o) => !(pending && !o) && onOpenChange(o)}>
-      <AlertDialogContent>
+      <AlertDialogContent size={size} {...(description ? {} : { "aria-describedby": undefined })}>
         <AlertDialogBody>
           <AlertDialogHeader>
             <AlertDialogTitle>{title}</AlertDialogTitle>
-            {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
+            {description ? (
+              <AlertDialogDescription asChild>
+                <div>{description}</div>
+              </AlertDialogDescription>
+            ) : null}
           </AlertDialogHeader>
           {children}
         </AlertDialogBody>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{cancelLabel ?? t("common.cancel")}</AlertDialogCancel>
+          {extraActions}
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
-            disabled={pending || confirmDisabled}
+            disabled={pending === true || confirmDisabled === true}
             onClick={(e) => {
               e.preventDefault();
               void onConfirm();

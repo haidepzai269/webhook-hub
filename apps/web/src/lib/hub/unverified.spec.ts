@@ -73,8 +73,8 @@ describe("PK5 — xem nhanh không bao giờ ghi \"Chữ ký hợp lệ\" cho s�
     // Nhãn + tông: unverified = hổ phách "Chưa xác thực", không bao giờ khoá "hợp lệ" / tông ok.
     expect(SIGNATURE_VIEW.unverified).toMatchObject({ key: "page.events.unverified", tone: "warn" });
     expect(SIGNATURE_VIEW.unverified.key).not.toBe(SIGNATURE_VIEW.valid.key);
-    expect(SIGNATURE_VIEW.unverified.className).toMatch(/amber/);
-    expect(SIGNATURE_VIEW.unverified.className).not.toMatch(/emerald|green/);
+    expect(SIGNATURE_VIEW.unverified.className).toMatch(/flow-warning/);
+    expect(SIGNATURE_VIEW.unverified.className).not.toMatch(/emerald|green|flow-healthy/);
     expect(SIGNATURE_VIEW.valid).toMatchObject({ key: "page.events.sheet.signature-valid", tone: "ok" });
     expect(SIGNATURE_VIEW.invalid).toMatchObject({ key: "page.events.sheet.signature-invalid", tone: "bad" });
   });

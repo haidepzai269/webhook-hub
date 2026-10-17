@@ -1,5 +1,6 @@
 "use client";
 
+import { toneBadgeClass } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { isUnverified, type SIGNATURE_VIEW, type VerifiedFlag } from "@/lib/hub/unverified";
 import { useT } from "@/lib/i18n/use-t";
@@ -15,7 +16,7 @@ export function UnverifiedBadge({ of, className }: { of: VerifiedFlag | null | u
     <Badge
       variant="outline"
       title={t("page.events.unverified-hint")}
-      className={`shrink-0 border-amber-500/50 text-[10px] text-amber-700 dark:text-amber-400 ${className ?? ""}`}
+      className={`shrink-0 text-[10px] ${toneBadgeClass("warn")} ${className ?? ""}`}
     >
       {t("page.events.unverified")}
     </Badge>

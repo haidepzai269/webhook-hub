@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { IconButton } from "@/components/admin/icon-button";
 import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
 import { formatDateTime } from "@/lib/hub/format";
@@ -73,15 +74,7 @@ function ConnectionButton({ id }: { id: string }) {
   const open = useContext(OpenConnection);
   const t = useT();
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      onClick={() => open(id)}
-      title={t("page.sources.connection-button")}
-      aria-label={t("page.sources.connection-button")}
-    >
-      <Link2 />
-    </Button>
+    <IconButton icon={<Link2 />} onClick={() => open(id)} label={t("page.sources.connection-button")} />
   );
 }
 
@@ -91,15 +84,7 @@ function TrafficButton({ id }: { id: string }) {
   const open = useContext(OpenTraffic);
   const t = useT();
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      onClick={() => open(id)}
-      title={t("traffic.button")}
-      aria-label={t("traffic.button")}
-    >
-      <Activity />
-    </Button>
+    <IconButton icon={<Activity />} onClick={() => open(id)} label={t("traffic.button")} />
   );
 }
 
@@ -109,9 +94,7 @@ function ListenButton({ id }: { id: string }) {
   const open = useContext(OpenListen);
   const t = useT();
   return (
-    <Button size="sm" variant="ghost" onClick={() => open(id)} title={t("page.sources.listen-button")} aria-label={t("page.sources.listen-button")}>
-      <Ear />
-    </Button>
+    <IconButton icon={<Ear />} onClick={() => open(id)} label={t("page.sources.listen-button")} />
   );
 }
 
