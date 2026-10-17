@@ -18,6 +18,7 @@ import { ruleName } from "@/lib/alerts/message";
 import { ALERT_RULE_CODES, ALERT_SEVERITIES, type AlertView } from "@/lib/alerts/types";
 import { useAlertsPage, useSubjectNames } from "@/lib/hub/alert-queries";
 import { TimeCell } from "@/components/admin/time-cell";
+import { shortId } from "@/lib/hub/format";
 import { ALERT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useProjects } from "@/lib/hub/queries";
@@ -141,7 +142,7 @@ function AlertsView() {
             ))}
             {v.project && !(projects.data ?? []).some((p) => p.id === v.project) && (
               <SelectItem value={v.project} className="font-mono text-xs">
-                {v.project.slice(0, 8)}
+                {shortId(v.project)}
               </SelectItem>
             )}
           </SelectContent>

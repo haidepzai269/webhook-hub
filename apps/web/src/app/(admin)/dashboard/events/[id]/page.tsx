@@ -30,7 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DetailSkeleton } from "@/components/admin/skeletons";
-import { formatDateTime } from "@/lib/hub/format";
+import { formatDateTime, shortId } from "@/lib/hub/format";
 import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
@@ -221,7 +221,7 @@ export default function EventJourneyPage() {
         <InfoCard icon={raw ? <ProviderIcon provider={raw.provider} name={raw.sourceName} size={13} /> : <Tag {...ICON_SM} />} label={t("page.events.detail.source")}>
           <div className="truncate font-medium text-sm">{raw ? `${raw.providerLabel} · ${raw.sourceName}` : (event?.source ?? "—")}</div>
           <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs" title={t("page.events.detail.no-ip")}>
-            {t("page.events.detail.ip-line", { id: event?.correlationId?.slice(0, 8) ?? "—" })}
+            {t("page.events.detail.ip-line", { id: event?.correlationId ? shortId(event.correlationId) : "—" })}
           </div>
         </InfoCard>
         <InfoCard icon={<CalendarClock {...ICON_SM} />} label={t("page.events.detail.received")}>

@@ -4,7 +4,8 @@ import { Route } from "lucide-react";
 import Link from "next/link";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
-import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { JsonBlock } from "@/components/admin/copy-button";
+import { MonoId } from "@/components/admin/mono-id";
 import { EmptyState, ErrorState } from "@/components/admin/state";
 import { SignatureBadge, UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,7 @@ function Row({ label, value, copy }: { label: string; value: string; copy?: bool
     <div className="grid grid-cols-[7rem_1fr] items-center gap-2 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="flex min-w-0 items-center gap-1">
-        <span className="truncate font-mono text-xs" title={value}>
-          {value}
-        </span>
-        {copy && <CopyButton value={value} />}
+        <MonoId id={value} n="full" copy={copy} />
       </span>
     </div>
   );

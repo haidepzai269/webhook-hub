@@ -11,6 +11,7 @@ import { useRealtimeStore } from "@/lib/hub/socket";
 import { stepToasts } from "@/lib/hub/ui-logic";
 import type { TraceIngestedNotice } from "@/lib/hub/types";
 import { clock } from "@/components/flow/time";
+import { shortId } from "@/lib/hub/format";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { type StatusTone, toneBadgeClass } from "@/components/admin/status-badge";
@@ -41,7 +42,7 @@ function showTraceToast(tr: TraceIngestedNotice, more: number, t: TranslateFn) {
   };
   if (tr.outcome === "REJECTED") {
     toast.error(t("page.events.toast.rejected", vars), {
-      description: t("page.events.toast.correlation", { source: tr.sourceKey, id: tr.correlationId.slice(0, 8) }),
+      description: t("page.events.toast.correlation", { source: tr.sourceKey, id: shortId(tr.correlationId) }),
     });
   } else if (tr.outcome === "DUPLICATE") {
     toast.info(t("page.events.toast.duplicate", vars), { description: tr.sourceKey });

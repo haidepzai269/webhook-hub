@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { HubColumn } from "@/components/admin/data-table";
 import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
-import { formatDateTime, httpTone, shortId } from "@/lib/hub/format";
+import { formatDateTime, httpTone, } from "@/lib/hub/format";
+import { MonoId } from "@/components/admin/mono-id";
 import { TimeCell } from "@/components/admin/time-cell";
 import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
@@ -84,9 +85,7 @@ export const buildDeliveryColumns = (t: TranslateFn): HubColumn<Delivery>[] => [
           {/* PK5 khoá 2: lượt giao của sự kiện chưa xác thực mang nhãn (cả ở DLQ — dùng chung cột). */}
           <UnverifiedBadge of={row.original.event} />
         </div>
-        <div className="font-mono text-[11px] text-muted-foreground" title={row.original.eventId}>
-          {shortId(row.original.eventId, 12)}
-        </div>
+        <MonoId id={row.original.eventId} className="text-muted-foreground" />
       </div>
     ),
   },

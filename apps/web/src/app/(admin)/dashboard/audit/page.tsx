@@ -14,7 +14,7 @@ import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageSkeleton } from "@/components/admin/skeletons";
-import { shortId } from "@/lib/hub/format";
+import { MonoId } from "@/components/admin/mono-id";
 import { TimeCell } from "@/components/admin/time-cell";
 import { AUDIT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
@@ -86,9 +86,7 @@ const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
         <div className="min-w-0">
           <div className="text-xs">
             {a.entityType}{" "}
-            <span className="font-mono text-muted-foreground" title={a.entityId}>
-              {shortId(a.entityId, 12)}
-            </span>
+            <MonoId id={a.entityId} className="text-muted-foreground" />
           </div>
           {summary && (
             <CellTooltip text={summary}>
