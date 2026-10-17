@@ -27,7 +27,7 @@ import {
 import { formatDateTime } from "@/lib/hub/format";
 import { DELIVERY_STATUS_VALUES } from "@/lib/hub/list-url";
 import { useSources } from "@/lib/hub/queries";
-import { describeVerification } from "@/lib/hub/ui-logic";
+import { describeVerification, errorTextOf } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -292,7 +292,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
                       r.verification === "VERIFIED"
                         ? toast.success(t("page.destinations.endpoint.verify-ok"))
                         : toast.error(`❌ ${r.verificationFix ?? r.verificationError}`),
-                    onError: (e) => toast.error(e.message),
+                    onError: (e) => toast.error(errorTextOf(e, t)),
                   })
                 }
               >
@@ -307,7 +307,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
                     if (!(await confirm({ title: t("page.destinations.endpoint.rotate-confirm"), destructive: true }))) return;
                     rotate.mutate(ep.id, {
                       onSuccess: (r) => setSecret(r.signingSecret),
-                      onError: (e) => toast.error(e.message),
+                      onError: (e) => toast.error(errorTextOf(e, t)),
                     });
                   }}
                 >

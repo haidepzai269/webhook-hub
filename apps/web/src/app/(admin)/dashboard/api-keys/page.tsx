@@ -6,14 +6,13 @@ import { Ban, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
-import { AdminDialogContent } from "@/components/admin/overlay-content";
+import { FormDialog } from "@/components/admin/form-dialog";
 import { CopyButton } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { ErrorState } from "@/components/admin/state";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -186,60 +185,54 @@ export default function ApiKeysPage() {
         rowClassName={(k) => (k.revokedAt ? "opacity-60" : undefined)}
       />
 
-      <Dialog open={open} onOpenChange={close}>
-        <AdminDialogContent size="md">
-          <DialogHeader>
-            <DialogTitle>{t("page.api-keys.create")}</DialogTitle>
-            <DialogDescription>{t("page.api-keys.dialog.description")}</DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-          {connectionString ? (
-            <ConnectionStringOnce connectionString={connectionString} />
-          ) : (
-            <form id="key-form" noValidate autoComplete="off" onSubmit={submit}>
-              <FieldGroup className="gap-4">
-                <Field className="gap-1.5">
-                  <FieldLabel htmlFor="key-service">{t("page.api-keys.field.service")}</FieldLabel>
-                  <Input
-                    id="key-service"
-                    name="hub-key-service-name"
-                    autoComplete="off"
-                    value={serviceName}
-                    onChange={(e) => setServiceName(e.target.value)}
-                  />
-                </Field>
-                <Field className="gap-1.5">
-                  <FieldLabel>{t("page.api-keys.field.scopes")}</FieldLabel>
-                  {KEY_SCOPES.map(({ scope, hintKey }) => (
-                    <label key={scope} className="flex items-center gap-2 text-sm">
-                      <Checkbox checked={scopes.includes(scope)} onCheckedChange={() => toggle(scope)} />
-                      <span className="font-mono text-xs">{scope}</span>
-                      <span className="text-muted-foreground text-xs">— {t(hintKey)}</span>
-                    </label>
-                  ))}
-                  <FieldDescription>{t("page.api-keys.field.scopes-hint")}</FieldDescription>
-                </Field>
-              </FieldGroup>
-            </form>
-          )}
-          </DialogBody>
-          <DialogFooter>
-            {connectionString ? (
-              <Button type="button" onClick={() => close(false)}>
-                {t("page.api-keys.copied-close")}
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                form="key-form"
-                disabled={create.isPending || !serviceName.trim() || scopes.length === 0}
-              >
-                {create.isPending ? t("common.creating") : t("page.api-keys.create-submit")}
-              </Button>
-            )}
-          </DialogFooter>
-        </AdminDialogContent>
-      </Dialog>
+      <FormDialog
+        open={open}
+        onOpenChange={close}
+        title={t("page.api-keys.create")}
+        description={t("page.api-keys.dialog.description")}
+        formId="key-form"
+        submitting={create.isPending}
+        submittingLabel={t("common.creating")}
+        submitLabel={t("page.api-keys.create-submit")}
+        submitDisabled={!serviceName.trim() || scopes.length === 0}
+        footer={
+          connectionString ? (
+            <Button type="button" onClick={() => close(false)}>
+              {t("page.api-keys.copied-close")}
+            </Button>
+          ) : undefined
+        }
+      >
+        {connectionString ? (
+          <ConnectionStringOnce connectionString={connectionString} />
+        ) : (
+          <form id="key-form" noValidate autoComplete="off" onSubmit={submit}>
+            <FieldGroup className="gap-4">
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="key-service">{t("page.api-keys.field.service")}</FieldLabel>
+                <Input
+                  id="key-service"
+                  name="hub-key-service-name"
+                  autoComplete="off"
+                  value={serviceName}
+                  onChange={(e) => setServiceName(e.target.value)}
+                />
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel>{t("page.api-keys.field.scopes")}</FieldLabel>
+                {KEY_SCOPES.map(({ scope, hintKey }) => (
+                  <label key={scope} className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={scopes.includes(scope)} onCheckedChange={() => toggle(scope)} />
+                    <span className="font-mono text-xs">{scope}</span>
+                    <span className="text-muted-foreground text-xs">— {t(hintKey)}</span>
+                  </label>
+                ))}
+                <FieldDescription>{t("page.api-keys.field.scopes-hint")}</FieldDescription>
+              </Field>
+            </FieldGroup>
+          </form>
+        )}
+      </FormDialog>
 
       <ConfirmDialog
         open={Boolean(target)}

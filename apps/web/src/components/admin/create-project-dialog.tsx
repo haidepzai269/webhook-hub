@@ -2,10 +2,8 @@
 
 import { useState } from "react";
 
-import { AdminDialogContent } from "@/components/admin/overlay-content";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { FormDialog } from "@/components/admin/form-dialog";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { HubApiError } from "@/lib/hub/client";
@@ -81,73 +79,57 @@ export function CreateProjectDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={close}>
-      <AdminDialogContent size="md">
-        <DialogHeader>
-          <DialogTitle>{t("page.projects.create")}</DialogTitle>
-          <DialogDescription>{t("page.projects.dialog.description")}</DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <form id="project-form" noValidate onSubmit={submit}>
-            <FieldGroup className="gap-4">
-              <Field className="gap-1.5">
-                <FieldLabel htmlFor="pj-name">{t("page.projects.field.name")}</FieldLabel>
-                <Input
-                  id="pj-name"
-                  value={name}
-                  placeholder={t("page.projects.field.name-placeholder")}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    if (!slugTouched) setSlug(slugFromName(e.target.value));
-                  }}
-                />
-              </Field>
-              <Field className="gap-1.5">
-                <FieldLabel htmlFor="pj-slug">{t("page.projects.field.slug")}</FieldLabel>
-                <Input
-                  id="pj-slug"
-                  className="font-mono"
-                  value={slug}
-                  onChange={(e) => {
-                    setSlugTouched(true);
-                    setSlug(e.target.value);
-                  }}
-                />
-                <FieldDescription>{t("page.projects.field.slug-hint")}</FieldDescription>
-              </Field>
-              <Field className="gap-1.5">
-                <FieldLabel>{t("page.projects.field.environment")}</FieldLabel>
-                <RadioGroup value={env} onValueChange={(v) => setEnv(v as "test" | "live")} className="flex gap-4 text-sm">
-                  {(["test", "live"] as const).map((v) => (
-                    <label key={v} className="flex cursor-pointer items-center gap-1.5">
-                      <RadioGroupItem value={v} />
-                      {t(v === "test" ? "page.projects.field.env-test" : "page.projects.field.env-live")}
-                    </label>
-                  ))}
-                </RadioGroup>
-              </Field>
-              {formError && <p className="text-destructive text-sm">{formError}</p>}
-            </FieldGroup>
-          </form>
-        </DialogBody>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => close(false)}
-            disabled={pending}
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form="project-form"
-            disabled={pending || !name.trim() || !slug.trim()}
-          >
-            {pending ? t("common.creating") : t("common.create")}
-          </Button>
-        </DialogFooter>
-      </AdminDialogContent>
-    </Dialog>
+    <FormDialog
+      open={open}
+      onOpenChange={close}
+      title={t("page.projects.create")}
+      description={t("page.projects.dialog.description")}
+      formId="project-form"
+      submitting={pending}
+      submittingLabel={t("common.creating")}
+      submitDisabled={!name.trim() || !slug.trim()}
+    >
+      <form id="project-form" noValidate onSubmit={submit}>
+        <FieldGroup className="gap-4">
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="pj-name">{t("page.projects.field.name")}</FieldLabel>
+            <Input
+              id="pj-name"
+              value={name}
+              placeholder={t("page.projects.field.name-placeholder")}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (!slugTouched) setSlug(slugFromName(e.target.value));
+              }}
+            />
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="pj-slug">{t("page.projects.field.slug")}</FieldLabel>
+            <Input
+              id="pj-slug"
+              className="font-mono"
+              value={slug}
+              onChange={(e) => {
+                setSlugTouched(true);
+                setSlug(e.target.value);
+              }}
+            />
+            <FieldDescription>{t("page.projects.field.slug-hint")}</FieldDescription>
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel>{t("page.projects.field.environment")}</FieldLabel>
+            <RadioGroup value={env} onValueChange={(v) => setEnv(v as "test" | "live")} className="flex gap-4 text-sm">
+              {(["test", "live"] as const).map((v) => (
+                <label key={v} className="flex cursor-pointer items-center gap-1.5">
+                  <RadioGroupItem value={v} />
+                  {t(v === "test" ? "page.projects.field.env-test" : "page.projects.field.env-live")}
+                </label>
+              ))}
+            </RadioGroup>
+          </Field>
+          {formError && <FieldError>{formError}</FieldError>}
+        </FieldGroup>
+      </form>
+    </FormDialog>
   );
 }

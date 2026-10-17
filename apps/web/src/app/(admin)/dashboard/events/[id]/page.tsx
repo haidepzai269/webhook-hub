@@ -36,6 +36,7 @@ import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDeli
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { journeyUnverified } from "@/lib/hub/unverified";
+import { errorTextOf } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 
@@ -99,7 +100,7 @@ export default function EventJourneyPage() {
           {
             onSuccess: (r) =>
               toast.success(r.queued ? t("page.events.detail.requeued") : t("page.events.detail.not-orphan")),
-            onError: (e) => toast.error(e.message),
+            onError: (e) => toast.error(errorTextOf(e, t)),
           },
         );
       } else if (action === "open_dlq") router.push("/dashboard/dlq");

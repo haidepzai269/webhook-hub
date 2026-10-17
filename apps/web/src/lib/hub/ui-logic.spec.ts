@@ -11,6 +11,7 @@ import {
   emptyToastCursor,
   SOCKET_INVALIDATES,
   errorMessageOf,
+  errorTextOf,
   keysAfterAudited,
   stepToasts,
   TOAST_WINDOW_MS,
@@ -223,5 +224,16 @@ describe("errorMessageOf — 422 public_url_required", () => {
     expect(errorMessageOf({ error: "public_url_required" }, createT("en"))).toContain("HUB_INGEST_PUBLIC_URL=");
     expect(m).toContain("hub-api trên Render");
     expect(errorMessageOf({ error: "public_url_required" }, createT("en"))).toContain("hub-api service on Render");
+  });
+});
+
+describe("errorTextOf — toast lỗi không lộ chuỗi thô của server (ADR-246)", () => {
+  it("lỗi hub (status+body) -> câu theo mã; lỗi thường -> message; khác -> String", () => {
+    const hubErr = Object.assign(new Error("Not Found"), { status: 404, body: { error: "not_found", message: "x" } });
+    expect(errorTextOf(hubErr, vi)).toMatch(/Không tìm thấy/);
+    const noBody = Object.assign(new Error("boom"), { status: 500, body: null });
+    expect(errorTextOf(noBody, vi)).toBe("boom");
+    expect(errorTextOf(new Error("plain"), vi)).toBe("plain");
+    expect(errorTextOf("str", vi)).toBe("str");
   });
 });

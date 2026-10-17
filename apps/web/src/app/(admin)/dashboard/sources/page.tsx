@@ -61,6 +61,7 @@ import {
 } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { errorTextOf } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
@@ -336,7 +337,7 @@ function KeepLongerCell({ source }: { source: Source }) {
           { id: source.id, keepLonger: v },
           {
             onSuccess: () => toast.success(t(v ? "page.storage.keep-longer.on" : "page.storage.keep-longer.off", { name: source.name })),
-            onError: (e) => toast.error(e.message),
+            onError: (e) => toast.error(errorTextOf(e, t)),
           },
         )
       }
