@@ -5,6 +5,7 @@ import { Suspense, useMemo, useState } from "react";
 import { Eye, ListRestart, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { Card } from "@/components/ui/card";
 import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
@@ -146,10 +147,10 @@ function BulkReplayDialog({
         </DialogHeader>
         <DialogBody>
         <FieldGroup className="gap-4">
-          <div className="rounded-md border p-3 text-sm">
+          <Card variant="inset" className="text-sm">
             <span className="text-muted-foreground">{t("page.dlq.bulk.filters")}</span>
             {summary.length ? summary.join(" · ") : t("page.dlq.bulk.whole")}
-          </div>
+          </Card>
           <Field className="gap-1.5" data-invalid={reason.length > 0 && !reasonOk}>
             <FieldLabel htmlFor="bulk-reason">{t("page.dlq.bulk.reason")}</FieldLabel>
             <Textarea
@@ -164,7 +165,7 @@ function BulkReplayDialog({
           </Field>
 
           {preview && (
-            <div className="space-y-2 rounded-md border p-3 text-sm">
+            <Card variant="inset" className="space-y-2 text-sm">
               <p>
                 <span className="font-semibold tabular-nums">{preview.count}</span> {t("page.dlq.bulk.will-replay")}
                 {preview.truncated ? t("page.dlq.bulk.truncated", { limit: preview.limit }) : ""}.
@@ -178,7 +179,7 @@ function BulkReplayDialog({
                   ))}
                 </ul>
               )}
-            </div>
+            </Card>
           )}
         </FieldGroup>
         </DialogBody>

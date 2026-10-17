@@ -285,7 +285,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
       <CardContent className="space-y-2">
         {data.suggestions.length === 0 && <EmptyState size="sm" title={t("page.storage.suggestions-empty")} />}
         {data.suggestions.map((s) => (
-          <div key={s.id} className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+          <Card key={s.id} variant="inset" className="gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-0.5 text-sm">
               <div className="font-medium">
                 {t(`page.storage.action.${s.action}` as MessageKey)} · {impName(s.importance)} · {t("page.storage.suggestion.older", { age: ageLabel(t, s.olderThan) })}
@@ -300,7 +300,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
                 </Button>
               ))}
             </div>
-          </div>
+          </Card>
         ))}
       </CardContent>
       <ConfirmDialog

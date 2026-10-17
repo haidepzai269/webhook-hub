@@ -7,6 +7,7 @@ import Link from "next/link";
 import { KeyRound, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { Card } from "@/components/ui/card";
 import { CreateProjectDialog } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { ErrorState } from "@/components/admin/state";
@@ -76,7 +77,7 @@ function UnverifiedSourcesSetting({ projectId, canEdit }: { projectId: string; c
   const save = useSetUnverifiedSources(projectId);
   const on = q.data?.allowUnverifiedSources === true;
   return (
-    <section className="mt-6 flex flex-col gap-2 rounded-md border p-4">
+    <Card variant="inset" className="mt-6 gap-2 p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="font-medium text-sm">{t("page.projects.unverified.title")}</p>
@@ -105,7 +106,7 @@ function UnverifiedSourcesSetting({ projectId, canEdit }: { projectId: string; c
       ) : (
         <p className="text-muted-foreground text-xs">{t("page.projects.unverified.owner-only")}</p>
       )}
-    </section>
+    </Card>
   );
 }
 
