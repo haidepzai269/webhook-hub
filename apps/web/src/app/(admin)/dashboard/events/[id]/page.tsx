@@ -29,7 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailSkeleton } from "@/components/admin/skeletons";
 import { formatDateTime } from "@/lib/hub/format";
 import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
@@ -110,7 +110,7 @@ export default function EventJourneyPage() {
 
   const onSelect = useCallback((stage: StageView, branch?: FlowBranch) => setSelected({ stage, branch }), []);
 
-  if (isLoading) return <Skeleton className="h-[70vh] w-full rounded-2xl" />;
+  if (isLoading) return <DetailSkeleton rows={6} />;
   if (error) return <ErrorState message={t("page.events.load-error", { message: error.message })} onRetry={() => void refetch()} />;
   if (!data)
     return (

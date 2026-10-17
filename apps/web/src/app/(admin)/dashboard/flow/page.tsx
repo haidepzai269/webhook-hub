@@ -24,7 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { useTopology } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
@@ -166,7 +166,7 @@ export default function FlowMapPage() {
         <div className="relative min-h-0 flex-1">
         {isLoading ? (
           <div className="grid h-full place-items-center">
-            <Skeleton className="h-40 w-2/3" />
+            <CardSkeleton lines={3} className="w-2/3" />
           </div>
         ) : error ? (
           <div className="grid h-full place-items-center p-4">

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageSkeleton } from "@/components/admin/skeletons";
 import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
 import { AUDIT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
@@ -230,7 +230,7 @@ function AuditView() {
 
 export default function AuditPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <AuditView />
     </Suspense>
   );

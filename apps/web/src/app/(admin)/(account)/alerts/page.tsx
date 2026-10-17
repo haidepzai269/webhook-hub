@@ -13,7 +13,6 @@ import { ProjectChip, SeverityDot, useAlertText } from "@/components/alerts/aler
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { AlertText } from "@/lib/alerts/message";
 import { ruleName } from "@/lib/alerts/message";
 import { ALERT_RULE_CODES, ALERT_SEVERITIES, type AlertView } from "@/lib/alerts/types";
@@ -222,7 +221,7 @@ function AlertsView() {
 
 export default function AlertsPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <AlertsView />
     </Suspense>
   );

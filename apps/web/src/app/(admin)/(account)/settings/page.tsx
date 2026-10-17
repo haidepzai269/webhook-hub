@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -48,7 +48,7 @@ export default function SettingsPage() {
     <>
       <PageHeader title={t("page.settings.title")} description={t("page.settings.description")} />
       {/* ADR-238: chưa có /auth/me -> chưa biết có phải operator; cùng khung chờ với AlertSettings đang tải. */}
-      {!operator && booting && <Skeleton className="h-64 w-full" />}
+      {!operator && booting && <CardSkeleton lines={6} />}
       {operator && <AlertSettings />}
       {!operator && !booting && <p className="text-muted-foreground text-sm">{t("page.settings.operator-only")}</p>}
     </>
@@ -84,7 +84,7 @@ function AlertSettings() {
     err instanceof HubApiError ? errorMessageOf(err.body, t) || err.message : String(err);
   const put = (patch: AlertPreferencesPatch) => save.mutate(patch, { onError: (err) => toast.error(errorText(err)) });
 
-  if (prefs.isLoading) return <Skeleton className="h-64 w-full" />;
+  if (prefs.isLoading) return <CardSkeleton lines={6} />;
   if (prefs.isError || !prefs.data) return <ErrorState message={t("page.settings.load-error")} onRetry={() => void prefs.refetch()} />;
   const p = prefs.data;
   const sw = emailSwitchState(p);

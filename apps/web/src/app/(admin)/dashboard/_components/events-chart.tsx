@@ -13,7 +13,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useTimeseries } from "@/lib/hub/queries";
 import type { TimeseriesRange } from "@/lib/hub/types";
@@ -78,7 +78,7 @@ export function EventsChart() {
         {error ? (
           <ErrorState inline message={t("page.dashboard.chart.load-error", { message: error.message })} onRetry={() => void refetch()} />
         ) : isLoading && !data ? (
-          <Skeleton className="h-64 w-full" />
+          <CardSkeleton lines={6} className="h-64" />
         ) : (
           <ChartContainer
             config={chartConfig}

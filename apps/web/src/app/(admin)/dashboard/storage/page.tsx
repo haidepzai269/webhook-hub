@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -82,7 +82,7 @@ export default function StoragePage() {
           onRetry={() => void q.refetch()}
         />
       ) : !q.data ? (
-        <Skeleton className="h-40 w-full" />
+        <CardSkeleton lines={3} />
       ) : (
         <div className="grid gap-4">
           {!canWrite && <p className="text-muted-foreground text-sm">{t("page.storage.read-only")}</p>}

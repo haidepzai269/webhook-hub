@@ -14,7 +14,7 @@ import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, Dial
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageSkeleton } from "@/components/admin/skeletons";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { HubApiError } from "@/lib/hub/client";
@@ -403,7 +403,7 @@ function DlqView() {
 
 export default function DlqPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <DlqView />
     </Suspense>
   );

@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailSkeleton } from "@/components/admin/skeletons";
 import { formatDateTime } from "@/lib/hub/format";
 import { useEventDetail } from "@/lib/hub/queries";
 import { isUnverified, SIGNATURE_VIEW, signatureView } from "@/lib/hub/unverified";
@@ -62,7 +62,7 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
 
         <SheetBody className="space-y-5 px-4 pt-4 pb-6">
           {isLoading ? (
-            <Skeleton className="h-64 w-full" />
+            <DetailSkeleton rows={4} />
           ) : error ? (
             <ErrorState message={t("page.events.load-error", { message: error.message })} onRetry={() => void refetch()} />
           ) : !ev ? (

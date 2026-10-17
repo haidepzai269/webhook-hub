@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PageSkeleton } from "@/components/admin/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TimeRange } from "@/components/admin/time-range";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -305,7 +306,7 @@ function ExecutionsView() {
 
 export default function EventsPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <ExecutionsView />
     </Suspense>
   );

@@ -15,7 +15,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { HubApiError } from "@/lib/hub/client";
@@ -118,7 +118,7 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
       ) : error ? (
         <ErrorState message={t("traffic.load-error", { message: error.message })} onRetry={() => void refetch()} />
       ) : isLoading && !data ? (
-        <Skeleton className="h-64 w-full" />
+        <CardSkeleton lines={6} />
       ) : data && text ? (
         <div className={`space-y-4 transition-opacity ${isPlaceholderData ? "opacity-50" : ""}`}>
           <div className="space-y-1" data-testid="traffic-insight">
