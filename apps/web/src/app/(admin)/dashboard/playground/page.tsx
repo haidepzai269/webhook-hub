@@ -11,6 +11,7 @@ import { Send, Shuffle } from "lucide-react";
 
 import { JsonBlock } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
+import { ErrorState } from "@/components/admin/state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -246,7 +247,7 @@ export default function PlaygroundPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {sendError && <p className="text-destructive text-sm">{t("page.playground.send-error", { message: sendError })}</p>}
+            {sendError && <ErrorState message={t("page.playground.send-error", { message: sendError })} />}
             {!result && !sendError && <p className="text-muted-foreground text-sm">{t("page.playground.nothing-sent")}</p>}
             {result && (
               <>
