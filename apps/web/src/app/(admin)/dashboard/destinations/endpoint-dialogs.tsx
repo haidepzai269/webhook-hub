@@ -28,6 +28,7 @@ import { DELIVERY_STATUS_VALUES } from "@/lib/hub/list-url";
 import { useSources } from "@/lib/hub/queries";
 import { describeVerification } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** Trạng thái lượt giao của hub -> nhãn dịch; mã lạ (API mới hơn console) giữ nguyên. */
 function DeliveryStatusLabel({ status }: { status: string }) {
@@ -67,13 +68,15 @@ export function SecretOnce({ secret }: { secret: string }) {
   const t = useT();
   const envLine = `HUB_SIGNING_SECRET=${secret}`;
   return (
-    <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-sm">
-      <p className="mb-2 font-medium">{t("page.destinations.endpoint.secret-once")}</p>
-      <div className="flex items-center gap-2">
-        <code className="bg-muted flex-1 overflow-x-auto rounded px-2 py-1 font-mono text-xs">{envLine}</code>
-        <CopyButton text={envLine} />
-      </div>
-    </div>
+    <Alert variant="warning">
+      <AlertTitle>{t("page.destinations.endpoint.secret-once")}</AlertTitle>
+      <AlertDescription className="w-full">
+        <div className="flex w-full items-center gap-2">
+          <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-foreground text-xs">{envLine}</code>
+          <CopyButton text={envLine} />
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 

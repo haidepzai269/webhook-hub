@@ -30,23 +30,25 @@ import {
 } from "@/lib/hub/keys-logic";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** Hộp "Chỉ hiện một lần" — key thô chỉ sống trong state của hộp này; đóng là mất (SK1, SPEC §3). */
 function ConnectionStringOnce({ connectionString }: { connectionString: string }) {
   const line = envLine(connectionString);
   const t = useT();
   return (
-    <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-sm">
-      <p className="mb-2 font-medium">{t("page.api-keys.once.title")}</p>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">{line}</code>
-        <CopyButton value={line} label={t("page.api-keys.once.copy")} />
-      </div>
-      <p className="mt-2 text-muted-foreground text-xs">
-        {t("page.api-keys.once.hint-before")} <b>{t("page.api-keys.once.hint-target")}</b>{" "}
-        {t("page.api-keys.once.hint-after")}
-      </p>
-    </div>
+    <Alert variant="warning">
+      <AlertTitle>{t("page.api-keys.once.title")}</AlertTitle>
+      <AlertDescription className="w-full">
+        <div className="flex w-full items-center gap-2">
+          <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-foreground text-xs">{line}</code>
+          <CopyButton value={line} label={t("page.api-keys.once.copy")} />
+        </div>
+        <p className="text-xs">
+          {t("page.api-keys.once.hint-before")} <b>{t("page.api-keys.once.hint-target")}</b> {t("page.api-keys.once.hint-after")}
+        </p>
+      </AlertDescription>
+    </Alert>
   );
 }
 

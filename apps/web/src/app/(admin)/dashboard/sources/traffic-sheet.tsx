@@ -30,6 +30,7 @@ import {
   type TrafficRange,
   trafficInsightText,
 } from "@/lib/traffic/message";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -128,10 +129,10 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
           </div>
 
           {blocked && (
-            <div className="rounded-lg border border-amber-500/40 px-3 py-2 text-sm">
-              <p className="text-amber-800 dark:text-amber-200">{blocked}</p>
-              <p className="text-muted-foreground text-xs">{t("traffic.blocked-now-estimate")}</p>
-            </div>
+            <Alert variant="warning">
+              <AlertTitle>{blocked}</AlertTitle>
+              <AlertDescription className="text-xs">{t("traffic.blocked-now-estimate")}</AlertDescription>
+            </Alert>
           )}
 
           {!text.empty && (

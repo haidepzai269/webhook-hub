@@ -41,6 +41,7 @@ import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { barPct, formatBytes, levelSeg, levelTone, parseLevel } from "@/lib/storage/storage-logic";
 import { toneBadgeClass } from "@/components/admin/status-badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 import { DEMO_CURRENT_ID, DEMO_PROJECTS } from "./demo-projects";
 
@@ -410,10 +411,10 @@ function Home({ demo }: { demo: boolean }) {
       <AccountTopBar demo={demo} />
       <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6">
         {demo && (
-          <div className="mb-6 flex items-start gap-2 rounded-lg border border-amber-500/40 border-dashed bg-amber-500/5 px-3 py-2 text-amber-800 text-sm dark:text-amber-300">
-            <Info className="mt-0.5 size-4 shrink-0" />
-            {t("page.projects.home.demo")}
-          </div>
+          <Alert variant="warning" className="mb-6">
+            <Info />
+            <AlertDescription>{t("page.projects.home.demo")}</AlertDescription>
+          </Alert>
         )}
         <PageHeader
           title={t("page.projects.home.title")}

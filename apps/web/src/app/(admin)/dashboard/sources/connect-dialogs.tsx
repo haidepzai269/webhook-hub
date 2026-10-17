@@ -20,6 +20,7 @@ import { useSources } from "@/lib/hub/queries";
 import { connectionDialogMode } from "@/lib/hub/ui-logic";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** KN2 (SPEC-ket-noi §4, ADR-138): form dựng từ `spec.fields` của connector — UI không biết provider nào có ô gì. */
 interface ConnectorInfo {
@@ -182,12 +183,14 @@ export function ConnectSourceDialog({
           <div className="flex flex-col gap-2">
             <StatusLine c={result} />
             {secretChanged && (
-              <p className="rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                {rich(t("page.sources.connect.secret-changed"), {
-                  both: <b>{t("page.sources.connect.secret-changed.both")}</b>,
-                  code: <code>secret_mismatch</code>,
-                })}
-              </p>
+              <Alert variant="warning">
+                <AlertDescription className="text-xs">
+                  {rich(t("page.sources.connect.secret-changed"), {
+                    both: <b>{t("page.sources.connect.secret-changed.both")}</b>,
+                    code: <code>secret_mismatch</code>,
+                  })}
+                </AlertDescription>
+              </Alert>
             )}
           </div>
         ) : !connectors.data?.length ? (
@@ -305,12 +308,16 @@ export function ConnectSourceDialog({
               ))}
               {spec && <p className="text-muted-foreground text-xs">{spec.keyHint}</p>}
               {spec?.overwriteWarning && (
-                <label className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                  <Checkbox checked={ack} onCheckedChange={(v) => setAck(v === true)} className="mt-0.5" />
-                  <span>
-                    <b>{t("page.sources.connect.ack-overwrite")}</b> {spec.overwriteWarning}
-                  </span>
-                </label>
+                <Alert variant="warning">
+                  <AlertDescription className="text-xs">
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <Checkbox checked={ack} onCheckedChange={(v) => setAck(v === true)} className="mt-0.5" />
+                      <span>
+                        <b>{t("page.sources.connect.ack-overwrite")}</b> {spec.overwriteWarning}
+                      </span>
+                    </label>
+                  </AlertDescription>
+                </Alert>
               )}
             </FieldGroup>
           </form>
