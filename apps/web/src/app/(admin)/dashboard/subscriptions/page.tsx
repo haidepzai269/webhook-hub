@@ -18,6 +18,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { AcceptUnverifiedField } from "@/components/admin/accept-unverified-field";
 import { formatDateTime } from "@/lib/hub/format";
 import {
   useCreateSubscription,
@@ -379,13 +380,12 @@ export default function SubscriptionsPage() {
               control={form.control}
               name="acceptUnverified"
               render={({ field }) => (
-                <Field className="gap-1.5">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />
-                    {t("page.subscriptions.form.accept-unverified")}
-                  </label>
-                  <FieldDescription>{t("page.subscriptions.form.accept-unverified-hint")}</FieldDescription>
-                </Field>
+                <AcceptUnverifiedField
+                  checked={field.value}
+                  onChange={field.onChange}
+                  label={t("page.subscriptions.form.accept-unverified")}
+                  hint={t("page.subscriptions.form.accept-unverified-hint")}
+                />
               )}
             />
           </FieldGroup>

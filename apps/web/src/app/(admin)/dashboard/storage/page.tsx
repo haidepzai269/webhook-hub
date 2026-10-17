@@ -25,6 +25,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HubApiError } from "@/lib/hub/client";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { useMeStore } from "@/lib/hub/me-store";
@@ -405,19 +407,18 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
               <TableRow key={r.importance}>
                 <TableCell className="font-medium">{t(`page.storage.importance.${r.importance}` as MessageKey)}</TableCell>
                 <TableCell>
-                  <select
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
-                    value={r.action}
-                    disabled={!canWrite}
-                    aria-label={t("page.storage.auto.col.action")}
-                    onChange={(e) => set(i, { action: e.target.value as PolicyDraft["action"] })}
-                  >
-                    {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
-                      <option key={a} value={a}>
-                        {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={r.action} disabled={!canWrite} onValueChange={(v) => set(i, { action: v as PolicyDraft["action"] })}>
+                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.action")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
+                        <SelectItem key={a} value={a}>
+                          {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
                   <Input
@@ -432,16 +433,19 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
                   />
                 </TableCell>
                 <TableCell>
-                  <select
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                  <Select
                     value={r.trigger}
                     disabled={!canWrite || r.action === "off"}
-                    aria-label={t("page.storage.auto.col.trigger")}
-                    onChange={(e) => set(i, { trigger: e.target.value as PolicyDraft["trigger"] })}
+                    onValueChange={(v) => set(i, { trigger: v as PolicyDraft["trigger"] })}
                   >
-                    <option value="always">{t("page.storage.auto.trigger.always")}</option>
-                    <option value="above_85">{t("page.storage.auto.trigger.above-85")}</option>
-                  </select>
+                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.trigger")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="always">{t("page.storage.auto.trigger.always")}</SelectItem>
+                      <SelectItem value="above_85">{t("page.storage.auto.trigger.above-85")}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </TableCell>
               </TableRow>
             ))}
@@ -486,13 +490,10 @@ function EmailCard() {
       <CardContent>
         {q.data.member ? (
           <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              role="switch"
-              className="size-4 accent-primary"
+            <Switch
               checked={q.data.warnEmail}
               disabled={save.isPending}
-              onChange={(e) => save.mutate(e.target.checked, { onError: (err) => toast.error(err instanceof HubApiError ? errorMessageOf(err.body, t) : String(err)) })}
+              onCheckedChange={(v) => save.mutate(v, { onError: (err) => toast.error(err instanceof HubApiError ? errorMessageOf(err.body, t) : String(err)) })}
             />
             {t("page.storage.email.warn")}
           </label>

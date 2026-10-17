@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { AcceptUnverifiedField } from "@/components/admin/accept-unverified-field";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   type CreateEndpointResult,
   useCreateEndpoint,
@@ -195,11 +197,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
               <div className="flex flex-wrap gap-2">
                 {[...(catalog.data?.wildcards ?? []), ...(catalog.data?.types ?? [])].map((type) => (
                   <label key={type} className="flex items-center gap-1 font-mono text-xs">
-                    <input
-                      type="checkbox"
-                      checked={types.includes(type)}
-                      onChange={() => setTypes(toggle(types, type))}
-                    />
+                    <Checkbox checked={types.includes(type)} onCheckedChange={() => setTypes(toggle(types, type))} />
                     {type}
                   </label>
                 ))}
@@ -216,23 +214,18 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
               <div className="flex flex-col gap-1">
                 {(sources.data ?? []).map((s) => (
                   <label key={s.id} className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={sourceIds.includes(s.id)}
-                      onChange={() => setSourceIds(toggle(sourceIds, s.id))}
-                    />
+                    <Checkbox checked={sourceIds.includes(s.id)} onCheckedChange={() => setSourceIds(toggle(sourceIds, s.id))} />
                     {s.name} <Badge variant="secondary">{s.provider}</Badge>
                   </label>
                 ))}
               </div>
             </Field>
-            <Field className="gap-1.5">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={acceptUnverified} onChange={(e) => setAcceptUnverified(e.target.checked)} />
-                {t("page.destinations.endpoint.accept-unverified")}
-              </label>
-              <FieldDescription>{t("page.destinations.endpoint.accept-unverified-hint")}</FieldDescription>
-            </Field>
+            <AcceptUnverifiedField
+              checked={acceptUnverified}
+              onChange={setAcceptUnverified}
+              label={t("page.destinations.endpoint.accept-unverified")}
+              hint={t("page.destinations.endpoint.accept-unverified-hint")}
+            />
             </div>
           </FieldGroup>
         )}

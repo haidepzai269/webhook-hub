@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TimeRange } from "@/components/admin/time-range";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatRelative } from "@/lib/hub/format";
 import type { ExecutionFilters } from "@/lib/hub/flow-types";
 import { EXECUTION_PARAMS } from "@/lib/hub/list-url";
@@ -140,21 +141,16 @@ function ExecutionsView() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border p-0.5" role="tablist">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={status === tab.id}
-              onClick={() => url.setFilter({ status: tab.id === "all" ? null : tab.id })}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm ${status === tab.id ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {tab.id !== "all" && <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[EXECUTION_TONE[tab.id]] }} />}
-              {t(tab.label)}
-            </button>
-          ))}
-        </div>
+        <Tabs value={status} onValueChange={(id) => url.setFilter({ status: id === "all" ? null : id })}>
+          <TabsList variant="segmented">
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab.id} value={tab.id}>
+                {tab.id !== "all" && <span className="size-1.5 rounded-full" style={{ background: TONE_VAR[EXECUTION_TONE[tab.id]] }} />}
+                {t(tab.label)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <Select value={source || ALL} onValueChange={(x) => url.setFilter({ source: x === ALL ? null : x })}>
           <SelectTrigger size="sm" className="w-48">
             <SelectValue placeholder={t("page.events.filter.source")} />

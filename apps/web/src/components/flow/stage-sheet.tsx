@@ -7,6 +7,7 @@ import type { FlowBranch, StageView } from "@hub/flow";
 import { useT } from "@/lib/i18n/use-t";
 import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { HeadersCard } from "./detail-cards";
 import { JsonViewer } from "./json-viewer";
@@ -57,27 +58,21 @@ export function StageSheet({ stage, branch, onClose }: { stage: StageView | null
                   <div>{stage.reason.message}</div>
                 </div>
               )}
-              <div className="inline-flex rounded-lg border p-0.5" role="tablist">
-                {(
-                  [
-                    ["in", t("flow.sheet.tab.in"), hasIn],
-                    ["out", t("flow.sheet.tab.out"), hasOut],
-                    ["detail", t("common.details"), true],
-                  ] as const
-                ).map(([id, label, enabled]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    disabled={!enabled}
-                    aria-selected={effective === id}
-                    onClick={() => setTab(id)}
-                    className={`rounded-md px-3 py-1 text-xs disabled:opacity-40 ${effective === id ? "bg-muted font-medium" : "text-muted-foreground"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <Tabs value={effective} onValueChange={(id) => setTab(id as typeof effective)}>
+                <TabsList variant="segmented">
+                  {(
+                    [
+                      ["in", t("flow.sheet.tab.in"), hasIn],
+                      ["out", t("flow.sheet.tab.out"), hasOut],
+                      ["detail", t("common.details"), true],
+                    ] as const
+                  ).map(([id, label, enabled]) => (
+                    <TabsTrigger key={id} value={id} disabled={!enabled}>
+                      {label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
               {effective === "in" && (
                 <>
                   <HeadersCard headers={d.headers as Record<string, unknown> | null} />

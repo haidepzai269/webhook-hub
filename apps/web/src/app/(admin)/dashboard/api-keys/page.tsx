@@ -27,6 +27,7 @@ import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, Dial
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { formatDateTime } from "@/lib/hub/format";
 import {
@@ -192,7 +193,7 @@ export default function ApiKeysPage() {
                   <FieldLabel>{t("page.api-keys.field.scopes")}</FieldLabel>
                   {KEY_SCOPES.map(({ scope, hintKey }) => (
                     <label key={scope} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={scopes.includes(scope)} onChange={() => toggle(scope)} />
+                      <Checkbox checked={scopes.includes(scope)} onCheckedChange={() => toggle(scope)} />
                       <span className="font-mono text-xs">{scope}</span>
                       <span className="text-muted-foreground text-xs">— {t(hintKey)}</span>
                     </label>

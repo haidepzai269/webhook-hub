@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
@@ -239,18 +241,18 @@ export function ConnectSourceDialog({
                   </FieldDescription>
                 ) : effMode === "existing" && target ? (
                   <>
-                    <select
-                      aria-label={t("page.sources.connect.existing-aria")}
-                      className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                      value={target.id}
-                      onChange={(e) => setExistingId(e.target.value)}
-                    >
-                      {candidates.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} · {s.sourceKey}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={target.id} onValueChange={setExistingId}>
+                      <SelectTrigger size="sm" className="w-full" aria-label={t("page.sources.connect.existing-aria")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {candidates.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name} · {s.sourceKey}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FieldDescription>{t("page.sources.connect.existing-keeps-both")}</FieldDescription>
                     <FieldDescription>
                       {t("page.sources.connect.existing-same-url", {
@@ -300,7 +302,7 @@ export function ConnectSourceDialog({
               {spec && <p className="text-muted-foreground text-xs">{spec.keyHint}</p>}
               {spec?.overwriteWarning && (
                 <label className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-2 text-xs">
-                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                  <Checkbox checked={ack} onCheckedChange={(v) => setAck(v === true)} className="mt-0.5" />
                   <span>
                     <b>{t("page.sources.connect.ack-overwrite")}</b> {spec.overwriteWarning}
                   </span>

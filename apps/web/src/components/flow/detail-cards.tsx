@@ -7,6 +7,7 @@ import { ChevronDown, ChevronRight, History, RotateCcw } from "lucide-react";
 
 import { CopyButton } from "@/components/admin/copy-button";
 import { deliveryStatusKey } from "@/components/admin/status-badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DeliveryStatus } from "@/lib/hub/types";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
@@ -28,23 +29,17 @@ export function FlowCard({ title, right, children, className }: { title: ReactNo
   );
 }
 
-function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { id: T; label: string; disabled?: boolean }[] }) {
+function SegmentedTabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { id: T; label: string; disabled?: boolean }[] }) {
   return (
-    <div className="inline-flex rounded-lg border p-0.5" role="tablist">
-      {items.map((t) => (
-        <button
-          key={t.id}
-          type="button"
-          role="tab"
-          aria-selected={value === t.id}
-          disabled={t.disabled}
-          onClick={() => onChange(t.id)}
-          className={`rounded-md px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${value === t.id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
+    <Tabs value={value} onValueChange={(v) => onChange(v as T)}>
+      <TabsList variant="segmented">
+        {items.map((t) => (
+          <TabsTrigger key={t.id} value={t.id} disabled={t.disabled}>
+            {t.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -60,7 +55,7 @@ export function PayloadCard({ data, raw, rawTruncated, dataTruncated }: { data: 
       title={t("flow.card.payload")}
       right={
         <div className="flex items-center gap-2">
-          <Tabs
+          <SegmentedTabs
             value={tab}
             onChange={setTab}
             items={[
