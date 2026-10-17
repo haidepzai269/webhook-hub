@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
+import { SimpleTable } from "@/components/admin/simple-table";
 import { EmptyState, ErrorState } from "@/components/admin/state";
 import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CardSkeleton } from "@/components/admin/skeletons";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { ruleName } from "@/lib/alerts/message";
@@ -154,39 +154,47 @@ function AlertSettings() {
                   </Button>
                 </div>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("page.settings.alerts.rules.col.rule")}</TableHead>
-                    <TableHead className="w-36">{t("page.settings.alerts.rules.col.severity")}</TableHead>
-                    <TableHead className="w-24 text-center">{t("page.settings.alerts.rules.col.send")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => (
-                    <TableRow key={r.code}>
-                      <TableCell className="whitespace-normal">
+              <SimpleTable
+                rows={rows}
+                getRowKey={(r) => r.code}
+                columns={[
+                  {
+                    key: "rule",
+                    header: t("page.settings.alerts.rules.col.rule"),
+                    cell: (r) => (
+                      <>
                         <div className="font-medium text-sm">{ruleName(r.code, t)}</div>
                         <div className="text-muted-foreground text-xs">{t(ruleDescriptionKey(r.code))}</div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={r.severity === "critical" ? "destructive" : "outline"} className="gap-1.5">
-                          <SeverityDot severity={r.severity} />
-                          {t(`alerts.severity.${r.severity}`)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Check
-                          checked={r.checked}
-                          disabled={busy}
-                          label={ruleName(r.code, t)}
-                          onChange={(on) => put({ emailRules: toggleRule(p.rules, p.emailRules, r.code, on) })}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      </>
+                    ),
+                  },
+                  {
+                    key: "severity",
+                    header: t("page.settings.alerts.rules.col.severity"),
+                    className: "w-36",
+                    cell: (r) => (
+                      <Badge variant={r.severity === "critical" ? "destructive" : "outline"} className="gap-1.5">
+                        <SeverityDot severity={r.severity} />
+                        {t(`alerts.severity.${r.severity}`)}
+                      </Badge>
+                    ),
+                  },
+                  {
+                    key: "send",
+                    header: t("page.settings.alerts.rules.col.send"),
+                    className: "w-24",
+                    align: "center",
+                    cell: (r) => (
+                      <Check
+                        checked={r.checked}
+                        disabled={busy}
+                        label={ruleName(r.code, t)}
+                        onChange={(on) => put({ emailRules: toggleRule(p.rules, p.emailRules, r.code, on) })}
+                      />
+                    ),
+                  },
+                ]}
+              />
             </section>
 
             <section className="space-y-1">

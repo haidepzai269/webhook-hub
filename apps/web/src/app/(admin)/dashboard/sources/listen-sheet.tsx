@@ -1,11 +1,11 @@
 "use client";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
+import { SimpleTable } from "@/components/admin/simple-table";
 import { ErrorState } from "@/components/admin/state";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DetailSkeleton } from "@/components/admin/skeletons";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TimeCell } from "@/components/admin/time-cell";
 import {
   connectionState,
@@ -90,30 +90,23 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
       </div>
       <SubscribeUrlNotice url={pendingSubscribeUrl(data)} />
       {data && data.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("page.sources.listen.col.time")}</TableHead>
-              <TableHead>{t("page.sources.listen.col.status")}</TableHead>
-              <TableHead>{t("page.sources.listen.col.diagnosis")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>
-                  <TimeCell iso={r.receivedAt} mode="absolute" />
-                </TableCell>
-                <TableCell>
-                  <Badge variant={r.status === "ACCEPTED" || r.diagnosis?.reason === "handshake" ? "outline" : r.status === "REJECTED" ? "destructive" : "secondary"}>
-                    {r.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="whitespace-normal text-xs">{reasonText(t, r.diagnosis)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <SimpleTable
+          rows={data}
+          getRowKey={(r) => r.id}
+          columns={[
+            { key: "time", header: t("page.sources.listen.col.time"), cell: (r) => <TimeCell iso={r.receivedAt} mode="absolute" /> },
+            {
+              key: "status",
+              header: t("page.sources.listen.col.status"),
+              cell: (r) => (
+                <Badge variant={r.status === "ACCEPTED" || r.diagnosis?.reason === "handshake" ? "outline" : r.status === "REJECTED" ? "destructive" : "secondary"}>
+                  {r.status}
+                </Badge>
+              ),
+            },
+            { key: "diagnosis", header: t("page.sources.listen.col.diagnosis"), className: "whitespace-normal text-xs", cell: (r) => reasonText(t, r.diagnosis) },
+          ]}
+        />
       )}
     </div>
   );

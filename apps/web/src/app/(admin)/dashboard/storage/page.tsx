@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
+import { SimpleTable } from "@/components/admin/simple-table";
 import { EmptyState, ErrorState } from "@/components/admin/state";
 import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CardSkeleton } from "@/components/admin/skeletons";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
@@ -372,64 +372,71 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("page.storage.auto.col.importance")}</TableHead>
-              <TableHead>{t("page.storage.auto.col.action")}</TableHead>
-              <TableHead>{t("page.storage.auto.col.after")}</TableHead>
-              <TableHead>{t("page.storage.auto.col.trigger")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r, i) => (
-              <TableRow key={r.importance}>
-                <TableCell className="font-medium">{t(`page.storage.importance.${r.importance}` as MessageKey)}</TableCell>
-                <TableCell>
-                  <Select value={r.action} disabled={!canWrite} onValueChange={(v) => set(i, { action: v as PolicyDraft["action"] })}>
-                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.action")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
-                        <SelectItem key={a} value={a}>
-                          {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={365}
-                    className="h-8 w-20"
-                    value={r.afterDays}
-                    disabled={!canWrite || r.action === "off"}
-                    aria-label={t("page.storage.auto.col.after")}
-                    onChange={(e) => set(i, { afterDays: Math.max(1, Math.min(365, Number(e.target.value) || 1)) })}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Select
-                    value={r.trigger}
-                    disabled={!canWrite || r.action === "off"}
-                    onValueChange={(v) => set(i, { trigger: v as PolicyDraft["trigger"] })}
-                  >
-                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.trigger")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="always">{t("page.storage.auto.trigger.always")}</SelectItem>
-                      <SelectItem value="above_85">{t("page.storage.auto.trigger.above-85")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <SimpleTable
+          rows={rows}
+          getRowKey={(r) => r.importance}
+          columns={[
+            {
+              key: "importance",
+              header: t("page.storage.auto.col.importance"),
+              className: "font-medium",
+              cell: (r) => t(`page.storage.importance.${r.importance}` as MessageKey),
+            },
+            {
+              key: "action",
+              header: t("page.storage.auto.col.action"),
+              cell: (r, i) => (
+                <Select value={r.action} disabled={!canWrite} onValueChange={(v) => set(i, { action: v as PolicyDraft["action"] })}>
+                  <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.action")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
+                      <SelectItem key={a} value={a}>
+                        {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ),
+            },
+            {
+              key: "after",
+              header: t("page.storage.auto.col.after"),
+              cell: (r, i) => (
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className="h-8 w-20"
+                  value={r.afterDays}
+                  disabled={!canWrite || r.action === "off"}
+                  aria-label={t("page.storage.auto.col.after")}
+                  onChange={(e) => set(i, { afterDays: Math.max(1, Math.min(365, Number(e.target.value) || 1)) })}
+                />
+              ),
+            },
+            {
+              key: "trigger",
+              header: t("page.storage.auto.col.trigger"),
+              cell: (r, i) => (
+                <Select
+                  value={r.trigger}
+                  disabled={!canWrite || r.action === "off"}
+                  onValueChange={(v) => set(i, { trigger: v as PolicyDraft["trigger"] })}
+                >
+                  <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.trigger")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always">{t("page.storage.auto.trigger.always")}</SelectItem>
+                    <SelectItem value="above_85">{t("page.storage.auto.trigger.above-85")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              ),
+            },
+          ]}
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-muted-foreground text-xs">{t("page.storage.auto.note")}</p>
           <Button

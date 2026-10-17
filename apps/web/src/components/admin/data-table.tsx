@@ -52,6 +52,8 @@ interface DataTableProps<T extends RowData> {
    * ô tìm và sắp xếp chỉ tác động trong trang này (hiện ghi chú bên cạnh ô tìm).
    */
   footer?: ReactNode;
+  /** Class thêm cho từng hàng (vd làm mờ hàng đã thu hồi). */
+  rowClassName?: (row: T) => string | undefined;
 }
 
 /** Bảng dữ liệu chung của admin — khung data-table của Studio Admin (TanStack Table v9). */
@@ -68,6 +70,7 @@ export function DataTable<T extends RowData>({
   onRowClick,
   toolbar,
   footer,
+  rowClassName,
 }: DataTableProps<T>) {
   const t = useT();
   const [globalFilter, setGlobalFilter] = useState("");
@@ -202,7 +205,7 @@ export function DataTable<T extends RowData>({
               rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className={cn(onRowClick && "cursor-pointer focus-visible:bg-muted focus-visible:outline-none")}
+                  className={cn(onRowClick && "cursor-pointer focus-visible:bg-muted focus-visible:outline-none", rowClassName?.(row.original))}
                   tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                   onKeyDown={

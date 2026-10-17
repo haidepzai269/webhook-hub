@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
+import { SimpleTable } from "@/components/admin/simple-table";
 import { EmptyState, ErrorState } from "@/components/admin/state";
 import {
   type ChartConfig,
@@ -16,7 +17,6 @@ import {
 } from "@/components/ui/chart";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { CardSkeleton } from "@/components/admin/skeletons";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { HubApiError } from "@/lib/hub/client";
 import { useSourceTraffic } from "@/lib/hub/traffic-queries";
@@ -171,30 +171,27 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
               {data.topIps.length > 0 && (
                 <div className="space-y-1">
                   <h3 className="font-medium text-sm">{t("traffic.top-ips.title")}</h3>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("traffic.top-ips.col.ip")}</TableHead>
-                        <TableHead className="text-right">{t("traffic.top-ips.col.count")}</TableHead>
-                        <TableHead className="text-right">{t("traffic.top-ips.col.rejected")}</TableHead>
-                        <TableHead>{t("traffic.top-ips.col.last")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.topIps.map((r) => (
-                        <TableRow key={r.ip}>
-                          <TableCell className="font-mono text-xs">{r.ip}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatNumber(r.count, locale)}</TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {r.count > 0 ? `${Math.round((r.rejected / r.count) * 100)}%` : "—"}
-                          </TableCell>
-                          <TableCell className="text-xs tabular-nums">
-                            {dayFmt.format(new Date(r.lastSeen))} {timeFmt.format(new Date(r.lastSeen))}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <SimpleTable
+                    rows={data.topIps}
+                    getRowKey={(r) => r.ip}
+                    columns={[
+                      { key: "ip", header: t("traffic.top-ips.col.ip"), cell: (r) => <span className="font-mono text-xs">{r.ip}</span> },
+                      { key: "count", header: t("traffic.top-ips.col.count"), align: "right", className: "tabular-nums", cell: (r) => formatNumber(r.count, locale) },
+                      {
+                        key: "rejected",
+                        header: t("traffic.top-ips.col.rejected"),
+                        align: "right",
+                        className: "tabular-nums",
+                        cell: (r) => (r.count > 0 ? `${Math.round((r.rejected / r.count) * 100)}%` : "—"),
+                      },
+                      {
+                        key: "last",
+                        header: t("traffic.top-ips.col.last"),
+                        className: "text-xs tabular-nums",
+                        cell: (r) => `${dayFmt.format(new Date(r.lastSeen))} ${timeFmt.format(new Date(r.lastSeen))}`,
+                      },
+                    ]}
+                  />
                   <p className="text-muted-foreground text-xs">{t("traffic.top-ips.note")}</p>
                 </div>
               )}

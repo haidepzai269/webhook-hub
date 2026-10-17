@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import Link from "next/link";
 
@@ -10,11 +10,10 @@ import { toast } from "sonner";
 import { CreateProjectDialog } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { ErrorState } from "@/components/admin/state";
-import { TableRowsSkeleton } from "@/components/admin/skeletons";
+import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { HubApiError } from "@/lib/hub/client";
 import { type ProjectSummary, useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
 import { useIsOperator } from "@/lib/hub/me-store";
@@ -137,6 +136,83 @@ export default function ProjectsPage() {
   const setProjectId = useFlowProjectStore((s) => s.setProjectId);
   const [open, setOpen] = useState(false);
 
+  const columns = useMemo<HubColumn<ProjectSummary>[]>(
+    () => [
+      {
+        id: "name",
+        header: t("page.projects.col.name"),
+        accessorFn: (p) => p.name,
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.name} {row.original.id === projectId && <Badge variant="secondary">{t("page.projects.selected")}</Badge>}
+          </span>
+        ),
+        enableHiding: false,
+      },
+      {
+        id: "slug",
+        header: t("page.projects.col.slug"),
+        accessorFn: (p) => p.slug,
+        cell: ({ row }) => <span className="font-mono text-xs">{row.original.slug}</span>,
+      },
+      {
+        id: "environment",
+        header: t("page.projects.col.environment"),
+        accessorFn: (p) => p.environment,
+        cell: ({ row }) => (ENV_KEY[row.original.environment] ? t(ENV_KEY[row.original.environment]) : row.original.environment),
+      },
+      {
+        id: "role",
+        header: t("page.projects.col.role"),
+        accessorFn: (p) => (p.member === false ? t("page.projects.role.operator") : roleLabel(p.role)),
+        cell: ({ row }) => (row.original.member === false ? t("page.projects.role.operator") : roleLabel(row.original.role)),
+      },
+      ...(operator
+        ? ([
+            {
+              id: "usage",
+              header: t("page.storage.col.usage"),
+              enableSorting: false,
+              cell: ({ row }) => (row.original.usage ? <UsageCell usage={row.original.usage} /> : "—"),
+            },
+            {
+              id: "quota",
+              header: t("page.storage.quota.override"),
+              enableSorting: false,
+              cell: ({ row }) => (
+                <QuotaOverride projectId={row.original.id} name={row.original.name} value={row.original.usage?.quotaOverrideMb ?? null} />
+              ),
+            },
+          ] satisfies HubColumn<ProjectSummary>[])
+        : []),
+      {
+        id: "actions",
+        header: "",
+        enableHiding: false,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="text-right">
+            {row.original.id !== projectId ? (
+              <Button size="sm" variant="outline" onClick={() => setProjectId(row.original.id)}>
+                {t("page.projects.select")}
+              </Button>
+            ) : (
+              <Button size="sm" variant="ghost" asChild>
+                <Link href="/dashboard/api-keys">
+                  <KeyRound />
+                  {t("page.projects.api-keys")}
+                </Link>
+              </Button>
+            )}
+          </div>
+        ),
+      },
+    ],
+    // roleLabel đổi theo t, setProjectId ổn định (zustand).
+    // biome-ignore lint/correctness/useExhaustiveDependencies: roleLabel dựng lại mỗi render nhưng chỉ phụ thuộc t
+    [t, operator, projectId, setProjectId],
+  );
+
   return (
     <>
       <PageHeader
@@ -150,58 +226,14 @@ export default function ProjectsPage() {
         }
       />
       {error && <ErrorState className="mb-3" message={t("page.projects.load-error", { message: error.message })} onRetry={() => void refetch()} />}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("page.projects.col.name")}</TableHead>
-            <TableHead>{t("page.projects.col.slug")}</TableHead>
-            <TableHead>{t("page.projects.col.environment")}</TableHead>
-            <TableHead>{t("page.projects.col.role")}</TableHead>
-            {operator && <TableHead>{t("page.storage.col.usage")}</TableHead>}
-            {operator && <TableHead>{t("page.storage.quota.override")}</TableHead>}
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && <TableRowsSkeleton cols={operator ? 7 : 5} />}
-          {(data ?? []).map((p) => (
-            <TableRow key={p.id}>
-              <TableCell className="font-medium">
-                {p.name} {p.id === projectId && <Badge variant="secondary">{t("page.projects.selected")}</Badge>}
-              </TableCell>
-              <TableCell className="font-mono text-xs">{p.slug}</TableCell>
-              <TableCell>{ENV_KEY[p.environment] ? t(ENV_KEY[p.environment]) : p.environment}</TableCell>
-              <TableCell>
-                {p.member === false ? t("page.projects.role.operator") : roleLabel(p.role)}
-              </TableCell>
-              {operator && (
-                <TableCell>
-                  {p.usage ? <UsageCell usage={p.usage} /> : "—"}
-                </TableCell>
-              )}
-              {operator && (
-                <TableCell>
-                  <QuotaOverride projectId={p.id} name={p.name} value={p.usage?.quotaOverrideMb ?? null} />
-                </TableCell>
-              )}
-              <TableCell className="text-right">
-                {p.id !== projectId ? (
-                  <Button size="sm" variant="outline" onClick={() => setProjectId(p.id)}>
-                    {t("page.projects.select")}
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="ghost" asChild>
-                    <Link href="/dashboard/api-keys">
-                      <KeyRound />
-                      {t("page.projects.api-keys")}
-                    </Link>
-                  </Button>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <DataTable
+        data={data}
+        columns={columns}
+        getRowId={(p) => p.id}
+        isLoading={isLoading}
+        pageSize={false}
+        emptyText={t("common.empty")}
+      />
       {projectId && (data ?? []).some((p) => p.id === projectId) && (
         <UnverifiedSourcesSetting
           projectId={projectId}
