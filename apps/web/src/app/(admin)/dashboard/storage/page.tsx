@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { HardDrive, Info, Loader2 } from "lucide-react";
+import { HardDrive, Info } from "lucide-react";
 import { toast } from "sonner";
 
+import { Spinner } from "@/components/admin/spinner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { SimpleTable } from "@/components/admin/simple-table";
@@ -455,7 +456,7 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
               })
             }
           >
-            {save.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+            {save.isPending && <Spinner />}
             {t("page.storage.auto.save")}
           </Button>
         </div>

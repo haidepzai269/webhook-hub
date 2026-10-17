@@ -2,9 +2,10 @@
 
 import { useId, useState } from "react";
 
-import { Loader2, Mail } from "lucide-react";
+import { Mail } from "lucide-react";
 import { toast } from "sonner";
 
+import { Spinner } from "@/components/admin/spinner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { SimpleTable } from "@/components/admin/simple-table";
@@ -231,7 +232,7 @@ function AlertSettings() {
 
         <section className="flex flex-wrap items-center gap-3 border-t pt-4">
           <Button size="sm" variant="outline" disabled={!p.emailVerified || test.isPending} onClick={sendTest}>
-            {test.isPending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+            {test.isPending ? <Spinner /> : <Mail className="size-4" />}
             {t("page.settings.alerts.test.button")}
           </Button>
           <p className="text-muted-foreground text-xs">

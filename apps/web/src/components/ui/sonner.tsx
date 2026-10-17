@@ -2,7 +2,8 @@
 
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon } from "lucide-react"
+import { Spinner } from "@/components/admin/spinner"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   // Theo theme của app (preferences store), không theo next-themes — app không dùng ThemeProvider.
@@ -26,7 +27,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <OctagonXIcon className="size-4" />
         ),
         loading: (
-          <Loader2Icon className="size-4 animate-spin" />
+          <Spinner />
         ),
       }}
       style={

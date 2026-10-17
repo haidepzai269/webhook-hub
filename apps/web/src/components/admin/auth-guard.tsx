@@ -5,8 +5,9 @@ import { createContext, type ReactNode, useContext, useEffect, useLayoutEffect, 
 import { useRouter } from "next/navigation";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, RotateCw, ServerCrash } from "lucide-react";
+import { RotateCw, ServerCrash } from "lucide-react";
 
+import { Spinner } from "@/components/admin/spinner";
 import { Button } from "@/components/ui/button";
 import { type BootPhase, runBoot } from "@/lib/hub/auth-boot";
 import { holdAuthGate, releaseAuthGate } from "@/lib/hub/auth-gate";
@@ -93,7 +94,7 @@ function BootNotice({ failed, onRetry }: { failed: boolean; onRetry: () => void 
         {failed ? (
           <ServerCrash className="size-4 shrink-0 text-destructive" aria-hidden />
         ) : (
-          <Loader2 className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
+          <Spinner />
         )}
         <span className="min-w-0">{t(failed ? "admin.boot.failed" : "admin.boot.slow")}</span>
         {failed && (
