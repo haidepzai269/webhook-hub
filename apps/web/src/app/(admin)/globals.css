@@ -64,6 +64,10 @@
 These serve as the fallback; there is no separate default.css file. */
 :root {
   --radius: 0.625rem;
+  /* Token chuyển động dùng chung (đợt 1 UI) */
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -205,4 +209,19 @@ html {
 
 .disable-transitions * {
   transition: none !important;
+}
+
+/* Giảm chuyển động: một khối chung cho mọi overlay/spinner/nhấn nút (tw-animate-css + Tailwind). */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .animate-out {
+    animation-duration: 1ms !important;
+  }
+  .animate-spin,
+  .animate-pulse {
+    animation: none !important;
+  }
+  [data-slot="button"]:active {
+    translate: none !important;
+  }
 }
