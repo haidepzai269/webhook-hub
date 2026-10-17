@@ -10,6 +10,7 @@ import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 
 /** Lần thử cuối (API không đảm bảo thứ tự attempts trong danh sách) — để hiện HTTP/ms. */
 function lastAttempt(d: Delivery): DeliveryAttempt | undefined {
@@ -149,9 +150,11 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
     accessorFn: (d) => d.lastError ?? "",
     cell: ({ row }) =>
       row.original.lastError ? (
-        <span className="block max-w-64 truncate text-rose-600 text-xs" title={row.original.lastError}>
-          {row.original.lastError}
-        </span>
+        <CellTooltip text={row.original.lastError}>
+          <span data-cell-text className="block max-w-64 truncate text-rose-600 text-xs">
+            {row.original.lastError}
+          </span>
+        </CellTooltip>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),

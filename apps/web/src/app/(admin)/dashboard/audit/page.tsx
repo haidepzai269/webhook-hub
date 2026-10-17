@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/admin/page-header";
 import { TimeRange } from "@/components/admin/time-range";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -90,7 +91,11 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
               {shortId(a.entityId, 12)}
             </span>
           </div>
-          {summary && <div className="truncate text-[11px] text-muted-foreground">{summary}</div>}
+          {summary && (
+            <CellTooltip text={summary}>
+              <span data-cell-text className="truncate text-[11px] text-muted-foreground">{summary}</span>
+            </CellTooltip>
+          )}
         </div>
       );
     },
@@ -101,9 +106,11 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
     accessorFn: (a) => a.reason ?? "",
     cell: ({ row }) =>
       row.original.reason ? (
-        <span className="block max-w-80 truncate text-sm" title={row.original.reason}>
-          {row.original.reason}
-        </span>
+        <CellTooltip text={row.original.reason}>
+          <span data-cell-text className="block max-w-80 truncate text-sm">
+            {row.original.reason}
+          </span>
+        </CellTooltip>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),

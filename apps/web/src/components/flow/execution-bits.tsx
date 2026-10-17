@@ -6,6 +6,7 @@ import type { ExecutionStatus, FlowFailedAt, FlowSummaryDot } from "@hub/flow";
 import { CircleAlert, CircleCheck, CircleX, Info, LoaderCircle, ShieldX } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -144,9 +145,12 @@ export function FailedAt({ failedAt, status }: { failedAt: FlowFailedAt | null; 
   const tone: Tone = status === "in_progress" ? "warning" : "crashed";
   const Icon = tone === "warning" ? CircleAlert : CircleX;
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 text-xs" style={{ color: TONE_VAR[tone] }} title={failedAt?.reason.message}>
-      <Icon {...ICON_SM} className="shrink-0" aria-hidden />
-      <span className="truncate">{text}</span>
-    </span>
+    // reason.message là thông tin THÊM (không phải chữ bị cắt) → luôn hiện; thiếu thì chỉ hiện khi `text` bị truncate.
+    <CellTooltip text={failedAt?.reason.message || text} always={Boolean(failedAt?.reason.message)}>
+      <span className="inline-flex min-w-0 items-center gap-1 text-xs" style={{ color: TONE_VAR[tone] }}>
+        <Icon {...ICON_SM} className="shrink-0" aria-hidden />
+        <span data-cell-text className="truncate">{text}</span>
+      </span>
+    </CellTooltip>
   );
 }

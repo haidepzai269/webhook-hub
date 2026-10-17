@@ -13,6 +13,7 @@ import { FormDialog } from "@/components/admin/form-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -177,9 +178,11 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Subscription>[] 
     accessorFn: (s) => s.template ?? "",
     cell: ({ row }) =>
       row.original.template ? (
-        <span className="block max-w-56 truncate font-mono text-xs" title={row.original.template}>
-          {row.original.template}
-        </span>
+        <CellTooltip text={row.original.template}>
+          <span data-cell-text className="block max-w-56 truncate font-mono text-xs">
+            {row.original.template}
+          </span>
+        </CellTooltip>
       ) : (
         <span className="text-muted-foreground text-xs">{t("page.subscriptions.template-default")}</span>
       ),

@@ -6,6 +6,7 @@ import type { HubColumn } from "@/components/admin/data-table";
 import { DeliverySummary } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Badge } from "@/components/ui/badge";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { formatDateTime, formatRelative } from "@/lib/hub/format";
 import type { HubEvent } from "@/lib/hub/types";
 import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
@@ -29,11 +30,13 @@ export const buildEventColumns = (t: TranslateFn, locale: Locale): HubColumn<Hub
     header: t("page.events.table.type"),
     accessorFn: (e) => e.type,
     cell: ({ row }) => (
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate font-mono text-xs">{row.original.type}</span>
-        {/* PK5 khoá 2: nhãn "Chưa xác thực" ở mọi nơi có event. */}
-        <UnverifiedBadge of={row.original} />
-      </span>
+      <CellTooltip text={row.original.type}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span data-cell-text className="truncate font-mono text-xs">{row.original.type}</span>
+          {/* PK5 khoá 2: nhãn "Chưa xác thực" ở mọi nơi có event. */}
+          <UnverifiedBadge of={row.original} />
+        </span>
+      </CellTooltip>
     ),
   },
   {
@@ -53,9 +56,11 @@ export const buildEventColumns = (t: TranslateFn, locale: Locale): HubColumn<Hub
     header: t("page.events.table.subject"),
     accessorFn: (e) => e.subject ?? "",
     cell: ({ row }) => (
-      <span className="block max-w-48 truncate text-xs" title={row.original.subject ?? ""}>
-        {row.original.subject ?? "—"}
-      </span>
+      <CellTooltip text={row.original.subject ?? ""}>
+        <span data-cell-text className="block max-w-48 truncate text-xs">
+          {row.original.subject ?? "—"}
+        </span>
+      </CellTooltip>
     ),
   },
   {
