@@ -6,9 +6,23 @@ import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { useT } from "@/lib/i18n/use-t";
+import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/admin/icon-button";
 
-export function CopyButton({ value, label }: { value: string; label?: string }) {
+/**
+ * Nút sao chép MỘT kiểu (ADR-247): `variant="icon"` (mặc định) là IconButton nhỏ có tooltip — dùng trong ô bảng/góc khối;
+ * `variant="labeled"` là nút outline có chữ ("Sao chép" -> "Đã chép") — dùng khi nút là hành động chính (hộp secret một lần).
+ * `label` là tên hành động (tooltip / chữ nút).
+ */
+export function CopyButton({
+  value,
+  label,
+  variant = "icon",
+}: {
+  value: string;
+  label?: string;
+  variant?: "icon" | "labeled";
+}) {
   const t = useT();
   const text = label ?? t("common.copy");
   const [done, setDone] = useState(false);
@@ -21,6 +35,22 @@ export function CopyButton({ value, label }: { value: string; label?: string }) 
       toast.error(t("admin.copy.blocked"));
     }
   };
+  if (variant === "labeled") {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation();
+          void copy();
+        }}
+      >
+        {done ? <Check /> : <Copy />}
+        {done ? t("common.copied") : text}
+      </Button>
+    );
+  }
   return (
     <IconButton
       size="icon-xs"
