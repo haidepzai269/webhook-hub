@@ -17,7 +17,6 @@ import {
   Info,
   Plus,
   Radio,
-  Search,
   Settings2,
   ShieldCheck,
 } from "lucide-react";
@@ -33,7 +32,7 @@ import { roleLabel } from "@/components/flow/project-picker-logic";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/admin/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HubApiError } from "@/lib/hub/client";
 import { type ProjectSummary, useProjectsWithStats } from "@/lib/hub/flow-project";
@@ -434,17 +433,14 @@ function Home({ demo }: { demo: boolean }) {
 
         {(loading || projects.length > 0) && (
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                className="pl-8"
-                value={query}
-                placeholder={t("page.projects.home.search")}
-                aria-label={t("common.search")}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
+            <SearchInput
+              type="search"
+              wrapperClassName="w-full sm:max-w-xs"
+              value={query}
+              placeholder={t("page.projects.home.search")}
+              aria-label={t("common.search")}
+              onChange={(e) => setQuery(e.target.value)}
+            />
             {!loading && (
               <span className="text-muted-foreground text-sm tabular-nums">
                 {t("page.projects.home.count", { count: shown.length })}

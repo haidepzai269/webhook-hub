@@ -10,7 +10,7 @@ import {
   type SortingState,
   useTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Columns3, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Columns3 } from "lucide-react";
 
 import { cn } from "cn";
 
@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/admin/search-input";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
@@ -112,19 +112,16 @@ export function DataTable<T extends RowData>({
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         {searchPlaceholder ? (
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="h-8 pl-8"
-              placeholder={searchPlaceholder}
-              aria-label={searchPlaceholder}
-              value={globalFilter}
-              onChange={(e) => {
-                setGlobalFilter(e.target.value);
-                table.setPageIndex(0);
-              }}
-            />
-          </div>
+          <SearchInput
+            wrapperClassName="w-full sm:w-72"
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
+            value={globalFilter}
+            onChange={(e) => {
+              setGlobalFilter(e.target.value);
+              table.setPageIndex(0);
+            }}
+          />
         ) : (
           <div />
         )}

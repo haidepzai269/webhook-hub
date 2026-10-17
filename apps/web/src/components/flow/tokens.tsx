@@ -10,6 +10,7 @@
  *  - Màu trạng thái KHÔNG BAO GIỜ đứng một mình: luôn có icon + nhãn (người mù màu đọc được).
  */
 import "./flow.css";
+import { ICON, ICON_SM } from "@/components/admin/icon";
 
 import type { ComponentType, CSSProperties } from "react";
 
@@ -48,8 +49,7 @@ export const stageLabelKey = (key: StageKey) => `flow.stage.${key}` as MessageKe
 export const stageStatusKey = (status: StageStatus) => `journey.stage-status.${status.replace("_", "-")}` as MessageKey;
 export const healthKey = (health: Health) => `flow.health.${health}` as MessageKey;
 
-export const ICON = { size: 16, strokeWidth: 1.75 } as const;
-export const ICON_SM = { size: 13, strokeWidth: 1.75 } as const;
+export { ICON, ICON_SM };
 
 /** Tone = khoá màu chung cho canvas, pill, log, cạnh. */
 export type Tone = "healthy" | "warning" | "crashed" | "idle" | "progress" | "skipped";

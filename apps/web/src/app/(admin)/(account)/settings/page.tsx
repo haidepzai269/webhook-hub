@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 
-import { Loader2, Mail, Search } from "lucide-react";
+import { Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
@@ -13,7 +13,7 @@ import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/admin/search-input";
 import { CardSkeleton } from "@/components/admin/skeletons";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -264,16 +264,14 @@ function MuteList({
   const view = muteListView(projects, muted, { query, expanded });
   return (
     <div className="space-y-2">
-      <div className="relative max-w-xs">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("page.settings.alerts.muted.search")}
-          aria-label={t("page.settings.alerts.muted.search")}
-          className="h-8 pl-8 text-sm"
-        />
-      </div>
+      <SearchInput
+        wrapperClassName="max-w-xs"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t("page.settings.alerts.muted.search")}
+        aria-label={t("page.settings.alerts.muted.search")}
+        className="text-sm"
+      />
       {view.matched === 0 ? (
         <EmptyState size="sm" title={t("page.settings.alerts.muted.no-match")} />
       ) : (

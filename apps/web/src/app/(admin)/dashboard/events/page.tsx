@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ExecutionStatus } from "@hub/flow";
-import { Eye, Pause, Play, Search, X } from "lucide-react";
+import { Eye, Pause, Play, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
@@ -17,7 +17,7 @@ import { ICON, TONE_VAR } from "@/components/flow/tokens";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/admin/search-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageSkeleton } from "@/components/admin/skeletons";
 import { TimeRange } from "@/components/admin/time-range";
@@ -179,21 +179,23 @@ function ExecutionsView() {
             ))}
           </SelectContent>
         </Select>
-        <div className="relative">
-          <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder={t("page.events.filter.type")} aria-label={t("page.events.filter.type")} className="h-8 w-48 pl-7 font-mono text-xs" />
-        </div>
-        <div className="relative">
-          <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-          <Input
-            value={idInput}
-            onChange={(e) => setIdInput(e.target.value)}
-            placeholder={t("page.events.filter.id")}
-            aria-label={t("page.events.filter.id")}
-            title={t("page.events.filter.id-hint")}
-            className="h-8 w-48 pl-7 font-mono text-xs"
-          />
-        </div>
+        <SearchInput
+          wrapperClassName="w-48"
+          value={typeInput}
+          onChange={(e) => setTypeInput(e.target.value)}
+          placeholder={t("page.events.filter.type")}
+          aria-label={t("page.events.filter.type")}
+          className="font-mono text-xs"
+        />
+        <SearchInput
+          wrapperClassName="w-48"
+          value={idInput}
+          onChange={(e) => setIdInput(e.target.value)}
+          placeholder={t("page.events.filter.id")}
+          aria-label={t("page.events.filter.id")}
+          title={t("page.events.filter.id-hint")}
+          className="font-mono text-xs"
+        />
         <TimeRange key={url.resetToken} from={v.from} to={v.to} onChange={(r) => url.setFilter(r)} />
         {(source || destination || v.type || v.q || v.from || v.to || status !== "all") && (
           <Button variant="ghost" size="sm" onClick={url.clear}>
