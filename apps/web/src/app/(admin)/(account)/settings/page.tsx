@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import { Mail } from "lucide-react";
 import { toast } from "sonner";
 
+import { toneTextClass } from "@/components/admin/status-badge";
 import { Spinner } from "@/components/admin/spinner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
@@ -125,7 +126,7 @@ function AlertSettings() {
             </p>
           )}
           {sw.reasonKey && (
-            <p className="pl-12 text-amber-700 text-xs dark:text-amber-400">
+            <p className={`pl-12 text-xs ${toneTextClass("warn")}`}>
               {t(sw.reasonKey, { email: p.email ?? "" })}
             </p>
           )}

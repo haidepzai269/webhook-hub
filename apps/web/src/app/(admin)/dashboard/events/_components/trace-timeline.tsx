@@ -133,7 +133,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                           <span className={toneTextClass(httpTone(a.responseStatus ?? 0))}>HTTP {a.responseStatus || "—"}</span>
                           <span>{a.durationMs ?? "—"}ms</span>
                           <span className="text-muted-foreground">{formatDateTime(a.createdAt, locale)}</span>
-                          {a.error && <span className="basis-full break-all text-rose-600">{a.error}</span>}
+                          {a.error && <span className="basis-full break-all text-destructive">{a.error}</span>}
                         </li>
                       ))}
                     </ol>
@@ -143,7 +143,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                       {t("page.events.trace.retry-in")} <RetryCountdown iso={d.nextAttemptAt} />
                     </div>
                   )}
-                  {d.status === "DEAD" && d.lastError && <p className="mt-1 break-all text-rose-600">{d.lastError}</p>}
+                  {d.status === "DEAD" && d.lastError && <p className="mt-1 break-all text-destructive">{d.lastError}</p>}
                 </li>
               );
             })}

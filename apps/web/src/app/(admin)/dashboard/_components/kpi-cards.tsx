@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { Activity, Cable, CircleCheck, Inbox, Send, Skull } from "lucide-react";
 
+import { toneTextClass } from "@/components/admin/status-badge";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverview } from "@/lib/hub/queries";
@@ -31,7 +32,7 @@ export function KpiCards() {
       value: data?.deadDeliveries,
       icon: Skull,
       href: "/dashboard/dlq",
-      tone: data && data.deadDeliveries > 0 ? "text-rose-600 dark:text-rose-400" : undefined,
+      tone: data && data.deadDeliveries > 0 ? "text-destructive" : undefined,
     },
     {
       label: t("page.dashboard.kpi.success-rate"),
@@ -40,8 +41,8 @@ export function KpiCards() {
       href: "/dashboard/deliveries",
       tone:
         data && data.successRate !== null && data.successRate < 95
-          ? "text-amber-600 dark:text-amber-400"
-          : "text-emerald-600 dark:text-emerald-400",
+          ? toneTextClass("warn")
+          : toneTextClass("ok"),
     },
   ];
 

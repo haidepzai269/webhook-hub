@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/admin/confirm-dialog";
-import { StatusBadge } from "@/components/admin/status-badge";
+import { StatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
@@ -241,7 +241,7 @@ export function ConnectSourceDialog({
                   </Button>
                 </div>
                 {!sourcesReady ? (
-                  <FieldDescription className="text-amber-600">
+                  <FieldDescription className={toneTextClass("warn")}>
                     {sources.isError
                       ? t("page.sources.connect.sources-error")
                       : t("page.sources.connect.sources-loading")}
@@ -284,7 +284,7 @@ export function ConnectSourceDialog({
                       placeholder={t("page.sources.connect.key-placeholder")}
                     />
                     {candidates.length > 0 && (
-                      <FieldDescription className="text-amber-600 sm:col-span-2">
+                      <FieldDescription className={`${toneTextClass("warn")} sm:col-span-2`}>
                         {t("page.sources.connect.new-url-warning")}
                       </FieldDescription>
                     )}

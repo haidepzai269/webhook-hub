@@ -326,7 +326,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
                     <span>{formatDateTime(d.createdAt, locale)}</span>
                     <DeliveryStatusLabel status={d.status} />
                     <span>{d.eventType}</span>
-                    {d.lastError && <span className="text-rose-700 dark:text-rose-300">{d.lastError}</span>}
+                    {d.lastError && <span className="text-destructive">{d.lastError}</span>}
                   </li>
                 ))}
               </ul>

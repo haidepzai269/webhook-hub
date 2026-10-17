@@ -19,13 +19,14 @@ import { useTimeseries } from "@/lib/hub/queries";
 import type { TimeseriesRange } from "@/lib/hub/types";
 import { ErrorState } from "@/components/admin/state";
 import { chartTimeFormatters } from "@/lib/hub/format";
+import { TONE_VAR } from "@/components/flow/tokens";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 const SERIES = {
   events: { labelKey: "page.dashboard.chart.events", color: "var(--chart-1)" },
-  succeeded: { labelKey: "page.dashboard.chart.succeeded", color: "oklch(0.65 0.15 155)" },
-  retrying: { labelKey: "page.dashboard.chart.retrying", color: "oklch(0.75 0.15 75)" },
-  dead: { labelKey: "page.dashboard.chart.dead", color: "oklch(0.63 0.22 25)" },
+  succeeded: { labelKey: "page.dashboard.chart.succeeded", color: TONE_VAR.healthy },
+  retrying: { labelKey: "page.dashboard.chart.retrying", color: TONE_VAR.warning },
+  dead: { labelKey: "page.dashboard.chart.dead", color: TONE_VAR.crashed },
 } as const;
 
 /**
