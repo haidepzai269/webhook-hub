@@ -20,12 +20,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { IconButton } from "@/components/admin/icon-button";
 import { useConfirm } from "@/components/admin/confirm-dialog";
-import { formatDateTime } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { useCreateDestination, useDeleteDestination, useDestinations } from "@/lib/hub/queries";
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
 import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
-import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
 import { CreateEndpointDialog, EndpointDetailDialog } from "./endpoint-dialogs";
@@ -75,16 +76,24 @@ function VerificationCell({ dest }: { dest: Destination }) {
   const v = describeVerification(dest.verification, dest.verificationError, t);
   return (
     <div className="flex max-w-xs flex-col gap-0.5">
-      <Badge
-        variant="outline"
-        className={`w-fit font-mono text-[11px] ${toneBadgeClass(VERIFY_TONE[v.tone])}`}
-        title={dest.verificationFix ?? v.label}
-      >
-        {t(v.labelKey)}
-      </Badge>
-      {v.reason && <span className="text-muted-foreground text-xs">{v.reason}</span>}
+      <CellTooltip text={dest.verificationFix ?? v.label} always className="w-fit">
+        <Badge variant="outline" className={`w-fit font-mono text-[11px] ${toneBadgeClass(VERIFY_TONE[v.tone])}`}>
+          {t(v.labelKey)}
+        </Badge>
+      </CellTooltip>
+      {v.reason && (
+        <CellTooltip text={v.reason} className="flex">
+          <span data-cell-text className="truncate text-muted-foreground text-xs">
+            {v.reason}
+          </span>
+        </CellTooltip>
+      )}
       {dest.verification === "FAILED" && dest.verificationError && (
-        <span className="font-mono text-[11px] text-rose-700 dark:text-rose-300">{dest.verificationError}</span>
+        <CellTooltip text={dest.verificationError} className="flex">
+          <span data-cell-text className="truncate font-mono text-[11px] text-destructive">
+            {dest.verificationError}
+          </span>
+        </CellTooltip>
       )}
     </div>
   );
@@ -143,7 +152,7 @@ function DestinationActions({ dest }: { dest: Destination }) {
   );
 }
 
-const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] => [
+const makeColumns = (t: TranslateFn): HubColumn<Destination>[] => [
   {
     id: "name",
     header: t("common.name"),
@@ -191,7 +200,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] =
   {
     id: "rateLimit",
     header: t("page.destinations.col.rate-limit"),
-    accessorFn: (d) => String(d.rateLimitRps),
+    accessorFn: (d) => d.rateLimitRps,
     cell: ({ row }) => (
       <span className="font-mono text-xs">{row.original.rateLimitRps > 0 ? row.original.rateLimitRps : "∞"}</span>
     ),
@@ -211,7 +220,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] =
     id: "createdAt",
     header: t("common.created-at"),
     accessorFn: (d) => d.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
+    cell: ({ row }) => <TimeCell iso={row.original.createdAt} mode="absolute" />,
   },
   {
     id: "actions",
@@ -224,8 +233,7 @@ const makeColumns = (t: TranslateFn, locale: Locale): HubColumn<Destination>[] =
 
 export default function DestinationsPage() {
   const t = useT();
-  const locale = useLocale();
-  const columns = useMemo(() => makeColumns(t, locale), [t, locale]);
+  const columns = useMemo(() => makeColumns(t), [t]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useDestinations();
   const create = useCreateDestination();

@@ -10,8 +10,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useRealtimeStore } from "@/lib/hub/socket";
 import { stepToasts } from "@/lib/hub/ui-logic";
 import type { TraceIngestedNotice } from "@/lib/hub/types";
-import { INTL_LOCALE, type MessageKey, type TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { clock } from "@/components/flow/time";
+import { shortId } from "@/lib/hub/format";
+import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 import { type StatusTone, toneBadgeClass } from "@/components/admin/status-badge";
 
 const OUTCOME_TONE: Record<TraceIngestedNotice["outcome"], StatusTone> = {
@@ -40,7 +42,7 @@ function showTraceToast(tr: TraceIngestedNotice, more: number, t: TranslateFn) {
   };
   if (tr.outcome === "REJECTED") {
     toast.error(t("page.events.toast.rejected", vars), {
-      description: t("page.events.toast.correlation", { source: tr.sourceKey, id: tr.correlationId.slice(0, 8) }),
+      description: t("page.events.toast.correlation", { source: tr.sourceKey, id: shortId(tr.correlationId) }),
     });
   } else if (tr.outcome === "DUPLICATE") {
     toast.info(t("page.events.toast.duplicate", vars), { description: tr.sourceKey });
@@ -56,7 +58,6 @@ function showTraceToast(tr: TraceIngestedNotice, more: number, t: TranslateFn) {
 export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {}) {
   const traces = useRealtimeStore((s) => s.traces);
   const t = useT();
-  const locale = useLocale();
   // Effect toast không phụ thuộc t (đổi ngôn ngữ không được toast lại) — đọc t mới nhất qua ref.
   const tRef = useRef(t);
   tRef.current = t;
@@ -98,7 +99,7 @@ export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {})
                 HTTP {tr.httpStatus} · {tr.ms}ms
               </span>
               <span className="ml-auto text-muted-foreground">
-                {new Date(tr.receivedAt).toLocaleTimeString(INTL_LOCALE[locale])}
+                {clock(tr.receivedAt, false)}
               </span>
             </li>
           ))}

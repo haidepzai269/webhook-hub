@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { isoToLocalInput, localInputToIso, localInputToIsoEnd, timeRangeError } from "@/lib/hub/list-url";
 import { useT } from "@/lib/i18n/use-t";
@@ -78,11 +79,7 @@ export function TimeRange({
           }}
         />
       </div>
-      {error && (
-        <p role="alert" className="text-destructive text-xs">
-          {t(error)}
-        </p>
-      )}
+      {error && <FieldError className="text-xs">{t(error)}</FieldError>}
     </div>
   );
 }

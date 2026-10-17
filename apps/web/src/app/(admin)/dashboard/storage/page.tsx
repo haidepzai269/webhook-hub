@@ -7,13 +7,14 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
+import { SimpleTable } from "@/components/admin/simple-table";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { KeepLongerSwitch } from "@/components/storage/keep-longer-switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
@@ -31,8 +32,9 @@ import {
   useStoragePolicies,
 } from "@/lib/hub/storage-queries";
 import { errorMessageOf } from "@/lib/hub/ui-logic";
+import { formatStamp } from "@/lib/hub/format";
 import type { MessageKey } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import {
   IMPORTANCES,
   type Importance,
@@ -64,6 +66,16 @@ export default function StoragePage() {
   const canWrite = me?.user.isOperator === true || (me?.memberships ?? []).some((m) => m.projectId === projectId && m.role === "owner");
   const q = useStorage(projectId, { poll: true });
   const booting = useAuthBooting();
+  const forbidden = q.error instanceof HubApiError && q.error.status === 403;
+  // 403 là "không có quyền" (trung tính, thử lại vô ích) chứ không phải lỗi tải.
+  const loadError = forbidden ? (
+    <EmptyState size="sm" title={t("page.storage.forbidden")} />
+  ) : (
+    <ErrorState
+      message={t("page.storage.load-error", { message: q.error instanceof HubApiError ? errorMessageOf(q.error.body, t) : String(q.error) })}
+      onRetry={() => void q.refetch()}
+    />
+  );
 
   return (
     <>
@@ -72,13 +84,9 @@ export default function StoragePage() {
       {!projectId && !booting ? (
         <p className="text-muted-foreground text-sm">{t("page.storage.no-project")}</p>
       ) : q.error ? (
-        <p className="text-muted-foreground text-sm">
-          {q.error instanceof HubApiError && q.error.status === 403
-            ? t("page.storage.forbidden")
-            : t("page.storage.load-error", { message: q.error instanceof HubApiError ? errorMessageOf(q.error.body, t) : String(q.error) })}
-        </p>
+        loadError
       ) : !q.data ? (
-        <Skeleton className="h-40 w-full" />
+        <CardSkeleton lines={3} />
       ) : (
         <div className="grid gap-4">
           {!canWrite && <p className="text-muted-foreground text-sm">{t("page.storage.read-only")}</p>}
@@ -102,10 +110,9 @@ function useOverview() {
   return { projectId, data: useStorage(projectId, { poll: true }).data };
 }
 
+/** Mốc ngày giờ gọn (dd/MM HH:mm, 24 giờ ở mọi ngôn ngữ) — dùng chung `formatStamp` của lib/hub/format. */
 function useDateTime() {
-  const locale = useLocale();
-  return (iso: string | null | undefined) =>
-    iso ? new Intl.DateTimeFormat(locale === "en" ? "en-US" : "vi-VN", { dateStyle: "short", timeStyle: "short", hourCycle: "h23" }).format(new Date(iso)) : "—";
+  return (iso: string | null | undefined) => formatStamp(iso);
 }
 
 function UsageCard() {
@@ -282,7 +289,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
         <CardDescription>{t("page.storage.computed-at", { at: fmt(data.suggestionsAt) })}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        {data.suggestions.length === 0 && <p className="text-muted-foreground text-sm">{t("page.storage.suggestions-empty")}</p>}
+        {data.suggestions.length === 0 && <EmptyState size="sm" title={t("page.storage.suggestions-empty")} />}
         {data.suggestions.map((s) => (
           <div key={s.id} className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-0.5 text-sm">
@@ -368,64 +375,71 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("page.storage.auto.col.importance")}</TableHead>
-              <TableHead>{t("page.storage.auto.col.action")}</TableHead>
-              <TableHead>{t("page.storage.auto.col.after")}</TableHead>
-              <TableHead>{t("page.storage.auto.col.trigger")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r, i) => (
-              <TableRow key={r.importance}>
-                <TableCell className="font-medium">{t(`page.storage.importance.${r.importance}` as MessageKey)}</TableCell>
-                <TableCell>
-                  <Select value={r.action} disabled={!canWrite} onValueChange={(v) => set(i, { action: v as PolicyDraft["action"] })}>
-                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.action")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
-                        <SelectItem key={a} value={a}>
-                          {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={365}
-                    className="h-8 w-20"
-                    value={r.afterDays}
-                    disabled={!canWrite || r.action === "off"}
-                    aria-label={t("page.storage.auto.col.after")}
-                    onChange={(e) => set(i, { afterDays: Math.max(1, Math.min(365, Number(e.target.value) || 1)) })}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Select
-                    value={r.trigger}
-                    disabled={!canWrite || r.action === "off"}
-                    onValueChange={(v) => set(i, { trigger: v as PolicyDraft["trigger"] })}
-                  >
-                    <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.trigger")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="always">{t("page.storage.auto.trigger.always")}</SelectItem>
-                      <SelectItem value="above_85">{t("page.storage.auto.trigger.above-85")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <SimpleTable
+          rows={rows}
+          getRowKey={(r) => r.importance}
+          columns={[
+            {
+              key: "importance",
+              header: t("page.storage.auto.col.importance"),
+              className: "font-medium",
+              cell: (r) => t(`page.storage.importance.${r.importance}` as MessageKey),
+            },
+            {
+              key: "action",
+              header: t("page.storage.auto.col.action"),
+              cell: (r, i) => (
+                <Select value={r.action} disabled={!canWrite} onValueChange={(v) => set(i, { action: v as PolicyDraft["action"] })}>
+                  <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.action")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(r.importance === "junk" ? (["delete", "off"] as const) : (["trim", "delete", "off"] as const)).map((a) => (
+                      <SelectItem key={a} value={a}>
+                        {a === "off" ? t("page.storage.auto.off") : t(`page.storage.action.${a}` as MessageKey)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ),
+            },
+            {
+              key: "after",
+              header: t("page.storage.auto.col.after"),
+              cell: (r, i) => (
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className="h-8 w-20"
+                  value={r.afterDays}
+                  disabled={!canWrite || r.action === "off"}
+                  aria-label={t("page.storage.auto.col.after")}
+                  onChange={(e) => set(i, { afterDays: Math.max(1, Math.min(365, Number(e.target.value) || 1)) })}
+                />
+              ),
+            },
+            {
+              key: "trigger",
+              header: t("page.storage.auto.col.trigger"),
+              cell: (r, i) => (
+                <Select
+                  value={r.trigger}
+                  disabled={!canWrite || r.action === "off"}
+                  onValueChange={(v) => set(i, { trigger: v as PolicyDraft["trigger"] })}
+                >
+                  <SelectTrigger size="sm" aria-label={t("page.storage.auto.col.trigger")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always">{t("page.storage.auto.trigger.always")}</SelectItem>
+                    <SelectItem value="above_85">{t("page.storage.auto.trigger.above-85")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              ),
+            },
+          ]}
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-muted-foreground text-xs">{t("page.storage.auto.note")}</p>
           <Button

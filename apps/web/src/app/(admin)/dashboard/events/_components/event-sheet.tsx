@@ -4,13 +4,15 @@ import { Route } from "lucide-react";
 import Link from "next/link";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
-import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { JsonBlock } from "@/components/admin/copy-button";
+import { MonoId } from "@/components/admin/mono-id";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { SignatureBadge, UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailSkeleton } from "@/components/admin/skeletons";
 import { formatDateTime } from "@/lib/hub/format";
 import { useEventDetail } from "@/lib/hub/queries";
 import { isUnverified, SIGNATURE_VIEW, signatureView } from "@/lib/hub/unverified";
@@ -23,10 +25,7 @@ function Row({ label, value, copy }: { label: string; value: string; copy?: bool
     <div className="grid grid-cols-[7rem_1fr] items-center gap-2 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="flex min-w-0 items-center gap-1">
-        <span className="truncate font-mono text-xs" title={value}>
-          {value}
-        </span>
-        {copy && <CopyButton value={value} />}
+        <MonoId id={value} n="full" copy={copy} />
       </span>
     </div>
   );
@@ -35,7 +34,7 @@ function Row({ label, value, copy }: { label: string; value: string; copy?: bool
 export function EventSheet({ eventId, open, onClose }: { eventId: string | null; open: boolean; onClose: () => void }) {
   const t = useT();
   const locale = useLocale();
-  const { data: ev, isLoading, error } = useEventDetail(eventId);
+  const { data: ev, isLoading, error, refetch } = useEventDetail(eventId);
 
   return (
     <Sheet open={open && Boolean(eventId)} onOpenChange={(o) => !o && onClose()}>
@@ -61,11 +60,11 @@ export function EventSheet({ eventId, open, onClose }: { eventId: string | null;
 
         <SheetBody className="space-y-5 px-4 pt-4 pb-6">
           {isLoading ? (
-            <Skeleton className="h-64 w-full" />
+            <DetailSkeleton rows={4} />
           ) : error ? (
-            <p className="text-destructive text-sm">{t("page.events.load-error", { message: error.message })}</p>
+            <ErrorState message={t("page.events.load-error", { message: error.message })} onRetry={() => void refetch()} />
           ) : !ev ? (
-            <p className="text-muted-foreground text-sm">{t("page.events.sheet.not-found")}</p>
+            <EmptyState size="sm" title={t("page.events.sheet.not-found")} />
           ) : (
             <>
               <section className="space-y-1.5">

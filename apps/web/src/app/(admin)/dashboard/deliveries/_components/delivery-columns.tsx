@@ -5,10 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { HubColumn } from "@/components/admin/data-table";
 import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
-import { formatDateTime, formatRelative, httpTone, shortId } from "@/lib/hub/format";
+import { formatDateTime, httpTone } from "@/lib/hub/format";
+import { MonoId } from "@/components/admin/mono-id";
+import { TimeCell } from "@/components/admin/time-cell";
 import { countdownTicker } from "@/lib/hub/ui-logic";
 import type { Delivery, DeliveryAttempt } from "@/lib/hub/types";
-import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 
@@ -50,7 +52,7 @@ export function RetryCountdown({ iso }: { iso: string }) {
 }
 
 /** Cột bảng lượt giao theo ngôn ngữ — header là chuỗi để menu ẩn/hiện cột của DataTable đọc được. */
-export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<Delivery>[] => [
+export const buildDeliveryColumns = (t: TranslateFn): HubColumn<Delivery>[] => [
   {
     id: "status",
     header: t("page.deliveries.col.status"),
@@ -83,16 +85,14 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
           {/* PK5 khoá 2: lượt giao của sự kiện chưa xác thực mang nhãn (cả ở DLQ — dùng chung cột). */}
           <UnverifiedBadge of={row.original.event} />
         </div>
-        <div className="font-mono text-[11px] text-muted-foreground" title={row.original.eventId}>
-          {shortId(row.original.eventId, 12)}
-        </div>
+        <MonoId id={row.original.eventId} className="text-muted-foreground" />
       </div>
     ),
   },
   {
     id: "generation",
     header: t("page.deliveries.col.generation"),
-    accessorFn: (d) => String(d.attemptGeneration),
+    accessorFn: (d) => d.attemptGeneration,
     cell: ({ row }) => (
       <span className="font-mono text-xs" title={t("page.deliveries.col.generation-hint")}>
         {row.original.attemptGeneration}
@@ -102,13 +102,13 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
   {
     id: "attempts",
     header: t("page.deliveries.col.attempts"),
-    accessorFn: (d) => String(d.attemptCount),
+    accessorFn: (d) => d.attemptCount,
     cell: ({ row }) => <span className="font-mono text-xs">{row.original.attemptCount}</span>,
   },
   {
     id: "http",
     header: t("page.deliveries.col.http"),
-    accessorFn: (d) => String(lastAttempt(d)?.responseStatus ?? ""),
+    accessorFn: (d) => lastAttempt(d)?.responseStatus ?? null,
     cell: ({ row }) => {
       const a = lastAttempt(row.original);
       return <span className={`font-mono text-xs ${toneTextClass(httpTone(a?.responseStatus))}`}>{a?.responseStatus ?? "—"}</span>;
@@ -117,7 +117,7 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
   {
     id: "ms",
     header: t("page.deliveries.col.ms"),
-    accessorFn: (d) => String(lastAttempt(d)?.durationMs ?? ""),
+    accessorFn: (d) => lastAttempt(d)?.durationMs ?? null,
     cell: ({ row }) => {
       const a = lastAttempt(row.original);
       return <span className="font-mono text-xs tabular-nums">{a?.durationMs ?? "—"}</span>;
@@ -156,16 +156,11 @@ export const buildDeliveryColumns = (t: TranslateFn, locale: Locale): HubColumn<
     id: "updatedAt",
     header: t("page.deliveries.col.updated"),
     accessorFn: (d) => d.updatedAt,
-    cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.updatedAt, locale)}>
-        {formatRelative(row.original.updatedAt, undefined, locale)}
-      </span>
-    ),
+    cell: ({ row }) => <TimeCell iso={row.original.updatedAt} />,
   },
 ];
 
 export function useDeliveryColumns(): HubColumn<Delivery>[] {
   const t = useT();
-  const locale = useLocale();
-  return useMemo(() => buildDeliveryColumns(t, locale), [t, locale]);
+  return useMemo(() => buildDeliveryColumns(t), [t]);
 }

@@ -236,3 +236,16 @@ export function connectionDialogMode(
   if (connection) return "status";
   return connectorProviders.includes(provider) ? "connect" : "manual";
 }
+
+/**
+ * Chữ lỗi để hiện cho người dùng từ MỘT lỗi bất kỳ (toast, ô báo lỗi): lỗi từ hub (`HubApiError`: có `status` + `body`) →
+ * `errorMessageOf` (dịch theo mã `error`); còn lại → `message`. Nhận diện bằng hình dạng (không import client.ts) để file
+ * này vẫn là TS thuần cho jest. Thay `toast.error(e.message)` — vốn lộ chuỗi tiếng Anh thô của server.
+ */
+export function errorTextOf(e: unknown, t: TranslateFn): string {
+  if (e !== null && typeof e === "object" && "status" in e && "body" in e) {
+    const text = errorMessageOf((e as { body: unknown }).body, t);
+    if (text) return text;
+  }
+  return e instanceof Error ? e.message : String(e);
+}

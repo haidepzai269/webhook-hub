@@ -16,6 +16,7 @@ export function formatDateTime(iso: string | null | undefined, locale: Locale = 
 // Mốc "dd/MM HH:mm[:ss]" CÙNG một khuôn ở mọi ngôn ngữ, 24 giờ (review trên trình duyệt thật: vi ra "14:19 12-10", en
 // ra "10/12, 02:19 PM" cho cùng một mốc). Lấy từng phần qua formatToParts để không phụ thuộc thứ tự/dấu nối của locale.
 const stampParts = new Intl.DateTimeFormat("en-GB", {
+  year: "numeric",
   day: "2-digit",
   month: "2-digit",
   hour: "2-digit",
@@ -24,15 +25,20 @@ const stampParts = new Intl.DateTimeFormat("en-GB", {
   hourCycle: "h23",
 });
 
-/** Mốc tuyệt đối gọn cho cảnh báo (dòng thời gian, bảng số liệu): "12/10 14:19" hoặc "12/10 14:19:38" — vi và en như nhau. */
-export function formatStamp(at: string | number | Date | null | undefined, opts: { seconds?: boolean } = {}): string {
+/**
+ * Mốc tuyệt đối gọn cho cảnh báo (dòng thời gian, bảng số liệu): "12/10 14:19" hoặc "12/10 14:19:38" — vi và en như nhau.
+ * Khác năm hiện tại (`now`) thì có năm: "12/10/2025 14:19".
+ */
+export function formatStamp(at: string | number | Date | null | undefined, opts: { seconds?: boolean; now?: number } = {}): string {
   if (at === null || at === undefined || at === "") return "—";
   const d = at instanceof Date ? at : new Date(at);
   if (Number.isNaN(d.getTime())) return "—";
   const p: Record<string, string> = {};
   for (const x of stampParts.formatToParts(d)) p[x.type] = x.value;
   const hour = p.hour === "24" ? "00" : p.hour;
-  return `${p.day}/${p.month} ${hour}:${p.minute}${opts.seconds ? `:${p.second}` : ""}`;
+  const thisYear = stampParts.formatToParts(opts.now ?? Date.now()).find((x) => x.type === "year")?.value;
+  const date = p.year === thisYear ? `${p.day}/${p.month}` : `${p.day}/${p.month}/${p.year}`;
+  return `${date} ${hour}:${p.minute}${opts.seconds ? `:${p.second}` : ""}`;
 }
 
 const rtf: Record<Locale, Intl.RelativeTimeFormat> = {
@@ -63,4 +69,47 @@ export function httpTone(status: number | null | undefined): HttpToneName {
   if (status < 300) return "ok";
   if (status === 408 || status === 429) return "warn";
   return "bad";
+}
+
+// Một Intl.NumberFormat mỗi ngôn ngữ (tạo mới mỗi render là đắt, và mỗi trang từng tự chế một bản).
+const numberFmt: Record<Locale, Intl.NumberFormat> = {
+  vi: new Intl.NumberFormat(INTL_LOCALE.vi),
+  en: new Intl.NumberFormat(INTL_LOCALE.en),
+};
+
+/** Số nguyên/thập phân có dấu phân cách nghìn theo ngôn ngữ giao diện. */
+export function formatNumber(n: number, locale: Locale = "vi"): string {
+  return numberFmt[locale].format(n);
+}
+
+const dateMedium: Record<Locale, Intl.DateTimeFormat> = {
+  vi: new Intl.DateTimeFormat(INTL_LOCALE.vi, { dateStyle: "medium" }),
+  en: new Intl.DateTimeFormat(INTL_LOCALE.en, { dateStyle: "medium" }),
+};
+
+/** Ngày (không giờ) dạng "17 thg 10, 2026" / "Oct 17, 2026". Không phân giải được → trả nguyên chuỗi gốc. */
+export function formatDate(iso: string | null | undefined, locale: Locale = "vi"): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : dateMedium[locale].format(d);
+}
+
+const chartFmtCache = new Map<string, { time: Intl.DateTimeFormat; day: Intl.DateTimeFormat }>();
+
+/**
+ * Cặp formatter nhãn trục biểu đồ: `time` = HH:mm, `day` = dd/MM. `timeZone` vắng = giờ máy người xem.
+ * Biểu đồ có bucket do server cắt THEO MỘT múi giờ cố định (events-chart: Asia/Ho_Chi_Minh, ADR-246) phải truyền đúng
+ * múi giờ đó, nếu không nhãn "ngày" lệch với ranh giới bucket ở máy khác múi giờ.
+ */
+export function chartTimeFormatters(locale: Locale, timeZone?: string): { time: Intl.DateTimeFormat; day: Intl.DateTimeFormat } {
+  const key = `${locale}|${timeZone ?? ""}`;
+  let hit = chartFmtCache.get(key);
+  if (!hit) {
+    hit = {
+      time: new Intl.DateTimeFormat(INTL_LOCALE[locale], { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone }),
+      day: new Intl.DateTimeFormat(INTL_LOCALE[locale], { day: "2-digit", month: "2-digit", timeZone }),
+    };
+    chartFmtCache.set(key, hit);
+  }
+  return hit;
 }

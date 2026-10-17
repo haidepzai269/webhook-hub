@@ -13,14 +13,15 @@ import { Button } from "@/components/ui/button";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime, formatRelative, shortId } from "@/lib/hub/format";
+import { PageSkeleton } from "@/components/admin/skeletons";
+import { MonoId } from "@/components/admin/mono-id";
+import { TimeCell } from "@/components/admin/time-cell";
 import { AUDIT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
 import type { AuditLog } from "@/lib/hub/types";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
-import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
 const ALL = "__all";
@@ -48,17 +49,12 @@ function metaSummary(meta: unknown, t: TranslateFn): string {
   return "";
 }
 
-const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => [
+const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
   {
     id: "createdAt",
     header: t("page.audit.col.time"),
     accessorFn: (a) => a.createdAt,
-    cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatDateTime(row.original.createdAt, locale)}>
-        {formatDateTime(row.original.createdAt, locale)}
-        <span className="block text-[11px] text-muted-foreground">{formatRelative(row.original.createdAt, undefined, locale)}</span>
-      </span>
-    ),
+    cell: ({ row }) => <TimeCell iso={row.original.createdAt} mode="both" />,
     enableHiding: false,
   },
   {
@@ -88,9 +84,7 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
         <div className="min-w-0">
           <div className="text-xs">
             {a.entityType}{" "}
-            <span className="font-mono text-muted-foreground" title={a.entityId}>
-              {shortId(a.entityId, 12)}
-            </span>
+            <MonoId id={a.entityId} className="text-muted-foreground" />
           </div>
           {summary && (
             <CellTooltip text={summary}>
@@ -125,8 +119,7 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<AuditLog>[] => 
  */
 function AuditView() {
   const t = useT();
-  const locale = useLocale();
-  const columns = useMemo(() => buildColumns(t, locale), [t, locale]);
+  const columns = useMemo(() => buildColumns(t), [t]);
   const url = useUrlParams(AUDIT_PARAMS);
   const v = url.values;
   const facets = useAuditFacets();
@@ -213,7 +206,7 @@ function AuditView() {
         pageSize={false}
         searchPlaceholder={t("page.audit.search-placeholder")}
         emptyText={t(filtered ? "page.audit.empty-filtered" : "page.audit.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}
@@ -230,7 +223,7 @@ function AuditView() {
 
 export default function AuditPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <AuditView />
     </Suspense>
   );

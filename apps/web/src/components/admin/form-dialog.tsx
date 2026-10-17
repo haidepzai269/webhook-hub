@@ -11,6 +11,8 @@ import { useT } from "@/lib/i18n/use-t";
 /**
  * Khung Dialog chung cho các form "Tạo mới" — form thật (RHF + Zod) do từng trang truyền vào. Tiêu đề và nút Huỷ/Tạo
  * đứng yên, form cuộn trong DialogBody (UI-MS). `size` theo bộ cỡ chung (mặc định md).
+ * - `footer`: thay hai nút mặc định (vd bước "secret chỉ hiện một lần" chỉ có nút Đóng).
+ * - `submitDisabled`: khoá nút gửi khi form chưa hợp lệ; `submittingLabel`: chữ khi đang gửi (mặc định "Đang lưu…").
  */
 export function FormDialog({
   open,
@@ -20,6 +22,9 @@ export function FormDialog({
   formId,
   submitting,
   submitLabel,
+  submittingLabel,
+  submitDisabled = false,
+  footer,
   size = "md",
   children,
 }: {
@@ -30,6 +35,9 @@ export function FormDialog({
   formId: string;
   submitting: boolean;
   submitLabel?: string;
+  submittingLabel?: string;
+  submitDisabled?: boolean;
+  footer?: ReactNode;
   size?: OverlaySize;
   children: ReactNode;
 }) {
@@ -43,12 +51,16 @@ export function FormDialog({
         </DialogHeader>
         <DialogBody>{children}</DialogBody>
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button type="submit" form={formId} disabled={submitting}>
-            {submitting ? t("common.saving") : (submitLabel ?? t("common.create"))}
-          </Button>
+          {footer ?? (
+            <>
+              <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" form={formId} disabled={submitting || submitDisabled}>
+                {submitting ? (submittingLabel ?? t("common.saving")) : (submitLabel ?? t("common.create"))}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </AdminDialogContent>
     </Dialog>

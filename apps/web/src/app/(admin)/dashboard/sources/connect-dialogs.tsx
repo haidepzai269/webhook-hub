@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,7 +17,7 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { credentialError, credentialInputAttrs } from "@/lib/credential-input";
 import { HubApiError, hubFetch } from "@/lib/hub/client";
 import { useSources } from "@/lib/hub/queries";
-import { connectionDialogMode } from "@/lib/hub/ui-logic";
+import { connectionDialogMode, errorTextOf } from "@/lib/hub/ui-logic";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 import { Alert, AlertDescription, } from "@/components/ui/alert";
@@ -301,7 +301,7 @@ export function ConnectSourceDialog({
                     onChange={(e) => setCreds({ ...creds, [f.name]: e.target.value })}
                   />
                   {credentialError(f.label, creds[f.name] ?? "", t) && (
-                    <p className="text-destructive text-xs">{credentialError(f.label, creds[f.name] ?? "", t)}</p>
+                    <FieldError>{credentialError(f.label, creds[f.name] ?? "", t)}</FieldError>
                   )}
                   {f.help && <FieldDescription>{f.help}</FieldDescription>}
                 </Field>
@@ -373,7 +373,7 @@ export function ConnectionDialog({
         `/api/v1/sources/${encodeURIComponent(sourceId ?? "")}/connection${kind === "retry" ? "/retry" : kind === "credentials" ? "/credentials" : ""}`,
         { method: kind === "retry" ? "POST" : "DELETE", ...(kind === "retry" ? { body: "{}" } : {}) },
       ),
-    onError: (e) => toast.error(e.message),
+    onError: (e) => toast.error(errorTextOf(e, t)),
     onSettled: refresh,
   });
   const c = q.data;

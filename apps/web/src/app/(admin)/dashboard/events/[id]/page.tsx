@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/admin/copy-button";
+import { ErrorState } from "@/components/admin/state";
 import { AttemptsCard, FlowCard, HeadersCard, PayloadCard, Waterfall } from "@/components/flow/detail-cards";
 import { ExecutionStatusPill } from "@/components/flow/execution-bits";
 import { JourneyCanvas, journeyHeight } from "@/components/flow/journey-canvas";
@@ -28,13 +29,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime } from "@/lib/hub/format";
+import { DetailSkeleton } from "@/components/admin/skeletons";
+import { formatDateTime, shortId } from "@/lib/hub/format";
 import { HubApiError } from "@/lib/hub/client";
 import { restoreFlowProject, useEventFlow, useFlowRenormalize, useFlowReplayDelivery } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
 import { journeyUnverified } from "@/lib/hub/unverified";
+import { errorTextOf } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
 
@@ -62,7 +64,7 @@ export default function EventJourneyPage() {
   // F7: project đang xem (chọn ở V2/V3, nhớ trong localStorage) → `?projectId=` cho mọi gọi của trang.
   useEffect(() => restoreFlowProject(), []);
   const router = useRouter();
-  const { data, isLoading, error } = useEventFlow(id ? decodeURIComponent(id) : null);
+  const { data, isLoading, error, refetch } = useEventFlow(id ? decodeURIComponent(id) : null);
   useRealtimeProject(useFlowProjectStore((st) => st.projectId)); // R-5: socket theo project đang xem
   const [selected, setSelected] = useState<{ stage: StageView; branch?: FlowBranch } | null>(null);
   const replay = useFlowReplayDelivery();
@@ -98,7 +100,7 @@ export default function EventJourneyPage() {
           {
             onSuccess: (r) =>
               toast.success(r.queued ? t("page.events.detail.requeued") : t("page.events.detail.not-orphan")),
-            onError: (e) => toast.error(e.message),
+            onError: (e) => toast.error(errorTextOf(e, t)),
           },
         );
       } else if (action === "open_dlq") router.push("/dashboard/dlq");
@@ -109,8 +111,8 @@ export default function EventJourneyPage() {
 
   const onSelect = useCallback((stage: StageView, branch?: FlowBranch) => setSelected({ stage, branch }), []);
 
-  if (isLoading) return <Skeleton className="h-[70vh] w-full rounded-2xl" />;
-  if (error) return <p className="text-destructive text-sm">{t("page.events.load-error", { message: error.message })}</p>;
+  if (isLoading) return <DetailSkeleton rows={6} />;
+  if (error) return <ErrorState message={t("page.events.load-error", { message: error.message })} onRetry={() => void refetch()} />;
   if (!data)
     return (
       <div className="space-y-3">
@@ -220,7 +222,7 @@ export default function EventJourneyPage() {
         <InfoCard icon={raw ? <ProviderIcon provider={raw.provider} name={raw.sourceName} size={13} /> : <Tag {...ICON_SM} />} label={t("page.events.detail.source")}>
           <div className="truncate font-medium text-sm">{raw ? `${raw.providerLabel} · ${raw.sourceName}` : (event?.source ?? "—")}</div>
           <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs" title={t("page.events.detail.no-ip")}>
-            {t("page.events.detail.ip-line", { id: event?.correlationId?.slice(0, 8) ?? "—" })}
+            {t("page.events.detail.ip-line", { id: event?.correlationId ? shortId(event.correlationId) : "—" })}
           </div>
         </InfoCard>
         <InfoCard icon={<CalendarClock {...ICON_SM} />} label={t("page.events.detail.received")}>

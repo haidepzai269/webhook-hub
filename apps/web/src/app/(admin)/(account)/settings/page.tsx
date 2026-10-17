@@ -7,13 +7,14 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
+import { SimpleTable } from "@/components/admin/simple-table";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { ruleName } from "@/lib/alerts/message";
@@ -47,7 +48,7 @@ export default function SettingsPage() {
     <>
       <PageHeader title={t("page.settings.title")} description={t("page.settings.description")} />
       {/* ADR-238: chưa có /auth/me -> chưa biết có phải operator; cùng khung chờ với AlertSettings đang tải. */}
-      {!operator && booting && <Skeleton className="h-64 w-full" />}
+      {!operator && booting && <CardSkeleton lines={6} />}
       {operator && <AlertSettings />}
       {!operator && !booting && <p className="text-muted-foreground text-sm">{t("page.settings.operator-only")}</p>}
     </>
@@ -83,8 +84,8 @@ function AlertSettings() {
     err instanceof HubApiError ? errorMessageOf(err.body, t) || err.message : String(err);
   const put = (patch: AlertPreferencesPatch) => save.mutate(patch, { onError: (err) => toast.error(errorText(err)) });
 
-  if (prefs.isLoading) return <Skeleton className="h-64 w-full" />;
-  if (prefs.isError || !prefs.data) return <p className="text-destructive text-sm">{t("page.settings.load-error")}</p>;
+  if (prefs.isLoading) return <CardSkeleton lines={6} />;
+  if (prefs.isError || !prefs.data) return <ErrorState message={t("page.settings.load-error")} onRetry={() => void prefs.refetch()} />;
   const p = prefs.data;
   const sw = emailSwitchState(p);
   const rows = ruleRows(p.rules, p.emailRules);
@@ -153,39 +154,47 @@ function AlertSettings() {
                   </Button>
                 </div>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("page.settings.alerts.rules.col.rule")}</TableHead>
-                    <TableHead className="w-36">{t("page.settings.alerts.rules.col.severity")}</TableHead>
-                    <TableHead className="w-24 text-center">{t("page.settings.alerts.rules.col.send")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => (
-                    <TableRow key={r.code}>
-                      <TableCell className="whitespace-normal">
+              <SimpleTable
+                rows={rows}
+                getRowKey={(r) => r.code}
+                columns={[
+                  {
+                    key: "rule",
+                    header: t("page.settings.alerts.rules.col.rule"),
+                    cell: (r) => (
+                      <>
                         <div className="font-medium text-sm">{ruleName(r.code, t)}</div>
                         <div className="text-muted-foreground text-xs">{t(ruleDescriptionKey(r.code))}</div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={r.severity === "critical" ? "destructive" : "outline"} className="gap-1.5">
-                          <SeverityDot severity={r.severity} />
-                          {t(`alerts.severity.${r.severity}`)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Check
-                          checked={r.checked}
-                          disabled={busy}
-                          label={ruleName(r.code, t)}
-                          onChange={(on) => put({ emailRules: toggleRule(p.rules, p.emailRules, r.code, on) })}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      </>
+                    ),
+                  },
+                  {
+                    key: "severity",
+                    header: t("page.settings.alerts.rules.col.severity"),
+                    className: "w-36",
+                    cell: (r) => (
+                      <Badge variant={r.severity === "critical" ? "destructive" : "outline"} className="gap-1.5">
+                        <SeverityDot severity={r.severity} />
+                        {t(`alerts.severity.${r.severity}`)}
+                      </Badge>
+                    ),
+                  },
+                  {
+                    key: "send",
+                    header: t("page.settings.alerts.rules.col.send"),
+                    className: "w-24",
+                    align: "center",
+                    cell: (r) => (
+                      <Check
+                        checked={r.checked}
+                        disabled={busy}
+                        label={ruleName(r.code, t)}
+                        onChange={(on) => put({ emailRules: toggleRule(p.rules, p.emailRules, r.code, on) })}
+                      />
+                    ),
+                  },
+                ]}
+              />
             </section>
 
             <section className="space-y-1">
@@ -207,7 +216,7 @@ function AlertSettings() {
               <h3 className="font-medium text-sm">{t("page.settings.alerts.muted.title")}</h3>
               <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.hint")}</p>
               {(projects.data ?? []).length === 0 ? (
-                <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.empty")}</p>
+                <EmptyState size="sm" title={t("page.settings.alerts.muted.empty")} />
               ) : (
                 <MuteList
                   projects={projects.data ?? []}
@@ -266,7 +275,7 @@ function MuteList({
         />
       </div>
       {view.matched === 0 ? (
-        <p className="text-muted-foreground text-xs">{t("page.settings.alerts.muted.no-match")}</p>
+        <EmptyState size="sm" title={t("page.settings.alerts.muted.no-match")} />
       ) : (
         <ul className="grid gap-1.5 sm:grid-cols-2">
           {view.rows.map((pr) => (

@@ -6,6 +6,7 @@ import { Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { AdminDialogContent } from "@/components/admin/overlay-content";
+import { EmptyState } from "@/components/admin/state";
 import { DeliveryStatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ import {
 import { formatDateTime } from "@/lib/hub/format";
 import { DELIVERY_STATUS_VALUES } from "@/lib/hub/list-url";
 import { useSources } from "@/lib/hub/queries";
-import { describeVerification } from "@/lib/hub/ui-logic";
+import { describeVerification, errorTextOf } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -291,7 +292,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
                       r.verification === "VERIFIED"
                         ? toast.success(t("page.destinations.endpoint.verify-ok"))
                         : toast.error(`❌ ${r.verificationFix ?? r.verificationError}`),
-                    onError: (e) => toast.error(e.message),
+                    onError: (e) => toast.error(errorTextOf(e, t)),
                   })
                 }
               >
@@ -306,7 +307,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
                     if (!(await confirm({ title: t("page.destinations.endpoint.rotate-confirm"), destructive: true }))) return;
                     rotate.mutate(ep.id, {
                       onSuccess: (r) => setSecret(r.signingSecret),
-                      onError: (e) => toast.error(e.message),
+                      onError: (e) => toast.error(errorTextOf(e, t)),
                     });
                   }}
                 >
@@ -317,7 +318,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
             <div className="text-sm">
               <p className="mb-1 font-medium">{t("page.destinations.endpoint.recent")}</p>
               {(detail.data?.deliveries ?? []).length === 0 && (
-                <p className="text-muted-foreground text-xs">{t("page.destinations.endpoint.recent-empty")}</p>
+                <EmptyState size="sm" className="items-start py-2 text-left" title={t("page.destinations.endpoint.recent-empty")} />
               )}
               <ul className="flex flex-col gap-1">
                 {(detail.data?.deliveries ?? []).map((d) => (

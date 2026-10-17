@@ -1,11 +1,18 @@
 "use client";
 
-import { Eye, Trash2 } from "lucide-react";
+import { Eye, Inbox, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { ConfirmDialog, useConfirm } from "@/components/admin/confirm-dialog";
+import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { GridList, GridListRow } from "@/components/admin/grid-list";
 import { IconButton } from "@/components/admin/icon-button";
+import { MonoId } from "@/components/admin/mono-id";
 import { PageHeader } from "@/components/admin/page-header";
+import { SimpleTable } from "@/components/admin/simple-table";
+import { CardSkeleton, DetailSkeleton, PageSkeleton, TableRowsSkeleton } from "@/components/admin/skeletons";
+import { EmptyState, ErrorState } from "@/components/admin/state";
+import { TimeCell } from "@/components/admin/time-cell";
 import { DeliveryStatusBadge, type StatusTone, StatusBadge } from "@/components/admin/status-badge";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,7 +21,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Table, TableBody } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TONE_VAR } from "@/components/flow/tokens";
 import { httpTone } from "@/lib/hub/format";
 
 /**
@@ -36,6 +45,31 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 }
 
 const TONES: StatusTone[] = ["ok", "warn", "bad", "info", "idle", "progress"];
+
+interface DemoRow {
+  id: string;
+  name: string;
+  status: number;
+  at: string;
+}
+
+const NOW = Date.parse("2026-10-17T10:00:00Z");
+const DEMO_ROWS: DemoRow[] = [
+  { id: "7f3a9c21-5b1e-4d77-9a10-0c2e8b6d4a11", name: "payos-orders", status: 200, at: new Date(NOW - 45_000).toISOString() },
+  { id: "b21c4e90-1a2d-4f60-8e33-71d5c9f0a2b4", name: "github-push", status: 500, at: new Date(NOW - 3_600_000).toISOString() },
+  { id: "0e6d1f48-93bc-4a52-b7d1-5e8a3c2f9d60", name: "stripe-events", status: 429, at: new Date(NOW - 86_400_000).toISOString() },
+];
+
+const DEMO_COLUMNS: HubColumn<DemoRow>[] = [
+  { id: "name", header: "Tên (sắp xếp được)", accessorFn: (r) => r.name, cell: ({ row }) => <span className="font-medium">{row.original.name}</span>, enableHiding: false },
+  { id: "id", header: "Mã", enableSorting: false, cell: ({ row }) => <MonoId id={row.original.id} copy /> },
+  { id: "status", header: "HTTP", accessorFn: (r) => String(r.status), cell: ({ row }) => <StatusBadge tone={httpTone(row.original.status)}>{row.original.status}</StatusBadge> },
+  { id: "at", header: "Lúc", accessorFn: (r) => r.at, cell: ({ row }) => <TimeCell iso={row.original.at} /> },
+];
+
+const DEMO_TONE = { ok: TONE_VAR.healthy, warn: TONE_VAR.warning, bad: TONE_VAR.crashed, info: TONE_VAR.progress, idle: TONE_VAR.idle, progress: TONE_VAR.progress } as const;
+
+const GRID_TEMPLATE = "7rem minmax(0,1fr) 6rem";
 
 export default function UiKitPage() {
   const [checked, setChecked] = useState(true);
@@ -188,6 +222,90 @@ export default function UiKitPage() {
               <TabsTrigger value="b">Hai</TabsTrigger>
             </TabsList>
           </Tabs>
+        </Section>
+
+        <Section title="EmptyState / ErrorState" hint="Trạng thái rỗng (size md/sm, icon hoặc illustration, action) và lỗi tải (dựa trên Alert destructive; onRetry hiện nút Thử lại; inline = một dòng).">
+          <div className="grid w-full gap-4 md:grid-cols-2">
+            <EmptyState icon={<Inbox />} title="Chưa có nguồn nào" description="Tạo nguồn đầu tiên để nhận webhook." action={<Button size="sm">Tạo nguồn</Button>} />
+            <div className="grid content-start gap-3">
+              <EmptyState size="sm" icon={<Inbox />} title="Không có kết quả" description="Thử bỏ bớt bộ lọc." />
+              <ErrorState message="Không tải được danh sách: timeout" onRetry={() => undefined} />
+              <ErrorState inline message="Không tải được biểu đồ" onRetry={() => undefined} />
+            </div>
+          </div>
+        </Section>
+
+        <Section title="TimeCell / MonoId" hint='TimeCell mode relative (mặc định) | absolute | both — tooltip là phần còn lại. MonoId: mono, rút gọn 8 ký tự, tooltip đủ mã, copy tuỳ chọn; n="full" cắt bằng CSS.'>
+          <TimeCell iso={new Date(Date.now() - 300_000).toISOString()} />
+          <TimeCell iso={new Date(Date.now() - 300_000).toISOString()} mode="absolute" />
+          <TimeCell iso={new Date(Date.now() - 300_000).toISOString()} mode="both" />
+          <TimeCell iso={null} />
+          <MonoId id="7f3a9c21-5b1e-4d77-9a10-0c2e8b6d4a11" />
+          <MonoId id="7f3a9c21-5b1e-4d77-9a10-0c2e8b6d4a11" copy />
+          <div className="w-48">
+            <MonoId id="7f3a9c21-5b1e-4d77-9a10-0c2e8b6d4a11" n="full" copy />
+          </div>
+        </Section>
+
+        <Section title="DataTable" hint="Bấm tiêu đề để sắp xếp (aria-sort; enableSorting:false thì tắt). Hàng bấm được: Tab tới hàng, Enter/Space kích hoạt. footer = chỗ của CursorPager (kèm ghi chú 'trong trang này').">
+          <div className="w-full">
+            <DataTable
+              data={DEMO_ROWS}
+              columns={DEMO_COLUMNS}
+              getRowId={(r) => r.id}
+              pageSize={false}
+              searchPlaceholder="Tìm trong bảng"
+              onRowClick={(r) => setAnswer(`hàng ${r.name}`)}
+              footer={<span className="text-muted-foreground text-xs">footer (CursorPager)</span>}
+            />
+          </div>
+        </Section>
+
+        <Section title="SimpleTable" hint="Bảng nhỏ không cần sắp xếp/phân trang; cùng token khung/tiêu đề với DataTable. loading / error / empty có sẵn.">
+          <div className="grid w-full gap-3">
+            <SimpleTable
+              rows={DEMO_ROWS}
+              getRowKey={(r) => r.id}
+              columns={[
+                { key: "name", header: "Tên", cell: (r) => r.name },
+                { key: "status", header: "HTTP", align: "right", cell: (r) => r.status },
+              ]}
+            />
+            <SimpleTable rows={[]} getRowKey={(r: DemoRow) => r.id} columns={[{ key: "name", header: "Rỗng", cell: (r: DemoRow) => r.name }]} empty="Chưa có dữ liệu" />
+            <SimpleTable rows={undefined} loading getRowKey={(r: DemoRow) => r.id} columns={[{ key: "name", header: "Đang tải", cell: (r: DemoRow) => r.name }, { key: "x", header: "Cột", cell: () => null }]} />
+          </div>
+        </Section>
+
+        <Section title="GridList / GridListRow" hint="Danh sách lưới realtime (trang Sự kiện, ngăn Nhật ký): tiêu đề, hàng bấm được (div role=button hoặc href), viền trái theo tone, trạng thái rỗng/tải/lỗi. Cuộn vô hạn/unroll do trang tự thêm.">
+          <div className="w-full overflow-hidden rounded-xl border">
+            <GridList template={GRID_TEMPLATE} headers={["Lúc", "Tên", "HTTP"]}>
+              {DEMO_ROWS.map((r) => (
+                <GridListRow key={r.id} tone={DEMO_TONE[httpTone(r.status)]} onActivate={() => setAnswer(`lưới: ${r.name}`)}>
+                  <TimeCell iso={r.at} />
+                  <span className="truncate">{r.name}</span>
+                  <StatusBadge tone={httpTone(r.status)}>{r.status}</StatusBadge>
+                </GridListRow>
+              ))}
+            </GridList>
+          </div>
+          <div className="w-full overflow-hidden rounded-xl border">
+            <GridList template={GRID_TEMPLATE} headers={["Lúc", "Tên", "HTTP"]} isEmpty emptyText="Không có dòng nào" />
+          </div>
+        </Section>
+
+        <Section title="Skeleton (PageSkeleton / CardSkeleton / DetailSkeleton / TableRowsSkeleton)" hint="Dùng thay Skeleton h-xx trần. Suspense fallback của trang danh sách = PageSkeleton.">
+          <div className="grid w-full gap-4 md:grid-cols-2">
+            <CardSkeleton lines={4} />
+            <DetailSkeleton rows={3} />
+            <div className="md:col-span-2">
+              <PageSkeleton />
+            </div>
+            <Table>
+              <TableBody>
+                <TableRowsSkeleton cols={4} rows={3} />
+              </TableBody>
+            </Table>
+          </div>
         </Section>
 
         <Section title="Select" hint='Thay thẻ select gốc: SelectTrigger size="sm".'>

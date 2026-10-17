@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { DEFAULT_LOCALE, INTL_LOCALE, type Locale } from "../../lib/i18n/locales";
 
 /** HH:MM:SS.mmm theo giờ máy người xem — "COMMIT lúc 10:02:37.120". */
-export function clock(iso: string | null | undefined, ms = true): string {
+export function clock(iso: string | number | null | undefined, ms = true): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";

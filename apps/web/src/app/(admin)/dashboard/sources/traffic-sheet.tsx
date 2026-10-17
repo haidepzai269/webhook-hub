@@ -5,6 +5,8 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { AdminSheetContent } from "@/components/admin/overlay-content";
+import { SimpleTable } from "@/components/admin/simple-table";
+import { EmptyState, ErrorState } from "@/components/admin/state";
 import {
   type ChartConfig,
   ChartContainer,
@@ -14,13 +16,13 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { Sheet, SheetBody, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CardSkeleton } from "@/components/admin/skeletons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { HubApiError } from "@/lib/hub/client";
 import { useSourceTraffic } from "@/lib/hub/traffic-queries";
 import type { Source } from "@/lib/hub/types";
-import { INTL_LOCALE, type MessageKey } from "@/lib/i18n/dictionary";
+import { formatNumber, chartTimeFormatters } from "@/lib/hub/format";
+import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 import { INSIGHT_DOT, INSIGHT_TONE } from "@/lib/insights/message";
 import {
@@ -32,7 +34,6 @@ import {
 } from "@/lib/traffic/message";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-const TZ = "Asia/Ho_Chi_Minh";
 
 /** Màu từng kết quả — cùng bảng màu với biểu đồ Tổng quan (xanh = nhận, đỏ = lỗi, hổ phách = vượt trần). */
 const SERIES: Record<TrafficOutcome, { key: MessageKey; color: string }> = {
@@ -75,19 +76,13 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
   const t = useT();
   const locale = useLocale();
   const [range, setRange] = useState<TrafficRange>("1h");
-  const { data, isLoading, isPlaceholderData, error } = useSourceTraffic(sourceId, range);
+  const { data, isLoading, isPlaceholderData, error, refetch } = useSourceTraffic(sourceId, range);
   const chartConfig = useMemo<ChartConfig>(
     () => Object.fromEntries(TRAFFIC_OUTCOMES.map((k) => [k, { label: t(SERIES[k].key), color: SERIES[k].color }])),
     [t],
   );
-  const [timeFmt, dayFmt] = useMemo(
-    () => [
-      new Intl.DateTimeFormat(INTL_LOCALE[locale], { hour: "2-digit", minute: "2-digit", timeZone: TZ }),
-      new Intl.DateTimeFormat(INTL_LOCALE[locale], { day: "2-digit", month: "2-digit", timeZone: TZ }),
-    ],
-    [locale],
-  );
-  const nf = useMemo(() => new Intl.NumberFormat(INTL_LOCALE[locale]), [locale]);
+  // Bucket lưu lượng cắt theo epoch (UTC, không theo múi giờ cố định) → nhãn theo giờ máy người xem (ADR-246).
+  const { time: timeFmt, day: dayFmt } = chartTimeFormatters(locale);
   const dataRange = data?.range ?? range;
   const tick = (v: string) => (dataRange === "7d" ? dayFmt.format(new Date(v)) : timeFmt.format(new Date(v)));
 
@@ -113,11 +108,11 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
       </ToggleGroup>
 
       {forbidden ? (
-        <p className="rounded-lg border px-3 py-2 text-muted-foreground text-sm">{t("traffic.forbidden")}</p>
+        <EmptyState size="sm" className="rounded-lg border" title={t("traffic.forbidden")} />
       ) : error ? (
-        <p className="text-destructive text-sm">{t("traffic.load-error", { message: error.message })}</p>
+        <ErrorState message={t("traffic.load-error", { message: error.message })} onRetry={() => void refetch()} />
       ) : isLoading && !data ? (
-        <Skeleton className="h-64 w-full" />
+        <CardSkeleton lines={6} />
       ) : data && text ? (
         <div className={`space-y-4 transition-opacity ${isPlaceholderData ? "opacity-50" : ""}`}>
           <div className="space-y-1" data-testid="traffic-insight">
@@ -176,30 +171,27 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
               {data.topIps.length > 0 && (
                 <div className="space-y-1">
                   <h3 className="font-medium text-sm">{t("traffic.top-ips.title")}</h3>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("traffic.top-ips.col.ip")}</TableHead>
-                        <TableHead className="text-right">{t("traffic.top-ips.col.count")}</TableHead>
-                        <TableHead className="text-right">{t("traffic.top-ips.col.rejected")}</TableHead>
-                        <TableHead>{t("traffic.top-ips.col.last")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.topIps.map((r) => (
-                        <TableRow key={r.ip}>
-                          <TableCell className="font-mono text-xs">{r.ip}</TableCell>
-                          <TableCell className="text-right tabular-nums">{nf.format(r.count)}</TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {r.count > 0 ? `${Math.round((r.rejected / r.count) * 100)}%` : "—"}
-                          </TableCell>
-                          <TableCell className="text-xs tabular-nums">
-                            {dayFmt.format(new Date(r.lastSeen))} {timeFmt.format(new Date(r.lastSeen))}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <SimpleTable
+                    rows={data.topIps}
+                    getRowKey={(r) => r.ip}
+                    columns={[
+                      { key: "ip", header: t("traffic.top-ips.col.ip"), cell: (r) => <span className="font-mono text-xs">{r.ip}</span> },
+                      { key: "count", header: t("traffic.top-ips.col.count"), align: "right", className: "tabular-nums", cell: (r) => formatNumber(r.count, locale) },
+                      {
+                        key: "rejected",
+                        header: t("traffic.top-ips.col.rejected"),
+                        align: "right",
+                        className: "tabular-nums",
+                        cell: (r) => (r.count > 0 ? `${Math.round((r.rejected / r.count) * 100)}%` : "—"),
+                      },
+                      {
+                        key: "last",
+                        header: t("traffic.top-ips.col.last"),
+                        className: "text-xs tabular-nums",
+                        cell: (r) => `${dayFmt.format(new Date(r.lastSeen))} ${timeFmt.format(new Date(r.lastSeen))}`,
+                      },
+                    ]}
+                  />
                   <p className="text-muted-foreground text-xs">{t("traffic.top-ips.note")}</p>
                 </div>
               )}

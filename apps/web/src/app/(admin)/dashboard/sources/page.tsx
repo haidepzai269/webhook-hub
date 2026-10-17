@@ -22,7 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconButton } from "@/components/admin/icon-button";
 import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
-import { formatDateTime } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
 import { isUnverifiedSource, unverifiedSourceBlocked } from "@/lib/hub/unverified";
@@ -59,8 +60,9 @@ import {
   WHEN_KIND_CHOICES,
 } from "@/lib/hub/listen-logic";
 import { PROVIDERS, type Source } from "@/lib/hub/types";
-import type { Locale, MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
+import { errorTextOf } from "@/lib/hub/ui-logic";
+import { useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
@@ -214,7 +216,7 @@ void _formShape;
 // ADR-211: hub trả URL ingest (HUB_INGEST_PUBLIC_URL) khi có URL công khai; không có thì ghép như cũ.
 const fullUrl = (s: Source) => s.ingestUrl || `${HUB_API_URL}${s.webhookUrl}`;
 
-const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubColumn<Source>[] => [
+const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] => [
   {
     id: "name",
     header: t("common.name"),
@@ -242,9 +244,11 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
       // URL dài không quyết định bề rộng bảng (span w-0 flex-1): cột co về tối thiểu 11rem khi trang hẹp, phần dư cắt "…"
       // (đủ trong title + nút chép) — để cột "Nhịp sự kiện" không bị đẩy ra ngoài mép phải ở 1280–1440px.
       <div className="flex w-full min-w-44 max-w-md items-center gap-1">
-        <span className="w-0 flex-1 truncate font-mono text-xs" title={fullUrl(row.original)}>
-          {fullUrl(row.original)}
-        </span>
+        <CellTooltip text={fullUrl(row.original)} className="w-0 flex-1">
+          <span data-cell-text className="truncate font-mono text-xs">
+            {fullUrl(row.original)}
+          </span>
+        </CellTooltip>
         <CopyButton value={fullUrl(row.original)} label={t("page.sources.copy-url")} />
       </div>
     ),
@@ -252,7 +256,7 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
   {
     id: "secret",
     header: t("page.sources.col.secret"),
-    accessorFn: (s) => String(s.secretVersions ?? 0),
+    accessorFn: (s) => s.secretVersions ?? 0,
     cell: ({ row }) => (
       <span className="text-muted-foreground text-xs">
         •••••• {row.original.secretVersions ? `(v${row.original.secretVersions})` : ""}
@@ -288,7 +292,7 @@ const makeColumns = (t: TranslateFn, locale: Locale, canTraffic: boolean): HubCo
     id: "createdAt",
     header: t("common.created-at"),
     accessorFn: (s) => s.createdAt,
-    cell: ({ row }) => <span className="text-xs">{formatDateTime(row.original.createdAt, locale)}</span>,
+    cell: ({ row }) => <TimeCell iso={row.original.createdAt} mode="absolute" />,
   },
   {
     id: "connection",
@@ -333,7 +337,7 @@ function KeepLongerCell({ source }: { source: Source }) {
           { id: source.id, keepLonger: v },
           {
             onSuccess: () => toast.success(t(v ? "page.storage.keep-longer.on" : "page.storage.keep-longer.off", { name: source.name })),
-            onError: (e) => toast.error(e.message),
+            onError: (e) => toast.error(errorTextOf(e, t)),
           },
         )
       }
@@ -351,9 +355,8 @@ function SourceCount() {
 
 export default function SourcesPage() {
   const t = useT();
-  const locale = useLocale();
   const canTraffic = useCanViewTraffic();
-  const columns = useMemo(() => makeColumns(t, locale, canTraffic), [t, locale, canTraffic]);
+  const columns = useMemo(() => makeColumns(t, canTraffic), [t, canTraffic]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSources();
   const create = useCreateSource();

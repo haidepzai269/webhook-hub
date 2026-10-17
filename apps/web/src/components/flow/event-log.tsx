@@ -13,8 +13,9 @@ import {
 
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, EyeOff, Pause, Play, Search, Terminal } from "lucide-react";
-import Link from "next/link";
 
+import { GridList, GridListRow } from "@/components/admin/grid-list";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -23,8 +24,8 @@ import { EVENT_LOG_PARAMS, EXECUTION_STATUS_VALUES } from "@/lib/hub/list-url";
 import type { ExecutionsPage } from "@/lib/hub/flow-types";
 import { flowKeys, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
-import { INTL_LOCALE, type Locale } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { clock } from "./time";
+import { useT } from "@/lib/i18n/use-t";
 import { useUnroll } from "@/lib/ui/use-unroll";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -69,11 +70,6 @@ const NOTE_COLOR: Record<NoteTone, string> = {
   error: TONE_VAR.crashed,
 };
 
-function time(iso: string, locale: Locale) {
-  const d = new Date(iso);
-  return `${d.toLocaleTimeString(INTL_LOCALE[locale], { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-}
-
 /**
  * Nhật ký sự kiện trực tiếp (SPEC §0A.C): ngăn dưới kiểu console trên V3. Mỗi dòng = một hành trình
  * rút gọn (cùng `/flow/executions` với V2), màu theo kết quả, bấm → V1. Cập nhật bằng invalidate
@@ -93,7 +89,6 @@ export function EventLog() {
 
 function EventLogPanel() {
   const t = useT();
-  const locale = useLocale();
   const [open, setOpen] = useState(true);
   const [paused, setPaused] = useState(false);
   const [q, setQ] = useState("");
@@ -315,19 +310,17 @@ function EventLogPanel() {
           onScroll={(e) => setAwayFromTop(e.currentTarget.scrollTop > 24)}
         >
           {/* Hẹp hơn tổng min cột → cuộn ngang trong ngăn (log-layout.ts) thay vì đè chữ. */}
-          <div style={{ minWidth: MIN_WIDTH }}>
-            <div
-              className="sticky top-0 z-[1] grid items-center gap-3 border-b border-l-2 border-l-transparent px-3 py-1 font-sans text-[11px] text-muted-foreground uppercase tracking-wide"
-              style={{ gridTemplateColumns: GRID_TEMPLATE, borderBottomColor: "var(--flow-card-border)", background: "var(--flow-card-solid)" }}
-            >
-              {LOG_COLUMNS.map((c) => (
-                <span key={c.key} className="truncate">
-                  {t(c.labelKey)}
-                </span>
-              ))}
-            </div>
-            {isLoading && <div className="px-3 py-2 text-muted-foreground">{t("common.loading")}</div>}
-            {!isLoading && items.length === 0 && <div className="px-3 py-2 text-muted-foreground">{t("journey.log.empty")}</div>}
+          <GridList
+            template={GRID_TEMPLATE}
+            minWidth={MIN_WIDTH}
+            density="sm"
+            sticky
+            headerStyle={{ borderBottomColor: "var(--flow-card-border)", background: "var(--flow-card-solid)" }}
+            headers={LOG_COLUMNS.map((c) => t(c.labelKey))}
+            loading={isLoading}
+            isEmpty={items.length === 0}
+            emptyText={t("journey.log.empty")}
+          >
             {items.map((i) => {
               // Request kiểm tra kết nối của provider đúng thiết kế (ADR-159) → viền + nhãn trung tính, không "Thành công" xanh.
               const probe = expectedProbe(i);
@@ -336,40 +329,49 @@ function EventLogPanel() {
               const note = describeEvent(i, t);
               const anim = unroll(i.id);
               return (
-                <Link
+                <GridListRow
                   key={i.id}
                   href={`/dashboard/events/${encodeURIComponent(i.id)}`}
-                  className={`grid items-center gap-3 border-l-2 px-3 py-1 hover:bg-muted/50 ${anim.className ?? ""}`}
-                  style={{ gridTemplateColumns: GRID_TEMPLATE, borderLeftColor: color, ...anim.style }}
+                  className={anim.className}
+                  tone={color}
+                  style={anim.style}
                 >
-                  <span className="truncate text-muted-foreground tabular-nums">{time(i.receivedAt, locale)}</span>
-                  <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
-                    <span className="shrink-0 text-muted-foreground">
-                      <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
+                  <span className="truncate text-muted-foreground tabular-nums">{clock(i.receivedAt)}</span>
+                  <CellTooltip text={i.providerLabel}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="shrink-0 text-muted-foreground">
+                        <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
+                      </span>
+                      <span data-cell-text className="truncate">{i.providerLabel}</span>
                     </span>
-                    <span className="truncate">{i.providerLabel}</span>
-                  </span>
+                  </CellTooltip>
                   <span className="min-w-0 overflow-hidden">
                     <MiniPipeline summary={i.summary} context={i} decorative />
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5" title={i.type ?? resultLabel}>
-                    <span className="truncate">{i.type ?? <span style={{ color }}>{resultLabel}</span>}</span>
-                    {/* PK5 khoá 2 (REVIEW-PK5-R2 T-a): nhãn chữ, không chỉ chấm mini decorative. */}
-                    <UnverifiedBadge of={i} />
-                  </span>
-                  <span className="min-w-0 truncate" title={failedAtText(i.failedAt, t) ?? resultLabel}>
-                    {i.failedAt ? (
-                      <FailedAt failedAt={i.failedAt} status={i.status} />
-                    ) : (
-                      <span style={{ color }} className="font-sans text-xs">
-                        {resultLabel}
-                      </span>
-                    )}
-                  </span>
-                  <span className="min-w-0 truncate font-sans text-xs" style={{ color: NOTE_COLOR[note.tone] }} title={note.text}>
-                    {note.text}
-                  </span>
-                </Link>
+                  <CellTooltip text={i.type ?? resultLabel}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span data-cell-text className="truncate">{i.type ?? <span style={{ color }}>{resultLabel}</span>}</span>
+                      {/* PK5 khoá 2 (REVIEW-PK5-R2 T-a): nhãn chữ, không chỉ chấm mini decorative. */}
+                      <UnverifiedBadge of={i} />
+                    </span>
+                  </CellTooltip>
+                  <CellTooltip text={failedAtText(i.failedAt, t) ?? resultLabel}>
+                    <span data-cell-text className="min-w-0 truncate">
+                      {i.failedAt ? (
+                        <FailedAt failedAt={i.failedAt} status={i.status} />
+                      ) : (
+                        <span style={{ color }} className="font-sans text-xs">
+                          {resultLabel}
+                        </span>
+                      )}
+                    </span>
+                  </CellTooltip>
+                  <CellTooltip text={note.text}>
+                    <span data-cell-text className="min-w-0 truncate font-sans text-xs" style={{ color: NOTE_COLOR[note.tone] }}>
+                      {note.text}
+                    </span>
+                  </CellTooltip>
+                </GridListRow>
               );
             })}
             <div ref={sentinel} className="h-4" />
@@ -383,7 +385,7 @@ function EventLogPanel() {
               </div>
             )}
             {!hasNextPage && all.length > 0 && <div className="px-3 py-1 font-sans text-muted-foreground text-xs">{t("journey.log.end")}</div>}
-          </div>
+          </GridList>
         </div>
       )}
     </div>

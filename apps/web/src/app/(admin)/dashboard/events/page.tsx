@@ -7,6 +7,7 @@ import { Eye, Pause, Play, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { GridList, GridListRow } from "@/components/admin/grid-list";
 import { expectedProbe } from "@/components/flow/event-notes";
 import { EXECUTION_TONE, ExecutionStatusPill, FailedAt, MiniPipeline } from "@/components/flow/execution-bits";
 import { ProjectPicker } from "@/components/flow/project-picker";
@@ -18,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageSkeleton } from "@/components/admin/skeletons";
 import { TimeRange } from "@/components/admin/time-range";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconButton } from "@/components/admin/icon-button";
@@ -52,7 +53,7 @@ const isIdPrefix = (x: string) => /^[0-9A-Za-z_-]{4,36}$/.test(x);
  * Grid cố định 7 cột: Thời gian | Nhà cung cấp | Kiểu·đối tượng | Đường ống | Trạng thái | Hỏng ở | Mắt.
  * Pipeline cố 9rem (đủ 6 chấm + khoảng cách), Status cố 7.5rem, FailedAt co giãn.
  */
-const GRID_COLS = "grid-cols-[7rem_7.5rem_minmax(0,1fr)_9rem_7.5rem_minmax(0,1fr)_2rem]";
+const GRID_COLS = "7rem 7.5rem minmax(0,1fr) 9rem 7.5rem minmax(0,1fr) 2rem";
 
 /**
  * V2 — Danh sách hành trình (SPEC-event-flow-ui §4). Dùng `/flow/executions` (KHÔNG dùng
@@ -153,7 +154,7 @@ function ExecutionsView() {
           </TabsList>
         </Tabs>
         <Select value={source || ALL} onValueChange={(x) => url.setFilter({ source: x === ALL ? null : x })}>
-          <SelectTrigger size="sm" className="w-48">
+          <SelectTrigger size="sm" className="w-48" aria-label={t("page.events.filter.source")}>
             <SelectValue placeholder={t("page.events.filter.source")} />
           </SelectTrigger>
           <SelectContent>
@@ -166,7 +167,7 @@ function ExecutionsView() {
           </SelectContent>
         </Select>
         <Select value={destination || ALL} onValueChange={(x) => url.setFilter({ destination: x === ALL ? null : x })}>
-          <SelectTrigger size="sm" className="w-52">
+          <SelectTrigger size="sm" className="w-52" aria-label={t("page.events.filter.destination")}>
             <SelectValue placeholder={t("page.events.filter.destination")} />
           </SelectTrigger>
           <SelectContent>
@@ -180,7 +181,7 @@ function ExecutionsView() {
         </Select>
         <div className="relative">
           <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder={t("page.events.filter.type")} className="h-8 w-48 pl-7 font-mono text-xs" />
+          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder={t("page.events.filter.type")} aria-label={t("page.events.filter.type")} className="h-8 w-48 pl-7 font-mono text-xs" />
         </div>
         <div className="relative">
           <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
@@ -188,6 +189,7 @@ function ExecutionsView() {
             value={idInput}
             onChange={(e) => setIdInput(e.target.value)}
             placeholder={t("page.events.filter.id")}
+            aria-label={t("page.events.filter.id")}
             title={t("page.events.filter.id-hint")}
             className="h-8 w-48 pl-7 font-mono text-xs"
           />
@@ -203,43 +205,34 @@ function ExecutionsView() {
       </div>
 
       <div className="flow-surface overflow-hidden rounded-2xl">
-        <div className={`grid ${GRID_COLS} items-center gap-3 border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs`}>
-          <span>{t("page.events.col.time")}</span>
-          <span>{t("page.events.col.provider")}</span>
-          <span>{t("page.events.col.type")}</span>
-          <span>{t("page.events.col.pipeline")}</span>
-          <span>{t("page.events.col.status")}</span>
-          <span>{t("page.events.col.failed-at")}</span>
-          <span />
-        </div>
-        {q.isLoading && (
-          <div className="space-y-2 p-4">
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
-          </div>
-        )}
-        {q.error && <p className="p-4 text-destructive text-sm">{t("page.events.load-error", { message: q.error.message })}</p>}
-        {!q.isLoading && items.length === 0 && <p className="p-6 text-center text-muted-foreground text-sm">{t("page.events.no-match")}</p>}
+        <GridList
+          template={GRID_COLS}
+          headers={[
+            t("page.events.col.time"),
+            t("page.events.col.provider"),
+            t("page.events.col.type"),
+            t("page.events.col.pipeline"),
+            t("page.events.col.status"),
+            t("page.events.col.failed-at"),
+            null,
+          ]}
+          loading={q.isLoading}
+          error={q.error}
+          onRetry={() => void q.refetch()}
+          isEmpty={items.length === 0}
+          emptyText={t("page.events.no-match")}
+        >
         {items.map((i) => {
           // Request kiểm tra kết nối của provider (ADR-159) → viền xám + pill "Kiểm tra kết nối", như ngăn Nhật ký.
           const probe = expectedProbe(i);
           const anim = unroll(i.id);
           return (
-            // biome-ignore lint/a11y/useSemanticElements: hàng bảng bấm được
-            <div
+            <GridListRow
               key={i.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
-              onKeyDown={(e) => e.key === "Enter" && router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
-              className={`grid cursor-pointer ${GRID_COLS} items-center gap-3 border-b border-l-2 px-4 py-2 text-sm last:border-b-0 hover:bg-muted/40 ${anim.className ?? ""}`}
-              style={{
-                borderLeftColor: probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]],
-                contentVisibility: "auto",
-                containIntrinsicSize: "auto 44px",
-                ...anim.style,
-              }}
+              onActivate={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
+              className={anim.className}
+              tone={probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]]}
+              style={{ contentVisibility: "auto", containIntrinsicSize: "auto 44px", ...anim.style }}
             >
               {/* Thời gian */}
               <span className="text-xs tabular-nums" title={formatRelative(i.receivedAt, undefined, locale)}>
@@ -289,12 +282,13 @@ function ExecutionsView() {
                   />
                 )}
               </span>
-            </div>
+            </GridListRow>
           );
         })}
         <div ref={sentinel} className="h-6" />
         {q.isFetchingNextPage && <p className="pb-3 text-center text-muted-foreground text-xs">{t("page.events.loading-more")}</p>}
         {!q.hasNextPage && items.length > 0 && <p className="pb-3 text-center text-muted-foreground text-xs">{t("page.events.end")}</p>}
+        </GridList>
       </div>
 
       <EventSheet eventId={quick.id} open={quick.open} onClose={() => setQuick((s) => ({ ...s, open: false }))} />
@@ -304,7 +298,7 @@ function ExecutionsView() {
 
 export default function EventsPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <ExecutionsView />
     </Suspense>
   );

@@ -13,18 +13,19 @@ import { ProjectChip, SeverityDot, useAlertText } from "@/components/alerts/aler
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { AlertText } from "@/lib/alerts/message";
 import { ruleName } from "@/lib/alerts/message";
 import { ALERT_RULE_CODES, ALERT_SEVERITIES, type AlertView } from "@/lib/alerts/types";
 import { useAlertsPage, useSubjectNames } from "@/lib/hub/alert-queries";
-import { formatRelative, formatStamp } from "@/lib/hub/format";
+import { TimeCell } from "@/components/admin/time-cell";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
+import { shortId } from "@/lib/hub/format";
 import { ALERT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useProjects } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
-import type { Locale, TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import type { TranslateFn } from "@/lib/i18n/dictionary";
+import { useT } from "@/lib/i18n/use-t";
 
 import { AlertSheet } from "./_components/alert-sheet";
 
@@ -32,7 +33,7 @@ const ALL = "__all";
 
 type Row = AlertView & { text: AlertText };
 
-const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<Row>[] => [
+const buildColumns = (t: TranslateFn): HubColumn<Row>[] => [
   {
     id: "severity",
     header: t("page.alerts.col.severity"),
@@ -51,10 +52,16 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<Row>[] => [
     accessorFn: (a) => `${a.text.title} ${a.text.subjectLabel}`,
     cell: ({ row }) => (
       <div className="min-w-0 max-w-[32rem]">
-        <div className="truncate font-medium text-sm" title={row.original.text.title}>
-          {row.original.text.title}
-        </div>
-        <div className="truncate text-muted-foreground text-xs">{row.original.text.subjectLabel}</div>
+        <CellTooltip text={row.original.text.title} className="flex">
+          <span data-cell-text className="truncate font-medium text-sm">
+            {row.original.text.title}
+          </span>
+        </CellTooltip>
+        <CellTooltip text={row.original.text.subjectLabel} className="flex">
+          <span data-cell-text className="truncate text-muted-foreground text-xs">
+            {row.original.text.subjectLabel}
+          </span>
+        </CellTooltip>
       </div>
     ),
     enableHiding: false,
@@ -69,12 +76,7 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<Row>[] => [
     id: "openedAt",
     header: t("page.alerts.col.opened"),
     accessorFn: (a) => a.openedAt,
-    cell: ({ row }) => (
-      <span className="whitespace-nowrap text-xs" title={formatStamp(row.original.openedAt, { seconds: true })}>
-        {formatStamp(row.original.openedAt, { seconds: true })}
-        <span className="block text-[11px] text-muted-foreground">{formatRelative(row.original.openedAt, undefined, locale)}</span>
-      </span>
-    ),
+    cell: ({ row }) => <TimeCell iso={row.original.openedAt} mode="both" />,
   },
   {
     id: "state",
@@ -100,7 +102,6 @@ const buildColumns = (t: TranslateFn, locale: Locale): HubColumn<Row>[] => [
  */
 function AlertsView() {
   const t = useT();
-  const locale = useLocale();
   const operator = useCanSeeAlerts(); // QT6: owner thấy cảnh báo dung lượng của project mình
   const booting = useAuthBooting();
   const isOperator = useIsOperator();
@@ -111,7 +112,7 @@ function AlertsView() {
   const text = useAlertText();
   const nameOf = useSubjectNames(data?.items);
   const rows = useMemo<Row[] | undefined>(() => data?.items.map((a) => ({ ...a, text: text(a, nameOf(a.subjectId)) })), [data, text, nameOf]);
-  const columns = useMemo(() => buildColumns(t, locale), [t, locale]);
+  const columns = useMemo(() => buildColumns(t), [t]);
   const [selected, setSelected] = useState<string | null>(null);
   const selectedRow = rows?.find((r) => r.id === selected) ?? null;
   const filtered = Boolean(v.project || v.severity || v.state || v.rule);
@@ -145,7 +146,7 @@ function AlertsView() {
             ))}
             {v.project && !(projects.data ?? []).some((p) => p.id === v.project) && (
               <SelectItem value={v.project} className="font-mono text-xs">
-                {v.project.slice(0, 8)}
+                {shortId(v.project)}
               </SelectItem>
             )}
           </SelectContent>
@@ -204,7 +205,7 @@ function AlertsView() {
         onRowClick={(a) => setSelected(a.id)}
         searchPlaceholder={t("page.alerts.search-placeholder")}
         emptyText={t(filtered ? "page.alerts.empty-filtered" : "page.alerts.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}
@@ -222,7 +223,7 @@ function AlertsView() {
 
 export default function AlertsPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <AlertsView />
     </Suspense>
   );

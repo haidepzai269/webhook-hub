@@ -11,7 +11,7 @@ import { TimeRange } from "@/components/admin/time-range";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageSkeleton } from "@/components/admin/skeletons";
 import { DELIVERY_PARAMS, DELIVERY_STATUS_VALUES, toApiQuery } from "@/lib/hub/list-url";
 import { useDeliveries, useDestinations } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
@@ -126,7 +126,7 @@ function DeliveriesView() {
         pageSize={false}
         searchPlaceholder={t("page.deliveries.search")}
         emptyText={filtered ? t("page.deliveries.no-match") : t("page.deliveries.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}
@@ -143,7 +143,7 @@ function DeliveriesView() {
 
 export default function DeliveriesPage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense fallback={<PageSkeleton />}>
       <DeliveriesView />
     </Suspense>
   );
