@@ -201,7 +201,7 @@ function AlertsView() {
         onRowClick={(a) => setSelected(a.id)}
         searchPlaceholder={t("page.alerts.search-placeholder")}
         emptyText={t(filtered ? "page.alerts.empty-filtered" : "page.alerts.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}

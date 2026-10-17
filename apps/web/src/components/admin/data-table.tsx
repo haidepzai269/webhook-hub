@@ -10,7 +10,9 @@ import {
   type SortingState,
   useTable,
 } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, Columns3, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Columns3, Search } from "lucide-react";
+
+import { cn } from "cn";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +47,11 @@ interface DataTableProps<T extends RowData> {
   onRowClick?: (row: T) => void;
   /** Nút/bộ lọc riêng của từng trang, đặt bên trái nút "Cột". */
   toolbar?: ReactNode;
+  /**
+   * Dưới bảng, canh phải — chỗ của `CursorPager` (phân trang phía server). Có `footer` nghĩa là bảng chỉ chứa MỘT TRANG dữ liệu:
+   * ô tìm và sắp xếp chỉ tác động trong trang này (hiện ghi chú bên cạnh ô tìm).
+   */
+  footer?: ReactNode;
 }
 
 /** Bảng dữ liệu chung của admin — khung data-table của Studio Admin (TanStack Table v9). */
@@ -60,6 +67,7 @@ export function DataTable<T extends RowData>({
   pageSize = 20,
   onRowClick,
   toolbar,
+  footer,
 }: DataTableProps<T>) {
   const t = useT();
   const [globalFilter, setGlobalFilter] = useState("");
@@ -106,6 +114,7 @@ export function DataTable<T extends RowData>({
             <Input
               className="h-8 pl-8"
               placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
               value={globalFilter}
               onChange={(e) => {
                 setGlobalFilter(e.target.value);
@@ -115,6 +124,9 @@ export function DataTable<T extends RowData>({
           </div>
         ) : (
           <div />
+        )}
+        {footer && searchPlaceholder && (
+          <span className="hidden text-muted-foreground text-xs lg:inline sm:mr-auto sm:ml-2">{t("admin.table.search-in-page")}</span>
         )}
         <div className="flex flex-wrap items-center gap-2">
           {toolbar}
@@ -153,8 +165,24 @@ export function DataTable<T extends RowData>({
                 {hg.headers.map((header) => (
                   // Tiêu đề dài ("Giới hạn (yêu cầu/giây)", "Cầu dao ngắt mạch") được xuống dòng khi trang hẹp — đủ chỗ
                   // thì bảng tự động vẫn để một dòng; không thì bảng tràn ngang và cắt cột cuối ở 1280–1440px.
-                  <TableHead key={header.id} colSpan={header.colSpan} className="h-10 whitespace-normal px-3 py-1.5 font-medium leading-tight">
-                    {header.isPlaceholder ? null : <table.FlexRender header={header} />}
+                  <TableHead
+                    key={header.id}
+                    colSpan={header.colSpan}
+                    aria-sort={header.column.getCanSort() ? sortAria(header.column.getIsSorted()) : undefined}
+                    className="h-10 whitespace-normal px-3 py-1.5 font-medium leading-tight"
+                  >
+                    {header.isPlaceholder ? null : header.column.getCanSort() ? (
+                      <button
+                        type="button"
+                        onClick={header.column.getToggleSortingHandler()}
+                        className="-mx-1 inline-flex cursor-pointer items-center gap-1 rounded px-1 text-left hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                      >
+                        <table.FlexRender header={header} />
+                        <SortIcon dir={header.column.getIsSorted()} />
+                      </button>
+                    ) : (
+                      <table.FlexRender header={header} />
+                    )}
                   </TableHead>
                 ))}
               </TableRow>
@@ -174,8 +202,21 @@ export function DataTable<T extends RowData>({
               rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className={onRowClick ? "cursor-pointer" : undefined}
+                  className={cn(onRowClick && "cursor-pointer focus-visible:bg-muted focus-visible:outline-none")}
+                  tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          // Chỉ khi phím rơi đúng vào hàng — nút/liên kết bên trong ô tự xử lý Enter/Space của chúng.
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row.original);
+                          }
+                        }
+                      : undefined
+                  }
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id} className="px-3 py-2 align-middle">
@@ -194,6 +235,8 @@ export function DataTable<T extends RowData>({
           </TableBody>
         </Table>
       </div>
+
+      {footer && <div className="flex justify-end">{footer}</div>}
 
       {pageSize !== false && table.getPageCount() > 1 && (
         <div className="flex items-center justify-end gap-2 text-sm">
@@ -222,4 +265,14 @@ export function DataTable<T extends RowData>({
       )}
     </div>
   );
+}
+
+function sortAria(dir: false | "asc" | "desc"): "ascending" | "descending" | "none" {
+  return dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none";
+}
+
+function SortIcon({ dir }: { dir: false | "asc" | "desc" }) {
+  if (dir === "asc") return <ArrowUp className="size-3.5" aria-hidden />;
+  if (dir === "desc") return <ArrowDown className="size-3.5" aria-hidden />;
+  return <ArrowUpDown className="size-3.5 opacity-40" aria-hidden />;
 }

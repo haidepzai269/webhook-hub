@@ -209,7 +209,7 @@ function AuditView() {
         pageSize={false}
         searchPlaceholder={t("page.audit.search-placeholder")}
         emptyText={t(filtered ? "page.audit.empty-filtered" : "page.audit.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}

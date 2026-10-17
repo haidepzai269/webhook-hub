@@ -347,7 +347,7 @@ function DlqView() {
         pageSize={false}
         searchPlaceholder={t("page.dlq.search")}
         emptyText={filtered ? t("page.dlq.no-match") : t("page.dlq.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}

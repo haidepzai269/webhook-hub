@@ -126,7 +126,7 @@ function DeliveriesView() {
         pageSize={false}
         searchPlaceholder={t("page.deliveries.search")}
         emptyText={filtered ? t("page.deliveries.no-match") : t("page.deliveries.empty")}
-        toolbar={
+        footer={
           <CursorPager
             next={data?.next}
             prev={data?.prev}
