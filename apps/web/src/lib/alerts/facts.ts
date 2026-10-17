@@ -69,7 +69,7 @@ function flat(v: unknown): string {
   return String(v);
 }
 
-export function factRows(facts: Record<string, unknown> | null | undefined, t: TranslateFn, _ctx: Pick<MessageContext, "locale" | "now">): FactRow[] {
+export function factRows(facts: Record<string, unknown> | null | undefined, t: TranslateFn, ctx: Pick<MessageContext, "locale" | "now">): FactRow[] {
   const f = facts ?? {};
   const rows: FactRow[] = [];
   const done = new Set<string>();
@@ -96,7 +96,7 @@ export function factRows(facts: Record<string, unknown> | null | undefined, t: T
       case "time": {
         const at = typeof v === "string" ? Date.parse(v) : Number.NaN;
         // Cùng khuôn "dd/MM HH:mm" với dòng thời gian của sheet ở mọi ngôn ngữ (formatStamp).
-        value = Number.isNaN(at) ? flat(v) : formatStamp(at);
+        value = Number.isNaN(at) ? flat(v) : formatStamp(at, { now: ctx.now });
         break;
       }
       case "duration":
