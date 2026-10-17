@@ -25,7 +25,7 @@ import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
 import { useProjects } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 
 import { AlertSheet } from "./_components/alert-sheet";
 
@@ -76,9 +76,7 @@ const buildColumns = (t: TranslateFn): HubColumn<Row>[] => [
     id: "openedAt",
     header: t("page.alerts.col.opened"),
     accessorFn: (a) => a.openedAt,
-    cell: ({ row }) => (
-<TimeCell iso={row.original.openedAt} mode="both" />
-    ),
+    cell: ({ row }) => <TimeCell iso={row.original.openedAt} mode="both" />,
   },
   {
     id: "state",
@@ -104,7 +102,6 @@ const buildColumns = (t: TranslateFn): HubColumn<Row>[] => [
  */
 function AlertsView() {
   const t = useT();
-  const _locale = useLocale();
   const operator = useCanSeeAlerts(); // QT6: owner thấy cảnh báo dung lượng của project mình
   const booting = useAuthBooting();
   const isOperator = useIsOperator();

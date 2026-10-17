@@ -13,7 +13,7 @@ import type { TraceIngestedNotice } from "@/lib/hub/types";
 import { clock } from "@/components/flow/time";
 import { shortId } from "@/lib/hub/format";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { type StatusTone, toneBadgeClass } from "@/components/admin/status-badge";
 
 const OUTCOME_TONE: Record<TraceIngestedNotice["outcome"], StatusTone> = {
@@ -58,7 +58,6 @@ function showTraceToast(tr: TraceIngestedNotice, more: number, t: TranslateFn) {
 export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {}) {
   const traces = useRealtimeStore((s) => s.traces);
   const t = useT();
-  const _locale = useLocale();
   // Effect toast không phụ thuộc t (đổi ngôn ngữ không được toast lại) — đọc t mới nhất qua ref.
   const tRef = useRef(t);
   tRef.current = t;
@@ -100,7 +99,7 @@ export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {})
                 HTTP {tr.httpStatus} · {tr.ms}ms
               </span>
               <span className="ml-auto text-muted-foreground">
-                {clock(new Date(tr.receivedAt).toISOString(), false)}
+                {clock(tr.receivedAt, false)}
               </span>
             </li>
           ))}

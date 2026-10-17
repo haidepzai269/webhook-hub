@@ -26,7 +26,7 @@ import { useCreateDestination, useDeleteDestination, useDestinations } from "@/l
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
 import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
 import { CreateEndpointDialog, EndpointDetailDialog } from "./endpoint-dialogs";
@@ -200,7 +200,7 @@ const makeColumns = (t: TranslateFn): HubColumn<Destination>[] => [
   {
     id: "rateLimit",
     header: t("page.destinations.col.rate-limit"),
-    accessorFn: (d) => String(d.rateLimitRps),
+    accessorFn: (d) => d.rateLimitRps,
     cell: ({ row }) => (
       <span className="font-mono text-xs">{row.original.rateLimitRps > 0 ? row.original.rateLimitRps : "∞"}</span>
     ),
@@ -233,7 +233,6 @@ const makeColumns = (t: TranslateFn): HubColumn<Destination>[] => [
 
 export default function DestinationsPage() {
   const t = useT();
-  const _locale = useLocale();
   const columns = useMemo(() => makeColumns(t), [t]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useDestinations();

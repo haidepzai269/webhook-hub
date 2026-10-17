@@ -53,7 +53,7 @@ const isIdPrefix = (x: string) => /^[0-9A-Za-z_-]{4,36}$/.test(x);
  * Grid cố định 7 cột: Thời gian | Nhà cung cấp | Kiểu·đối tượng | Đường ống | Trạng thái | Hỏng ở | Mắt.
  * Pipeline cố 9rem (đủ 6 chấm + khoảng cách), Status cố 7.5rem, FailedAt co giãn.
  */
-const GRID_COLS = "grid-cols-[7rem_7.5rem_minmax(0,1fr)_9rem_7.5rem_minmax(0,1fr)_2rem]";
+const GRID_COLS = "7rem 7.5rem minmax(0,1fr) 9rem 7.5rem minmax(0,1fr) 2rem";
 
 /**
  * V2 — Danh sách hành trình (SPEC-event-flow-ui §4). Dùng `/flow/executions` (KHÔNG dùng

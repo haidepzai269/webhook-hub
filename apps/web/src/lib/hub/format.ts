@@ -16,6 +16,7 @@ export function formatDateTime(iso: string | null | undefined, locale: Locale = 
 // Mốc "dd/MM HH:mm[:ss]" CÙNG một khuôn ở mọi ngôn ngữ, 24 giờ (review trên trình duyệt thật: vi ra "14:19 12-10", en
 // ra "10/12, 02:19 PM" cho cùng một mốc). Lấy từng phần qua formatToParts để không phụ thuộc thứ tự/dấu nối của locale.
 const stampParts = new Intl.DateTimeFormat("en-GB", {
+  year: "numeric",
   day: "2-digit",
   month: "2-digit",
   hour: "2-digit",
@@ -24,15 +25,20 @@ const stampParts = new Intl.DateTimeFormat("en-GB", {
   hourCycle: "h23",
 });
 
-/** Mốc tuyệt đối gọn cho cảnh báo (dòng thời gian, bảng số liệu): "12/10 14:19" hoặc "12/10 14:19:38" — vi và en như nhau. */
-export function formatStamp(at: string | number | Date | null | undefined, opts: { seconds?: boolean } = {}): string {
+/**
+ * Mốc tuyệt đối gọn cho cảnh báo (dòng thời gian, bảng số liệu): "12/10 14:19" hoặc "12/10 14:19:38" — vi và en như nhau.
+ * Khác năm hiện tại (`now`) thì có năm: "12/10/2025 14:19".
+ */
+export function formatStamp(at: string | number | Date | null | undefined, opts: { seconds?: boolean; now?: number } = {}): string {
   if (at === null || at === undefined || at === "") return "—";
   const d = at instanceof Date ? at : new Date(at);
   if (Number.isNaN(d.getTime())) return "—";
   const p: Record<string, string> = {};
   for (const x of stampParts.formatToParts(d)) p[x.type] = x.value;
   const hour = p.hour === "24" ? "00" : p.hour;
-  return `${p.day}/${p.month} ${hour}:${p.minute}${opts.seconds ? `:${p.second}` : ""}`;
+  const thisYear = stampParts.formatToParts(opts.now ?? Date.now()).find((x) => x.type === "year")?.value;
+  const date = p.year === thisYear ? `${p.day}/${p.month}` : `${p.day}/${p.month}/${p.year}`;
+  return `${date} ${hour}:${p.minute}${opts.seconds ? `:${p.second}` : ""}`;
 }
 
 const rtf: Record<Locale, Intl.RelativeTimeFormat> = {

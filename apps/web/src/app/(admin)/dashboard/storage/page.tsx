@@ -66,6 +66,16 @@ export default function StoragePage() {
   const canWrite = me?.user.isOperator === true || (me?.memberships ?? []).some((m) => m.projectId === projectId && m.role === "owner");
   const q = useStorage(projectId, { poll: true });
   const booting = useAuthBooting();
+  const forbidden = q.error instanceof HubApiError && q.error.status === 403;
+  // 403 là "không có quyền" (trung tính, thử lại vô ích) chứ không phải lỗi tải.
+  const loadError = forbidden ? (
+    <EmptyState size="sm" title={t("page.storage.forbidden")} />
+  ) : (
+    <ErrorState
+      message={t("page.storage.load-error", { message: q.error instanceof HubApiError ? errorMessageOf(q.error.body, t) : String(q.error) })}
+      onRetry={() => void q.refetch()}
+    />
+  );
 
   return (
     <>
@@ -74,14 +84,7 @@ export default function StoragePage() {
       {!projectId && !booting ? (
         <p className="text-muted-foreground text-sm">{t("page.storage.no-project")}</p>
       ) : q.error ? (
-        <ErrorState
-          message={
-            q.error instanceof HubApiError && q.error.status === 403
-              ? t("page.storage.forbidden")
-              : t("page.storage.load-error", { message: q.error instanceof HubApiError ? errorMessageOf(q.error.body, t) : String(q.error) })
-          }
-          onRetry={() => void q.refetch()}
-        />
+        loadError
       ) : !q.data ? (
         <CardSkeleton lines={3} />
       ) : (

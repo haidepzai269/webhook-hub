@@ -21,7 +21,7 @@ import { useAuditFacets, useAuditLogs } from "@/lib/hub/queries";
 import type { AuditLog } from "@/lib/hub/types";
 import { useDebouncedUrlInput, useUrlParams } from "@/lib/hub/use-url-params";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
 const ALL = "__all";
@@ -54,9 +54,7 @@ const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
     id: "createdAt",
     header: t("page.audit.col.time"),
     accessorFn: (a) => a.createdAt,
-    cell: ({ row }) => (
-<TimeCell iso={row.original.createdAt} mode="both" />
-    ),
+    cell: ({ row }) => <TimeCell iso={row.original.createdAt} mode="both" />,
     enableHiding: false,
   },
   {
@@ -121,7 +119,6 @@ const buildColumns = (t: TranslateFn): HubColumn<AuditLog>[] => [
  */
 function AuditView() {
   const t = useT();
-  const _locale = useLocale();
   const columns = useMemo(() => buildColumns(t), [t]);
   const url = useUrlParams(AUDIT_PARAMS);
   const v = url.values;

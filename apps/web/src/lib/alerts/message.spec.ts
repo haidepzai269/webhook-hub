@@ -166,7 +166,10 @@ describe("facts -> bảng: ẩn sổ sách nội bộ, mốc giờ cùng khuôn 
     const en = factRows(facts, createT("en"), { locale: "en", now: NOW }).find((r) => r.key === "sinceAt")?.value;
     expect(vi).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}$/);
     expect(en).toBe(vi);
-    expect(formatStamp("2026-10-12T07:19:38.000Z", { seconds: true })).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}:38$/);
+    // Cùng năm: gọn; khác năm: thêm năm (M1).
+    const stampAt = "2026-10-12T07:19:38.000Z";
+    expect(formatStamp(stampAt, { seconds: true, now: Date.parse("2026-12-01T00:00:00Z") })).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}:38$/);
+    expect(formatStamp(stampAt, { now: Date.parse("2027-06-01T00:00:00Z") })).toMatch(/^12\/10\/2026 \d{2}:\d{2}$/);
     expect(formatStamp("không phải ngày")).toBe("—");
     // Câu cảnh báo (lõi chung với email): 24 giờ ở cả en — không "02:36 PM".
     const at = new Date(2026, 9, 12, 14, 36).getTime();

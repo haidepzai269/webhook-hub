@@ -28,7 +28,7 @@ import {
   SHOP_DEFAULT_SCOPES,
 } from "@/lib/hub/keys-logic";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -55,7 +55,6 @@ function ConnectionStringOnce({ connectionString }: { connectionString: string }
 /** SK1 (SPEC-shop-ket-noi-project §3): API key của project ĐANG CHỌN — tạo (copy connection string một lần), thu hồi. */
 export default function ApiKeysPage() {
   const t = useT();
-  const _locale = useLocale();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const project = useProjects().data?.find((p) => p.id === projectId);
   const keys = useApiKeys(projectId);
@@ -175,6 +174,7 @@ export default function ApiKeysPage() {
         }
       />
       {error && <ErrorState className="mb-3" message={t("page.api-keys.load-error", { message: error.message })} onRetry={() => void keys.refetch()} />}
+      {!error && (
       <DataTable
         data={data}
         columns={columns}
@@ -184,6 +184,7 @@ export default function ApiKeysPage() {
         emptyText={t("page.api-keys.empty")}
         rowClassName={(k) => (k.revokedAt ? "opacity-60" : undefined)}
       />
+      )}
 
       <FormDialog
         open={open}

@@ -33,7 +33,7 @@ import {
 import type { Subscription } from "@/lib/hub/types";
 import { describeDeleteConflict } from "@/lib/hub/ui-logic";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { toneBadgeClass } from "@/components/admin/status-badge";
 
 /** Câu dịch có chỗ chèn phần tử (`{wildcard}`…): tách theo `{tên}` và thay bằng node tương ứng. */
@@ -227,7 +227,6 @@ const makeColumns = (t: TranslateFn): HubColumn<Subscription>[] => [
 
 export default function SubscriptionsPage() {
   const t = useT();
-  const _locale = useLocale();
   const columns = useMemo(() => makeColumns(t), [t]);
   const schema = useMemo(() => makeSchema(t), [t]);
   const { data, isLoading, error } = useSubscriptions();

@@ -224,6 +224,7 @@ export default function ProjectsPage() {
         }
       />
       {error && <ErrorState className="mb-3" message={t("page.projects.load-error", { message: error.message })} onRetry={() => void refetch()} />}
+      {!error && (
       <DataTable
         data={data}
         columns={columns}
@@ -232,6 +233,7 @@ export default function ProjectsPage() {
         pageSize={false}
         emptyText={t("common.empty")}
       />
+      )}
       {projectId && (data ?? []).some((p) => p.id === projectId) && (
         <UnverifiedSourcesSetting
           projectId={projectId}

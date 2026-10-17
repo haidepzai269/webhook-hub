@@ -127,9 +127,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
                 />
                 <div className={s.done ? "text-sm" : "text-muted-foreground text-sm"}>{s.label}</div>
                 {s.at && (
-                  <div className="flex gap-1 text-muted-foreground text-xs">
-                    <TimeCell iso={s.at} mode="absolute" /> · <TimeCell iso={s.at} />
-                  </div>
+                  <TimeCell iso={s.at} mode="both" className="text-muted-foreground" />
                 )}
               </li>
             ))}

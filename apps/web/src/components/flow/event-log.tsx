@@ -25,7 +25,7 @@ import type { ExecutionsPage } from "@/lib/hub/flow-types";
 import { flowKeys, useExecutions, useFlowProjectStore, useSources } from "@/lib/hub/queries";
 import { useUrlParams } from "@/lib/hub/use-url-params";
 import { clock } from "./time";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { useUnroll } from "@/lib/ui/use-unroll";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -89,7 +89,6 @@ export function EventLog() {
 
 function EventLogPanel() {
   const t = useT();
-  const _locale = useLocale();
   const [open, setOpen] = useState(true);
   const [paused, setPaused] = useState(false);
   const [q, setQ] = useState("");

@@ -19,7 +19,7 @@ import {
 import { useSourceInspect } from "@/lib/hub/queries";
 import type { Source } from "@/lib/hub/types";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
@@ -58,7 +58,6 @@ export function ListenSheet({ source, onClose }: { source: Source | null; onClos
 
 function ListenBlock({ sourceId }: { sourceId: string }) {
   const t = useT();
-  const _locale = useLocale();
   const { data, isLoading, error, refetch } = useSourceInspect(sourceId);
   if (isLoading) return <DetailSkeleton rows={3} className="p-4" />;
   const errorLine = error && <ErrorState message={t("page.sources.listen.error", { message: error.message })} onRetry={() => void refetch()} />;

@@ -62,7 +62,7 @@ import {
 import { PROVIDERS, type Source } from "@/lib/hub/types";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { errorTextOf } from "@/lib/hub/ui-logic";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
@@ -256,7 +256,7 @@ const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] =
   {
     id: "secret",
     header: t("page.sources.col.secret"),
-    accessorFn: (s) => String(s.secretVersions ?? 0),
+    accessorFn: (s) => s.secretVersions ?? 0,
     cell: ({ row }) => (
       <span className="text-muted-foreground text-xs">
         •••••• {row.original.secretVersions ? `(v${row.original.secretVersions})` : ""}
@@ -355,7 +355,6 @@ function SourceCount() {
 
 export default function SourcesPage() {
   const t = useT();
-  const _locale = useLocale();
   const canTraffic = useCanViewTraffic();
   const columns = useMemo(() => makeColumns(t, canTraffic), [t, canTraffic]);
   const schema = useMemo(() => makeSchema(t), [t]);

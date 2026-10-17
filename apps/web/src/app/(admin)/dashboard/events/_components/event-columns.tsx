@@ -10,7 +10,7 @@ import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { TimeCell } from "@/components/admin/time-cell";
 import type { HubEvent } from "@/lib/hub/types";
 import type { TranslateFn } from "@/lib/i18n/dictionary";
-import { useLocale, useT } from "@/lib/i18n/use-t";
+import { useT } from "@/lib/i18n/use-t";
 
 /** Cột bảng sự kiện theo ngôn ngữ — header là chuỗi để menu ẩn/hiện cột của DataTable đọc được. */
 export const buildEventColumns = (t: TranslateFn): HubColumn<HubEvent>[] => [
@@ -18,9 +18,7 @@ export const buildEventColumns = (t: TranslateFn): HubColumn<HubEvent>[] => [
     id: "receivedAt",
     header: t("page.events.table.received-at"),
     accessorFn: (e) => e.receivedAt,
-    cell: ({ row }) => (
-<TimeCell iso={row.original.receivedAt} />
-    ),
+    cell: ({ row }) => <TimeCell iso={row.original.receivedAt} />,
     enableHiding: false,
   },
   {
@@ -77,7 +75,6 @@ export const buildEventColumns = (t: TranslateFn): HubColumn<HubEvent>[] => [
 
 export function useEventColumns(): HubColumn<HubEvent>[] {
   const t = useT();
-  const _locale = useLocale();
   return useMemo(() => buildEventColumns(t), [t]);
 }
 
