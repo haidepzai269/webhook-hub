@@ -3,6 +3,10 @@
 import { Eye, Inbox, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
+import { CopyButton, JsonBlock } from "@/components/admin/copy-button";
+import { SearchInput } from "@/components/admin/search-input";
+import { SecretOnce } from "@/components/admin/secret-once";
+import { Spinner } from "@/components/admin/spinner";
 import { ConfirmDialog, useConfirm } from "@/components/admin/confirm-dialog";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { GridList, GridListRow } from "@/components/admin/grid-list";
@@ -14,6 +18,8 @@ import { CardSkeleton, DetailSkeleton, PageSkeleton, TableRowsSkeleton } from "@
 import { EmptyState, ErrorState } from "@/components/admin/state";
 import { TimeCell } from "@/components/admin/time-cell";
 import { DeliveryStatusBadge, type StatusTone, StatusBadge } from "@/components/admin/status-badge";
+import { UsageMeter } from "@/components/storage/usage-meter";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -78,6 +84,7 @@ export default function UiKitPage() {
   const [tab, setTab] = useState("all");
   const [line, setLine] = useState("a");
   const [pick, setPick] = useState("x");
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const { confirm, confirmDialog } = useConfirm();
@@ -318,6 +325,72 @@ export default function UiKitPage() {
               <SelectItem value="y">Lựa chọn Y</SelectItem>
             </SelectContent>
           </Select>
+        </Section>
+
+        <Section title="Badge size" hint='size="sm" = chữ 11px (text-2xs) cho badge dày đặc trong bảng/dòng phụ. Đừng viết text-[11px] / text-[10px].'>
+          <Badge variant="outline">default</Badge>
+          <Badge variant="outline" size="sm">sm</Badge>
+          <Badge variant="secondary" size="sm" className="font-mono">payment.*</Badge>
+          <StatusBadge tone="ok">StatusBadge (đã sm)</StatusBadge>
+          <span className="text-2xs text-muted-foreground">dòng phụ text-2xs</span>
+        </Section>
+
+        <Section title="SearchInput" hint='Ô tìm kiếm có icon kính lúp (pointer-events-none). size="sm" cao 7 cho thanh lọc dày; wrapperClassName đặt chiều rộng.'>
+          <SearchInput wrapperClassName="w-56" placeholder="Tìm…" aria-label="Tìm" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <SearchInput size="sm" wrapperClassName="w-48" placeholder="Tìm (sm)…" aria-label="Tìm nhỏ" className="text-xs" />
+        </Section>
+
+        <Section title="Spinner" hint='Thay Loader2/LoaderCircle + animate-spin. size auto|sm|md|lg; có label thì là role=status. Button loading đã dùng sẵn.'>
+          <Spinner size="sm" />
+          <Spinner />
+          <Spinner size="lg" label="Đang tải" />
+          <Button loading>Đang lưu</Button>
+        </Section>
+
+        <Section title="UsageMeter" hint="Mức dùng dung lượng theo nấc OK / 70 / 85 / 95: inline (cột bảng) · bar (thẻ dự án) · card (trang Dung lượng).">
+          <div className="grid w-full gap-4 md:grid-cols-3">
+            {(["OK", "WARN_85", "CRITICAL_95"] as const).map((level, i) => (
+              <div key={level} className="space-y-3">
+                <UsageMeter usage={{ usedPct: [30, 86, 100][i], usedBytes: [3, 86, 100][i] * 1024 * 1024, quotaBytes: 100 * 1024 * 1024, level }} />
+                <UsageMeter variant="bar" label="Dung lượng" usage={{ usedPct: [30, 86, 100][i], usedBytes: [3, 86, 100][i] * 1024 * 1024, quotaBytes: 100 * 1024 * 1024, level }} />
+                <UsageMeter variant="card" label="Dung lượng" aside={<span>dự báo: còn ~5 ngày</span>} usage={{ usedPct: [30, 86, 100][i], usedBytes: [3, 86, 100][i] * 1024 * 1024, quotaBytes: 100 * 1024 * 1024, level }} />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Section title="CopyButton / JsonBlock" hint='CopyButton variant="icon" (mặc định, IconButton nhỏ) hoặc "labeled" (nút outline có chữ). JsonBlock = JsonViewer + nút chép.'>
+          <CopyButton value="whsec_demo" />
+          <CopyButton value="whsec_demo" variant="labeled" />
+          <div className="w-full">
+            <JsonBlock value={{ id: "evt_1", type: "payment.succeeded", data: { amount: 120000, currency: "VND" } }} maxHeight="10rem" />
+          </div>
+        </Section>
+
+        <Section title="SecretOnce" hint="Hộp 'chỉ hiện một lần' cho secret / connection string. value = đúng dòng được chép; hint tuỳ chọn.">
+          <div className="w-full">
+            <SecretOnce
+              title="Secret ký — chỉ hiện một lần"
+              value="HUB_SIGNING_SECRET=whsec_demo_000000"
+              hint="Dán vào biến môi trường của service nhận rồi đóng hộp này."
+            />
+          </div>
+        </Section>
+
+        <Section title="PageHeader (back / adornment / meta) và Card inset" hint="PageHeader: back = '← quay lại', adornment = pill cạnh h1, meta = dòng mã + chép. Card variant=inset là ô phụ trong một khối (thay div rounded-md border p-3). Canvas/flow giữ flow-surface.">
+          <div className="w-full">
+            <PageHeader
+              className="mb-3"
+              back={{ href: "/dashboard/events", label: "Quay lại" }}
+              title="Chi tiết sự kiện"
+              adornment={<StatusBadge tone="ok">Thành công</StatusBadge>}
+              meta={<MonoId id="7f3a9c21-5b1e-4d77-9a10-0c2e8b6d4a11" copy />}
+              actions={<Button size="sm" variant="outline">Hành động</Button>}
+            />
+            <Card variant="inset" className="text-sm">
+              Ô phụ (Card variant=&quot;inset&quot;): viền mảnh, không ring, p-3.
+            </Card>
+          </div>
         </Section>
       </div>
     </>
