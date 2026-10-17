@@ -2,9 +2,11 @@
 
 import { useId, useState } from "react";
 
-import { Loader2, Mail, Search } from "lucide-react";
+import { Mail } from "lucide-react";
 import { toast } from "sonner";
 
+import { toneTextClass } from "@/components/admin/status-badge";
+import { Spinner } from "@/components/admin/spinner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { SimpleTable } from "@/components/admin/simple-table";
@@ -13,7 +15,7 @@ import { SeverityDot } from "@/components/alerts/alert-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/admin/search-input";
 import { CardSkeleton } from "@/components/admin/skeletons";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -124,7 +126,7 @@ function AlertSettings() {
             </p>
           )}
           {sw.reasonKey && (
-            <p className="pl-12 text-amber-700 text-xs dark:text-amber-400">
+            <p className={`pl-12 text-xs ${toneTextClass("warn")}`}>
               {t(sw.reasonKey, { email: p.email ?? "" })}
             </p>
           )}
@@ -231,7 +233,7 @@ function AlertSettings() {
 
         <section className="flex flex-wrap items-center gap-3 border-t pt-4">
           <Button size="sm" variant="outline" disabled={!p.emailVerified || test.isPending} onClick={sendTest}>
-            {test.isPending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+            {test.isPending ? <Spinner /> : <Mail className="size-4" />}
             {t("page.settings.alerts.test.button")}
           </Button>
           <p className="text-muted-foreground text-xs">
@@ -264,16 +266,14 @@ function MuteList({
   const view = muteListView(projects, muted, { query, expanded });
   return (
     <div className="space-y-2">
-      <div className="relative max-w-xs">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("page.settings.alerts.muted.search")}
-          aria-label={t("page.settings.alerts.muted.search")}
-          className="h-8 pl-8 text-sm"
-        />
-      </div>
+      <SearchInput
+        wrapperClassName="max-w-xs"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t("page.settings.alerts.muted.search")}
+        aria-label={t("page.settings.alerts.muted.search")}
+        className="text-sm"
+      />
       {view.matched === 0 ? (
         <EmptyState size="sm" title={t("page.settings.alerts.muted.no-match")} />
       ) : (

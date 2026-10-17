@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { HardDrive, Info, Loader2 } from "lucide-react";
+import { HardDrive, Info } from "lucide-react";
 import { toast } from "sonner";
 
+import { Spinner } from "@/components/admin/spinner";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { PageHeader } from "@/components/admin/page-header";
 import { SimpleTable } from "@/components/admin/simple-table";
@@ -34,13 +35,13 @@ import {
 import { errorMessageOf } from "@/lib/hub/ui-logic";
 import { formatStamp } from "@/lib/hub/format";
 import type { MessageKey } from "@/lib/i18n/dictionary";
+import { USAGE_TONE_COLOR, UsageMeter } from "@/components/storage/usage-meter";
 import { useT } from "@/lib/i18n/use-t";
 import {
   IMPORTANCES,
   type Importance,
   type StoragePolicyView,
   type StorageSuggestion,
-  barPct,
   cleanBodyFor,
   confirmKeys,
   formatBytes,
@@ -57,7 +58,6 @@ import {
  * nói đánh đổi), "Dọn tự động" (trạng thái cờ, lần chạy gần nhất), email 70/85. Không có nút "Nâng cấp".
  * Quyền ghi (dọn, policy, Giữ lâu) = owner hoặc người vận hành; server vẫn kiểm scope `storage:write`.
  */
-const TONE_COLOR = { ok: "var(--ok, oklch(0.65 0.15 155))", warning: "var(--warning)", danger: "var(--danger)" } as const;
 
 export default function StoragePage() {
   const t = useT();
@@ -129,7 +129,7 @@ function UsageCard() {
           <HardDrive className="size-4" aria-hidden />
           {t("page.storage.usage", { used: formatBytes(data.usedBytes), quota: formatBytes(data.quotaBytes) })}
           <Badge variant="outline">{t("page.storage.estimated")}</Badge>
-          <Badge variant="outline" style={{ borderColor: TONE_COLOR[tone], color: TONE_COLOR[tone] }}>
+          <Badge variant="outline" style={{ borderColor: USAGE_TONE_COLOR[tone], color: USAGE_TONE_COLOR[tone] }}>
             {t(`page.storage.level.${levelSeg(data.level)}` as MessageKey)}
           </Badge>
           {src && <span className="ml-auto font-normal text-muted-foreground text-sm">{t("page.storage.sources-count", src)}</span>}
@@ -138,25 +138,19 @@ function UsageCard() {
           {data.calibratedAt ? t("page.storage.calibrated-at", { at: fmt(data.calibratedAt) }) : t("page.storage.calibrated-never")}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2">
-        <div
-          className="h-3 w-full overflow-hidden rounded-full bg-muted"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(barPct(data.usedPct))}
-          aria-label={t("page.storage.title")}
-        >
-          <div className="h-full rounded-full transition-[width]" style={{ width: `${barPct(data.usedPct)}%`, backgroundColor: TONE_COLOR[tone] }} />
-        </div>
-        <div className="flex flex-wrap justify-between gap-2 text-muted-foreground text-sm">
-          <span className="tabular-nums">{data.usedPct}%</span>
-          <span>
-            {data.forecastHours !== null
-              ? t("page.storage.forecast", { hours: Math.max(0, Math.round(data.forecastHours)), perDay: formatBytes(data.growthPerDay) })
-              : t("page.storage.forecast-none")}
-          </span>
-        </div>
+      <CardContent>
+        <UsageMeter
+          variant="card"
+          usage={data}
+          label={t("page.storage.title")}
+          aside={
+            <span>
+              {data.forecastHours !== null
+                ? t("page.storage.forecast", { hours: Math.max(0, Math.round(data.forecastHours)), perDay: formatBytes(data.growthPerDay) })
+                : t("page.storage.forecast-none")}
+            </span>
+          }
+        />
       </CardContent>
     </Card>
   );
@@ -291,7 +285,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
       <CardContent className="space-y-2">
         {data.suggestions.length === 0 && <EmptyState size="sm" title={t("page.storage.suggestions-empty")} />}
         {data.suggestions.map((s) => (
-          <div key={s.id} className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+          <Card key={s.id} variant="inset" className="gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-0.5 text-sm">
               <div className="font-medium">
                 {t(`page.storage.action.${s.action}` as MessageKey)} · {impName(s.importance)} · {t("page.storage.suggestion.older", { age: ageLabel(t, s.olderThan) })}
@@ -306,7 +300,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
                 </Button>
               ))}
             </div>
-          </div>
+          </Card>
         ))}
       </CardContent>
       <ConfirmDialog
@@ -455,7 +449,7 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
               })
             }
           >
-            {save.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+            {save.isPending && <Spinner />}
             {t("page.storage.auto.save")}
           </Button>
         </div>

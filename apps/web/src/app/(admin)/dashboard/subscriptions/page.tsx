@@ -155,7 +155,7 @@ const makeColumns = (t: TranslateFn): HubColumn<Subscription>[] => [
     cell: ({ row }) => (
       <div className="flex flex-wrap gap-1">
         {row.original.eventTypes.map((type) => (
-          <Badge key={type} variant="outline" className="font-mono text-[11px]">
+          <Badge size="sm" key={type} variant="outline" className="font-mono">
             {type}
           </Badge>
         ))}

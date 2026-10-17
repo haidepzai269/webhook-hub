@@ -18,12 +18,10 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CardSkeleton } from "@/components/admin/skeletons";
 import { useTopology } from "@/lib/hub/queries";
 import { useRealtimeProject } from "@/lib/hub/socket";
@@ -33,6 +31,8 @@ import { useT } from "@/lib/i18n/use-t";
 
 import { TraceFeed } from "../events/_components/trace-feed";
 
+/** Giá trị Select cho "mọi nguồn" (Radix Select không nhận chuỗi rỗng). */
+const ALL_SOURCES = "__all__";
 const WINDOW_BTN: Record<TopologyWindow, string> = { "15m": "15M", "1h": "1H", "24h": "24H" };
 
 /**
@@ -91,42 +91,33 @@ export default function FlowMapPage() {
           </div>
           <div className="flex items-center gap-2">
             <ProjectPicker className="bg-[var(--flow-card)] backdrop-blur" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur" aria-label={t("flow.window.label")}>
-                  {WINDOW_BTN[window]}
-                  <ChevronDown {...ICON} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>{t("flow.window.label")}</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={window} onValueChange={(v) => setWindow(v as TopologyWindow)}>
-                  {(Object.keys(TOPOLOGY_WINDOWS) as TopologyWindow[]).map((w) => (
-                    <DropdownMenuRadioItem key={w} value={w}>
-                      {t(`flow.window.${w}`)}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur">
-                  {sourceName ?? t("flow.filter.all-sources")}
-                  <ChevronDown {...ICON} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setSourceFilter(null)}>{t("flow.filter.all-sources")}</DropdownMenuItem>
-                <DropdownMenuSeparator />
+            {/* Chọn MỘT giá trị -> Select (ADR-247); DropdownMenu chỉ giữ cho menu hộp kiểm "Tuỳ chọn" bên dưới. */}
+            <Select value={window} onValueChange={(v) => setWindow(v as TopologyWindow)}>
+              <SelectTrigger size="sm" className="bg-[var(--flow-card)] backdrop-blur" aria-label={t("flow.window.label")}>
+                <SelectValue>{WINDOW_BTN[window]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                {(Object.keys(TOPOLOGY_WINDOWS) as TopologyWindow[]).map((w) => (
+                  <SelectItem key={w} value={w}>
+                    {t(`flow.window.${w}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter ?? ALL_SOURCES} onValueChange={(v) => setSourceFilter(v === ALL_SOURCES ? null : v)}>
+              <SelectTrigger size="sm" className="bg-[var(--flow-card)] backdrop-blur" aria-label={t("flow.filter.sources")}>
+                <SelectValue>{sourceName ?? t("flow.filter.all-sources")}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value={ALL_SOURCES}>{t("flow.filter.all-sources")}</SelectItem>
                 {sources.map((s) => (
-                  <DropdownMenuItem key={s.id} onSelect={() => setSourceFilter(s.id.slice(4))}>
+                  <SelectItem key={s.id} value={s.id.slice(4)}>
                     <ProviderIcon provider={"provider" in s ? s.provider : ""} name={s.label} />
                     {s.label}
-                  </DropdownMenuItem>
+                  </SelectItem>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </SelectContent>
+            </Select>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="bg-[var(--flow-card)] backdrop-blur">

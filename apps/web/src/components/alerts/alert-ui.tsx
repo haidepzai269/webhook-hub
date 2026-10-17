@@ -55,7 +55,7 @@ export function ProjectChip({ name, className }: { name: string; className?: str
   return (
     <span
       className={cn(
-        "inline-flex max-w-40 shrink-0 items-center truncate rounded-sm border border-border bg-muted px-1.5 py-px font-medium text-[11px] text-foreground/80 leading-4",
+        "inline-flex max-w-40 shrink-0 items-center truncate rounded-sm border border-border bg-muted px-1.5 py-px font-medium text-2xs text-foreground/80 leading-4",
         className,
       )}
       title={name}

@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { toneTextClass } from "@/components/admin/status-badge";
 import { AdminSheetContent } from "@/components/admin/overlay-content";
 import { SimpleTable } from "@/components/admin/simple-table";
 import { ErrorState } from "@/components/admin/state";
@@ -67,16 +69,16 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
   return (
     <div className="flex flex-col gap-4 p-4">
       {errorLine}
-      <div role="status" aria-live="polite" className="rounded-md border p-3 text-sm">
+      <Card variant="inset" role="status" aria-live="polite" className="text-sm">
         {state.kind === "waiting" && <span className="text-muted-foreground">{t("page.sources.listen.waiting")}</span>}
-        {state.kind === "handshaken" && <span className="font-medium text-emerald-600">{t("page.sources.listen.handshaken")}</span>}
+        {state.kind === "handshaken" && <span className={`font-medium ${toneTextClass("ok")}`}>{t("page.sources.listen.handshaken")}</span>}
         {state.kind === "connected" && (
           <>
             {/* PK5 khoá 2 (REVIEW-PK5 TB-1): nguồn chưa xác thực — đã nhận, nhưng không xanh / không "✓ hợp lệ". */}
             {state.unverified ? (
-              <span className="font-medium text-amber-700 dark:text-amber-400">{t("page.sources.listen.connected-unverified")}</span>
+              <span className={`font-medium ${toneTextClass("warn")}`}>{t("page.sources.listen.connected-unverified")}</span>
             ) : (
-              <span className="font-medium text-emerald-600">{t("page.sources.listen.connected")}</span>
+              <span className={`font-medium ${toneTextClass("ok")}`}>{t("page.sources.listen.connected")}</span>
             )}
             {state.lastFailure && (
               <p className="mt-1 text-muted-foreground">{t("page.sources.listen.last-failure", { reason: reasonText(t, state.lastFailure) })}</p>
@@ -86,7 +88,7 @@ function ListenBlock({ sourceId }: { sourceId: string }) {
         {state.kind === "failing" && (
           <span className="text-destructive">{t("page.sources.listen.failing", { reason: reasonText(t, state.diagnosis) })}</span>
         )}
-      </div>
+      </Card>
       <SubscribeUrlNotice url={pendingSubscribeUrl(data)} />
       {data && data.length > 0 && (
         <SimpleTable

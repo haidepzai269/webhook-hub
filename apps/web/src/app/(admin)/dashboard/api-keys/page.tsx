@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { FormDialog } from "@/components/admin/form-dialog";
-import { CopyButton } from "@/components/admin/copy-button";
+import { SecretOnce } from "@/components/admin/secret-once";
 import { PageHeader } from "@/components/admin/page-header";
 import { ErrorState } from "@/components/admin/state";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
@@ -29,26 +29,22 @@ import {
 } from "@/lib/hub/keys-logic";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
 import { useT } from "@/lib/i18n/use-t";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Hộp "Chỉ hiện một lần" — key thô chỉ sống trong state của hộp này; đóng là mất (SK1, SPEC §3). */
 function ConnectionStringOnce({ connectionString }: { connectionString: string }) {
-  const line = envLine(connectionString);
   const t = useT();
   return (
-    <Alert variant="warning">
-      <AlertTitle>{t("page.api-keys.once.title")}</AlertTitle>
-      <AlertDescription className="w-full">
-        <div className="flex w-full items-center gap-2">
-          <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-foreground text-xs">{line}</code>
-          <CopyButton value={line} label={t("page.api-keys.once.copy")} />
-        </div>
-        <p className="text-xs">
+    <SecretOnce
+      title={t("page.api-keys.once.title")}
+      value={envLine(connectionString)}
+      copyLabel={t("page.api-keys.once.copy")}
+      hint={
+        <>
           {t("page.api-keys.once.hint-before")} <b>{t("page.api-keys.once.hint-target")}</b> {t("page.api-keys.once.hint-after")}
-        </p>
-      </AlertDescription>
-    </Alert>
+        </>
+      }
+    />
   );
 }
 
@@ -95,7 +91,7 @@ export default function ApiKeysPage() {
         cell: ({ row }) => (
           <div className="flex flex-wrap gap-1">
             {row.original.scopes.map((s) => (
-              <Badge key={s} variant="secondary" className="font-mono text-[10px]">
+              <Badge size="sm" key={s} variant="secondary" className="font-mono">
                 {s}
               </Badge>
             ))}

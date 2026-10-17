@@ -15,8 +15,9 @@ export function UnverifiedBadge({ of, className }: { of: VerifiedFlag | null | u
   return (
     <Badge
       variant="outline"
+      size="sm"
       title={t("page.events.unverified-hint")}
-      className={`shrink-0 text-[10px] ${toneBadgeClass("warn")} ${className ?? ""}`}
+      className={`shrink-0 ${toneBadgeClass("warn")} ${className ?? ""}`}
     >
       {t("page.events.unverified")}
     </Badge>

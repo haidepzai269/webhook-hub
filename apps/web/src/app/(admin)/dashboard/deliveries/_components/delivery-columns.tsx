@@ -43,7 +43,7 @@ export function RetryCountdown({ iso }: { iso: string }) {
   const sec = left % 60;
   return (
     <span
-      className="whitespace-nowrap font-mono text-amber-600 text-xs tabular-nums dark:text-amber-400"
+      className={`whitespace-nowrap font-mono text-xs tabular-nums ${toneTextClass("warn")}`}
       title={formatDateTime(iso, locale)}
     >
       {m > 0 ? `${m}m ${String(sec).padStart(2, "0")}s` : `${sec}s`}
@@ -144,7 +144,7 @@ export const buildDeliveryColumns = (t: TranslateFn): HubColumn<Delivery>[] => [
     cell: ({ row }) =>
       row.original.lastError ? (
         <CellTooltip text={row.original.lastError}>
-          <span data-cell-text className="block max-w-64 truncate text-rose-600 text-xs">
+          <span data-cell-text className="block max-w-64 truncate text-destructive text-xs">
             {row.original.lastError}
           </span>
         </CellTooltip>

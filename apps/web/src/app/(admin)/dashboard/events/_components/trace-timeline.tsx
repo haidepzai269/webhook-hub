@@ -42,7 +42,7 @@ function Step({
           <span className="mr-1 text-muted-foreground">{n}</span>
           {title}
         </span>
-        {time && <span className="font-mono text-[11px] text-muted-foreground">{time}</span>}
+        {time && <span className="font-mono text-2xs text-muted-foreground">{time}</span>}
       </div>
       {children && <div className="mt-1 space-y-1 text-xs">{children}</div>}
     </li>
@@ -116,7 +116,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                     </span>
                     <span className="flex items-center gap-2">
                       {d.attemptGeneration > 1 && (
-                        <Badge variant="outline" className="font-mono text-[10px]">
+                        <Badge size="sm" variant="outline" className="font-mono">
                           {t("page.events.trace.generation", { n: d.attemptGeneration })}
                         </Badge>
                       )}
@@ -126,14 +126,14 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                   {attempts.length === 0 ? (
                     <p className="mt-1 text-muted-foreground">{t("page.events.trace.no-attempts")}</p>
                   ) : (
-                    <ol className="mt-1.5 space-y-0.5 font-mono text-[11px]">
+                    <ol className="mt-1.5 space-y-0.5 font-mono text-2xs">
                       {attempts.map((a) => (
                         <li key={a.id} className="flex flex-wrap gap-x-2">
                           <span className="text-muted-foreground">#{a.attemptNo}</span>
                           <span className={toneTextClass(httpTone(a.responseStatus ?? 0))}>HTTP {a.responseStatus || "—"}</span>
                           <span>{a.durationMs ?? "—"}ms</span>
                           <span className="text-muted-foreground">{formatDateTime(a.createdAt, locale)}</span>
-                          {a.error && <span className="basis-full break-all text-rose-600">{a.error}</span>}
+                          {a.error && <span className="basis-full break-all text-destructive">{a.error}</span>}
                         </li>
                       ))}
                     </ol>
@@ -143,7 +143,7 @@ export function TraceTimeline({ ev }: { ev: HubEventDetail }) {
                       {t("page.events.trace.retry-in")} <RetryCountdown iso={d.nextAttemptAt} />
                     </div>
                   )}
-                  {d.status === "DEAD" && d.lastError && <p className="mt-1 break-all text-rose-600">{d.lastError}</p>}
+                  {d.status === "DEAD" && d.lastError && <p className="mt-1 break-all text-destructive">{d.lastError}</p>}
                 </li>
               );
             })}

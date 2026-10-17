@@ -32,18 +32,19 @@ import {
   type TrafficRange,
   trafficInsightText,
 } from "@/lib/traffic/message";
+import { TONE_VAR } from "@/components/flow/tokens";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
 /** Màu từng kết quả — cùng bảng màu với biểu đồ Tổng quan (xanh = nhận, đỏ = lỗi, hổ phách = vượt trần). */
 const SERIES: Record<TrafficOutcome, { key: MessageKey; color: string }> = {
-  ACCEPTED: { key: "traffic.outcome.accepted", color: "oklch(0.65 0.15 155)" },
+  ACCEPTED: { key: "traffic.outcome.accepted", color: TONE_VAR.healthy },
   DUPLICATE: { key: "traffic.outcome.duplicate", color: "var(--chart-2)" },
-  REJECTED: { key: "traffic.outcome.rejected", color: "oklch(0.63 0.22 25)" },
-  RATE_LIMITED: { key: "traffic.outcome.rate-limited", color: "oklch(0.75 0.15 75)" },
-  BLOCKED: { key: "traffic.outcome.blocked", color: "oklch(0.55 0.2 300)" },
-  // QT7 (E2): request bị 507 vì dự án đầy dung lượng (bytes 0) — xám đậm, khác lỗi chữ ký và vượt trần.
-  STORAGE_FULL: { key: "traffic.outcome.storage-full", color: "oklch(0.45 0.03 260)" },
+  REJECTED: { key: "traffic.outcome.rejected", color: TONE_VAR.crashed },
+  RATE_LIMITED: { key: "traffic.outcome.rate-limited", color: TONE_VAR.warning },
+  BLOCKED: { key: "traffic.outcome.blocked", color: TONE_VAR.progress },
+  // QT7 (E2): request bị 507 vì dự án đầy dung lượng (bytes 0) — xám (tone idle), khác lỗi chữ ký và vượt trần.
+  STORAGE_FULL: { key: "traffic.outcome.storage-full", color: TONE_VAR.idle },
 };
 
 /**

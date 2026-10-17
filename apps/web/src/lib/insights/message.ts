@@ -168,7 +168,7 @@ export const INSIGHT_TONE: Record<InsightLevel, string> = {
   ok: "text-emerald-700 dark:text-emerald-300",
   info: "text-muted-foreground",
   warning: "text-amber-700 dark:text-amber-300",
-  critical: "text-rose-700 dark:text-rose-300",
+  critical: "text-destructive",
 };
 export const INSIGHT_DOT: Record<InsightLevel, string> = {
   ok: "bg-emerald-500",

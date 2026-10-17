@@ -53,7 +53,7 @@ export interface StatusBadgeProps {
 /** Nhãn trạng thái dùng chung: `<StatusBadge tone="ok" dot>Hoạt động</StatusBadge>`. */
 export function StatusBadge({ tone, children, dot, pulse, tooltip, className }: StatusBadgeProps) {
   const badge = (
-    <Badge variant="outline" className={cn("text-[11px]", toneBadgeClass(tone), className)}>
+    <Badge size="sm" variant="outline" className={cn(toneBadgeClass(tone), className)}>
       {dot || pulse ? <span aria-hidden className={cn("size-1.5 rounded-full bg-(--tone)", pulse && "animate-pulse")} /> : null}
       {children}
     </Badge>

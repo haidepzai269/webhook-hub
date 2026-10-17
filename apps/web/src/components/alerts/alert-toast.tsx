@@ -44,7 +44,7 @@ function AlertToast(p: AlertToastProps) {
         <div className="mb-1 flex min-w-0 items-center gap-1.5">
           <ProjectChip name={p.projectName} />
           <span
-            className="truncate rounded-sm px-1.5 py-px font-medium text-[11px] leading-4"
+            className="truncate rounded-sm px-1.5 py-px font-medium text-2xs leading-4"
             style={{ backgroundColor: `var(--${tone}-subtle)`, color: `var(--${tone}-fg)` }}
           >
             {p.severityLabel}

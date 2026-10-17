@@ -34,7 +34,7 @@ export function TimeCell({
     return (
       <span className={base}>
         {abs}
-        <span className="block text-[11px] text-muted-foreground">{rel}</span>
+        <span className="block text-2xs text-muted-foreground">{rel}</span>
       </span>
     );
   }

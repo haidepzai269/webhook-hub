@@ -77,7 +77,7 @@ function VerificationCell({ dest }: { dest: Destination }) {
   return (
     <div className="flex max-w-xs flex-col gap-0.5">
       <CellTooltip text={dest.verificationFix ?? v.label} always className="w-fit">
-        <Badge variant="outline" className={`w-fit font-mono text-[11px] ${toneBadgeClass(VERIFY_TONE[v.tone])}`}>
+        <Badge size="sm" variant="outline" className={`w-fit font-mono ${toneBadgeClass(VERIFY_TONE[v.tone])}`}>
           {t(v.labelKey)}
         </Badge>
       </CellTooltip>
@@ -90,7 +90,7 @@ function VerificationCell({ dest }: { dest: Destination }) {
       )}
       {dest.verification === "FAILED" && dest.verificationError && (
         <CellTooltip text={dest.verificationError} className="flex">
-          <span data-cell-text className="truncate font-mono text-[11px] text-destructive">
+          <span data-cell-text className="truncate font-mono text-2xs text-destructive">
             {dest.verificationError}
           </span>
         </CellTooltip>
@@ -180,7 +180,8 @@ const makeColumns = (t: TranslateFn): HubColumn<Destination>[] => [
     cell: ({ row }) => (
       <Badge
         variant="outline"
-        className={`gap-1.5 font-mono text-[11px] ${toneBadgeClass(CIRCUIT_TONE[row.original.circuitState])}`}
+        size="sm"
+        className={`gap-1.5 font-mono text-2xs ${toneBadgeClass(CIRCUIT_TONE[row.original.circuitState])}`}
         title={`${row.original.circuitState} — ${t(CIRCUIT_HINT[row.original.circuitState])}`}
       >
         <span

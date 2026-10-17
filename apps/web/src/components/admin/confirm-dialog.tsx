@@ -1,6 +1,5 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 
 import {
@@ -14,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Spinner } from "@/components/admin/spinner";
 import { useT } from "@/lib/i18n/use-t";
 
 export interface ConfirmDialogProps {
@@ -86,7 +86,7 @@ export function ConfirmDialog({
               void onConfirm();
             }}
           >
-            {pending ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+            {pending ? <Spinner /> : null}
             {confirmLabel ?? t("common.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>

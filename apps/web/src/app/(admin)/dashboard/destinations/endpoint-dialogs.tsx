@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 
-import { Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
+import { RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
+import { SecretOnce } from "@/components/admin/secret-once";
 import { AdminDialogContent } from "@/components/admin/overlay-content";
 import { EmptyState } from "@/components/admin/state";
 import { DeliveryStatusBadge } from "@/components/admin/status-badge";
@@ -29,7 +30,6 @@ import { DELIVERY_STATUS_VALUES } from "@/lib/hub/list-url";
 import { useSources } from "@/lib/hub/queries";
 import { describeVerification, errorTextOf } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** Trạng thái lượt giao của hub -> nhãn dịch; mã lạ (API mới hơn console) giữ nguyên. */
 function DeliveryStatusLabel({ status }: { status: string }) {
@@ -43,42 +43,10 @@ function DeliveryStatusLabel({ status }: { status: string }) {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+/** Secret ký của endpoint, dạng dòng env để dán thẳng vào service nhận (SPEC-ket-noi §3.2). */
+export function EndpointSecretOnce({ secret }: { secret: string }) {
   const t = useT();
-  const [done, setDone] = useState(false);
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      onClick={() => {
-        void navigator.clipboard.writeText(text).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
-        });
-      }}
-    >
-      {done ? <Check /> : <Copy />}
-      {done ? t("common.copied") : t("common.copy")}
-    </Button>
-  );
-}
-
-/** Hộp "Secret chỉ hiện một lần" (SPEC-ket-noi §3.2) — đóng hộp là mất, hub không bao giờ hiện lại. */
-export function SecretOnce({ secret }: { secret: string }) {
-  const t = useT();
-  const envLine = `HUB_SIGNING_SECRET=${secret}`;
-  return (
-    <Alert variant="warning">
-      <AlertTitle>{t("page.destinations.endpoint.secret-once")}</AlertTitle>
-      <AlertDescription className="w-full">
-        <div className="flex w-full items-center gap-2">
-          <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-foreground text-xs">{envLine}</code>
-          <CopyButton text={envLine} />
-        </div>
-      </AlertDescription>
-    </Alert>
-  );
+  return <SecretOnce title={t("page.destinations.endpoint.secret-once")} value={`HUB_SIGNING_SECRET=${secret}`} />;
 }
 
 function VerificationLine({
@@ -162,7 +130,7 @@ export function CreateEndpointDialog({ open, onOpenChange }: { open: boolean; on
         <DialogBody>
         {result ? (
           <div className="flex flex-col gap-3">
-            {result.signingSecret && <SecretOnce secret={result.signingSecret} />}
+            {result.signingSecret && <EndpointSecretOnce secret={result.signingSecret} />}
             <VerificationLine
               verification={result.verification}
               error={result.verificationError}
@@ -280,7 +248,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
         {ep && (
           <div className="flex flex-col gap-3">
             <VerificationLine verification={ep.verification} error={ep.verificationError} fix={ep.verificationFix} />
-            {secret && <SecretOnce secret={secret} />}
+            {secret && <EndpointSecretOnce secret={secret} />}
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -326,7 +294,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
                     <span>{formatDateTime(d.createdAt, locale)}</span>
                     <DeliveryStatusLabel status={d.status} />
                     <span>{d.eventType}</span>
-                    {d.lastError && <span className="text-rose-700 dark:text-rose-300">{d.lastError}</span>}
+                    {d.lastError && <span className="text-destructive">{d.lastError}</span>}
                   </li>
                 ))}
               </ul>

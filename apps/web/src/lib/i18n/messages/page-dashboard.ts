@@ -3,6 +3,7 @@ import { defineMessages } from "../locales";
 /** Trang Tổng quan (dashboard/page.tsx + dashboard/_components/*). */
 export const pageDashboard = defineMessages("page.dashboard", {
   vi: {
+    "page.dashboard.description": "Sức khoẻ luồng sự kiện của dự án đang chọn: nhận, giao, lỗi.",
     // Thẻ số liệu
     "page.dashboard.kpi.sources": "Nguồn",
     "page.dashboard.kpi.destinations": "Đích",
@@ -37,6 +38,7 @@ export const pageDashboard = defineMessages("page.dashboard", {
     "page.dashboard.recent.empty": "Chưa có sự kiện nào. Thử bắn một webhook ở trang Thử nghiệm.",
   },
   en: {
+    "page.dashboard.description": "Event-flow health of the selected project: received, delivered, failed.",
     "page.dashboard.kpi.sources": "Sources",
     "page.dashboard.kpi.destinations": "Destinations",
     "page.dashboard.kpi.events": "Events",

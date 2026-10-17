@@ -90,7 +90,7 @@ export function TraceFeed({ toastsOnly = false }: { toastsOnly?: boolean } = {})
         <ul className="space-y-1">
           {traces.slice(0, SHOW).map((tr) => (
             <li key={`${tr.correlationId}-${tr.receivedAt}`} className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline" className={`font-mono text-[11px] ${toneBadgeClass(OUTCOME_TONE[tr.outcome])}`}>
+              <Badge size="sm" variant="outline" className={`font-mono ${toneBadgeClass(OUTCOME_TONE[tr.outcome])}`}>
                 {tr.outcome}
               </Badge>
               <span className="font-mono">{tr.provider}</span>

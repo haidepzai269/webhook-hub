@@ -207,7 +207,7 @@ export function SidebarProjectPicker() {
               </CellTooltip>
               {v.operator && (
                 <span
-                  className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-700 leading-4 group-data-[collapsible=icon]:hidden dark:text-amber-400"
+                  className="shrink-0 rounded bg-amber-500/15 px-1 text-2xs text-amber-700 leading-4 group-data-[collapsible=icon]:hidden dark:text-amber-400"
                   title={t("admin.project.operator-note")}
                 >
                   {t("admin.project.operator")}

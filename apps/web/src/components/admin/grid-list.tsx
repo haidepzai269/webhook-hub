@@ -25,7 +25,7 @@ const Ctx = createContext<{ template: string; density: Density }>({ template: "n
 
 const HEADER_BASE: Record<Density, string> = {
   md: "border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs",
-  sm: "border-b border-l-2 border-l-transparent px-3 py-1 font-sans text-[11px] text-muted-foreground uppercase tracking-wide",
+  sm: "border-b border-l-2 border-l-transparent px-3 py-1 font-sans text-2xs text-muted-foreground uppercase tracking-wide",
 };
 
 export function GridList({

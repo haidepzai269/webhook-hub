@@ -6,9 +6,24 @@ import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { useT } from "@/lib/i18n/use-t";
+import { Button } from "@/components/ui/button";
+import { JsonViewer } from "@/components/flow/json-viewer";
 import { IconButton } from "@/components/admin/icon-button";
 
-export function CopyButton({ value, label }: { value: string; label?: string }) {
+/**
+ * Nút sao chép MỘT kiểu (ADR-247): `variant="icon"` (mặc định) là IconButton nhỏ có tooltip — dùng trong ô bảng/góc khối;
+ * `variant="labeled"` là nút outline có chữ ("Sao chép" -> "Đã chép") — dùng khi nút là hành động chính (hộp secret một lần).
+ * `label` là tên hành động (tooltip / chữ nút).
+ */
+export function CopyButton({
+  value,
+  label,
+  variant = "icon",
+}: {
+  value: string;
+  label?: string;
+  variant?: "icon" | "labeled";
+}) {
   const t = useT();
   const text = label ?? t("common.copy");
   const [done, setDone] = useState(false);
@@ -21,6 +36,22 @@ export function CopyButton({ value, label }: { value: string; label?: string }) 
       toast.error(t("admin.copy.blocked"));
     }
   };
+  if (variant === "labeled") {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation();
+          void copy();
+        }}
+      >
+        {done ? <Check /> : <Copy />}
+        {done ? t("common.copied") : text}
+      </Button>
+    );
+  }
   return (
     <IconButton
       size="icon-xs"
@@ -34,17 +65,19 @@ export function CopyButton({ value, label }: { value: string; label?: string }) 
   );
 }
 
+/**
+ * Khối JSON MỘT kiểu (ADR-247): `JsonViewer` (tô cú pháp, gập/mở, số dòng) + nút chép JSON ở góc. Event-sheet, playground và
+ * thẻ chi tiết hành trình đều đi qua đây/`JsonViewer` — không còn `<pre>` riêng.
+ */
 export function JsonBlock({ value, maxHeight = "24rem" }: { value: unknown; maxHeight?: string }) {
   const t = useT();
   const text = JSON.stringify(value, null, 2) ?? "null";
   return (
-    <div className="relative rounded-md border bg-muted/40">
-      <div className="absolute top-1 right-1">
+    <div className="relative">
+      <div className="absolute top-1 right-1 z-10 rounded-md bg-background/80">
         <CopyButton value={text} label={t("admin.copy.json")} />
       </div>
-      <pre className="overflow-auto p-3 pr-9 font-mono text-xs leading-relaxed" style={{ maxHeight }}>
-        {text}
-      </pre>
+      <JsonViewer value={value} maxHeight={maxHeight} />
     </div>
   );
 }

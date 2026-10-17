@@ -54,9 +54,9 @@ export function InsightCell({ id }: { id: string }) {
         <span className={`mt-1 size-1.5 shrink-0 rounded-full ${INSIGHT_DOT[text.level]}`} aria-hidden />
         <span className="line-clamp-2 min-w-0">{text.label}</span>
       </span>
-      <span className="line-clamp-2 break-words text-[11px] text-muted-foreground leading-snug">{text.detail}</span>
+      <span className="line-clamp-2 break-words text-2xs text-muted-foreground leading-snug">{text.detail}</span>
       {action && (
-        <Link href={action.href} className="w-fit text-[11px] underline underline-offset-2 hover:text-foreground">
+        <Link href={action.href} className="w-fit text-2xs underline underline-offset-2 hover:text-foreground">
           {t(action.labelKey)}
         </Link>
       )}

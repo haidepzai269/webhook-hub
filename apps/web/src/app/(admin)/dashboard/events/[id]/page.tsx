@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/admin/page-header";
 import { CopyButton } from "@/components/admin/copy-button";
 import { ErrorState } from "@/components/admin/state";
 import { AttemptsCard, FlowCard, HeadersCard, PayloadCard, Waterfall } from "@/components/flow/detail-cards";
@@ -144,23 +145,25 @@ export default function EventJourneyPage() {
     <div className="space-y-4">
       {/* 1. Dòng trên cùng */}
       <div className="space-y-2">
-        <Link href="/dashboard/events" className="inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground">
-          <ArrowLeft {...ICON} /> {t("page.events.detail.back")}
-        </Link>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="font-semibold text-xl tracking-tight">{t("page.events.detail.title")}</h1>
+        <PageHeader
+          className="mb-0"
+          back={{ href: "/dashboard/events", label: t("page.events.detail.back") }}
+          title={t("page.events.detail.title")}
+          adornment={
+            <>
               <ExecutionStatusPill status={data.executionStatus} />
               {/* PK5 khoá 2 (REVIEW-PK5 TB-1): hub không kiểm chữ ký nguồn này — chặng "Xác thực" cũng là cảnh báo, không xanh. */}
               <UnverifiedBadge of={journeyUnverified(data) ? { verified: false } : null} />
-            </div>
-            <div className="mt-0.5 flex items-center gap-1 font-mono text-muted-foreground text-xs">
+            </>
+          }
+          meta={
+            <span className="flex items-center gap-1 font-mono">
               <span className="truncate">{displayId}</span>
               <CopyButton value={displayId} label={t("page.events.detail.copy-id")} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+            </span>
+          }
+          actions={
+            <>
             <Button variant="outline" size="sm" onClick={createFrom} disabled={!raw}>
               <WandSparkles {...ICON} />
               {t("page.events.detail.create-from")}
@@ -197,8 +200,9 @@ export default function EventJourneyPage() {
               </DropdownMenuContent>
             </DropdownMenu>
             )}
-          </div>
-        </div>
+            </>
+          }
+        />
         {event?.trimmedAt && (
           <p role="note" className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-sm">
             {t("page.storage.trimmed", { at: formatDateTime(event.trimmedAt, locale) })}

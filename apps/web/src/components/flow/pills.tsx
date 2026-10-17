@@ -14,7 +14,7 @@ import { HEALTH_TONE, HealthGlyph, healthKey, STATUS_TONE, StatusGlyph, stageSta
 export function TonePill({ tone, icon, children, className }: { tone: Tone; icon?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <span
-      className={cn("flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 font-medium text-[11px] leading-none", className)}
+      className={cn("flow-pill inline-flex h-5 items-center gap-1 rounded-full px-2 font-medium text-2xs leading-none", className)}
       style={toneStyle(tone)}
     >
       {icon}

@@ -63,12 +63,12 @@ export function JsonViewer({ value, maxHeight = "26rem" }: { value: unknown; max
             <span className="text-muted-foreground">{open}</span>
             {isCollapsed ? (
               <>
-                <span className="mx-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">{count}</span>
+                <span className="mx-1 rounded bg-muted px-1 text-2xs text-muted-foreground">{count}</span>
                 <span className="text-muted-foreground">{close}</span>
                 {comma}
               </>
             ) : (
-              <span className="ml-1.5 text-[10px] text-muted-foreground/70">{count}</span>
+              <span className="ml-1.5 text-2xs text-muted-foreground/70">{count}</span>
             )}
           </div>,
         );

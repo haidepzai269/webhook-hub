@@ -12,12 +12,12 @@ import {
 } from "react";
 
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, EyeOff, Pause, Play, Search, Terminal } from "lucide-react";
+import { ChevronDown, ChevronUp, EyeOff, Pause, Play, Terminal } from "lucide-react";
 
 import { GridList, GridListRow } from "@/components/admin/grid-list";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/admin/search-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ExecutionFilters, ExecutionStatus } from "@/lib/hub/flow-types";
 import { EVENT_LOG_PARAMS, EXECUTION_STATUS_VALUES } from "@/lib/hub/list-url";
@@ -247,7 +247,7 @@ function EventLogPanel() {
           {open && (
             <>
               <Select value={logProvider ?? ALL} onValueChange={(v) => url.setFilter({ logProvider: v === ALL ? null : v })}>
-                <SelectTrigger size="sm" className="h-7 w-40 text-xs" aria-label={t("journey.log.filter-provider")}>
+                <SelectTrigger size="sm" className="w-40 text-xs" aria-label={t("journey.log.filter-provider")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -260,7 +260,7 @@ function EventLogPanel() {
                 </SelectContent>
               </Select>
               <Select value={logStatus ?? ALL} onValueChange={(v) => url.setFilter({ logStatus: v === ALL ? null : v })}>
-                <SelectTrigger size="sm" className="h-7 w-32 text-xs" aria-label={t("journey.log.filter-outcome")}>
+                <SelectTrigger size="sm" className="w-32 text-xs" aria-label={t("journey.log.filter-outcome")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -289,10 +289,15 @@ function EventLogPanel() {
             </>
           )}
           {open && (
-            <div className="relative">
-              <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("journey.log.search-placeholder")} className="h-7 w-52 pl-7 text-xs" />
-            </div>
+            <SearchInput
+              size="sm"
+              wrapperClassName="w-52"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={t("journey.log.search-placeholder")}
+              aria-label={t("journey.log.search-placeholder")}
+              className="text-xs"
+            />
           )}
           <Button variant="ghost" size="sm" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
             {paused ? <Play {...ICON} /> : <Pause {...ICON} />}

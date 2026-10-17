@@ -8,6 +8,7 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { toneTextClass } from "@/components/admin/status-badge";
 import { CopyButton } from "@/components/admin/copy-button";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
 import { FormDialog } from "@/components/admin/form-dialog";
@@ -316,7 +317,7 @@ function UnverifiedBlockedNote({ source }: { source: Source }) {
   const flag = useUnverifiedSources(isUnverifiedSource(source) ? projectId : null);
   if (!unverifiedSourceBlocked(source, flag.data?.allowUnverifiedSources)) return null;
   return (
-    <p role="note" className="mt-1 max-w-xs whitespace-normal text-amber-700 text-xs dark:text-amber-400">
+    <p role="note" className={`mt-1 max-w-xs whitespace-normal text-xs ${toneTextClass("warn")}`}>
       {t("page.sources.unverified-blocked")}
     </p>
   );
