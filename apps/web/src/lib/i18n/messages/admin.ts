@@ -25,6 +25,12 @@ export const admin = defineMessages("admin", {
     "admin.realtime.title": "Kết nối Socket.IO tới máy chủ hub",
     "admin.realtime.connected": "Thời gian thực",
     "admin.realtime.disconnected": "Mất kết nối",
+    "admin.realtime.connecting": "Đang kết nối…",
+    "admin.realtime.hint.connected": "đang nhận sự kiện trực tiếp.",
+    "admin.realtime.hint.connecting":
+      "đang nối (lại). Máy chủ có thể đang khởi động — tối đa khoảng 1–2 phút; trang tự cập nhật khi nối được.",
+    "admin.realtime.hint.disconnected":
+      "không nối được sau nhiều lần thử. Dữ liệu vẫn tải được nhưng không tự cập nhật — tải lại trang để thử ngay.",
     "admin.time-range.from": "Từ",
     "admin.time-range.to": "Đến",
     "admin.time-range.order-error": "“Từ” phải trước “Đến”",
@@ -58,6 +64,12 @@ export const admin = defineMessages("admin", {
     "admin.realtime.title": "Socket.IO connection to the hub server",
     "admin.realtime.connected": "Realtime",
     "admin.realtime.disconnected": "Disconnected",
+    "admin.realtime.connecting": "Connecting…",
+    "admin.realtime.hint.connected": "receiving live events.",
+    "admin.realtime.hint.connecting":
+      "(re)connecting. The server may be starting up — up to about 1–2 minutes; the page updates by itself once connected.",
+    "admin.realtime.hint.disconnected":
+      "could not connect after several attempts. Data still loads but will not update live — reload the page to retry now.",
     "admin.time-range.from": "From",
     "admin.time-range.to": "To",
     "admin.time-range.order-error": "“From” must be before “To”",

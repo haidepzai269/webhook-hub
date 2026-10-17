@@ -135,17 +135,6 @@ export interface Source {
   verificationConfig?: unknown;
 }
 
-export interface HealthDependency {
-  status: "up" | "down";
-  message?: string;
-}
-
-export interface Health {
-  status: "healthy" | "degraded" | "offline";
-  timestamp?: string;
-  dependencies?: Record<string, HealthDependency>;
-}
-
 export interface MetricsTick {
   timestamp: string;
   eventsPerMin: number;
