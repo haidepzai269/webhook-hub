@@ -154,7 +154,7 @@ function ExecutionsView() {
           </TabsList>
         </Tabs>
         <Select value={source || ALL} onValueChange={(x) => url.setFilter({ source: x === ALL ? null : x })}>
-          <SelectTrigger size="sm" className="w-48">
+          <SelectTrigger size="sm" className="w-48" aria-label={t("page.events.filter.source")}>
             <SelectValue placeholder={t("page.events.filter.source")} />
           </SelectTrigger>
           <SelectContent>
@@ -167,7 +167,7 @@ function ExecutionsView() {
           </SelectContent>
         </Select>
         <Select value={destination || ALL} onValueChange={(x) => url.setFilter({ destination: x === ALL ? null : x })}>
-          <SelectTrigger size="sm" className="w-52">
+          <SelectTrigger size="sm" className="w-52" aria-label={t("page.events.filter.destination")}>
             <SelectValue placeholder={t("page.events.filter.destination")} />
           </SelectTrigger>
           <SelectContent>
@@ -181,7 +181,7 @@ function ExecutionsView() {
         </Select>
         <div className="relative">
           <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
-          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder={t("page.events.filter.type")} className="h-8 w-48 pl-7 font-mono text-xs" />
+          <Input value={typeInput} onChange={(e) => setTypeInput(e.target.value)} placeholder={t("page.events.filter.type")} aria-label={t("page.events.filter.type")} className="h-8 w-48 pl-7 font-mono text-xs" />
         </div>
         <div className="relative">
           <Search size={14} strokeWidth={1.75} className="-translate-y-1/2 absolute top-1/2 left-2 text-muted-foreground" aria-hidden />
@@ -189,6 +189,7 @@ function ExecutionsView() {
             value={idInput}
             onChange={(e) => setIdInput(e.target.value)}
             placeholder={t("page.events.filter.id")}
+            aria-label={t("page.events.filter.id")}
             title={t("page.events.filter.id-hint")}
             className="h-8 w-48 pl-7 font-mono text-xs"
           />

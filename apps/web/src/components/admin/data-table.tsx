@@ -129,7 +129,7 @@ export function DataTable<T extends RowData>({
           <div />
         )}
         {footer && searchPlaceholder && (
-          <span className="hidden text-muted-foreground text-xs lg:inline sm:mr-auto sm:ml-2">{t("admin.table.search-in-page")}</span>
+          <span className="hidden text-muted-foreground text-xs sm:mr-auto sm:ml-2 lg:inline">{t("admin.table.search-in-page")}</span>
         )}
         <div className="flex flex-wrap items-center gap-2">
           {toolbar}
@@ -174,7 +174,7 @@ export function DataTable<T extends RowData>({
                     aria-sort={header.column.getCanSort() ? sortAria(header.column.getIsSorted()) : undefined}
                     className="h-10 whitespace-normal px-3 py-1.5 font-medium leading-tight"
                   >
-                    {header.isPlaceholder ? null : header.column.getCanSort() ? (
+                    {!header.isPlaceholder && header.column.getCanSort() && (
                       <button
                         type="button"
                         onClick={header.column.getToggleSortingHandler()}
@@ -183,9 +183,8 @@ export function DataTable<T extends RowData>({
                         <table.FlexRender header={header} />
                         <SortIcon dir={header.column.getIsSorted()} />
                       </button>
-                    ) : (
-                      <table.FlexRender header={header} />
                     )}
+                    {!header.isPlaceholder && !header.column.getCanSort() && <table.FlexRender header={header} />}
                   </TableHead>
                 ))}
               </TableRow>
@@ -271,7 +270,9 @@ export function DataTable<T extends RowData>({
 }
 
 function sortAria(dir: false | "asc" | "desc"): "ascending" | "descending" | "none" {
-  return dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none";
+  if (dir === "asc") return "ascending";
+  if (dir === "desc") return "descending";
+  return "none";
 }
 
 function SortIcon({ dir }: { dir: false | "asc" | "desc" }) {

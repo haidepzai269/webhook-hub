@@ -9,6 +9,7 @@ import { ChevronDown, ChevronsUpDown, FolderKanban, LayoutGrid, Plus } from "luc
 import { toast } from "sonner";
 
 import { CreateProjectDialog } from "@/components/admin/create-project-dialog";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -199,9 +200,11 @@ export function SidebarProjectPicker() {
                   />
                 )}
               </span>
-              <span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden" title={v.label}>
-                {v.label}
-              </span>
+              <CellTooltip text={v.label} className="flex-1 group-data-[collapsible=icon]:hidden">
+                <span data-cell-text className="truncate">
+                  {v.label}
+                </span>
+              </CellTooltip>
               {v.operator && (
                 <span
                   className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-700 leading-4 group-data-[collapsible=icon]:hidden dark:text-amber-400"

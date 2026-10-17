@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import Link from "next/link";
 
@@ -130,7 +130,7 @@ function UnverifiedSourcesSetting({ projectId, canEdit }: { projectId: string; c
 export default function ProjectsPage() {
   const t = useT();
   const operator = useIsOperator();
-  const roleLabel = (role: string | undefined) => (role && ROLE_KEY[role] ? t(ROLE_KEY[role]) : (role ?? "—"));
+  const roleLabel = useCallback((role: string | undefined) => (role && ROLE_KEY[role] ? t(ROLE_KEY[role]) : (role ?? "—")), [t]);
   const { data, isLoading, error, refetch } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const setProjectId = useFlowProjectStore((s) => s.setProjectId);
@@ -208,9 +208,7 @@ export default function ProjectsPage() {
         ),
       },
     ],
-    // roleLabel đổi theo t, setProjectId ổn định (zustand).
-    // biome-ignore lint/correctness/useExhaustiveDependencies: roleLabel dựng lại mỗi render nhưng chỉ phụ thuộc t
-    [t, operator, projectId, setProjectId],
+    [t, roleLabel, operator, projectId, setProjectId],
   );
 
   return (

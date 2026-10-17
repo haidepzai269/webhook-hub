@@ -23,6 +23,7 @@ import { IconButton } from "@/components/admin/icon-button";
 import { credentialInputAttrs } from "@/lib/credential-input";
 import { HUB_API_URL } from "@/lib/env";
 import { TimeCell } from "@/components/admin/time-cell";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
 import { isUnverifiedSource, unverifiedSourceBlocked } from "@/lib/hub/unverified";
@@ -242,9 +243,11 @@ const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] =
       // URL dài không quyết định bề rộng bảng (span w-0 flex-1): cột co về tối thiểu 11rem khi trang hẹp, phần dư cắt "…"
       // (đủ trong title + nút chép) — để cột "Nhịp sự kiện" không bị đẩy ra ngoài mép phải ở 1280–1440px.
       <div className="flex w-full min-w-44 max-w-md items-center gap-1">
-        <span className="w-0 flex-1 truncate font-mono text-xs" title={fullUrl(row.original)}>
-          {fullUrl(row.original)}
-        </span>
+        <CellTooltip text={fullUrl(row.original)} className="w-0 flex-1">
+          <span data-cell-text className="truncate font-mono text-xs">
+            {fullUrl(row.original)}
+          </span>
+        </CellTooltip>
         <CopyButton value={fullUrl(row.original)} label={t("page.sources.copy-url")} />
       </div>
     ),

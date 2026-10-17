@@ -18,6 +18,7 @@ import { ruleName } from "@/lib/alerts/message";
 import { ALERT_RULE_CODES, ALERT_SEVERITIES, type AlertView } from "@/lib/alerts/types";
 import { useAlertsPage, useSubjectNames } from "@/lib/hub/alert-queries";
 import { TimeCell } from "@/components/admin/time-cell";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { shortId } from "@/lib/hub/format";
 import { ALERT_PARAMS, toApiQuery } from "@/lib/hub/list-url";
 import { useCanSeeAlerts, useIsOperator } from "@/lib/hub/me-store";
@@ -51,10 +52,16 @@ const buildColumns = (t: TranslateFn): HubColumn<Row>[] => [
     accessorFn: (a) => `${a.text.title} ${a.text.subjectLabel}`,
     cell: ({ row }) => (
       <div className="min-w-0 max-w-[32rem]">
-        <div className="truncate font-medium text-sm" title={row.original.text.title}>
-          {row.original.text.title}
-        </div>
-        <div className="truncate text-muted-foreground text-xs">{row.original.text.subjectLabel}</div>
+        <CellTooltip text={row.original.text.title} className="flex">
+          <span data-cell-text className="truncate font-medium text-sm">
+            {row.original.text.title}
+          </span>
+        </CellTooltip>
+        <CellTooltip text={row.original.text.subjectLabel} className="flex">
+          <span data-cell-text className="truncate text-muted-foreground text-xs">
+            {row.original.text.subjectLabel}
+          </span>
+        </CellTooltip>
       </div>
     ),
     enableHiding: false,

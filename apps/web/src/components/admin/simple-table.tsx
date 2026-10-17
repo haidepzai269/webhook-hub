@@ -52,6 +52,37 @@ export function SimpleTable<T>({
 }) {
   const t = useT();
   const list = rows ?? [];
+  const colSpan = columns.length;
+  let body: ReactNode;
+  if (loading && !rows) {
+    body = <TableRowsSkeleton cols={colSpan} cellClassName="px-3" />;
+  } else if (error) {
+    body = (
+      <TableRow>
+        <TableCell colSpan={colSpan} className="p-3">
+          <ErrorState error={error} onRetry={onRetry} inline />
+        </TableCell>
+      </TableRow>
+    );
+  } else if (list.length === 0) {
+    body = (
+      <TableRow>
+        <TableCell colSpan={colSpan} className="h-20 text-center text-muted-foreground">
+          {empty ?? t("common.empty")}
+        </TableCell>
+      </TableRow>
+    );
+  } else {
+    body = list.map((row, i) => (
+      <TableRow key={getRowKey(row, i)} className={rowClassName?.(row)}>
+        {columns.map((c) => (
+          <TableCell key={c.key} className={cn("px-3 py-2 align-middle", ALIGN[c.align ?? "left"], c.className)}>
+            {c.cell(row, i)}
+          </TableCell>
+        ))}
+      </TableRow>
+    ));
+  }
   return (
     <div className={cn(framed && "overflow-x-auto rounded-lg border bg-card", className)}>
       <Table>
@@ -64,33 +95,7 @@ export function SimpleTable<T>({
             ))}
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {loading && !rows ? (
-            <TableRowsSkeleton cols={columns.length} cellClassName="px-3" />
-          ) : error ? (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="p-3">
-                <ErrorState error={error} onRetry={onRetry} inline />
-              </TableCell>
-            </TableRow>
-          ) : list.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="h-20 text-center text-muted-foreground">
-                {empty ?? t("common.empty")}
-              </TableCell>
-            </TableRow>
-          ) : (
-            list.map((row, i) => (
-              <TableRow key={getRowKey(row, i)} className={rowClassName?.(row)}>
-                {columns.map((c) => (
-                  <TableCell key={c.key} className={cn("px-3 py-2 align-middle", ALIGN[c.align ?? "left"], c.className)}>
-                    {c.cell(row, i)}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          )}
-        </TableBody>
+        <TableBody>{body}</TableBody>
       </Table>
     </div>
   );

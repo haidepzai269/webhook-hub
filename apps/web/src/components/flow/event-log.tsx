@@ -15,6 +15,7 @@ import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, EyeOff, Pause, Play, Search, Terminal } from "lucide-react";
 
 import { GridList, GridListRow } from "@/components/admin/grid-list";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -337,32 +338,40 @@ function EventLogPanel() {
                   style={anim.style}
                 >
                   <span className="truncate text-muted-foreground tabular-nums">{clock(i.receivedAt)}</span>
-                  <span className="flex min-w-0 items-center gap-1.5" title={i.providerLabel}>
-                    <span className="shrink-0 text-muted-foreground">
-                      <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
+                  <CellTooltip text={i.providerLabel}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="shrink-0 text-muted-foreground">
+                        <ProviderIcon provider={i.provider} name={i.sourceName ?? undefined} size={14} />
+                      </span>
+                      <span data-cell-text className="truncate">{i.providerLabel}</span>
                     </span>
-                    <span className="truncate">{i.providerLabel}</span>
-                  </span>
+                  </CellTooltip>
                   <span className="min-w-0 overflow-hidden">
                     <MiniPipeline summary={i.summary} context={i} decorative />
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5" title={i.type ?? resultLabel}>
-                    <span className="truncate">{i.type ?? <span style={{ color }}>{resultLabel}</span>}</span>
-                    {/* PK5 khoá 2 (REVIEW-PK5-R2 T-a): nhãn chữ, không chỉ chấm mini decorative. */}
-                    <UnverifiedBadge of={i} />
-                  </span>
-                  <span className="min-w-0 truncate" title={failedAtText(i.failedAt, t) ?? resultLabel}>
-                    {i.failedAt ? (
-                      <FailedAt failedAt={i.failedAt} status={i.status} />
-                    ) : (
-                      <span style={{ color }} className="font-sans text-xs">
-                        {resultLabel}
-                      </span>
-                    )}
-                  </span>
-                  <span className="min-w-0 truncate font-sans text-xs" style={{ color: NOTE_COLOR[note.tone] }} title={note.text}>
-                    {note.text}
-                  </span>
+                  <CellTooltip text={i.type ?? resultLabel}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span data-cell-text className="truncate">{i.type ?? <span style={{ color }}>{resultLabel}</span>}</span>
+                      {/* PK5 khoá 2 (REVIEW-PK5-R2 T-a): nhãn chữ, không chỉ chấm mini decorative. */}
+                      <UnverifiedBadge of={i} />
+                    </span>
+                  </CellTooltip>
+                  <CellTooltip text={failedAtText(i.failedAt, t) ?? resultLabel}>
+                    <span data-cell-text className="min-w-0 truncate">
+                      {i.failedAt ? (
+                        <FailedAt failedAt={i.failedAt} status={i.status} />
+                      ) : (
+                        <span style={{ color }} className="font-sans text-xs">
+                          {resultLabel}
+                        </span>
+                      )}
+                    </span>
+                  </CellTooltip>
+                  <CellTooltip text={note.text}>
+                    <span data-cell-text className="min-w-0 truncate font-sans text-xs" style={{ color: NOTE_COLOR[note.tone] }}>
+                      {note.text}
+                    </span>
+                  </CellTooltip>
                 </GridListRow>
               );
             })}

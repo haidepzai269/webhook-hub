@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { IconButton } from "@/components/admin/icon-button";
 import { useConfirm } from "@/components/admin/confirm-dialog";
 import { TimeCell } from "@/components/admin/time-cell";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { useCreateDestination, useDeleteDestination, useDestinations } from "@/lib/hub/queries";
 import { DESTINATION_TYPES, type Destination, type DestinationType } from "@/lib/hub/types";
 import { describeDeleteConflict, describeVerification } from "@/lib/hub/ui-logic";
@@ -75,16 +76,24 @@ function VerificationCell({ dest }: { dest: Destination }) {
   const v = describeVerification(dest.verification, dest.verificationError, t);
   return (
     <div className="flex max-w-xs flex-col gap-0.5">
-      <Badge
-        variant="outline"
-        className={`w-fit font-mono text-[11px] ${toneBadgeClass(VERIFY_TONE[v.tone])}`}
-        title={dest.verificationFix ?? v.label}
-      >
-        {t(v.labelKey)}
-      </Badge>
-      {v.reason && <span className="text-muted-foreground text-xs">{v.reason}</span>}
+      <CellTooltip text={dest.verificationFix ?? v.label} always className="w-fit">
+        <Badge variant="outline" className={`w-fit font-mono text-[11px] ${toneBadgeClass(VERIFY_TONE[v.tone])}`}>
+          {t(v.labelKey)}
+        </Badge>
+      </CellTooltip>
+      {v.reason && (
+        <CellTooltip text={v.reason} className="flex">
+          <span data-cell-text className="truncate text-muted-foreground text-xs">
+            {v.reason}
+          </span>
+        </CellTooltip>
+      )}
       {dest.verification === "FAILED" && dest.verificationError && (
-        <span className="font-mono text-[11px] text-rose-700 dark:text-rose-300">{dest.verificationError}</span>
+        <CellTooltip text={dest.verificationError} className="flex">
+          <span data-cell-text className="truncate font-mono text-[11px] text-destructive">
+            {dest.verificationError}
+          </span>
+        </CellTooltip>
       )}
     </div>
   );

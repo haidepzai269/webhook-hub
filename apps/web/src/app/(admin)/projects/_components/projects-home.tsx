@@ -27,6 +27,7 @@ import { AccountTopBar } from "@/components/admin/account-menu";
 import { AuthGuard } from "@/components/admin/auth-guard";
 import { CreateProjectDialog, type CreateProjectInput } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
+import { CellTooltip } from "@/components/ui/cell-tooltip";
 import { EmptyState, ErrorState } from "@/components/admin/state";
 import { roleLabel } from "@/components/flow/project-picker-logic";
 import { Badge } from "@/components/ui/badge";
@@ -191,12 +192,16 @@ function ProjectCard({ p, current, onOpen }: { p: ProjectSummary; current: boole
         <div className="flex items-start gap-3">
           <ProjectAvatar p={p} />
           <div className="min-w-0 flex-1">
-            <span className="block truncate font-medium text-base leading-tight" title={p.name}>
-              {p.name}
-            </span>
-            <span className="block truncate font-mono text-muted-foreground text-xs" title={p.slug}>
-              {p.slug}
-            </span>
+            <CellTooltip text={p.name} className="flex">
+              <span data-cell-text className="truncate font-medium text-base leading-tight">
+                {p.name}
+              </span>
+            </CellTooltip>
+            <CellTooltip text={p.slug} className="flex">
+              <span data-cell-text className="truncate font-mono text-muted-foreground text-xs">
+                {p.slug}
+              </span>
+            </CellTooltip>
           </div>
           <Badge
             variant="outline"
