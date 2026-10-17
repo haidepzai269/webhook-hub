@@ -28,7 +28,7 @@ import { DELIVERY_STATUS_VALUES } from "@/lib/hub/list-url";
 import { useSources } from "@/lib/hub/queries";
 import { describeVerification } from "@/lib/hub/ui-logic";
 import { useLocale, useT } from "@/lib/i18n/use-t";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** Trạng thái lượt giao của hub -> nhãn dịch; mã lạ (API mới hơn console) giữ nguyên. */
 function DeliveryStatusLabel({ status }: { status: string }) {

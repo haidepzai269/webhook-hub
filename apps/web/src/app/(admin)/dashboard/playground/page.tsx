@@ -11,7 +11,6 @@ import { Send, Shuffle } from "lucide-react";
 
 import { JsonBlock } from "@/components/admin/copy-button";
 import { PageHeader } from "@/components/admin/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";

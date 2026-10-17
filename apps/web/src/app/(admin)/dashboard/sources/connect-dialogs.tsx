@@ -20,7 +20,7 @@ import { useSources } from "@/lib/hub/queries";
 import { connectionDialogMode } from "@/lib/hub/ui-logic";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, } from "@/components/ui/alert";
 
 /** KN2 (SPEC-ket-noi §4, ADR-138): form dựng từ `spec.fields` của connector — UI không biết provider nào có ô gì. */
 interface ConnectorInfo {

@@ -6,7 +6,7 @@ import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-ba
 import { SignatureBadge } from "@/components/flow/unverified-badge";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime, httpTone } from "@/lib/hub/format";
-import type { DeliveryAttempt, HubEventDetail } from "@/lib/hub/types";
+import type { HubEventDetail } from "@/lib/hub/types";
 import { isUnverified, SIGNATURE_VIEW, signatureView } from "@/lib/hub/unverified";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 

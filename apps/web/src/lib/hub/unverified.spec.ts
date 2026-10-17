@@ -54,8 +54,8 @@ describe("PK5 — nhãn \"Chưa xác thực\" ở console (REVIEW-PK5 TB-1)", ()
     expect(listen).toMatch(/page\.sources\.listen\.connected-unverified/);
     // Badge màu cảnh báo, không xanh.
     const badge = read("src/components/flow/unverified-badge.tsx");
-    expect(badge).toMatch(/amber/);
-    expect(badge).not.toMatch(/emerald|green/);
+    expect(badge).toMatch(/toneBadgeClass\("warn"\)/);
+    expect(badge).not.toMatch(/emerald|green|toneBadgeClass\("ok"\)/);
   });
 });
 

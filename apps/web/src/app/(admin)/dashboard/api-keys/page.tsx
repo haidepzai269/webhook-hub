@@ -30,7 +30,7 @@ import {
 } from "@/lib/hub/keys-logic";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/lib/hub/project-queries";
 import { useLocale, useT } from "@/lib/i18n/use-t";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /** Hộp "Chỉ hiện một lần" — key thô chỉ sống trong state của hộp này; đóng là mất (SK1, SPEC §3). */
 function ConnectionStringOnce({ connectionString }: { connectionString: string }) {

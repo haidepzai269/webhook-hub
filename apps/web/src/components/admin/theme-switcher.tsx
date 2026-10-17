@@ -3,7 +3,6 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
-import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/admin/icon-button";
 import { useT } from "@/lib/i18n/use-t";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
