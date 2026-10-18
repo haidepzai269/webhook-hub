@@ -5,6 +5,16 @@ import { RedisService } from '../redis/redis.service';
 import * as amqp from 'amqplib';
 import { PublicRoute } from '../service-api/require-scope.decorator';
 
+type DepState = { status: 'up' | 'down'; message?: string };
+type Dep = DepState & { required: boolean };
+
+/**
+ * ADR-248 — tách LIVENESS khỏi READINESS.
+ *  - `/health/live`: process còn trả lời được. KHÔNG chạm phụ thuộc nào (Redis chớp không được làm orchestrator restart).
+ *  - `/health/ready` (và `/health` đường cũ): kiểm phụ thuộc. CỨNG = Postgres (BB-3: không COMMIT được thì không được
+ *    ACK provider) -> rớt thì 503. MỀM = Redis (BB-2: được phép sai/mất) và RabbitMQ (ingest chỉ ghi `raw_events` + outbox
+ *    vào Postgres, relay ở hub-worker mới publish) -> rớt thì 200 + `degraded`.
+ */
 @Controller('health')
 @PublicRoute('health check công khai cho Render/compose, không trả dữ liệu tenant')
 export class HealthController {
@@ -13,59 +23,90 @@ export class HealthController {
     private readonly redis: RedisService,
   ) {}
 
-  private rabbitCache: { at: number; result: { status: 'up' | 'down'; message?: string } } | null = null;
-  private static readonly RABBIT_CACHE_MS = 30_000;
+  /** Phụ thuộc mềm đắt (handshake TLS AMQP / quota lệnh Upstash) -> cache ngắn trong bộ nhớ, dashboard poll cũng không đốt. */
+  private static readonly SOFT_CACHE_MS = 30_000;
+  /** Mỗi phép kiểm có trần thời gian: dependency treo không được làm health check treo theo. */
+  private static readonly PROBE_TIMEOUT_MS = 3_000;
 
-  private async checkRabbit(): Promise<{ status: 'up' | 'down'; message?: string }> {
-    if (this.rabbitCache && Date.now() - this.rabbitCache.at < HealthController.RABBIT_CACHE_MS) {
-      return this.rabbitCache.result;
-    }
-    let result: { status: 'up' | 'down'; message?: string };
+  private softCache = new Map<string, { at: number; result: DepState }>();
+
+  private withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
+    let t: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, rej) => {
+      t = setTimeout(() => rej(new Error(`${label} timeout ${HealthController.PROBE_TIMEOUT_MS}ms`)), HealthController.PROBE_TIMEOUT_MS);
+      t.unref?.();
+    });
+    return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+  }
+
+  private async cached(key: string, probe: () => Promise<DepState>): Promise<DepState> {
+    const hit = this.softCache.get(key);
+    if (hit && Date.now() - hit.at < HealthController.SOFT_CACHE_MS) return hit.result;
+    let result: DepState;
     try {
-      const amqpUrl = process.env.RABBITMQ_URL || 'amqp://hub_admin:hub_secret@localhost:5672';
-      const conn = await amqp.connect(amqpUrl);
-      await conn.close();
-      result = { status: 'up' };
+      result = await probe();
     } catch (e: any) {
-      result = { status: 'down', message: e.message };
+      result = { status: 'down', message: e?.message ?? String(e) };
     }
-    this.rabbitCache = { at: Date.now(), result };
+    this.softCache.set(key, { at: Date.now(), result });
     return result;
   }
 
+  /** Mở connection mới mỗi lần là đắt — luôn gọi qua `cached`. Tách method để test thay thế. */
+  protected async probeRabbit(): Promise<DepState> {
+    const amqpUrl = process.env.RABBITMQ_URL || 'amqp://hub_admin:hub_secret@localhost:5672';
+    const conn = await this.withTimeout(amqp.connect(amqpUrl), 'rabbitmq');
+    await conn.close();
+    return { status: 'up' };
+  }
+
+  private async probeRedis(): Promise<DepState> {
+    const ok = await this.withTimeout(this.redis.checkHealth(), 'redis');
+    return ok ? { status: 'up' } : { status: 'down' };
+  }
+
+  private async probePostgres(): Promise<DepState> {
+    try {
+      await this.withTimeout(this.prisma.$queryRaw`SELECT 1`, 'postgres');
+      return { status: 'up' };
+    } catch (e: any) {
+      return { status: 'down', message: e?.message ?? String(e) };
+    }
+  }
+
+  private async evaluate() {
+    const [pg, redis, rabbit] = await Promise.all([
+      this.probePostgres(),
+      this.cached('redis', () => this.probeRedis()),
+      this.cached('rabbitmq', () => this.probeRabbit()),
+    ]);
+    const dependencies: Record<string, Dep> = {
+      postgres: { ...pg, required: true },
+      redis: { ...redis, required: false },
+      rabbitmq: { ...rabbit, required: false },
+    };
+    const hardDown = Object.values(dependencies).some((d) => d.required && d.status === 'down');
+    const softDown = Object.values(dependencies).some((d) => !d.required && d.status === 'down');
+    const status = hardDown ? 'unhealthy' : softDown ? 'degraded' : 'healthy';
+    return { httpStatus: hardDown ? 503 : 200, body: { status, timestamp: new Date().toISOString(), dependencies } };
+  }
+
+  /** Liveness: đồng bộ, không I/O. */
+  @Get('live')
+  live(@Res() res: Response) {
+    return res.status(200).json({ status: 'alive', timestamp: new Date().toISOString() });
+  }
+
+  @Get('ready')
+  async ready(@Res() res: Response) {
+    const { httpStatus, body } = await this.evaluate();
+    return res.status(httpStatus).json(body);
+  }
+
+  /** Đường cũ giữ nguyên JSON chi tiết; status code theo luật mới (như `/health/ready`). */
   @Get()
   async check(@Res() res: Response) {
-    const checks: Record<string, { status: 'up' | 'down'; message?: string }> = {
-      postgres: { status: 'down' },
-      redis: { status: 'down' },
-      rabbitmq: { status: 'down' },
-    };
-
-    // 1. Kiểm tra Postgres
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-      checks.postgres = { status: 'up' };
-    } catch (e: any) {
-      checks.postgres = { status: 'down', message: e.message };
-    }
-
-    // 2. Kiểm tra Redis
-    try {
-      const redisOk = await this.redis.checkHealth();
-      checks.redis = { status: redisOk ? 'up' : 'down' };
-    } catch (e: any) {
-      checks.redis = { status: 'down', message: e.message };
-    }
-
-    // 3. Kiểm tra RabbitMQ — mở connection mới mỗi lần là đắt (handshake TLS) và đốt giới hạn
-    // connection của CloudAMQP khi dashboard poll /health. Cache kết quả ngắn hạn trong bộ nhớ.
-    checks.rabbitmq = await this.checkRabbit();
-
-    const allUp = Object.values(checks).every((c) => c.status === 'up');
-    return res.status(allUp ? 200 : 503).json({
-      status: allUp ? 'healthy' : 'degraded',
-      timestamp: new Date().toISOString(),
-      dependencies: checks,
-    });
+    const { httpStatus, body } = await this.evaluate();
+    return res.status(httpStatus).json(body);
   }
 }

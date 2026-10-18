@@ -1,4 +1,5 @@
-import { startMetricsServer } from './metrics';
+import { startMetricsServer, setReadinessProbe } from './metrics';
+import { startExternalHeartbeatFromEnv, heartbeatAgeMs } from './heartbeat';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
 import { setupRabbitMQTopology, QUEUES } from '@hub/messaging';
@@ -180,12 +181,36 @@ async function bootstrap() {
   );
   logger.info(`Đang lắng nghe consumer queue: ${QUEUES.DELIVERY_MAIN} (prefetch: 20, manual ack)`);
 
+  // ADR-248: readiness = cả hai consumer đã subscribe + Postgres trả lời. Liveness (`/health/live`) không chạm gì.
+  const prismaForReady = PrismaService.getInstance();
+  setReadinessProbe(async () => {
+    const consumers = !shuttingDown;
+    let postgres = 'up';
+    try {
+      await Promise.race([
+        prismaForReady.$queryRaw`SELECT 1`,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000).unref()),
+      ]);
+    } catch {
+      postgres = 'down';
+    }
+    const age = heartbeatAgeMs();
+    return {
+      ok: consumers && postgres === 'up',
+      checks: { consumers: consumers ? 'up' : 'down', postgres, heartbeatAgeSeconds: age === null ? 'none' : String(Math.round(age / 1000)) },
+    };
+  });
+  // ADR-248: dead-man's switch ngoài, tắt mặc định (không HEARTBEAT_URL = no-op).
+  const externalHeartbeat = startExternalHeartbeatFromEnv();
+  if (externalHeartbeat) logger.info('HEARTBEAT_URL đã bật: ping dịch vụ ngoài khi vòng outbox relay còn khoẻ');
+
   // 5. Graceful Shutdown theo ARCHITECTURE.md §5.6 (Render SIGTERM 25s timeout)
   const shutdownTimeoutMs = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '25000', 10);
 
   const handleShutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    externalHeartbeat?.stop();
     logger.info(`Nhận tín hiệu ${signal}. Bắt đầu graceful shutdown (timeout: ${shutdownTimeoutMs}ms)...`);
     outboxRelay.stop();
     sweeper.stop();

@@ -1,4 +1,5 @@
 import { outboxLag } from '../metrics';
+import { beat } from '../heartbeat';
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { EXCHANGES, ROUTING_KEYS } from '@hub/messaging';
@@ -91,6 +92,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       }
       const publishedCount = await this.relayBatch(this.channel);
       full = publishedCount >= RELAY_BATCH;
+      beat(); // ADR-248: lượt làm việc THẬT thành công (Postgres + broker) — chỉ trong bộ nhớ
       if (publishedCount > 0) {
         logger.debug({ count: publishedCount, full }, 'Outbox Relay đã publish xong batch');
       }
