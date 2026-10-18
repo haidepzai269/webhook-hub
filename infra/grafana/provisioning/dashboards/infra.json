@@ -1,0 +1,972 @@
+{
+  "uid": "webhook-hub-infra",
+  "title": "Hạ tầng",
+  "tags": [
+    "webhook-hub",
+    "infra"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "15s",
+      "30s",
+      "1m",
+      "5m"
+    ],
+    "time_options": [
+      "15m",
+      "1h",
+      "6h",
+      "24h",
+      "2d",
+      "7d",
+      "15d"
+    ]
+  },
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Tổng quan — target & worker",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Target đang UP",
+      "description": "Số target Prometheus scrape được / tổng. Dưới tổng = có bộ phận mất mạch đập.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(up)",
+          "legendFormat": "UP"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "count(up)",
+          "legendFormat": "Tổng"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Heartbeat worker — giây từ nhịp cuối",
+      "description": "time() - hub_worker_heartbeat_timestamp_seconds. >120s = luật WorkerSilent. PHỤ THUỘC metric do hub-worker phát; chưa có thì panel trống.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 9,
+        "x": 6,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "time() - hub_worker_heartbeat_timestamp_seconds",
+          "legendFormat": "tuổi nhịp cuối"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Cảnh báo đang bắn",
+      "description": "Số alert firing (Prometheus ALERTS).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 9,
+        "x": 15,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+          "legendFormat": "firing"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "row",
+      "title": "Host (VM WSL2 của Docker Desktop — không phải Windows host)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "CPU host",
+      "description": "1 - idle, trung bình các core.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "instance:node_cpu_utilisation:ratio5m",
+          "legendFormat": "CPU"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "RAM host",
+      "description": "1 - MemAvailable/MemTotal. >90% = HostMemoryHigh.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "instance:node_mem_utilisation:ratio",
+          "legendFormat": "RAM dùng"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "node_memory_MemAvailable_bytes",
+          "legendFormat": "còn trống (byte)"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Disk trống theo mountpoint",
+      "description": "node_filesystem_avail_bytes / size. Đã loại tmpfs/overlay. Nhìn dốc đi xuống = GIAI ĐOẠN.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs|ramfs\"} / node_filesystem_size_bytes",
+          "legendFormat": "{{mountpoint}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Dự báo disk: còn trống sau 7 ngày (predict_linear 6h)",
+      "description": "Âm = dự báo hết chỗ trong 7 ngày (luật DiskWillFillIn7Days).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "predict_linear(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs|ramfs\"}[6h], 7*86400)",
+          "legendFormat": "{{mountpoint}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Tốc độ tăng DB nghiệp vụ (byte/ngày)",
+      "description": "deriv(hub_db_size_bytes[6h])*86400 — recording rule hub:db_size_growth_bytes:perday6h.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "hub:db_size_growth_bytes:perday6h",
+          "legendFormat": "tăng/ngày"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Container (nhãn container = 12 ký tự ID, khớp `docker ps`)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "RAM theo container",
+      "description": "container_memory_working_set_bytes. cAdvisor trên Docker Desktop không có tên container -> tra ID bằng docker ps.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "container:memory_working_set_bytes",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "CPU theo container (core)",
+      "description": "rate(container_cpu_usage_seconds_total[5m]).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "container:cpu_cores:rate5m",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "PostgreSQL",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Connections",
+      "description": "Tổng numbackends so với max_connections (luật PostgresConnectionsNearMax ở 80%).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(pg_stat_database_numbackends)",
+          "legendFormat": "đang dùng"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "pg_settings_max_connections",
+          "legendFormat": "tối đa"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Kích thước database nghiệp vụ",
+      "description": "hub_db_size_bytes (hub-worker đọc pg_database_size ≤ 10 phút/lần) và pg_database_size_bytes từ exporter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "hub_db_size_bytes",
+          "legendFormat": "hub_db_size_bytes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "pg_database_size_bytes{datname=\"webhook_hub\"}",
+          "legendFormat": "exporter webhook_hub"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Giao dịch/giây",
+      "description": "commit + rollback trên webhook_hub.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"webhook_hub\"}[1m])",
+          "legendFormat": "commit"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"webhook_hub\"}[1m])",
+          "legendFormat": "rollback"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "row",
+      "title": "Redis (đường tắt — được phép sai, BB-2)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "panels": []
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Bộ nhớ",
+      "description": "used vs maxmemory (0 = không đặt trần).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "đang dùng"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "redis_memory_max_bytes",
+          "legendFormat": "maxmemory"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Lệnh/giây",
+      "description": "rate(redis_commands_processed_total). Ngân sách R1 tính theo lệnh/sự kiện.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "rate(redis_commands_processed_total[1m])",
+          "legendFormat": "lệnh/s"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Clients & key",
+      "description": "connected_clients và tổng key.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "redis_connected_clients",
+          "legendFormat": "clients"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "B",
+          "expr": "sum(redis_db_keys)",
+          "legendFormat": "keys"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "RabbitMQ",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Độ sâu queue (ready)",
+      "description": "rabbitmq_detailed_queue_messages_ready theo queue. Retry queue có TTL nên tự rỗng.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "rabbitmq_detailed_queue_messages_ready",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Consumer theo queue",
+      "description": "= 0 ở q.normalize / q.delivery.main là luật RabbitNoConsumers.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "rabbitmq_detailed_queue_consumers",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "DLQ — tin chết",
+      "description": "Tổng tin trong q.*.dlq. > 0 trong 5 phút = RabbitDeadLetterNotEmpty.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "hub-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "hub-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rabbitmq_detailed_queue_messages_ready{queue=~\"q\\\\..*\\\\.dlq\"}) or vector(0)",
+          "legendFormat": "DLQ"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "editable": false
+}

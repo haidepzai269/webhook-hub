@@ -1,0 +1,201 @@
+# MON1 (ADR-249) — luật hạ tầng LOCAL. Kiểm: promtool check rules (xem docs/MONITORING.md).
+# Mỗi annotation trả lời "cơ thể nào bị bệnh gì".
+groups:
+  # Lưu ý: Docker Desktop dùng containerd image store nên cAdvisor KHÔNG gắn được tên container (chỉ cgroup /docker/<id>).
+  # prometheus.yml sinh nhãn `container` = 12 ký tự đầu của id (khớp cột ID của `docker ps`). Xem docs/MONITORING.md.
+  - name: recording
+    interval: 30s
+    rules:
+      - record: instance:node_cpu_utilisation:ratio5m
+        expr: 1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+      - record: instance:node_mem_utilisation:ratio
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
+      - record: container:cpu_cores:rate5m
+        expr: sum by (container) (rate(container_cpu_usage_seconds_total{id=~"/docker/[0-9a-f]{64}"}[5m]))
+      - record: container:memory_working_set_bytes
+        expr: sum by (container) (container_memory_working_set_bytes{id=~"/docker/[0-9a-f]{64}"})
+      # Tốc độ tăng của database nghiệp vụ (byte/ngày) — nhìn xu hướng "giai đoạn" trên dashboard.
+      - record: hub:db_size_growth_bytes:perday6h
+        expr: deriv(hub_db_size_bytes[6h]) * 86400
+
+  - name: availability
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Không scrape được {{ $labels.job }} ({{ $labels.instance }})"
+          description: "Tiến trình/exporter {{ $labels.job }} không trả /metrics 1 phút: hoặc container đã chết, hoặc treo. Mất mạch đập của bộ phận này -> kiểm docker ps / docker logs."
+
+      - alert: WorkerSilent
+        # PHỤ THUỘC: metric hub_worker_heartbeat_timestamp_seconds do hub-worker phát (agent khác thêm cùng đợt /health).
+        # Chưa có metric thì vector rỗng -> luật im lặng, không báo giả. Worker chết hẳn thì TargetDown{job="hub-worker"} bắt;
+        # luật này bắt ca khó hơn: tiến trình còn sống, còn trả /metrics nhưng vòng lặp chính đứng.
+        expr: time() - hub_worker_heartbeat_timestamp_seconds > 120
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "hub-worker im > 2 phút"
+          description: "Tim worker còn đập ở tầng HTTP nhưng nhịp heartbeat nội bộ ngừng >120s: relay outbox / consumer có thể đã kẹt (sự kiện nằm yên, không mất nhưng không được giao)."
+
+  - name: host
+    rules:
+      - alert: HostMemoryHigh
+        expr: instance:node_mem_utilisation:ratio > 0.90
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "RAM VM Docker > 90%"
+          description: "Bộ nhớ của VM WSL2 (không phải Windows host) đầy {{ $value | humanizePercentage }}: sắp bị OOM-kill container ngẫu nhiên."
+      - alert: HostMemoryCritical
+        expr: instance:node_mem_utilisation:ratio > 0.96
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "RAM VM Docker > 96%"
+          description: "VM gần cạn RAM ({{ $value | humanizePercentage }}): kernel sắp giết tiến trình, Postgres/Rabbit có thể chết giữa chừng."
+      - alert: HostCpuHigh
+        expr: instance:node_cpu_utilisation:ratio5m > 0.85
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU VM Docker > 85% kéo dài 15 phút"
+          description: "Tim làm việc quá sức liên tục ({{ $value | humanizePercentage }}), không phải đỉnh thoáng qua: tải thật hoặc vòng lặp chạy không phanh."
+      - alert: DiskWillFillIn7Days
+        # Câu hỏi "GIAI ĐOẠN": nhìn 6 giờ gần nhất, ngoại suy tuyến tính 7 ngày. Chỉ xét ổ còn dưới 50% trống để tránh báo thừa ở ổ rộng.
+        expr: |
+          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h], 7 * 86400) < 0)
+          and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes < 0.5)
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ổ {{ $labels.mountpoint }} dự báo đầy trong 7 ngày"
+          description: "Theo đà 6 giờ qua, ổ {{ $labels.mountpoint }} ({{ $labels.device }}) hết chỗ trong <7 ngày: xương sống lưu trữ sắp hết đệm. Dọn dữ liệu / tăng ổ trước đó."
+      - alert: DiskWillFillIn24Hours
+        expr: |
+          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[3h], 24 * 3600) < 0)
+          and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes < 0.5)
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Ổ {{ $labels.mountpoint }} dự báo đầy trong 24 giờ"
+          description: "Ổ {{ $labels.mountpoint }} sẽ hết chỗ trong chưa đầy một ngày theo đà 3 giờ qua: Postgres sẽ ngừng ghi, mất khả năng COMMIT (BB-3)."
+      - alert: DiskAlmostFull
+        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes < 0.10
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Ổ {{ $labels.mountpoint }} còn dưới 10%"
+          description: "Ổ {{ $labels.mountpoint }} chỉ còn {{ $value | humanizePercentage }} trống."
+
+  - name: containers
+    rules:
+      - alert: ContainerMemoryNearLimit
+        # Chỉ có nghĩa khi container có giới hạn bộ nhớ (limit > 0); local mặc định không đặt limit nên luật thường im.
+        expr: |
+          container_memory_working_set_bytes{id=~"/docker/[0-9a-f]{64}"}
+            / (container_spec_memory_limit_bytes{id=~"/docker/[0-9a-f]{64}"} > 0) > 0.90
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.container }} dùng > 90% giới hạn RAM"
+          description: "Container {{ $labels.container }} sắp chạm trần bộ nhớ đã đặt ({{ $value | humanizePercentage }}): sắp bị OOM-kill và restart."
+      - alert: ContainerMemoryLarge
+        expr: container:memory_working_set_bytes > 1.5 * 1024 * 1024 * 1024
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.container }} ăn > 1.5 GiB RAM"
+          description: "Container {{ $labels.container }} giữ {{ $value | humanize1024 }}B kéo dài: nghi rò bộ nhớ hoặc hàng đợi trong bộ nhớ phình."
+      - alert: ContainerCpuHigh
+        expr: container:cpu_cores:rate5m > 1
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.container }} dùng > 1 core CPU suốt 15 phút"
+          description: "Container {{ $labels.container }} chạy hết công suất ({{ $value | humanize }} core) kéo dài: vòng lặp nóng hoặc tải thật."
+      - alert: ContainerRestarting
+        expr: changes(container_start_time_seconds{id=~"/docker/[0-9a-f]{64}"}[15m]) > 2
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.container }} khởi động lại > 2 lần trong 15 phút"
+          description: "Container {{ $labels.container }} chết rồi dựng lại liên tục (crash loop): xem docker logs, thường do thiếu secret hoặc OOM."
+
+  - name: postgres
+    rules:
+      - alert: PostgresConnectionsNearMax
+        expr: |
+          sum(pg_stat_database_numbackends) / scalar(pg_settings_max_connections) > 0.80
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Postgres dùng > 80% connection tối đa"
+          description: "Số kết nối bằng {{ $value | humanizePercentage }} trần max_connections: pool app/worker đang giữ quá nhiều, sắp 'too many clients' và request ingest lỗi."
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Exporter không nối được Postgres"
+          description: "Postgres (trọng tài idempotency, BB-2) không trả lời: ingest sẽ không COMMIT được -> không ACK (BB-3)."
+      - alert: HubDbGrowingFast
+        # hub_db_size_bytes do hub-worker phát (đọc pg_database_size tối đa 10 phút/lần) nên cửa sổ ≥ 1h mới đủ điểm.
+        expr: delta(hub_db_size_bytes[1h]) > 200 * 1024 * 1024
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Database nghiệp vụ tăng > 200 MiB trong 1 giờ"
+          description: "Kích thước DB tăng {{ $value | humanize1024 }}B/giờ: dữ liệu sự kiện/outbox phình bất thường hoặc cleanup không chạy."
+      - alert: HubDbNearBudget
+        expr: hub_storage_near_full == 1
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Database vượt 80% DB_DISK_BUDGET_MB"
+          description: "Hub tự chốt chiều ghi theo ngân sách ổ DB (ADR-185): ghi mới sẽ bị 507. Dọn dữ liệu hoặc tăng ngân sách."
+
+  - name: redis
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Redis không trả lời"
+          description: "Redis chỉ là đường tắt (BB-2): hệ thống chậm đi chứ không sai, nhưng đường nóng sẽ rơi hết về Postgres."
+      - alert: RedisMemoryNearMax
+        # redis_memory_max_bytes = 0 khi không đặt maxmemory (local mặc định) -> điều kiện > 0 loại luật ra.
+        expr: redis_memory_used_bytes / (redis_memory_max_bytes > 0) > 0.85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Redis dùng > 85% maxmemory"
+          description: "Redis đầy {{ $value | humanizePercentage }} maxmemory: sắp tống khứ key (evict), đường tắt idempotency mất hiệu quả."
+
+  - name: rabbitmq
+    rules:
+      - alert: RabbitQueueBacklogGrowing
+        # Chỉ hai queue chính (retry có TTL nên tự rỗng, DLQ có luật riêng). >100 tin và đang tăng liên tục 15 phút.
+        expr: |
+          (rabbitmq_detailed_queue_messages_ready{queue=~"q\\.normalize|q\\.delivery\\.main"} > 100)
+          and (deriv(rabbitmq_detailed_queue_messages_ready{queue=~"q\\.normalize|q\\.delivery\\.main"}[10m]) > 0)
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hàng đợi {{ $labels.queue }} tồn và tăng liên tục"
+          description: "Queue {{ $labels.queue }} có {{ $value }} tin chờ và không giảm: consumer chậm hơn tốc độ vào, sự kiện giao trễ."
+      - alert: RabbitNoConsumers
+        expr: rabbitmq_detailed_queue_consumers{queue=~"q\\.normalize|q\\.delivery\\.main"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Queue {{ $labels.queue }} không có consumer"
+          description: "Không ai đọc {{ $labels.queue }}: hub-worker chưa nối RabbitMQ hoặc đã chết; sự kiện nằm yên trong queue."
+      - alert: RabbitDeadLetterNotEmpty
+        expr: rabbitmq_detailed_queue_messages_ready{queue=~"q\\..*\\.dlq"} > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "DLQ {{ $labels.queue }} có {{ $value }} tin"
+          description: "Có tin chết hẳn (hết retry / lỗi vĩnh viễn) trong {{ $labels.queue }}: cần người xem, không tự lành."

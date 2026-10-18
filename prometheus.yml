@@ -1,5 +1,14 @@
 global:
   scrape_interval: 5s
+  evaluation_interval: 15s
+
+# MON1 (ADR-249): luật cảnh báo + Alertmanager. Chỉ cho LOCAL (xem docs/MONITORING.md).
+rule_files:
+  - /etc/prometheus/rules/*.yml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
 
 # S3-4: hub-api phục vụ /metrics qua Nest (cổng 4000); hub-worker qua http server tối giản (9101,
 # chỉ trong mạng compose).
@@ -18,3 +27,49 @@ scrape_configs:
     #   credentials: '<METRICS_TOKEN>'
     static_configs:
       - targets: ['hub-worker:9101']
+
+  # ---- MON1 (ADR-249): hạ tầng LOCAL. Nhịp 15s (không 5s): cAdvisor/INFO Redis không cần dày, và 15d retention gọn hơn.
+  # KHÔNG chạy các job dưới đây ở deployed — redis-exporter 5s ăn quota lệnh Upstash (R1, docs/MONITORING.md).
+  - job_name: 'node'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['node-exporter:9100']
+  - job_name: 'cadvisor'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['cadvisor:8080']
+    # Docker Desktop (containerd image store): cAdvisor không biết tên container, chỉ có id cgroup /docker/<64 hex>.
+    # Rút 12 ký tự đầu = cột ID của `docker ps` -> nhãn `container`. Cgroup không phải container Docker không có nhãn này.
+    metric_relabel_configs:
+      - source_labels: [id]
+        regex: '/docker/([0-9a-f]{12})[0-9a-f]{52}'
+        target_label: container
+        replacement: '$1'
+  - job_name: 'postgres'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+  - job_name: 'redis'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['redis-exporter:9121']
+  - job_name: 'rabbitmq'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['rabbitmq:15692']
+  # Số tin / số consumer THEO TỪNG QUEUE: endpoint /metrics/detailed (không cần bật return_per_object_metrics toàn cục).
+  - job_name: 'rabbitmq-queues'
+    scrape_interval: 15s
+    metrics_path: /metrics/detailed
+    params:
+      family: ['queue_coarse_metrics', 'queue_consumer_count']
+    static_configs:
+      - targets: ['rabbitmq:15692']
+  - job_name: 'alertmanager'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['alertmanager:9093']
+  - job_name: 'prometheus'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9090']

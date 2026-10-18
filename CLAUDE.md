@@ -11,6 +11,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 | [`docs/ROADMAP-14D.md`](docs/ROADMAP-14D.md) | Lộ trình 14 ngày + Definition of Done từng ngày |
 | [`docs/EVENT-CATALOG.md`](docs/EVENT-CATALOG.md) | **Catalog kiểu chuẩn** (`payment.*`, `repo.*`) — hợp đồng đầu ra của hub. Thêm/đổi trường = sửa catalog + test U50 |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Hai môi trường · Render/Vercel/Neon/Upstash/CloudAMQP · ràng buộc free tier · env vars |
+| [`docs/MONITORING.md`](docs/MONITORING.md) | Theo dõi sức khỏe 6 tầng (LOCAL: Prometheus + exporter + Alertmanager + dashboard "Hạ tầng") · giới hạn Windows/WSL2 · ADR-249 |
 | [`docs/LOGGING.md`](docs/LOGGING.md) | Log tự nói nguyên nhân sơ bộ: taxonomy `cause` (chậm/sai/tăng nhanh), canonical log line, `stage_ms`, `traceparent` W3C + Sentry/RUM — THIẾT KẾ (ADR-250..252), chưa code |
 | [`docs/adr/README.md`](docs/adr/README.md) | Nhật ký quyết định — **append-only, ghi ngay khi quyết định** |
 | `webhook-hub-y-tuong.md` | Ý tưởng gốc. **Chỉ tham khảo.** Mâu thuẫn với ARCHITECTURE.md → ARCHITECTURE.md thắng. |

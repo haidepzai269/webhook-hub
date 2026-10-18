@@ -48,8 +48,13 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    # MON1 (ADR-249): /metrics của plugin rabbitmq_prometheus — CHỈ trong mạng compose, không publish ra host.
+    expose:
+      - "15692"
     volumes:
       - rabbitdata:/var/lib/rabbitmq
+      # MON1: bật plugin rabbitmq_prometheus (không khai báo/đổi queue nào — topology chỉ ở libs/messaging/topology.ts)
+      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_running"]
       interval: 10s
@@ -79,10 +84,110 @@ services:
     image: prom/prometheus:v3.14.0
     container_name: webhook-hub-prometheus
     restart: unless-stopped
+    # MON1 (ADR-249): lưu bền (volume promdata) + retention 15 ngày để trả lời câu hỏi "giai đoạn" (xu hướng tuần).
+    # Phải lặp lại --config.file vì khai báo `command` thay hoàn toàn lệnh mặc định của image.
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules:/etc/prometheus/rules:ro
+      - promdata:/prometheus
+    depends_on:
+      - alertmanager
+
+  # MON1 (ADR-249): bộ theo dõi hạ tầng CHỈ cho LOCAL (xem docs/MONITORING.md). Không publish cổng exporter ra host.
+  # Số đo CPU/RAM/disk của node-exporter là của VM WSL2 của Docker Desktop, KHÔNG phải của Windows host.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: webhook-hub-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run|var/lib/docker/.+|var/lib/kubelet/.+)($$|/)
+    # Docker Desktop (WSL2) từ chối `rslave` cho "/" nên mount ro thường; đủ để đọc filesystem của VM.
+    volumes:
+      - /:/host:ro
+    expose:
+      - "9100"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: webhook-hub-cadvisor
+    restart: unless-stopped
+    # Docker Desktop: cần đọc cgroup + data-root của Docker trong VM; privileged là cách ổn định duy nhất ở đây.
+    privileged: true
+    command:
+      - --housekeeping_interval=15s
+      - --docker_only=false
+      - --docker=unix:///nonexistent.sock
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    expose:
+      - "8080"
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: webhook-hub-postgres-exporter
+    restart: unless-stopped
+    # Cùng thông tin đăng nhập đã có ở service postgres phía trên (local-only). Exporter chỉ chạy truy vấn đọc.
+    environment:
+      DATA_SOURCE_NAME: postgresql://hub_user:hub_password@postgres:5432/webhook_hub?sslmode=disable
+    expose:
+      - "9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0-alpine
+    container_name: webhook-hub-redis-exporter
+    restart: unless-stopped
+    # Chỉ INFO/đọc. KHÔNG chạy ở deployed: scrape 5s sẽ ăn quota lệnh Upstash (docs/MONITORING.md §Giới hạn).
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    expose:
+      - "9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Receiver CHƯA chốt (email / Telegram / SMS) -> `default` gửi webhook tới alert-sink chỉ để ghi log. Xem infra/alertmanager.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: webhook-hub-alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanagerdata:/alertmanager
+    ports:
+      - "9093:9093"
+    depends_on:
+      - alert-sink
+
+  alert-sink:
+    image: mendhak/http-https-echo:33
+    container_name: webhook-hub-alert-sink
+    restart: unless-stopped
+    # In mọi request nhận được ra stdout: `docker logs webhook-hub-alert-sink`
+    environment:
+      HTTP_PORT: "8080"
+      HTTPS_PORT: "0"
+      DISABLE_REQUEST_LOGS: "false"
+    expose:
+      - "8080"
 
   grafana:
     image: grafana/grafana:13.2.2
@@ -394,3 +499,6 @@ volumes:
   pgdata:
   redisdata:
   rabbitdata:
+  # MON1 (ADR-249): TSDB Prometheus (retention 15d) + trạng thái silence của Alertmanager
+  promdata:
+  alertmanagerdata:
