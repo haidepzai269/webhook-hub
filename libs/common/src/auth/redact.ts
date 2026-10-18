@@ -28,6 +28,8 @@ export const LOG_REDACT_OPTIONS = {
 
 const PATTERNS: [RegExp, string][] = [
   [/\bhk_(live|test)_[A-Za-z0-9_-]{8,}/g, 'hk_$1_***'],
+  // LOGGING.md §5: signing secret của endpoint (`whsec_…`) không bao giờ vào log.
+  [/\bwhsec_[A-Za-z0-9+/=_-]{6,}/g, 'whsec_***'],
   [/(__Host-hub_(?:at|rt|oauth)=)[^;\s"]+/g, '$1***'],
   [/(hub_csrf=)[^;\s"]+/g, '$1***'],
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1***'],

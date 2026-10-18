@@ -19,3 +19,7 @@ export * from './alerts';
 export * from './traffic';
 export * from './storage';
 export * from './log-throttle';
+export * from './causes';
+export * from './slow-thresholds';
+export * from './trace-context';
+export * from './log-line';
