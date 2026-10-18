@@ -35,3 +35,39 @@ describe('trace-context — W3C traceparent (LOGGING.md §4)', () => {
     expect(newTraceId()).toMatch(/^[0-9a-f]{32}$/);
   });
 });
+
+describe('traceFromHeaders — worker đọc ngữ cảnh (LOGGING.md §4)', () => {
+  const { traceFromHeaders } = require('../src/trace-context');
+  const corr = '3f2a9c1e-5b7d-4a08-b6c1-d2e3f4a5b6c7';
+  const tid = '3f2a9c1e5b7d4a08b6c1d2e3f4a5b6c7';
+
+  it('có traceparent hợp lệ -> propagated, giữ trace_id, span mới, parent là span cũ', () => {
+    const t = traceFromHeaders({ traceparent: `00-${tid}-${'a'.repeat(16)}-01` }, 'whatever');
+    expect(t).toMatchObject({ traceId: tid, origin: 'propagated', parentSpanId: 'a'.repeat(16) });
+    expect(t.spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(t.spanId).not.toBe('a'.repeat(16));
+  });
+  it('không header nhưng correlationId là UUID -> correlation (cùng trace_id); không gì cả -> orphan, không ném', () => {
+    expect(traceFromHeaders({}, corr)).toMatchObject({ traceId: tid, origin: 'correlation' });
+    const o = traceFromHeaders(undefined, 'corr-1');
+    expect(o.origin).toBe('orphan');
+    expect(o.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(traceFromHeaders({ traceparent: 'rác' }, undefined).origin).toBe('orphan');
+  });
+  it('x-replay-of hợp lệ được chuyển thành replayOf; rác bị bỏ', () => {
+    expect(traceFromHeaders({ 'x-replay-of': tid }, corr).replayOf).toBe(tid);
+    expect(traceFromHeaders({ 'x-replay-of': 'zzz' }, corr).replayOf).toBeUndefined();
+  });
+});
+
+describe('replayTraceFields — replay = trace mới + link gốc', () => {
+  const { replayTraceFields } = require('../src/trace-context');
+  const corr = '3f2a9c1e-5b7d-4a08-b6c1-d2e3f4a5b6c7';
+  it('trace_id MỚI khác gốc, replayOf = trace_id gốc; correlationId lạ -> không replayOf nhưng vẫn có trace mới', () => {
+    const r = replayTraceFields(corr);
+    expect(r.replayOf).toBe('3f2a9c1e5b7d4a08b6c1d2e3f4a5b6c7');
+    expect(parseTraceparent(r.traceparent)!.traceId).not.toBe(r.replayOf);
+    expect(replayTraceFields('corr-1').replayOf).toBeUndefined();
+    expect(parseTraceparent(replayTraceFields('corr-1').traceparent)).not.toBeNull();
+  });
+});

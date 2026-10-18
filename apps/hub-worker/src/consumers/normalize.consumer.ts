@@ -2,8 +2,18 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { BACKPRESSURE_DB, FailureRateController } from '../backpressure/failure-rate.controller';
 import { PrismaService, TenantScopedRepository } from '@hub/database';
 import { ProviderRegistry } from '@hub/providers';
-import { QUEUES, normalizeMaxDeferMs } from '@hub/messaging';
+import { performance } from 'perf_hooks';
+import { NORMALIZE_RETRY_TTL_MS, QUEUES, normalizeMaxDeferMs } from '@hub/messaging';
 import {
+  CanonicalLogger,
+  CanonicalOutcome,
+  Cause,
+  Stage,
+  TRACEPARENT_HEADER,
+  computeQueueWait,
+  errInfo,
+  formatTraceparent,
+  traceFromHeaders,
   logger,
   OutboxPayload,
   NormalizedEvent,
@@ -25,6 +35,18 @@ import {
   readNormalizeRetryCount,
 } from './normalize-errors';
 import { normalizeDeferred, normalizeRetries, normalizeSchemaErrors } from '../metrics';
+
+/** Ngữ cảnh một lần xử lý message normalize (log `normalize.done`, LOGGING.md §3). */
+interface NormalizeRun {
+  ctx: ReturnType<typeof traceFromHeaders>;
+  t0: number;
+  /** Chỉ có khi message mang `timestamp` AMQP (relay) hoặc `x-due-at` (tầng retry). */
+  queueWaitMs?: number;
+  clockSkew: boolean;
+  outboxLagMs?: number;
+  stages: Partial<Record<Stage, number>>;
+  payload?: Partial<OutboxPayload>;
+}
 
 /** BP5 §7.4: mốc bắt đầu hoãn không đốt lượt của một raw event ở normalize (epoch ms). */
 export const NORMALIZE_DEFERRED_SINCE_HEADER = 'x-normalize-deferred-since';
@@ -87,6 +109,8 @@ export class NormalizeConsumer {
   private faultsLeft: number;
   /** F2 (ADR-231): warn "Lỗi tạm ở normalize" tối đa 1 dòng / 30s / tiến trình (như `infraLogThrottle` của delivery). */
   readonly transientLogThrottle = new LogThrottle();
+  /** LOGGING.md §3: MỘT dòng `normalize.done` mỗi lần xử lý message (ok/skip/lỗi/hoãn). Gán lại được (test). */
+  canonical: CanonicalLogger = new CanonicalLogger({ log: logger });
 
   constructor(
     private readonly prisma: PrismaService,
@@ -118,13 +142,15 @@ export class NormalizeConsumer {
    * ứng viên renormalize) — không spill vô hạn vượt sàn dọn của QT.
    */
   spill(msg: amqp.ConsumeMessage, channel: amqp.Channel): void {
-    const headers = { ...(msg.properties.headers || {}) };
+    const run = this.begin(msg);
+    const headers = this.outHeaders(run, msg.properties.headers, NORMALIZE_RETRY_TTL_MS);
     const now = Date.now();
     const sinceRaw = Number(headers[NORMALIZE_DEFERRED_SINCE_HEADER]);
     const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : now;
     if (now - since <= normalizeMaxDeferMs()) {
       channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, { persistent: true, headers: { ...headers, [NORMALIZE_DEFERRED_SINCE_HEADER]: since } });
       channel.ack(msg);
+      this.emitDone(run, 'deferred', { cause: 'slow.deferred_backpressure', deferMs: NORMALIZE_RETRY_TTL_MS, nextQueue: QUEUES.NORMALIZE_RETRY });
       return;
     }
     const retries = readNormalizeRetryCount(headers);
@@ -132,10 +158,86 @@ export class NormalizeConsumer {
       normalizeRetries.inc();
       channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, { persistent: true, headers: { ...headers, [NORMALIZE_RETRY_HEADER]: retries + 1 } });
       channel.ack(msg);
+      this.emitDone(run, 'retry', { cause: 'slow.deferred_backpressure', deferMs: NORMALIZE_RETRY_TTL_MS, nextQueue: QUEUES.NORMALIZE_RETRY });
       return;
     }
     logger.error({ deferredSince: since, retries }, 'Normalize giữ/hoãn quá NORMALIZE_MAX_DEFER_MS và hết lượt -> DLQ (renormalize từ Postgres)');
     channel.nack(msg, false, false);
+    this.emitDone(run, 'dead', { cause: 'slow.deferred_backpressure' });
+  }
+
+  /** Ngữ cảnh MỘT lần xử lý: trace (đọc header), đồng hồ, chờ hàng đợi / tuổi outbox. Không I/O. */
+  private begin(msg: amqp.ConsumeMessage, payload?: Partial<OutboxPayload>): NormalizeRun {
+    const headers = (msg.properties.headers ?? {}) as Record<string, unknown>;
+    const correlation = headers['x-correlation-id'] ?? payload?.correlationId;
+    const ctx = traceFromHeaders(!headers[TRACEPARENT_HEADER] && payload?.traceparent ? { ...headers, [TRACEPARENT_HEADER]: payload.traceparent } : headers, correlation);
+    const due = Number(headers['x-due-at']);
+    const published = msg.properties.timestamp;
+    const hasQw = (typeof published === 'number' && published > 0) || (Number.isFinite(due) && due > 0);
+    const qw = computeQueueWait({ nowMs: Date.now(), publishedTs: published, dueTs: Number.isFinite(due) ? due : undefined });
+    const lag = Number(headers['x-outbox-age-ms']);
+    return { ctx, t0: performance.now(), queueWaitMs: hasQw ? qw.ms : undefined, clockSkew: qw.clockSkew, outboxLagMs: Number.isFinite(lag) && lag > 0 ? Math.round(lag) : undefined, stages: {}, payload };
+  }
+
+  /**
+   * Header cho bản republish (retry/hoãn): giữ `traceparent` (cùng trace_id, span của chặng này làm cha), đặt `x-due-at` = lúc tầng
+   * hoãn hết hạn (để lần sau `queue_wait` chỉ tính phần QUÁ hạn), bỏ `x-outbox-age-ms` (đã cũ). LOGGING.md §3.2, §4.
+   */
+  private outHeaders(run: NormalizeRun, headers: Record<string, unknown> | undefined, ttlMs: number): Record<string, unknown> {
+    const h: Record<string, unknown> = { ...(headers || {}), [TRACEPARENT_HEADER]: formatTraceparent(run.ctx.traceId, run.ctx.spanId), 'x-due-at': Date.now() + ttlMs };
+    delete h['x-outbox-age-ms'];
+    return h;
+  }
+
+  /** MỘT dòng `normalize.done` (LOGGING.md §3). Không bao giờ ném. */
+  private emitDone(
+    run: NormalizeRun,
+    outcome: CanonicalOutcome,
+    o: { cause?: Cause; err?: unknown; deferMs?: number; nextQueue?: string; eventName?: string; policy?: string } = {},
+  ): void {
+    try {
+      const handlerMs = performance.now() - run.t0;
+      const stageMs: Partial<Record<Stage, number>> = { ...run.stages };
+      if (run.queueWaitMs !== undefined) stageMs.queue_wait = run.queueWaitMs;
+      if (run.outboxLagMs !== undefined) stageMs.outbox_lag = run.outboxLagMs;
+      const p = run.payload;
+      this.canonical.emit({
+        svc: 'hub-worker',
+        msg: 'normalize.done',
+        outcome,
+        traceId: run.ctx.traceId,
+        spanId: run.ctx.spanId,
+        tenantId: p?.tenantId,
+        sourceId: p?.sourceId,
+        rawEventId: p?.rawEventId,
+        provider: typeof p?.provider === 'string' ? p.provider : undefined,
+        eventName: o.eventName,
+        cause: o.cause,
+        err: o.err,
+        totalMs: handlerMs + (run.queueWaitMs ?? 0) + (run.outboxLagMs ?? 0),
+        stageMs,
+        extra: {
+          ...(run.ctx.origin !== 'propagated' ? { trace_origin: run.ctx.origin } : {}),
+          ...(run.ctx.parentSpanId ? { parent_span_id: run.ctx.parentSpanId } : {}),
+          ...(run.ctx.replayOf ? { replay_of: run.ctx.replayOf } : {}),
+          ...(run.clockSkew ? { clock_skew: true } : {}),
+          ...(o.deferMs ? { defer_ms: o.deferMs } : {}),
+          ...(o.nextQueue ? { next_queue: o.nextQueue } : {}),
+          ...(o.policy ? { policy: o.policy } : {}),
+        },
+      });
+    } catch {
+      /* log không bao giờ làm hỏng consumer */
+    }
+  }
+
+  private async timed<T>(run: NormalizeRun, stage: Stage, fn: () => Promise<T> | T): Promise<T> {
+    const t = performance.now();
+    try {
+      return await fn();
+    } finally {
+      run.stages[stage] = (run.stages[stage] ?? 0) + (performance.now() - t);
+    }
   }
 
   private async handle(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<'transient' | 'permanent' | void> {
@@ -145,37 +247,44 @@ export class NormalizeConsumer {
     try {
       payload = JSON.parse(msg.content.toString());
     } catch (e: any) {
-      logger.error({ err: e.message }, 'Lỗi parse JSON payload trong NormalizeConsumer -> chuyển DLQ');
+      logger.error({ err: errInfo(e) }, 'Lỗi parse JSON payload trong NormalizeConsumer -> chuyển DLQ');
       channel.nack(msg, false, false);
+      this.emitDone(this.begin(msg), 'dead', { cause: 'fail.poison_message', err: e });
       return 'permanent';
     }
 
     const { rawEventId, tenantId, sourceId, provider } = payload;
     const log = logger.child({ correlationId, rawEventId, provider });
+    const run = this.begin(msg, payload);
 
     try {
       this.maybeInjectFault();
 
       // 1. Idempotency (§5.2): processed_messages
-      const alreadyProcessed = await this.prisma.processedMessage.findUnique({
-        where: { consumer_messageId: { consumer: 'normalize', messageId: rawEventId } },
-      });
+      const alreadyProcessed = await this.timed(run, 'db_read', () =>
+        this.prisma.processedMessage.findUnique({
+          where: { consumer_messageId: { consumer: 'normalize', messageId: rawEventId } },
+        }),
+      );
       if (alreadyProcessed) {
         log.info('Message đã được normalize trước đó (processed_messages hit), bỏ qua');
         channel.ack(msg);
+        this.emitDone(run, 'skipped', { policy: 'already_processed' });
         return;
       }
 
       // 2. Nạp raw_event QUA REPO đã scope tenant (S1-5, BB-5): raw event của tenant khác không đọc được.
       const repo = this.prisma.forTenant(tenantId);
-      const rawEvent = await repo.findRawEventById(rawEventId);
+      const rawEvent = await this.timed(run, 'db_read', () => repo.findRawEventById(rawEventId));
       if (!rawEvent) {
         log.warn('Không tìm thấy raw_event (hoặc không thuộc tenant trong message)');
         channel.ack(msg);
+        this.emitDone(run, 'skipped', { policy: 'raw_missing' });
         return;
       }
 
       // 3. Adapter chuẩn hoá
+      const tAdapter = performance.now();
       const adapter = ProviderRegistry.get(provider);
       const normalizedEvents: NormalizedEvent[] = adapter.normalize(
         {
@@ -202,12 +311,15 @@ export class NormalizeConsumer {
       // 3c. PK5 (E5): `verified` CHÉP từ raw (ghi lúc ingest) — không suy từ config hiện tại. Chưa xác thực + kiểu chuẩn -> vĩnh viễn.
       const verified = (rawEvent as { verified?: boolean }).verified !== false;
       assertUnverifiedNotReserved(normalizedEvents, verified, provider);
+      run.stages.adapter = performance.now() - tAdapter;
 
       // 4. Event + delivery + outbox `delivery.requested` + processed_messages trong MỘT transaction (S1-2).
       // Không còn publish thẳng sau COMMIT: hoặc tất cả cùng COMMIT, hoặc không có gì — relay lo phần gửi.
       const routed: EventReceivedNotice['deliveries'] = [];
+      // LOGGING.md §4: traceparent của CHẶNG NÀY (span normalize) đi vào payload outbox `delivery.requested`; relay chuyển thành header.
+      const outTraceparent = formatTraceparent(run.ctx.traceId, run.ctx.spanId);
       // AU6: RLS — mọi bảng nghiệp vụ trong transaction này thuộc tenantId của message.
-      await this.prisma.tenantTx(tenantId, async (tx) => {
+      await this.timed(run, 'db_write', () => this.prisma.tenantTx(tenantId, async (tx) => {
         routed.length = 0; // phòng khi callback bị gọi lại
         const repoTx = new TenantScopedRepository(tx, tenantId);
 
@@ -238,12 +350,12 @@ export class NormalizeConsumer {
           }
           // QT4b: định tuyến dùng CHUNG với event do hub phát (route-event.ts) — một đường outbox duy nhất.
           routed.push(
-            ...(await routeEventToSubscriptions(tx, repoTx, tenantId, { id: evt.id, type: evt.type, sourceId: sourceId ?? null, correlationId: String(correlationId), verified }, log)),
+            ...(await routeEventToSubscriptions(tx, repoTx, tenantId, { id: evt.id, type: evt.type, sourceId: sourceId ?? null, correlationId: String(correlationId), verified, traceparent: outTraceparent }, log)),
           );
         }
 
         await tx.processedMessage.create({ data: { consumer: 'normalize', messageId: rawEventId } });
-      });
+      }));
 
       // 5. Realtime (best-effort, Redis được phép sai). S2-2: MỘT publish cho mỗi raw event (gộp mảng)
       // để giữ ngân sách Redis; mang đủ N nhánh (đích) để dashboard vẽ "toả ra" ngay.
@@ -261,15 +373,19 @@ export class NormalizeConsumer {
 
       channel.ack(msg);
       log.info({ deliveryCount: routedCount }, 'Normalize & Route hoàn thành (delivery đi qua outbox)');
+      this.emitDone(run, normalizedEvents.length === 0 ? 'skipped' : 'ok', { eventName: normalizedEvents[0]?.type, policy: normalizedEvents.length === 0 ? 'no_events' : undefined });
     } catch (err: any) {
-      return this.handleFailure(err, msg, channel, log);
+      return this.handleFailure(err, msg, channel, log, run);
     }
   }
 
   /** S1-3: lỗi tạm -> hàng đợi 30s (tối đa 5 lần); lỗi dữ liệu hoặc hết lượt -> DLQ. */
-  private handleFailure(err: any, msg: amqp.ConsumeMessage, channel: amqp.Channel, log: typeof logger): 'transient' | 'permanent' {
+  private handleFailure(err: any, msg: amqp.ConsumeMessage, channel: amqp.Channel, log: typeof logger, run: NormalizeRun): 'transient' | 'permanent' {
     const kind = classifyNormalizeError(err);
     const retries = readNormalizeRetryCount(msg.properties.headers);
+    // LOGGING.md §2.2: tách `wrong.schema_mismatch` (adapter ra sai khuôn catalog) khỏi `fail.hub_unknown` (adapter ném / lỗi lạ);
+    // lỗi tạm hạ tầng là `fail.hub_db`. Trước đây hai nhánh permanent gộp một.
+    const cause: Cause = kind === 'transient' ? 'fail.hub_db' : err instanceof CanonicalSchemaError ? 'wrong.schema_mismatch' : 'fail.hub_unknown';
 
     // BP5 §7.4 (ADR-200): hub ĐÃ BIẾT DB đang ốm (factor > 0) -> lỗi tạm HOÃN không đốt lượt, tối đa NORMALIZE_MAX_DEFER_MS.
     // DB khoẻ (factor = 0, lỗi lẻ) -> hành vi cũ 5 lượt × 30s, để một message có vấn đề riêng không được hoãn mãi.
@@ -279,12 +395,13 @@ export class NormalizeConsumer {
       const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : now;
       if (now - since <= normalizeMaxDeferMs()) {
         normalizeDeferred.inc();
-        log.debug({ err: err?.message, deferredSince: since }, 'Lỗi tạm ở normalize khi DB đang ốm -> retry.30s, KHÔNG đốt lượt');
+        log.debug({ err: errInfo(err), deferredSince: since }, 'Lỗi tạm ở normalize khi DB đang ốm -> retry.30s, KHÔNG đốt lượt');
         channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, {
           persistent: true,
-          headers: { ...(msg.properties.headers || {}), [NORMALIZE_DEFERRED_SINCE_HEADER]: since },
+          headers: { ...this.outHeaders(run, msg.properties.headers, NORMALIZE_RETRY_TTL_MS), [NORMALIZE_DEFERRED_SINCE_HEADER]: since },
         });
         channel.ack(msg);
+        this.emitDone(run, 'deferred', { cause, err, deferMs: NORMALIZE_RETRY_TTL_MS, nextQueue: QUEUES.NORMALIZE_RETRY });
         return kind;
       }
       log.warn({ deferredSince: since }, 'Normalize hoãn quá NORMALIZE_MAX_DEFER_MS -> đốt lượt như cũ');
@@ -294,7 +411,7 @@ export class NormalizeConsumer {
       // F2 (chaos [BP:T4] phần b, ADR-231): DB vừa chết, factor còn 0 (trước nhịp tick đầu) -> cả prefetch lỗi trong ~1 s, mỗi
       // message một dòng warn (đo được 225 dòng/s). Gộp như delivery (BP1): tối đa 1 dòng warn / 30s / tiến trình kèm số đã gộp;
       // từng message vẫn có dòng debug (rawEventId nằm trong `log`). Nhánh DLQ (log.error) bên dưới KHÔNG gộp.
-      const detail = { err: err?.message, code: err?.code, [NORMALIZE_RETRY_HEADER]: retries + 1 };
+      const detail = { err: errInfo(err), [NORMALIZE_RETRY_HEADER]: retries + 1 };
       log.debug(detail, 'Lỗi tạm ở normalize -> q.normalize.retry.30s');
       const suppressed = this.transientLogThrottle.take();
       if (suppressed !== null) {
@@ -303,17 +420,20 @@ export class NormalizeConsumer {
       normalizeRetries.inc();
       channel.sendToQueue(QUEUES.NORMALIZE_RETRY, msg.content, {
         persistent: true,
-        headers: { ...(msg.properties.headers || {}), [NORMALIZE_RETRY_HEADER]: retries + 1 },
+        headers: { ...this.outHeaders(run, msg.properties.headers, NORMALIZE_RETRY_TTL_MS), [NORMALIZE_RETRY_HEADER]: retries + 1 },
       });
       channel.ack(msg);
+      this.emitDone(run, 'retry', { cause, err, deferMs: NORMALIZE_RETRY_TTL_MS, nextQueue: QUEUES.NORMALIZE_RETRY });
       return kind;
     }
 
     log.error(
-      { err: err?.message, code: err?.code, kind, retries, ...(err instanceof CanonicalSchemaError ? { eventType: err.eventType, field: err.field } : {}) },
+      { err: errInfo(err), kind, retries, ...(err instanceof CanonicalSchemaError ? { eventType: err.eventType, field: err.field } : {}) },
       kind === 'transient' ? 'Lỗi tạm ở normalize đã hết lượt thử lại -> DLQ' : 'Lỗi dữ liệu ở normalize -> DLQ',
     );
     channel.nack(msg, false, false);
+    // CanonicalSchemaError.message chỉ có kiểu event + TÊN trường (không giá trị) nhưng vẫn đi qua errInfo như mọi lỗi.
+    this.emitDone(run, 'dead', { cause, err });
     return kind;
   }
 

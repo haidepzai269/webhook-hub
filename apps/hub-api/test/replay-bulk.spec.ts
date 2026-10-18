@@ -95,7 +95,8 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     expect(db.outbox).toHaveLength(3);
     for (const o of db.outbox) {
       expect(o.topic).toBe('delivery.replayed');
-      expect(Object.keys(o.payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
+      // LOGGING.md §4: + `traceparent` (trace MỚI của lần replay) [+ `replayOf` khi correlationId là UUID] — relay đưa vào HEADER, không vào body.
+      expect(Object.keys(o.payload).filter((k) => k !== 'replayOf').sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId', 'traceparent']);
       expect(o.payload).toMatchObject({ destinationId: 'dest-1', rateLimitRps: 4 });
     }
     expect(db.audit).toHaveLength(1);

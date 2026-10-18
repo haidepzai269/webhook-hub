@@ -43,7 +43,9 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
     expect(outboxRows).toHaveLength(1);
     expect(outboxRows[0].topic).toBe('delivery.replayed');
     const payload = outboxRows[0].payload;
-    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
+    // LOGGING.md §4: + `traceparent` (replay = trace MỚI) [+ `replayOf` khi correlationId là UUID]; relay đưa vào HEADER, body vẫn 7 khoá.
+    expect(Object.keys(payload).filter((k) => k !== 'replayOf').sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId', 'traceparent']);
+    expect(payload.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
     expect(payload).toMatchObject({ tenantId: TENANT, attemptGeneration: 2, attemptCount: 0, correlationId: 'corr-1', destinationId: 'd', rateLimitRps: 3 });
     expect(JSON.stringify(payload)).not.toMatch(/config|signingSecret|"event"/);
     // S2-3: audit trong CÙNG transaction (tx), có actor + reason

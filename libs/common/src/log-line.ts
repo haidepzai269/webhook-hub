@@ -149,6 +149,8 @@ function detectSlow(input: CanonicalInput, stage: Partial<Record<Stage, number>>
 const DEDUPE_CAUSES: ReadonlySet<Cause> = new Set<Cause>([
   'wrong.signature', 'wrong.unknown_source', 'wrong.payload_shape', 'wrong.policy_blocked',
   'slow.deferred_circuit', 'slow.deferred_throttle', 'slow.deferred_backpressure',
+  // Hạ tầng rớt: MỌI message đều lỗi mỗi nhịp retry (đo được 225 dòng/s ở normalize, ADR-231) -> gộp như `LogThrottle` cũ; metric đếm đủ.
+  'fail.hub_db', 'fail.hub_broker', 'fail.hub_redis',
 ]);
 
 function levelOf(cause: Cause | null): 'info' | 'warn' | 'error' {

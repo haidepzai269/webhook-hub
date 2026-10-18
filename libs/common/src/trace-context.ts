@@ -65,3 +65,40 @@ export function isTraceId(v: unknown): v is string {
 export function isSpanId(v: unknown): v is string {
   return typeof v === 'string' && SPAN_ID_RE.test(v);
 }
+
+export interface TraceFromHeaders {
+  traceId: string;
+  /** span_id của chặng ĐANG chạy (mới mỗi lần gọi). */
+  spanId: string;
+  /** span_id của chặng trước (nếu `traceparent` đến hợp lệ). */
+  parentSpanId?: string;
+  /**
+   * `propagated` = header `traceparent` hợp lệ; `correlation` = suy từ `correlationId` UUID (message cũ/tầng không mang header);
+   * `orphan` = không có gì dùng được -> trace mới (LOGGING.md §4: không bao giờ lỗi vì thiếu header).
+   */
+  origin: 'propagated' | 'correlation' | 'orphan';
+  /** trace_id gốc của lần replay này (header `x-replay-of`) — replay là trace MỚI có link về trace gốc. */
+  replayOf?: string;
+}
+
+/** Worker đọc ngữ cảnh trace của một message AMQP. Không bao giờ ném. */
+export function traceFromHeaders(headers: Record<string, unknown> | undefined, correlationId?: unknown): TraceFromHeaders {
+  const raw = headers?.[TRACEPARENT_HEADER];
+  const tp = parseTraceparent(typeof raw === 'string' ? raw : raw instanceof Uint8Array ? Buffer.from(raw).toString('utf8') : undefined);
+  const replay = headers?.[REPLAY_OF_HEADER];
+  const replayOf = isTraceId(replay) ? replay : undefined;
+  if (tp) return { traceId: tp.traceId, spanId: newSpanId(), parentSpanId: tp.spanId, origin: 'propagated', ...(replayOf ? { replayOf } : {}) };
+  const fromCorr = traceIdOf(correlationId);
+  if (fromCorr) return { traceId: fromCorr, spanId: newSpanId(), origin: 'correlation', ...(replayOf ? { replayOf } : {}) };
+  return { traceId: newTraceId(), spanId: newSpanId(), origin: 'orphan', ...(replayOf ? { replayOf } : {}) };
+}
+
+/**
+ * Replay do con người kích hoạt (có thể sau nhiều ngày) = trace MỚI, link về trace gốc (LOGGING.md §4): trace_id mới +
+ * `replayOf` = trace_id gốc (suy từ `correlationId` của event). Trả hai khoá để nhét vào payload outbox JSON; relay chuyển
+ * thành header `traceparent` / `x-replay-of` và BỎ khỏi body (message delivery vẫn đúng 7 khoá — S1-1).
+ */
+export function replayTraceFields(correlationId: unknown): { traceparent: string; replayOf?: string } {
+  const original = traceIdOf(correlationId);
+  return { traceparent: formatTraceparent(newTraceId(), newSpanId()), ...(original ? { replayOf: original } : {}) };
+}

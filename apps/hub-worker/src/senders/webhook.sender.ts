@@ -1,4 +1,4 @@
-import { DestinationSender, SendResult } from './sender.interface';
+import { DestinationSender, SendContext, SendResult } from './sender.interface';
 import { DestinationType, NormalizedEvent, toWebhookBody } from '@hub/common';
 import { createSsrfSafeAxiosConfig, swHeaders } from '@hub/crypto';
 import { describeSendError, httpErrorMessage, postLimited } from './http-limits';
@@ -11,6 +11,7 @@ export class WebhookSender implements DestinationSender {
     renderedContent: string,
     event: NormalizedEvent,
     signingSecret?: string,
+    ctx?: SendContext,
   ): Promise<SendResult> {
     const rawUrl = config.url;
     if (!rawUrl) {
@@ -33,6 +34,9 @@ export class WebhookSender implements DestinationSender {
       const headers: Record<string, string> = signingSecret
         ? { 'Content-Type': 'application/json', ...swHeaders(signingSecret, event.id, bodyString, timestamp) }
         : { 'Content-Type': 'application/json', 'webhook-id': event.id, 'webhook-timestamp': String(timestamp) };
+
+      // LOGGING.md §4: `traceparent` (W3C) ra đích — vô hại, KHÔNG nằm trong chuỗi ký (swHeaders ký id.ts.body ở trên); đích không hiểu thì bỏ qua.
+      if (ctx?.traceparent) headers.traceparent = ctx.traceparent;
 
       // 3. Gọi HTTP: maxRedirects: 0 để chống SSRF Redirect; agent đã pin IP ở trên. Phản hồi đọc tối
       // đa 64KB, status từ dòng trạng thái — 2xx body lớn vẫn là thành công (ADR-054).
