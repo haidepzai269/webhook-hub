@@ -80,6 +80,7 @@ services:
     # Chỉ ảnh hưởng JS phía trình duyệt; e2e qua proxy web (/api, /auth) dùng HUB_API_INTERNAL_URL như cũ.
     build:
       args:
+        BUILD_WEB: "1"   # ADR-253
         NEXT_PUBLIC_HUB_API_URL: http://localhost:14000
         NEXT_PUBLIC_SHOP_API_URL: http://localhost:14001
     ports: !override

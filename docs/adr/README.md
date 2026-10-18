@@ -2560,3 +2560,9 @@ không thấy gì.
 **Đánh đổi:** `/health/live` xanh không nói gì về DB — dựa vào `/ready` + monitor ngoài để thấy Postgres rớt, và Render sẽ không tự restart khi DB chết (restart cũng không chữa được DB). Trạng thái Redis/RabbitMQ trên `/ready` có thể cũ tới 30s. Heartbeat chỉ phản ánh outbox relay, không phản ánh consumer riêng lẻ bị kẹt (channel đóng thì worker đã tự thoát). Ở `hub-all` (`WORKER_METRICS_PORT=0`) worker không có cổng health nên chỉ `HEARTBEAT_URL` báo được worker kẹt.
 
 **Bổ sung (review):** `SELECT 1` ở `/health` (hub-api) và readiness worker là `$queryRaw` không qua `TenantScopedRepository` — ngoại lệ BB-5 có chủ đích: không đụng bảng nghiệp vụ nào, không trả dữ liệu tenant. `/health/ready` của worker tính cả heartbeat cũ (>45s) là not ready; "consumer" chỉ nghĩa là chưa tắt, vì consumer đóng bất thường thì tiến trình đã tự thoát. `HEARTBEAT_URL` được validate một lần lúc khởi động (http/https), không bao giờ log giá trị hay message lỗi thô, `redirect:'error'`, chu kỳ tối thiểu 5s. `/health` cache mềm 30s nên mới khởi động có thể báo `degraded` tới 30s dù Redis đã lên; timeout Postgres 8s để Neon cold-start không 503 oan cron-job.org.
+
+## ADR-253 — Dockerfile mặc định không build `apps/web` (`BUILD_WEB`) (2026-10-18)
+
+**Vấn đề:** Render deploy hub-api FAILED "Ran out of memory (used over 8GB)" ở `npm run build --workspaces` -> `next build` (35 worker thu thập trang). Image này phục vụ hub-api/worker/hub-all/shop, không cần web (web ở Vercel).
+**Chọn:** `ARG BUILD_WEB=0`; Dockerfile chạy `npm run build:server` (libs trước, rồi hub-api, hub-worker, shop) và chỉ `npm run build -w apps/web` khi `BUILD_WEB=1`. Service `web` trong `docker-compose.yml` và `docker-compose.verify.yml` truyền `BUILD_WEB: "1"`.
+**Đánh đổi:** Image mặc định không chạy được `docker-entrypoint.sh web` (thiếu `.next`); thêm workspace server mới phải thêm vào `build:server`.

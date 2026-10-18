@@ -359,6 +359,7 @@ services:
       # NEXT_PUBLIC_* được nhúng vào bundle LÚC BUILD. Chỉ dùng cho LOCAL (ADR-027) —
       # deployed build trên Vercel, không đi qua file này.
       args:
+        BUILD_WEB: "1"   # ADR-253: image mặc định không chứa apps/web
         # AU1 (SPEC-auth §9): web proxy /api/* và /auth/* sang hub-api (cookie first-party). Next tính rewrites LÚC
         # BUILD -> URL nội bộ phải có ở build arg (tên service trong mạng compose).
         HUB_API_INTERNAL_URL: ${HUB_API_INTERNAL_URL:-http://hub-api:4000}

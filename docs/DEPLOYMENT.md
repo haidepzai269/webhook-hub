@@ -134,6 +134,8 @@ services:
 
 **Một Dockerfile multi-stage, một image, ba `dockerCommand` khác nhau** (`docker-entrypoint.sh hub-api|hub-worker|shop`). Không build nhiều image.
 
+**Image Render không chứa `apps/web`** (ADR-253): `Dockerfile` mặc định chạy `npm run build:server` (libs rồi hub-api/hub-worker/shop), bỏ `next build` vì bước đó vượt 8GB RAM trên builder Render. `web` deploy ở Vercel, không đi qua Dockerfile. Local, service `web` của compose truyền `BUILD_WEB=1` (cả `docker-compose.yml` và `docker-compose.verify.yml`) để build thêm `apps/web`. Chạy `docker-entrypoint.sh web` trên image không có `BUILD_WEB=1` sẽ lỗi vì thiếu `.next`.
+
 ### 3.4. ⚠️ Graceful shutdown: **25 giây**, không phải 30
 
 Render gửi `SIGTERM` rồi `SIGKILL` sau ~30s. Timeout drain trong `ARCHITECTURE.md` §5.6 đang để đúng 30s — **đúng mép vực**.
