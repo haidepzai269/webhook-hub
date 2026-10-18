@@ -54,9 +54,11 @@ receivers:
   # SMS: Alertmanager không có receiver SMS gốc -> đi qua webhook_configs tới cổng SMS (eSMS/Twilio...) hoặc relay.
 
 # TargetDown che luật con cùng job (chết hẳn thì không cần báo thêm "im"/"không consumer").
+# Chỉ WorkerSilent/RabbitNoConsumers mang nhãn `job`. WorkerHeartbeatMissing/RabbitQueueMissing dùng absent() nên KHÔNG có nhãn job:
+# inhibit không khớp chúng; không hại vì chính điều kiện `up == 1` của chúng đã loại trừ ca target chết.
 inhibit_rules:
   - source_matchers: ['alertname="TargetDown"']
-    target_matchers: ['alertname=~"WorkerSilent|WorkerHeartbeatMissing|RabbitNoConsumers|RabbitQueueMissing"']
+    target_matchers: ['alertname=~"WorkerSilent|RabbitNoConsumers"']
     equal: ['job']
   # Dự báo đầy trong 24 giờ (critical) che dự báo 7 ngày (warning) của cùng ổ.
   - source_matchers: ['alertname="DiskWillFillIn24Hours"']

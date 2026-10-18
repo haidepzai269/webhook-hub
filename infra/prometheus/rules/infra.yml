@@ -81,10 +81,11 @@ groups:
           summary: "CPU VM Docker > 85% kéo dài 15 phút"
           description: "Tim làm việc quá sức liên tục ({{ $value | humanizePercentage }}), không phải đỉnh thoáng qua: tải thật hoặc vòng lặp chạy không phanh."
       - alert: DiskWillFillIn7Days
+        # Loại ổ C: Windows (/usr/lib/wsl/drivers): đã có DiskWindowsCWillFillIn7Days riêng, tránh báo trùng.
         # Câu hỏi "GIAI ĐOẠN": nhìn 6 giờ gần nhất, ngoại suy tuyến tính 7 ngày. Chỉ xét ổ còn dưới 50% trống để tránh báo thừa ở ổ rộng.
         expr: |
-          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h], 7 * 86400) < 0)
-          and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes < 0.5)
+          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs",mountpoint!="/usr/lib/wsl/drivers"}[6h], 7 * 86400) < 0)
+          and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs",mountpoint!="/usr/lib/wsl/drivers"} / node_filesystem_size_bytes < 0.5)
         for: 30m
         labels: { severity: warning }
         annotations:
@@ -92,8 +93,8 @@ groups:
           description: "Theo đà 6 giờ qua, ổ {{ $labels.mountpoint }} ({{ $labels.device }}) hết chỗ trong <7 ngày: xương sống lưu trữ sắp hết đệm. Dọn dữ liệu / tăng ổ trước đó."
       - alert: DiskWillFillIn24Hours
         expr: |
-          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[3h], 24 * 3600) < 0)
-          and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes < 0.5)
+          (predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs",mountpoint!="/usr/lib/wsl/drivers"}[3h], 24 * 3600) < 0)
+          and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs",mountpoint!="/usr/lib/wsl/drivers"} / node_filesystem_size_bytes < 0.5)
         for: 15m
         labels: { severity: critical }
         annotations:
