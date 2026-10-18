@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
-import { PrismaService, getMasterKey } from '@hub/database';
+import { performance } from 'perf_hooks';
+import { PrismaService, classifyInfraError, getMasterKey } from '@hub/database';
 import { RedisService } from '../redis/redis.service';
 import { AdapterContext, HandshakeOutcome, IdempotencyKeyMissingError, ProviderAdapter, ProviderRegistry, VerifyRefusal, verdictOf } from '@hub/providers';
 import { aesGcmDecrypt } from '@hub/crypto';
@@ -9,6 +10,17 @@ import {
   ProviderType,
   logger,
   generateCorrelationId,
+  CanonicalLogger,
+  Cause,
+  ERROR_CATALOG,
+  Stage,
+  correlationIdOf,
+  docsUrlFor,
+  errInfo,
+  formatTraceparent,
+  newSpanId,
+  parseTraceparent,
+  traceIdOf,
   OutboxPayload,
   TraceIngestedNotice,
   MAX_INGEST_PAYLOAD_BYTES,
@@ -62,6 +74,16 @@ export const TRACE_NOTIFIER = Symbol('TRACE_NOTIFIER');
 
 interface TraceState {
   correlationId: string;
+  /** LOGGING.md §4: trace_id (32 hex) = correlationId bỏ dấu "-"; span_id của chặng ingest; `traceparent` đi vào payload outbox. */
+  traceId: string;
+  spanId: string;
+  traceparent: string;
+  /** Thời gian theo chặng (ms) — đồng hồ trong bộ nhớ quanh lời gọi sẵn có, KHÔNG thêm lệnh Redis/truy vấn DB (§3.2). */
+  stages: Partial<Record<Stage, number>>;
+  /** Nguyên nhân (bảng `causes.ts`) và chi tiết chính sách của nhánh từ chối/lỗi; thiếu -> `ingest.done` suy từ outcome/ngưỡng. */
+  cause?: Cause;
+  policy?: string;
+  err?: unknown;
   tenantId?: string;
   outcome?: TraceIngestedNotice['outcome'];
   rawEventId?: string;
@@ -183,6 +205,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     onDropped: (n) => trafficFlushDropped.inc(n),
   });
   private unregisterShutdown?: () => void;
+  /**
+   * LOGGING.md §3 (ADR-250): MỘT dòng `ingest.done` cho mọi request kết thúc (kể cả từ chối). Lấy mẫu dòng thành công, gộp dòng
+   * lặp, đếm metric — không I/O. Gán lại được (test); gate hộp phạt (D3) dùng cùng instance.
+   */
+  canonical: CanonicalLogger = new CanonicalLogger({ log: logger });
 
   constructor(
     private readonly prisma: PrismaService,
@@ -226,10 +253,12 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     return this.traced(req, async (trace) => {
       const log = logger.child({ correlationId: trace.correlationId, provider: req.provider, sourceId });
       // QT3 (E4): nấc dung lượng JOIN vào chính câu nạp source (+0 lượt DB).
-      const source = await this.prisma.forTenant(tenantId).findSourceById(sourceId, { withStorageLevel: true });
+      const source = await this.timed(trace, 'db_read', () => this.prisma.forTenant(tenantId).findSourceById(sourceId, { withStorageLevel: true }));
       // ADR-161: source đã lưu trữ ("Xoá" trên bản đồ) bị từ chối y như source tắt (lưu trữ luôn kèm is_active=false).
       if (!source || !source.isActive || source.archivedAt) {
         log.warn('Source api của key không tồn tại hoặc đã tắt');
+        trace.cause = 'wrong.policy_blocked';
+        trace.policy = 'source_inactive';
         return { status: 409, body: { error: 'source_inactive' } };
       }
       trace.tenantId = source.tenantId;
@@ -237,10 +266,14 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       // QT3 (E4): khoá chiều ghi SAU nạp source, TRƯỚC rate limit — project đầy không tốn EVAL.
       if (this.storageBlocked(source, 'publish', log)) {
         trace.storageFull = true;
+        trace.cause = 'wrong.policy_blocked';
+        trace.policy = 'storage_full';
         return { status: 507, body: { error: 'project_storage_full' } };
       }
-      if (!(await this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60))) {
+      if (!(await this.timed(trace, 'redis', () => this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60)))) {
         trace.outcome = 'RATE_LIMITED';
+        trace.cause = 'wrong.policy_blocked';
+        trace.policy = 'rate_limit';
         return { status: 429, body: { error: 'rate_limited' } };
       }
       const adapter = ProviderRegistry.get(req.provider);
@@ -249,21 +282,44 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
         headers: redactHeaders(req.headers as Record<string, unknown>) as Record<string, unknown>,
         signatureHeader: null,
         origin: 'api',
-      });
+      }, { trace });
       return this.ackFor(adapter, r, idempotencyKey, trace);
-    });
+    }, { trustTraceparent: true });
   }
 
-  /** Bọc chung cho /hooks và /events: metric trong bộ nhớ + `trace.ingested` in-process (0 lệnh Redis). */
+  /** Bọc đồng hồ quanh MỘT lời gọi sẵn có, cộng dồn vào chặng `stage` (LOGGING.md §3.2). Không thêm lời gọi nào. */
+  private async timed<T>(trace: TraceState | undefined, stage: Stage, fn: () => Promise<T>): Promise<T> {
+    if (!trace) return fn();
+    const t0 = performance.now();
+    try {
+      return await fn();
+    } finally {
+      trace.stages[stage] = (trace.stages[stage] ?? 0) + (performance.now() - t0);
+    }
+  }
+
+  /**
+   * Bọc chung cho /hooks và /events: metric trong bộ nhớ + `trace.ingested` in-process (0 lệnh Redis) + MỘT dòng `ingest.done`.
+   * `trustTraceparent`: chỉ đường ĐÃ XÁC THỰC (`/events`, API key) mới nhận `traceparent` của client; `/hooks` (provider chưa
+   * xác thực) luôn sinh trace mới — không để bên ngoài chọn trace_id (lệch LOGGING.md §4, ADR-254).
+   */
   private async traced(
     req: RawWebhookRequest,
     run: (trace: TraceState) => Promise<IngestResponse>,
+    opts: { trustTraceparent?: boolean } = {},
   ): Promise<IngestResponse> {
     const startedAt = Date.now();
-    const trace: TraceState = { correlationId: generateCorrelationId() };
+    const t0 = performance.now();
+    const inbound = opts.trustTraceparent ? parseTraceparent((req.headers as Record<string, unknown> | undefined)?.traceparent) : null;
+    const correlationId = (inbound && correlationIdOf(inbound.traceId)) || generateCorrelationId();
+    const traceId = traceIdOf(correlationId) as string;
+    const spanId = newSpanId();
+    const trace: TraceState = { correlationId, traceId, spanId, traceparent: formatTraceparent(traceId, spanId), stages: {} };
     const result = await run(trace);
-    this.recordMetrics(req.provider, trace, result.status, startedAt);
+    const cause = this.resolveCause(trace, result);
+    this.recordMetrics(req.provider, trace, result.status, startedAt, cause);
     this.recordTraffic(req, trace);
+    this.emitLine(req, trace, result, performance.now() - t0, cause);
     // Chỉ phát khi ĐÃ BIẾT tenant (source tồn tại) — 404/400/413 không phát gì. Best-effort.
     if (trace.tenantId && trace.outcome && this.notifier) {
       try {
@@ -284,6 +340,47 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * LOGGING.md §3: MỘT dòng `ingest.done` mỗi request, GHI SAU quyết định ACK (BB-3: không đổi thứ tự/thời điểm trả lời). Mọi
+   * thứ ở đây đã có trong bộ nhớ — 0 Redis, 0 DB; tuyệt đối không đưa body/secret/chữ ký vào (builder chỉ nhận trường có tên).
+   */
+  private resolveCause(trace: TraceState, result: IngestResponse): Cause | undefined {
+    if (trace.cause) return trace.cause;
+    if (trace.outcome === 'DUPLICATE') return 'wrong.duplicate';
+    if (result.status >= 400 && outcomeOf(trace, result.status) !== 'handshake') return causeOfStatus(result.status);
+    return undefined;
+  }
+
+  private emitLine(req: RawWebhookRequest, trace: TraceState, result: IngestResponse, totalMs: number, cause: Cause | undefined): void {
+    try {
+      const outcome = outcomeOf(trace, result.status);
+      this.canonical.emit({
+        svc: 'hub-api',
+        msg: 'ingest.done',
+        outcome,
+        traceId: trace.traceId,
+        spanId: trace.spanId,
+        tenantId: trace.tenantId,
+        sourceId: trace.sourceId,
+        rawEventId: trace.rawEventId,
+        provider: providerMetricLabel(req.provider),
+        httpStatus: result.status,
+        bytes: req.rawBody?.length,
+        cause,
+        totalMs,
+        stageMs: trace.stages,
+        err: trace.err,
+        flags: { cold: req.cold === true },
+        extra: {
+          ...(trace.policy ? { policy: trace.policy } : {}),
+          ...(cause === 'wrong.payload_shape' && req.contentType ? { content_type: req.contentType } : {}),
+        },
+      });
+    } catch {
+      /* log không bao giờ làm hỏng ingest */
+    }
+  }
+
+  /**
    * Lõi dùng chung của `/hooks` và `/events` (SPEC §4.4) — ARCHITECTURE §3.1 bước 5–7, KHÔNG nhân bản:
    *   5. Redis GET (đường tắt, được phép sai — BB-2)
    *   6. Transaction: raw_events ACCEPTED + outbox `event.received` (Postgres là trọng tài: unique -> trùng)
@@ -299,20 +396,22 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
      * PK5 (E5, ADR-206): `verified: false` = nhận KHÔNG xác thực (scheme `unverified`) -> `raw_events.verified=false`; normalize
      * chép sang `events.verified`. `signature_valid` vẫn true ("không sai chữ ký" — không mở cảnh báo signature_failing).
      */
-    opts: { verified?: boolean } & IngestPath = {},
+    opts: { verified?: boolean; trace?: TraceState } & IngestPath = {},
   ): Promise<PersistResult> {
     const log = logger.child({ correlationId, provider: req.provider, sourceId: source.id });
     const redisIdemKey = `idem:${source.id}:${idempotencyKey}`;
-    if (await this.redis.getIdempotencyKey(redisIdemKey)) {
+    const trace = opts.trace;
+    if (await this.timed(trace, 'redis', () => this.redis.getIdempotencyKey(redisIdemKey))) {
       log.info({ idempotencyKey }, 'Chống trùng lớp 1 (Redis Cache Hit): đã nhận trước đó');
       this.duplicates.record(source.tenantId, source.id);
+      if (trace) trace.policy = 'redis_hit';
       return { kind: 'duplicate' };
     }
 
     let rawEventRecord;
     try {
       // AU6: RLS — raw_events/outbox ghi trong transaction đã đặt app.project_id của source (tenant đã biết từ bước 2).
-      rawEventRecord = await this.prisma.tenantTx(source.tenantId, async (tx) => {
+      rawEventRecord = await this.timed(trace, 'db_commit', () => this.prisma.tenantTx(source.tenantId, async (tx) => {
         const rawEvent = await tx.rawEvent.create({
           data: {
             sourceId: source.id,
@@ -336,23 +435,27 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
           tenantId: source.tenantId,
           provider: req.provider,
           correlationId,
+          // LOGGING.md §4: ngữ cảnh trace đi trong JSON của outbox (không đổi schema); relay chuyển thành header AMQP.
+          ...(trace ? { traceparent: trace.traceparent, ingestedAt: Date.now() } : {}),
         };
         await tx.outbox.create({ data: { topic: 'event.received', payload: outboxPayload as any } });
         return rawEvent;
-      });
+      }));
     } catch (error: any) {
       // UNIQUE(source_id, idempotency_key): PostgreSQL là trọng tài
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         log.info({ idempotencyKey }, 'Chống trùng lớp 2 (PostgreSQL Unique Violation): bỏ qua bản trùng');
         this.duplicates.record(source.tenantId, source.id);
+        if (trace) trace.policy = 'pg_unique';
         return { kind: 'duplicate' };
       }
-      log.error({ err: error.message }, 'Lỗi transaction khi lưu raw_event và outbox');
-      return { kind: 'error' };
+      // `err` có class/code (P2024, ECONNRESET…) — không `message` nguyên văn (Prisma có thể kèm tham số truy vấn, §5).
+      log.error({ err: errInfo(error) }, 'Lỗi transaction khi lưu raw_event và outbox');
+      return { kind: 'error', err: error };
     }
 
     // Sau khi COMMIT thành công: cập nhật đường tắt Redis (BB-3)
-    await this.redis.setIdempotencyKey(redisIdemKey, rawEventRecord.id, 86400);
+    await this.timed(trace, 'redis', () => this.redis.setIdempotencyKey(redisIdemKey, rawEventRecord.id, 86400));
     log.info({ rawEventId: rawEventRecord.id }, 'Đã tiếp nhận và commit thành công vào Outbox');
     return { kind: 'accepted', rawEventId: rawEventRecord.id, bytes: req.rawBody.length };
   }
@@ -367,18 +470,35 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   ): { status: number; body: unknown } {
     // PK4: 2xx chỉ SAU COMMIT (BB-3 — hàm này chỉ chạy sau persistAccepted); mã ngoài 200/202/204 -> 200.
     const ok = (a: { status: number; body: unknown }) => (SUCCESS_STATUSES.has(a.status) ? a : { status: 200, body: a.body });
-    if (r.kind === 'duplicate') {
-      trace.outcome = 'DUPLICATE';
-      return ok(adapter.buildAck({ accepted: true, status: 200, isDuplicate: true, idempotencyKey }, ctx));
-    }
     if (r.kind === 'error') {
       trace.outcome = 'ERROR';
+      trace.err = r.err;
+      // LOGGING.md §2.2: hạ tầng Postgres tạm thời (P2024/P1001/ECONNRESET…) -> 503 `service_unavailable` + `fail.hub_db`;
+      // lỗi lạ -> 500 như cũ + `fail.hub_unknown`. Cả hai KHÔNG phải 2xx (BB-3) và KHÔNG SET NX Redis.
+      if (classifyInfraError(r.err) === 'transient') {
+        const def = ERROR_CATALOG.service_unavailable;
+        trace.cause = 'fail.hub_db';
+        return {
+          status: def.status,
+          body: { error: 'service_unavailable', message: def.message, fix: def.fix({}), docsUrl: docsUrlFor('service_unavailable'), requestId: trace.correlationId },
+        };
+      }
+      trace.cause = 'fail.hub_unknown';
       return { status: 500, body: { error: 'Lỗi máy chủ nội bộ khi lưu sự kiện' } };
     }
-    trace.outcome = 'ACCEPTED';
-    trace.rawEventId = r.rawEventId;
-    trace.bytes = r.bytes; // QT E2: = octet_length(body_raw) vừa COMMIT
-    return ok(adapter.buildAck({ accepted: true, status: 200, rawEventId: r.rawEventId, idempotencyKey, isDuplicate: false }, ctx));
+    const t0 = performance.now();
+    try {
+      if (r.kind === 'duplicate') {
+        trace.outcome = 'DUPLICATE';
+        return ok(adapter.buildAck({ accepted: true, status: 200, isDuplicate: true, idempotencyKey }, ctx));
+      }
+      trace.outcome = 'ACCEPTED';
+      trace.rawEventId = r.rawEventId;
+      trace.bytes = r.bytes; // QT E2: = octet_length(body_raw) vừa COMMIT
+      return ok(adapter.buildAck({ accepted: true, status: 200, rawEventId: r.rawEventId, idempotencyKey, isDuplicate: false }, ctx));
+    } finally {
+      trace.stages.ack_build = (trace.stages.ack_build ?? 0) + (performance.now() - t0);
+    }
   }
 
   /** PK4: hỏi adapter có phải bắt tay không. Adapter ném -> coi như không phải (log), request đi tiếp đường thường. */
@@ -441,11 +561,11 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
    * S3-4: đếm trong bộ nhớ (0 lệnh Redis). Nhãn `provider` chỉ nhận provider ĐÃ ĐĂNG KÝ — path
    * `/hooks/:provider` do client gửi, để nguyên thì kẻ xấu làm nổ số chuỗi thời gian (cardinality).
    */
-  private recordMetrics(provider: string, trace: TraceState, status: number, startedAt: number) {
+  private recordMetrics(provider: string, trace: TraceState, status: number, startedAt: number, cause?: Cause) {
     try {
       const label = providerMetricLabel(provider);
       const outcome = trace.outcome ?? (trace.headOk ? 'HEAD_OK' : trace.storageFull ? 'STORAGE_FULL' : trace.blocked ? 'BLOCKED' : status === 404 ? 'NOT_FOUND' : status === 413 ? 'TOO_LARGE' : 'INVALID');
-      ingestRequests.inc({ provider: label, outcome });
+      ingestRequests.inc({ provider: label, outcome, cause: cause ?? '' }); // LOGGING.md §7: nhãn cause (enum đóng; '' khi ok)
       ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
     } catch {
       /* metric không bao giờ làm hỏng ingest */
@@ -468,17 +588,21 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const ipVerdict = this.penaltySafe(() => this.penalty.checkIp(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
     if (ipVerdict.blocked) {
       trace.blocked = true;
+      trace.cause = 'wrong.policy_blocked';
+      trace.policy = 'penalty_ip';
       return blockedAck(ipVerdict.retryAfterSec, req.headers, trace.correlationId);
     }
 
     // 1. Kiểm tra kích thước payload <= 1MB
     if (req.rawBody.length > MAX_INGEST_PAYLOAD_BYTES) {
       log.warn('Payload vượt quá giới hạn 1MB');
+      trace.cause = 'wrong.payload_shape';
       return { status: 413, body: { error: 'Payload quá lớn (tối đa 1MB)' } };
     }
     // 1 (PK4, E27): trần chuỗi query 8KB — GET bắt tay đọc query; query khổng lồ không đi tiếp tới DB/adapter.
     if ((req.query ?? '').length > MAX_INGEST_QUERY_CHARS) {
       log.warn('Query vượt quá 8KB');
+      trace.cause = 'wrong.payload_shape';
       return { status: 414, body: { error: 'uri_too_long', message: 'Query quá dài (tối đa 8KB)' } };
     }
 
@@ -488,6 +612,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       adapter = ProviderRegistry.get(req.provider);
     } catch (err: any) {
       log.error({ err: err.message }, 'Không tìm thấy adapter cho provider');
+      trace.cause = 'wrong.unknown_source';
+      trace.policy = 'unknown_provider';
       return { status: 400, body: { error: err.message } };
     }
 
@@ -496,11 +622,13 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // TenantScopedRepository (repo đòi tenantId sẵn có). Dùng escape hatch riêng
     // trên PrismaService thay vì gọi thẳng model — BB-5 vẫn giữ nguyên vì đây là
     // điểm duy nhất được phép truy vấn `source` không scope.
-    const source = await this.prisma.findSourceBySourceKeyForIngest(req.sourceKey);
+    const source = await this.timed(trace, 'db_read', () => this.prisma.findSourceBySourceKeyForIngest(req.sourceKey));
 
     // ADR-161: source đã lưu trữ bị từ chối y như source tắt — cùng 404, không lộ khác biệt.
     if (!source || !source.isActive || source.archivedAt) {
       log.warn('Source không tồn tại hoặc đã bị vô hiệu hóa');
+      trace.cause = 'wrong.unknown_source';
+      trace.policy = source ? 'source_inactive' : 'not_found';
       // EG2 luật (a): CHỈ 404 do không tìm thấy source mới tính điểm. Source tắt/đã lưu trữ thì không (provider thật
       // vẫn gửi vào source đã "Xoá" — đếm nó là khoá IP của GitHub/PayOS cho mọi tenant).
       if (!source) {
@@ -519,6 +647,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // không phải `if (provider === 'x')`.
     if (source.provider !== req.provider) {
       log.warn({ sourceProvider: source.provider }, 'Segment provider của URL không khớp provider của source -> 404');
+      trace.cause = 'wrong.unknown_source';
+      trace.policy = 'provider_mismatch';
       return { status: 404, body: { error: 'Source webhook không hợp lệ hoặc đã tắt' } };
     }
     // S8: cấu hình riêng của source (GenericAdapter) — lõi chỉ chuyển qua, KHÔNG đọc, không `if (provider)`.
@@ -547,6 +677,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const method = req.method ?? 'POST';
     if (!(adapter.acceptsMethod ? adapter.acceptsMethod(method, ctx, req) : method === 'POST')) {
       log.warn({ method }, 'Method không được nhận ở source này -> 405');
+      trace.cause = 'wrong.payload_shape';
+      trace.policy = 'method_not_allowed';
       return METHOD_NOT_ALLOWED;
     }
     trace.tenantId = source.tenantId;
@@ -557,6 +689,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // BB-3 giữ, provider tự gửi lại. Đặt TRƯỚC hộp phạt theo cặp / verify / rate limit: project đầy không tốn HMAC, EVAL.
     if (this.storageBlocked(source, 'hooks', log)) {
       trace.storageFull = true;
+      trace.cause = 'wrong.policy_blocked';
+      trace.policy = 'storage_full';
       return storageFullAck(req.headers, trace.correlationId);
     }
 
@@ -564,6 +698,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const pairVerdict = this.penaltySafe(() => this.penalty.checkPair(req.ip, req.sourceKey), { blocked: false } as PenaltyVerdict);
     if (pairVerdict.blocked) {
       trace.blocked = true;
+      trace.cause = 'wrong.policy_blocked';
+      trace.policy = 'penalty_pair';
       return blockedAck(pairVerdict.retryAfterSec, req.headers, trace.correlationId);
     }
     // 2a' (ADR-205 bổ sung, sửa E27): HEAD chỉ tới đây khi adapter nhận (`head-ok` — Intercom kiểm URL bằng HEAD). Đã qua hộp
@@ -597,6 +733,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       // 20 bản ghi/phút/source. Vượt trần vẫn trả 401, chỉ không ghi DB.
       trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, false, correlationId, log, { path });
       trace.outcome = 'REJECTED';
+      trace.cause = 'wrong.signature';
       // EG2 luật (b): phạt theo CẶP (ip, sourceKey) — tenant khác dùng chung IP của provider không bị vạ lây.
       // PK4 (E21): `rejectStatus: 503` vẫn phạt — mã HTTP đổi, luật phạt thì không.
       this.penaltySafe(() => this.penalty.recordBadSignature(req.ip, req.sourceKey, { tenantId: source.tenantId, sourceId: source.id }), undefined);
@@ -611,10 +748,13 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     if (method !== 'POST') return METHOD_NOT_ALLOWED;
 
     // 3. Adapter xác thực chữ ký (verify). PK5 (E5): kết quả có thể là `{ok, verified}` — `verdictOf` chuẩn hoá.
-    const verdict = verdictOf(await adapter.verify(req, decryptedSecrets, ctx));
+    const verdict = verdictOf(await this.timed(trace, 'verify', async () => adapter.verify(req, decryptedSecrets, ctx)));
     // PK5 (E14, E17): từ chối KHÔNG vì chữ ký sai (cờ project tắt, body quá trần) -> không lưu mẫu, không phạt, không lưu lượng.
     if (verdict.refusal) {
       trace.refused = true;
+      // 401 = cờ unverified tắt (chính sách); 413 = body quá trần của nguồn chưa xác thực (sai khuôn).
+      trace.cause = verdict.refusal.status === 401 ? 'wrong.policy_blocked' : 'wrong.payload_shape';
+      trace.policy = verdict.refusal.status === 401 ? 'unverified_off' : 'unverified_too_large';
       return this.refuse(adapter, verdict.refusal, log, ctx);
     }
     if (!verdict.ok) return rejectSignature();
@@ -626,10 +766,12 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     // 3c. EG3 (ADR-178): rate limit theo source chạy SAU verify — chỉ request ký đúng mới tiêu hạn mức. Kẻ biết một
     // sourceKey thật bắn chữ ký sai không còn khoá được webhook thật của nạn nhân. Cửa sổ cố định 60s, 1 EVAL INCR+EXPIRE,
     // trần `INGEST_RATE_LIMIT_PER_MIN` (S3-4, mặc định 100/phút/source). Redis chết -> fail-open.
-    const allowed = await this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60);
+    const allowed = await this.timed(trace, 'redis', () => this.redis.checkRateLimit(`rate:source:${source.id}`, ingestRateLimitPerMin(), 60));
     if (!allowed) {
       log.warn('Bị chặn bởi Rate Limit theo Source');
       trace.outcome = 'RATE_LIMITED';
+      trace.cause = 'wrong.policy_blocked';
+      trace.policy = 'rate_limit';
       return { status: 429, body: { error: 'Vượt quá tần suất cho phép (Rate limit)' } };
     }
     // EG2 (đính chính ADR-177): ký đúng VÀ qua rate limit -> nhớ "cặp tốt" (bộ nhớ, 0 I/O). Request bị 429 không được tính.
@@ -647,6 +789,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       log.warn({ where: err.where }, 'Thiếu khoá chống trùng -> REJECTED 422');
       trace.bytes = await this.storeRejected(source, req, storedHeaders, signatureHeader, true, correlationId, log, { path });
       trace.outcome = 'REJECTED';
+      trace.cause = 'wrong.payload_shape';
+      trace.policy = err.code === 'empty_body' ? 'empty_body' : 'missing_idempotency_key';
       // PK10 (E31): `empty_body` = chống trùng theo băm body mà body rỗng (lỗi chung, không riêng provider nào).
       return rejectAck(adapter, 422, err.code, log, ctx);
     }
@@ -658,7 +802,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       idempotencyKey,
       correlationId,
       { headers: meta ? { ...storedHeaders, [REJECTED_META_KEY]: meta } : storedHeaders, signatureHeader },
-      { verified: verdict.verified, ...path },
+      { verified: verdict.verified, trace, ...path },
     );
     // 8. ACK theo định dạng của provider (PK4: mã thành công theo `ack.successStatus`)
     return this.ackFor(adapter, persisted, idempotencyKey, trace, ctx);
@@ -822,7 +966,16 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error' };
+export type PersistResult = { kind: 'accepted'; rawEventId: string; bytes: number } | { kind: 'duplicate' } | { kind: 'error'; err?: unknown };
+
+/** Lưới đỡ cho `ingest.done`: nhánh trả 4xx/5xx mà quên đặt `cause` -> suy theo status (LOGGING.md §2.2). */
+function causeOfStatus(status: number): Cause {
+  if (status === 401 || status === 403) return 'wrong.signature';
+  if (status === 404) return 'wrong.unknown_source';
+  if (status === 429 || status === 507) return 'wrong.policy_blocked';
+  if (status >= 500) return status === 503 ? 'fail.hub_db' : 'fail.hub_unknown';
+  return 'wrong.payload_shape';
+}
 
 /**
  * REVIEW-LH3 T-1: bỏ header lưới khỏi bản lưu `raw_events.headers` (tab Lắng nghe, log) — chép lại chữ ký đầu là đặt được

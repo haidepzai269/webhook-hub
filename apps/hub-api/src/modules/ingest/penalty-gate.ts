@@ -1,6 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'http';
-import { generateCorrelationId, logger } from '@hub/common';
+import { CanonicalLogger, generateCorrelationId, logger, newTraceId } from '@hub/common';
 import { ingestDuration, ingestRequests } from '../metrics/metrics';
 import { blockedAck, providerMetricLabel } from './blocked-ack';
 import { PenaltyBox, PenaltyVerdict } from './penalty-box';
@@ -35,6 +35,8 @@ export interface PenaltyGateDeps {
   traffic?: { record(tenantId: string, sourceId: string, outcome: 'BLOCKED', ip?: string): void };
   /** Danh sách route (tiền tố) — mặc định `['/hooks']`. */
   routes?: readonly string[];
+  /** LOGGING.md: bộ phát dòng `ingest.done` (cùng instance với IngestService). Thiếu = không log (test cũ). */
+  canonical?: CanonicalLogger;
 }
 
 type GateReq = IncomingMessage & { ip?: string; originalUrl?: string; path?: string };
@@ -82,7 +84,7 @@ export function createPenaltyGate(deps: PenaltyGateDeps): (req: GateReq, res: Se
     // Quan sát: lỗi metric/lưu lượng không lật kết luận (đã trả 429).
     try {
       const label = providerMetricLabel(hit.provider);
-      ingestRequests.inc({ provider: label, outcome: 'BLOCKED' });
+      ingestRequests.inc({ provider: label, outcome: 'BLOCKED', cause: 'wrong.policy_blocked' });
       ingestDuration.observe({ provider: label }, (Date.now() - startedAt) / 1000);
     } catch {
       /* bỏ qua */
@@ -93,6 +95,25 @@ export function createPenaltyGate(deps: PenaltyGateDeps): (req: GateReq, res: Se
       } catch (err: any) {
         logger.warn({ err: err?.message }, 'Không ghi được lưu lượng vào bộ nhớ (bỏ qua)');
       }
+    }
+    // LOGGING.md §1/§6: dòng `ingest.done` `wrong.policy_blocked` — GỘP theo (cause, policy, source) trong cửa sổ + `suppressed`,
+    // KHÔNG một dòng mỗi request bị chặn (bão chặn không thành bão log; metric hub_ingest_penalty_blocked_total đã đếm đủ).
+    try {
+      deps.canonical?.emit({
+        svc: 'hub-api',
+        msg: 'ingest.done',
+        outcome: 'refused',
+        traceId: newTraceId(),
+        provider: providerMetricLabel(hit.provider),
+        tenantId: verdict.owner?.tenantId,
+        sourceId: verdict.owner?.sourceId,
+        httpStatus: 429,
+        cause: 'wrong.policy_blocked',
+        totalMs: Date.now() - startedAt,
+        extra: { policy: 'penalty_gate' },
+      });
+    } catch {
+      /* bỏ qua */
     }
   };
 }
@@ -114,5 +135,6 @@ function sendBlocked(res: ServerResponse, retryAfterSec: number, headers: Incomi
  * Gọi NGAY TRƯỚC `configureBodyParsers` (sau trust proxy, helmet, installErrorHandling, CORS).
  */
 export function installPenaltyGate(app: INestApplication, routes: readonly string[] = DEFAULT_PENALTY_GATE_ROUTES): void {
-  app.use(createPenaltyGate({ penalty: app.get(PenaltyBox), traffic: app.get(IngestService).traffic, routes }));
+  const ingest = app.get(IngestService);
+  app.use(createPenaltyGate({ penalty: app.get(PenaltyBox), traffic: ingest.traffic, routes, canonical: ingest.canonical }));
 }

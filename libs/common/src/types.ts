@@ -28,6 +28,11 @@ export interface RawWebhookRequest {
    * PK2, `query-echo` — PK4). PK0 KHÔNG lưu vào DB; lưu (bản đã che) là việc của PK2/PK5. Thiếu = ''.
    */
   query?: string;
+  /**
+   * LOGGING.md §3.2: request ĐẦU TIÊN của tiến trình hub-api (cold start; cờ trong bộ nhớ do middleware đặt) — controller chép
+   * sang đây; lõi chỉ dùng để gắn `slow.cold_start`. Thiếu = false.
+   */
+  cold?: boolean;
 }
 
 export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
@@ -100,6 +105,10 @@ export interface OutboxPayload {
   tenantId: string;
   provider: ProviderType;
   correlationId: string;
+  /** LOGGING.md §4: W3C `00-<trace_id>-<span_ingest>-01` — ngữ cảnh trace đi qua JSON outbox (không đổi schema DB). Thiếu = message cũ. */
+  traceparent?: string;
+  /** Epoch ms lúc ingest ghi outbox (đồng hồ hub-api) — chỉ để đối chiếu, không dùng để quyết định. */
+  ingestedAt?: number;
 }
 
 // --- Realtime (S2-2, ADR-049) — hợp đồng giữa worker (publish) và hub-api (emit Socket.IO) ---

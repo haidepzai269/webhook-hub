@@ -61,6 +61,7 @@ export class IngestController {
       ip: catchnet?.clientIp ?? req.ip,
       method: req.method.toUpperCase() as HttpMethod,
       query: hooksQueryOf({ url: req.originalUrl ?? req.url }), // E6: tách như router (parseurl), `#frag` không lọt
+      cold: (req as { hubCold?: boolean }).hubCold === true, // LOGGING.md §3.2: request đầu của tiến trình -> slow.cold_start
     };
 
     const result = await this.ingestService.ingestWebhook(

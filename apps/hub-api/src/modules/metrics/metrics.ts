@@ -1,4 +1,5 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import { setCanonicalObserver } from '@hub/common';
 
 /**
  * Chỉ số Prometheus của hub-api (S3-4). Đếm TRONG BỘ NHỚ của tiến trình — 0 lệnh Redis (ngân sách R1).
@@ -10,7 +11,7 @@ collectDefaultMetrics({ register: apiRegistry });
 export const ingestRequests = new Counter({
   name: 'hub_ingest_requests_total',
   help: 'Số request webhook vào /hooks theo provider và kết quả',
-  labelNames: ['provider', 'outcome'] as const,
+  labelNames: ['provider', 'outcome', 'cause'] as const,
   registers: [apiRegistry],
 });
 
@@ -121,4 +122,51 @@ export const cleanupSuggestionsRejectedApi = new Counter({
   help: 'Số gợi ý dọn bị hàng rào an toàn loại, theo advisor',
   labelNames: ['advisor'] as const,
   registers: [apiRegistry],
+});
+
+// ---- LOGGING.md §7 (ADR-250): metric nối với log — nhãn `cause` là enum đóng (~33 giá trị), KHÔNG tenant/source/destination ----
+
+/** Mỗi canonical line ĐÃ GHI hoặc BỊ LẤY MẪU BỎ đều đếm ở đây — số trên Grafana không phụ thuộc mẫu log. */
+export const logEventsTotal = new Counter({
+  name: 'hub_log_events_total',
+  help: 'Số dòng canonical log (ghi hoặc bị lấy mẫu bỏ) theo svc, msg, cause',
+  labelNames: ['svc', 'msg', 'cause'] as const,
+  registers: [apiRegistry],
+});
+
+export const slowTotal = new Counter({
+  name: 'hub_slow_total',
+  help: 'Số lần vượt ngưỡng chậm theo nguyên nhân slow.* (ngưỡng SLOW_*_MS)',
+  labelNames: ['svc', 'cause'] as const,
+  registers: [apiRegistry],
+});
+
+export const stageDuration = new Histogram({
+  name: 'hub_stage_duration_seconds',
+  help: 'Thời gian từng chặng của một request ingest (verify, redis, db_read, db_commit, ack_build, other…)',
+  labelNames: ['svc', 'stage'] as const,
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+  registers: [apiRegistry],
+});
+
+/** p99 độ trễ event loop (giây) — cờ `slow.hub_cpu`; đọc mỗi nhịp 5s, trong bộ nhớ. */
+export const eventLoopLag = new Gauge({
+  name: 'hub_event_loop_lag_seconds',
+  help: 'p99 độ trễ event loop của tiến trình (perf_hooks.monitorEventLoopDelay)',
+  registers: [apiRegistry],
+});
+
+export const growthTotal = new Counter({
+  name: 'hub_growth_total',
+  help: 'Số cửa sổ growth.window kích hoạt theo nguyên nhân growth.*',
+  labelNames: ['cause'] as const,
+  registers: [apiRegistry],
+});
+
+setCanonicalObserver((b) => {
+  if (b.svc !== 'hub-api') return;
+  logEventsTotal.inc({ svc: b.svc, msg: String(b.record.msg), cause: b.cause ?? '' });
+  if (b.slowCause) slowTotal.inc({ svc: b.svc, cause: b.slowCause });
+  for (const [stage, ms] of Object.entries(b.stageMs)) if (typeof ms === 'number' && ms > 0) stageDuration.observe({ svc: b.svc, stage }, ms / 1000);
+  if (b.record.msg === 'growth.window' && b.cause) growthTotal.inc({ cause: b.cause });
 });

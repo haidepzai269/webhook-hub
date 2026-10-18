@@ -99,7 +99,12 @@ export function errInfo(err: unknown): ErrInfo {
 
 function clean(s: string): string {
   // Số dài (giống số tài khoản/thẻ) không có lý do nằm trong thông điệp lỗi của hub.
-  return scrubSecrets(s).replace(/whsec_[A-Za-z0-9+/=_-]+/g, 'whsec_***').replace(/\b\d{9,}\b/g, '***').slice(0, 200);
+  // URL: chỉ giữ host (path/query thường mang token — URL heartbeat, URL đích có ?token=, §5 "host của đích, không path/query").
+  return scrubSecrets(s)
+    .replace(/\b(https?:\/\/[^\s/"'?#]+)[^\s"']*/gi, '$1/***')
+    .replace(/whsec_[A-Za-z0-9+/=_-]+/g, 'whsec_***')
+    .replace(/\b\d{9,}\b/g, '***')
+    .slice(0, 200);
 }
 
 function normalizeEpochMs(v: number): number {
