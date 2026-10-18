@@ -62,6 +62,16 @@ describe('growth.window — tổng hợp theo cửa sổ 60s trong bộ nhớ (L
     expect((gw as any).bySource.size).toBe(0);
   });
 
+  it('đường nền (baseline) có trần maxKeys: nhiều source qua nhiều cửa sổ không làm phình Map', () => {
+    const gw = new GrowthWindow({ ...S, maxKeys: 40, minCount: 1 });
+    for (let w = 0; w < 5; w++) {
+      for (let i = 0; i < 40; i++) gw.observe(ingest(`src_${w}_${i}`));
+      gw.flush();
+      expect((gw as any).baseline.size).toBeLessThanOrEqual(40);
+    }
+    expect((gw as any).baseline.size).toBe(40);
+  });
+
   it('emitGrowth ghi dòng growth.window (warn) đúng khuôn §9(d); ticker gọi flush theo cửa sổ và dừng được', () => {
     const lines: any[] = [];
     const log: any = { info: (o: any, m: string) => lines.push({ level: 'info', o, m }), warn: (o: any, m: string) => lines.push({ level: 'warn', o, m }), error: () => undefined };

@@ -270,7 +270,7 @@ describe('EG2 hộp phạt IP (ADR-177)', () => {
     });
     expect((await svc.ingestWebhook(req('x21', '203.0.113.150'))).status).toBe(429);
     spy.mockRestore();
-    expect(await apiRegistry.metrics()).toMatch(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED"(?:,cause="[a-z_.]*")?\} [1-9]/);
+    expect(await apiRegistry.metrics()).toMatch(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED",cause="wrong.policy_blocked"\} [1-9]/);
   });
 
   it('review lượt 3 CHẶN 1: trần TỔNG số cặp tốt được tôn trọng (50k key × 64 IP không làm phình RAM), loại key cũ nhất của tenant giữ nhiều nhất', () => {

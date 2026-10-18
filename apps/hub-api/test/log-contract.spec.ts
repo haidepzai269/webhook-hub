@@ -50,7 +50,7 @@ describe('ingest.done — canonical line theo từng đường (LOGGING.md §3, 
         if (opts.dup === 'pg') throw new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' });
         return fn(tx);
       }),
-      forTenant: () => ({ addIngestDuplicates: jest.fn(), addSourceTraffic: jest.fn() }),
+      forTenant: () => ({ addIngestDuplicates: jest.fn(), addSourceTraffic: jest.fn(), findSourceById: jest.fn().mockResolvedValue({ ...source }) }),
     };
     const redis: any = {
       checkRateLimit: jest.fn().mockResolvedValue(opts.rateOk ?? true),
@@ -240,6 +240,52 @@ describe('ingest.done — canonical line theo từng đường (LOGGING.md §3, 
     expect(tp!.traceId).toBe(traceId);
     expect(tp!.spanId).toBe(t.done()[0].obj.span_id);
     expect(typeof payload.ingestedAt).toBe('number');
+  });
+
+  describe('traceparent đến từ client (ADR-254): /hooks KHÔNG tin, /events (API key) có tin', () => {
+    const CLIENT_TRACE = 'c0ffee00c0ffee00c0ffee00c0ffee00';
+    const tp = (t: string) => `00-${t}-1111111111111111-01`;
+    const hooksReq = (traceparent: string) => { const r = good(); r.headers.traceparent = traceparent; return r; };
+    const evReq = (traceparent: string): any => ({ provider: 'api', sourceKey: 'api', headers: { traceparent }, rawBody: Buffer.from('{}'), body: { type: 'order.created', data: {}, idempotencyKey: 'k1' }, contentType: 'application/json' });
+
+    it('(a) /hooks gửi traceparent hợp lệ: trace_id trong ingest.done và correlationId KHÁC trace_id của client; payload outbox cũng không mang nó', async () => {
+      const t = build();
+      await t.svc.ingestWebhook(hooksReq(tp(CLIENT_TRACE)));
+      const notice = t.notifier.traceIngested.mock.calls[0][1];
+      expect(t.done()[0].obj.trace_id).not.toBe(CLIENT_TRACE);
+      expect(traceIdOf(notice.correlationId)).not.toBe(CLIENT_TRACE);
+      expect(JSON.stringify(t.txOutbox.create.mock.calls[0][0].data.payload)).not.toContain(CLIENT_TRACE);
+    });
+
+    it('(b) /events traceparent hợp lệ: correlationId = trace_id của client, dòng log cùng trace_id', async () => {
+      const t = build();
+      const res = await t.svc.publishFromService(TENANT, 'src-1', evReq(tp(CLIENT_TRACE)));
+      expect(res.status).toBeLessThan(300);
+      expect(t.txOutbox.create.mock.calls[0][0].data.payload.correlationId).toBe('c0ffee00-c0ff-ee00-c0ff-ee00c0ffee00');
+      expect(t.done()[0].obj.trace_id).toBe(CLIENT_TRACE);
+    });
+
+    it.each([['sai khuôn', 'rác'], ['trace_id toàn 0', tp('0'.repeat(32))], ['quá dài', 'x'.repeat(5000)], ['chữ hoa', tp('C0FFEE00C0FFEE00C0FFEE00C0FFEE00')]])('(c) /events traceparent %s: sinh trace mới, không ném', async (_n, bad) => {
+      const t = build();
+      const res = await t.svc.publishFromService(TENANT, 'src-1', evReq(bad));
+      expect(res.status).toBeLessThan(300);
+      expect(t.done()[0].obj.trace_id).toMatch(/^[0-9a-f]{32}$/);
+      expect(t.done()[0].obj.trace_id).not.toBe('0'.repeat(32));
+    });
+  });
+
+  it('503 service_unavailable: requestId trong body = x-request-id hợp lệ (nếu có) hoặc correlationId; có Retry-After; dòng log mang request_id', async () => {
+    const e = new Prisma.PrismaClientKnownRequestError('pool', { code: 'P2024', clientVersion: 't' });
+    const t = build({ txError: e });
+    const r = good(); r.headers['x-request-id'] = 'nginx-req-id-12345';
+    const res = await t.svc.ingestWebhook(r);
+    expect(res.status).toBe(503);
+    expect((res.body as any).requestId).toBe('nginx-req-id-12345');
+    expect(res.headers).toMatchObject({ 'Retry-After': '5' });
+    expect(t.done()[0].obj.request_id).toBe('nginx-req-id-12345');
+    const t2 = build({ txError: e });
+    const res2 = await t2.svc.ingestWebhook(good());
+    expect(traceIdOf((res2.body as any).requestId)).toBe(t2.done()[0].obj.trace_id);
   });
 
   it('ngân sách: đường chấp nhận KHÔNG thêm lệnh Redis hay truy vấn DB nào để log/đo (1 nạp source + 1 transaction)', async () => {

@@ -15,7 +15,7 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     attemptGeneration: 1,
     lastError: 'Hết 5 lần retry: 500',
     createdAt: new Date(),
-    correlationId: `corr-${i}`,
+    correlationId: `00000000-0000-4000-8000-00000000000${i}`, // UUID thật: replayOf phải trỏ trace gốc
     eventType: 'repo.push',
     destinationId: 'dest-1',
     rateLimitRps: 4,
@@ -98,6 +98,11 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
       // LOGGING.md §4: + `traceparent` (trace MỚI của lần replay) [+ `replayOf` khi correlationId là UUID] — relay đưa vào HEADER, không vào body.
       expect(Object.keys(o.payload).filter((k) => k !== 'replayOf').sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId', 'traceparent']);
       expect(o.payload).toMatchObject({ destinationId: 'dest-1', rateLimitRps: 4 });
+      // m-3: replay = trace MỚI (khác trace gốc) + replayOf = trace_id gốc suy từ correlationId của event
+      const orig = o.payload.correlationId.replace(/-/g, '');
+      expect(o.payload.replayOf).toBe(orig);
+      expect(o.payload.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+      expect(o.payload.traceparent.split('-')[1]).not.toBe(orig);
     }
     expect(db.audit).toHaveLength(1);
     expect(db.audit[0]).toMatchObject({ tenantId: TENANT, action: 'delivery.replay_bulk', actor: 'admin', reason: 'đích sống lại' });

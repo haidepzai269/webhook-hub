@@ -78,6 +78,8 @@ interface TraceState {
   traceId: string;
   spanId: string;
   traceparent: string;
+  /** `x-request-id` hợp lệ do nginx/client gửi (nếu có) — cùng id trong body lỗi và dòng log. */
+  requestId?: string;
   /** Thời gian theo chặng (ms) — đồng hồ trong bộ nhớ quanh lời gọi sẵn có, KHÔNG thêm lệnh Redis/truy vấn DB (§3.2). */
   stages: Partial<Record<Stage, number>>;
   /** Nguyên nhân (bảng `causes.ts`) và chi tiết chính sách của nhánh từ chối/lỗi; thiếu -> `ingest.done` suy từ outcome/ngưỡng. */
@@ -160,7 +162,7 @@ function rejectAck(
     const final = status === 401 && SIGNATURE_REJECT_STATUSES.has(ack.status) ? ack.status : status;
     return { status: final, body: ack.body };
   } catch (err: any) {
-    log.warn({ err: err?.message }, 'buildAck lỗi khi dựng ack từ chối -> dùng body mặc định');
+    log.warn({ err: errInfo(err) }, 'buildAck lỗi khi dựng ack từ chối -> dùng body mặc định');
     return { status, body: { error: message } };
   }
 }
@@ -315,6 +317,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const traceId = traceIdOf(correlationId) as string;
     const spanId = newSpanId();
     const trace: TraceState = { correlationId, traceId, spanId, traceparent: formatTraceparent(traceId, spanId), stages: {} };
+    const rid = (req.headers as Record<string, unknown> | undefined)?.['x-request-id'];
+    if (typeof rid === 'string' && /^[A-Za-z0-9._-]{8,128}$/.test(rid)) trace.requestId = rid;
     const result = await run(trace);
     const cause = this.resolveCause(trace, result);
     this.recordMetrics(req.provider, trace, result.status, startedAt, cause);
@@ -333,7 +337,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
           ms: Date.now() - startedAt,
         });
       } catch (err: any) {
-        logger.warn({ err: err?.message }, 'Không phát được trace.ingested (bỏ qua)');
+        logger.warn({ err: errInfo(err) }, 'Không phát được trace.ingested (bỏ qua)');
       }
     }
     return result;
@@ -359,6 +363,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
         outcome,
         traceId: trace.traceId,
         spanId: trace.spanId,
+        requestId: trace.requestId,
         tenantId: trace.tenantId,
         sourceId: trace.sourceId,
         rawEventId: trace.rawEventId,
@@ -467,7 +472,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     idempotencyKey: string,
     trace: TraceState,
     ctx?: AdapterContext,
-  ): { status: number; body: unknown } {
+  ): { status: number; body: unknown; headers?: Record<string, string> } {
     // PK4: 2xx chỉ SAU COMMIT (BB-3 — hàm này chỉ chạy sau persistAccepted); mã ngoài 200/202/204 -> 200.
     const ok = (a: { status: number; body: unknown }) => (SUCCESS_STATUSES.has(a.status) ? a : { status: 200, body: a.body });
     if (r.kind === 'error') {
@@ -480,7 +485,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
         trace.cause = 'fail.hub_db';
         return {
           status: def.status,
-          body: { error: 'service_unavailable', message: def.message, fix: def.fix({}), docsUrl: docsUrlFor('service_unavailable'), requestId: trace.correlationId },
+          headers: { 'Retry-After': '5' },
+          body: { error: 'service_unavailable', message: def.message, fix: def.fix({ retryAfter: 5 }), docsUrl: docsUrlFor('service_unavailable'), requestId: trace.requestId ?? trace.correlationId },
         };
       }
       trace.cause = 'fail.hub_unknown';
@@ -514,7 +520,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     try {
       return adapter.handshake(req, secrets, ctx, phase);
     } catch (err: any) {
-      log.warn({ err: err?.message, phase }, 'handshake của adapter lỗi -> coi như không phải bắt tay');
+      log.warn({ err: errInfo(err), phase }, 'handshake của adapter lỗi -> coi như không phải bắt tay');
       return null;
     }
   }
@@ -611,7 +617,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     try {
       adapter = ProviderRegistry.get(req.provider);
     } catch (err: any) {
-      log.error({ err: err.message }, 'Không tìm thấy adapter cho provider');
+      log.error({ err: errInfo(err) }, 'Không tìm thấy adapter cho provider');
       trace.cause = 'wrong.unknown_source';
       trace.policy = 'unknown_provider';
       return { status: 400, body: { error: err.message } };
@@ -830,7 +836,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     try {
       return adapter.storedMeta(req, ctx);
     } catch (err: any) {
-      log.warn({ err: err?.message }, 'storedMeta của adapter lỗi -> không lưu meta');
+      log.warn({ err: errInfo(err) }, 'storedMeta của adapter lỗi -> không lưu meta');
       return null;
     }
   }
@@ -844,7 +850,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       // QT E2: chỉ ACCEPTED / REJECTED có ghi mẫu mới mang byte; còn lại 0 (trùng, 429, chặn, 507).
       this.traffic.record(trace.tenantId, trace.sourceId, outcome, req.ip, trace.bytes ?? 0);
     } catch (err: any) {
-      logger.warn({ err: err?.message }, 'Không ghi được lưu lượng vào bộ nhớ (bỏ qua)');
+      logger.warn({ err: errInfo(err) }, 'Không ghi được lưu lượng vào bộ nhớ (bỏ qua)');
     }
   }
 
@@ -883,7 +889,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       }
       blocked = isWriteBlocked(parseStorageLevel(raw), source.keepLonger === true, true);
     } catch (err: any) {
-      log.warn({ err: err?.message }, 'Lỗi khi đọc nấc dung lượng -> fail-open (coi như OK)');
+      log.warn({ err: errInfo(err) }, 'Lỗi khi đọc nấc dung lượng -> fail-open (coi như OK)');
       return false;
     }
     if (!blocked) return false;
@@ -901,7 +907,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     try {
       r = fn();
     } catch (err: any) {
-      logger.warn({ err: err?.message }, 'Hộp phạt lỗi -> cho request đi qua (fail-open)');
+      logger.warn({ err: errInfo(err) }, 'Hộp phạt lỗi -> cho request đi qua (fail-open)');
       return fallback;
     }
     // Metric tách khỏi `try` trên: lỗi metric không được lật kết luận `blocked` thành "cho qua".
@@ -960,7 +966,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       }));
       return sample.bodyRaw.length;
     } catch (err) {
-      log.error({ err }, 'Lỗi khi lưu rejected raw_event');
+      log.error({ err: errInfo(err) }, 'Lỗi khi lưu rejected raw_event');
       return 0;
     }
   }

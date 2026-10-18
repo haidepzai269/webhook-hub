@@ -87,6 +87,22 @@ describe('log — bãi mìn secret (LOGGING.md §5)', () => {
     expect(line.err.code).toBe('ECONNRESET');
   });
 
+  it('đường storeRejected (chữ ký sai + ghi mẫu REJECTED lỗi, message lỗi mang secret): không lộ qua log.error', async () => {
+    const svc = build(Object.assign(new Error(`insert failed body=${BODY_MARK} ${WHSEC} acct ${ACCT} ${APIKEY} ${BEARER} ${HEARTBEAT}`), { code: 'P2010', name: 'PrismaClientKnownRequestError', meta: { modelName: 'RawEvent' } }));
+    await svc.ingestWebhook(req('sha256=' + '0'.repeat(64)));
+    assertClean();
+    const line = mockSink.map((l) => JSON.parse(l)).find((l) => l.msg === 'Lỗi khi lưu rejected raw_event');
+    expect(line.err).toEqual({ class: 'PrismaClientKnownRequestError', code: 'P2010', msg: 'P2010 RawEvent' }); // Prisma: chỉ code + model, không message nguyên văn
+  });
+
+  it('object lồng nhau / mảng: logger scrub đệ quy chuỗi (whsec_, Bearer, hk_live_) ở mọi cấp, kể cả khoá không nằm trong SECRET_KEYS', () => {
+    const { logger } = require('@hub/common');
+    logger.info({ a: { b: [`x ${BEARER}`, { c: `k=${WHSEC}`, d: { e: [APIKEY] } }] }, plain: `auth ${APIKEY}` }, 'nested');
+    const out = mockSink.join('');
+    expect(out).toContain('nested');
+    for (const m of [WHSEC, APIKEY, 'MINEBEARERTOKEN']) expect(out).not.toContain(m);
+  });
+
   it('mọi dòng log là JSON hợp lệ có svc khi đã setServiceName', async () => {
     const { setServiceName } = jest.requireActual('@hub/common');
     setServiceName('hub-api');

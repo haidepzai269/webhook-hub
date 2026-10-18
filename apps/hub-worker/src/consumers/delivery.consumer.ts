@@ -341,7 +341,7 @@ export class DeliveryConsumer {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisPub = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3: không xếp hàng publish vô hạn khi Redis chết
     // Không để ioredis văng 'Unhandled error event' khi Redis chết (BB-2: Redis được phép sai).
-    this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (delivery) lỗi'));
+    this.redisPub.on?.('error', (err) => logger.warn({ err: errInfo(err) }, 'Redis pub (delivery) lỗi'));
     this.redisPub.connect().catch(() => {});
   }
 
@@ -654,14 +654,14 @@ export class DeliveryConsumer {
         try {
           config = JSON.parse(aesGcmDecrypt(destination.configEncrypted, masterKey));
         } catch (err: any) {
-          log.error({ err: err.message, destinationId }, 'Không thể giải mã config của destination');
+          log.error({ err: errInfo(err), destinationId }, 'Không thể giải mã config của destination');
         }
         let signingSecret: string | undefined;
         if (destination.signingSecretEncrypted) {
           try {
             signingSecret = aesGcmDecrypt(destination.signingSecretEncrypted, masterKey);
           } catch (err: any) {
-            log.error({ err: err.message, destinationId }, 'Không thể giải mã signing secret của destination');
+            log.error({ err: errInfo(err), destinationId }, 'Không thể giải mã signing secret của destination');
           }
         }
 

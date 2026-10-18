@@ -371,10 +371,10 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
   });
 
   it('bãi mìn: sender trả lỗi chứa secret/URL có token/số tài khoản -> dòng log không lộ (err.msg đã scrub, chỉ host)', async () => {
-    const t = setup(fail({ status: 500, error: 'connect ECONNREFUSED https://hooks.example.com/path/whsec_MINEMINEMINE123456?token=MINETOKEN9999 acct 9704123456789012 Bearer MINEBEARER12345678' }));
+    const t = setup(fail({ status: 500, error: 'connect ECONNREFUSED https://hooks.example.com/path/whsec_MINEMINEMINE123456?token=MINETOKEN9999 acct 9704123456789012 Bearer MINEBEARER12345678 via https://alice:MINEPA55W0RD@dest.example.com/hook?token=abc' }));
     await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
     const out = JSON.stringify(t.lines);
-    for (const m of ['whsec_MINE', 'MINETOKEN', '9704123456789012', 'MINEBEARER', '/path/']) expect(out).not.toContain(m);
+    for (const m of ['whsec_MINE', 'MINETOKEN', '9704123456789012', 'MINEBEARER', '/path/', 'MINEPA55W0RD', 'alice']) expect(out).not.toContain(m);
     expect(out).toContain('hooks.example.com');
   });
 });

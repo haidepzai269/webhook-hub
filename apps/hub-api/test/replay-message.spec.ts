@@ -53,6 +53,27 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
     expect(auditRows[0]).toMatchObject({ tenantId: TENANT, action: 'delivery.replay', entityId: DELIVERY, actor: 'admin', reason: 'đích đã sửa' });
   });
 
+  it('m-3: correlationId UUID -> replayOf = trace_id gốc, traceparent mang trace_id MỚI (replay = trace mới có link)', async () => {
+    const CORR = '3f2a9c1e-5b7d-4a08-b6c1-d2e3f4a5b6c7';
+    const outboxRows: any[] = [];
+    const repo = {
+      findDeliveryById: jest.fn().mockResolvedValue({ id: DELIVERY, tenantId: TENANT, status: 'DEAD', eventId: 'evt-1', subscriptionId: 'sub-1', attemptGeneration: 1, event: { id: 'evt-1', correlationId: CORR }, subscription: { destination: { id: 'd', rateLimitRps: 3 } } }),
+      hasNewerGeneration: jest.fn().mockResolvedValue(false),
+      createDelivery: jest.fn().mockResolvedValue({}),
+    };
+    const tx = { outbox: { create: jest.fn(async ({ data }: any) => outboxRows.push(data)) }, auditLog: { create: jest.fn() } };
+    const prisma: any = {
+      forTenant: jest.fn((t: string, client?: any) => (client ? { ...repo, createAuditLog: jest.fn() } : repo)),
+      tenantTx(_t: any, fn: any, o?: any) { return this.$transaction(fn, o); },
+      $transaction: jest.fn(async (fn: any) => fn(tx)),
+    };
+    await new ApiController(prisma).replayDelivery(TENANT, 'admin', DELIVERY, { reason: 'đích đã sửa' });
+    const p = outboxRows[0].payload;
+    expect(p.replayOf).toBe('3f2a9c1e5b7d4a08b6c1d2e3f4a5b6c7');
+    expect(p.traceparent.split('-')[1]).not.toBe(p.replayOf);
+    expect(p.correlationId).toBe(CORR);
+  });
+
   it('[QT:T20] (phần a) event đã "Dọn" (trimmed_at) -> 409 event_trimmed, KHÔNG tạo delivery/outbox', async () => {
     const repo = {
       findDeliveryById: jest.fn().mockResolvedValue({

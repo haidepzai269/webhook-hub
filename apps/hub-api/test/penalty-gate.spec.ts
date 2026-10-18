@@ -107,7 +107,7 @@ function rawPost(port: number, path: string, ip: string, declared: number, send:
 }
 
 const metric = async (re: RegExp) => Number(re.exec(await apiRegistry.metrics())?.[1] ?? 0);
-const blockedGithub = () => metric(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED"(?:,cause="[a-z_.]*")?\} (\d+)/);
+const blockedGithub = () => metric(/hub_ingest_requests_total\{provider="github",outcome="BLOCKED",cause="wrong.policy_blocked"\} (\d+)/);
 const penaltyBlockedIp = () => metric(/hub_ingest_penalty_blocked_total\{reason="unknown_source"\} (\d+)/);
 
 describe('[EG:T19] (phần a) D3 gate hộp phạt trước body parser', () => {
@@ -152,7 +152,7 @@ describe('[EG:T19] (phần a) D3 gate hộp phạt trước body parser', () => 
   });
 
   it('[PK:T2] (phần a) IP trong hộp phạt gửi GET (và HEAD/PUT/DELETE/PATCH) /hooks/generic/<key> -> 429 ở gate TRƯỚC body parser, giống hệt POST; OPTIONS đi qua', async () => {
-    const blockedGeneric = () => metric(/hub_ingest_requests_total\{provider="generic",outcome="BLOCKED"(?:,cause="[a-z_.]*")?\} (\d+)/);
+    const blockedGeneric = () => metric(/hub_ingest_requests_total\{provider="generic",outcome="BLOCKED",cause="wrong.policy_blocked"\} (\d+)/);
     const before = await blockedGeneric();
     for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) {
       const r = await rawPost(port, '/hooks/generic/src_gate_get', BANNED, 1024 * 1024, 16 * 1024, method); // body chưa gửi đủ
