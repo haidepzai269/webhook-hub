@@ -16,7 +16,8 @@ groups:
         expr: sum by (container) (container_memory_working_set_bytes{id=~"/docker/[0-9a-f]{64}"})
       # Tốc độ tăng của database nghiệp vụ (byte/ngày) — nhìn xu hướng "giai đoạn" trên dashboard.
       - record: hub:db_size_growth_bytes:perday6h
-        expr: deriv(hub_db_size_bytes[6h]) * 86400
+        # `> 0`: gauge xuất 0 trước lần set đầu sau mỗi lần worker restart -> không lọc thì deriv báo giả. Subquery 1m.
+        expr: deriv((hub_db_size_bytes > 0)[6h:1m]) * 86400
 
   - name: availability
     rules:
@@ -28,16 +29,33 @@ groups:
           summary: "Không scrape được {{ $labels.job }} ({{ $labels.instance }})"
           description: "Tiến trình/exporter {{ $labels.job }} không trả /metrics 1 phút: hoặc container đã chết, hoặc treo. Mất mạch đập của bộ phận này -> kiểm docker ps / docker logs."
 
+      - alert: Watchdog
+        # Dead-man's switch: LUÔN bắn. Alertmanager gửi nó đều đặn tới receiver `watchdog`; nếu kênh ngoài (Healthchecks.io...)
+        # ngừng nhận thì chính Prometheus/Alertmanager đã chết. Local: receiver trỏ alert-sink (chỉ chứng minh đường ống thông).
+        expr: vector(1)
+        labels: { severity: none }
+        annotations:
+          summary: "Watchdog — đường ống cảnh báo còn sống"
+          description: "Luôn bắn. Mất tín hiệu này ở kênh ngoài = bộ giám sát (Prometheus/Alertmanager) đã chết, không ai khác báo được."
+
       - alert: WorkerSilent
-        # PHỤ THUỘC: metric hub_worker_heartbeat_timestamp_seconds do hub-worker phát (agent khác thêm cùng đợt /health).
-        # Chưa có metric thì vector rỗng -> luật im lặng, không báo giả. Worker chết hẳn thì TargetDown{job="hub-worker"} bắt;
-        # luật này bắt ca khó hơn: tiến trình còn sống, còn trả /metrics nhưng vòng lặp chính đứng.
-        expr: time() - hub_worker_heartbeat_timestamp_seconds > 120
+        # PHỤ THUỘC: metric hub_worker_heartbeat_timestamp_seconds do hub-worker phát (ADR-248). Gauge xuất 0 trước nhịp đầu ->
+        # lọc `> 0` để không báo oan lúc khởi động. Worker chết hẳn: TargetDown{job="hub-worker"} bắt (và che luật này, xem inhibit).
+        # Điểm yếu đã biết: nếu metric biến mất mà target vẫn UP thì luật này im -> WorkerHeartbeatMissing canh ca đó.
+        expr: (time() - hub_worker_heartbeat_timestamp_seconds > 120) and (hub_worker_heartbeat_timestamp_seconds > 0)
         for: 1m
         labels: { severity: critical }
         annotations:
           summary: "hub-worker im > 2 phút"
           description: "Tim worker còn đập ở tầng HTTP nhưng nhịp heartbeat nội bộ ngừng >120s: relay outbox / consumer có thể đã kẹt (sự kiện nằm yên, không mất nhưng không được giao)."
+
+      - alert: WorkerHeartbeatMissing
+        expr: absent(hub_worker_heartbeat_timestamp_seconds) and on() (up{job="hub-worker"} == 1)
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "hub-worker UP nhưng không có metric heartbeat"
+          description: "Worker trả /metrics nhưng thiếu hub_worker_heartbeat_timestamp_seconds: image worker cũ (chưa có heartbeat) hoặc metric bị gỡ. Luật WorkerSilent đang MÙ, worker kẹt sẽ không ai báo."
 
   - name: host
     rules:
@@ -82,12 +100,39 @@ groups:
           summary: "Ổ {{ $labels.mountpoint }} dự báo đầy trong 24 giờ"
           description: "Ổ {{ $labels.mountpoint }} sẽ hết chỗ trong chưa đầy một ngày theo đà 3 giờ qua: Postgres sẽ ngừng ghi, mất khả năng COMMIT (BB-3)."
       - alert: DiskAlmostFull
-        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes < 0.10
+        # Loại mountpoint ổ C: Windows (xem nhóm windows_disk: ngưỡng tuyệt đối theo GB).
+        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs",mountpoint!="/usr/lib/wsl/drivers"} / node_filesystem_size_bytes{mountpoint!="/usr/lib/wsl/drivers"} < 0.10
         for: 10m
         labels: { severity: critical }
         annotations:
           summary: "Ổ {{ $labels.mountpoint }} còn dưới 10%"
           description: "Ổ {{ $labels.mountpoint }} chỉ còn {{ $value | humanizePercentage }} trống."
+
+  - name: windows_disk
+    rules:
+      # /usr/lib/wsl/drivers (9p) trong VM WSL2 CHÍNH LÀ ổ C: Windows — nơi chứa VHDX của Docker. VHDX chỉ phình, không tự co;
+      # predict_linear trên /var/lib (ext4 ảo ~1 TB) KHÔNG thấy rủi ro C: đầy.
+      - alert: DiskWindowsCLow
+        expr: node_filesystem_avail_bytes{mountpoint="/usr/lib/wsl/drivers"} < 20 * 1024^3
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ổ C: Windows còn dưới 20 GB"
+          description: "Ổ C: Windows (nơi chứa VHDX của Docker) còn {{ $value | humanize1024 }}B. C: đầy thì Docker/WSL2 treo hoặc hỏng ổ ảo, mọi container chết cùng lúc."
+      - alert: DiskWindowsCCritical
+        expr: node_filesystem_avail_bytes{mountpoint="/usr/lib/wsl/drivers"} < 8 * 1024^3
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Ổ C: Windows còn dưới 8 GB"
+          description: "Ổ C: Windows (nơi chứa VHDX của Docker) gần cạn ({{ $value | humanize1024 }}B): Docker Desktop sắp ngừng ghi được vào VHDX. Dọn ổ C: hoặc docker system prune / thu nhỏ VHDX ngay."
+      - alert: DiskWindowsCWillFillIn7Days
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/usr/lib/wsl/drivers"}[6h], 7 * 86400) < 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ổ C: Windows dự báo đầy trong 7 ngày"
+          description: "Theo đà 6 giờ qua, ổ C: Windows (nơi chứa VHDX của Docker) hết chỗ trong <7 ngày."
 
   - name: containers
     rules:
@@ -141,7 +186,7 @@ groups:
           description: "Postgres (trọng tài idempotency, BB-2) không trả lời: ingest sẽ không COMMIT được -> không ACK (BB-3)."
       - alert: HubDbGrowingFast
         # hub_db_size_bytes do hub-worker phát (đọc pg_database_size tối đa 10 phút/lần) nên cửa sổ ≥ 1h mới đủ điểm.
-        expr: delta(hub_db_size_bytes[1h]) > 200 * 1024 * 1024
+        expr: delta((hub_db_size_bytes > 0)[1h:1m]) > 200 * 1024 * 1024
         for: 15m
         labels: { severity: warning }
         annotations:
@@ -192,6 +237,16 @@ groups:
         annotations:
           summary: "Queue {{ $labels.queue }} không có consumer"
           description: "Không ai đọc {{ $labels.queue }}: hub-worker chưa nối RabbitMQ hoặc đã chết; sự kiện nằm yên trong queue."
+      - alert: RabbitQueueMissing
+        # Queue chính biến mất (bị xoá / topology chưa khai báo) mà scrape vẫn UP -> các luật theo queue ở trên MÙ.
+        expr: |
+          (absent(rabbitmq_detailed_queue_consumers{queue="q.normalize"}) or absent(rabbitmq_detailed_queue_consumers{queue="q.delivery.main"}))
+            and on() (up{job="rabbitmq-queues"} == 1)
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Không thấy queue chính ({{ $labels.queue }}) trên RabbitMQ"
+          description: "q.normalize hoặc q.delivery.main không tồn tại: topology chưa được hub-worker khai báo hoặc queue bị xoá; luật backlog/consumer không còn thấy gì."
       - alert: RabbitDeadLetterNotEmpty
         expr: rabbitmq_detailed_queue_messages_ready{queue=~"q\\..*\\.dlq"} > 0
         for: 5m

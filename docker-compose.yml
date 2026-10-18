@@ -97,14 +97,13 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./infra/prometheus/rules:/etc/prometheus/rules:ro
       - promdata:/prometheus
-    depends_on:
-      - alertmanager
 
   # MON1 (ADR-249): bộ theo dõi hạ tầng CHỈ cho LOCAL (xem docs/MONITORING.md). Không publish cổng exporter ra host.
   # Số đo CPU/RAM/disk của node-exporter là của VM WSL2 của Docker Desktop, KHÔNG phải của Windows host.
   node-exporter:
     image: prom/node-exporter:v1.8.2
     container_name: webhook-hub-node-exporter
+    profiles: ["monitoring"]
     restart: unless-stopped
     command:
       - --path.rootfs=/host
@@ -118,9 +117,9 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.52.1
     container_name: webhook-hub-cadvisor
+    profiles: ["monitoring"]
     restart: unless-stopped
-    # Docker Desktop: cần đọc cgroup + data-root của Docker trong VM; privileged là cách ổn định duy nhất ở đây.
-    privileged: true
+    # Đã thử bỏ `privileged` và mount /var/run (docker.sock thừa vì docker factory tắt): vẫn đọc đủ cgroup /docker/<id> (23 container).
     command:
       - --housekeeping_interval=15s
       - --docker_only=false
@@ -131,7 +130,6 @@ services:
       - /dev/kmsg
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
@@ -141,10 +139,12 @@ services:
   postgres-exporter:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
     container_name: webhook-hub-postgres-exporter
+    profiles: ["monitoring"]
     restart: unless-stopped
-    # Cùng thông tin đăng nhập đã có ở service postgres phía trên (local-only). Exporter chỉ chạy truy vấn đọc.
+    # Dùng hub_user (SUPERUSER của DB local) — giới hạn đã biết: môi trường thật phải dùng role `pg_monitor` riêng. Mật khẩu lấy
+    # ${POSTGRES_PASSWORD} nếu có (service postgres hiện hardcode hub_password; không sửa DB ở ADR-249).
     environment:
-      DATA_SOURCE_NAME: postgresql://hub_user:hub_password@postgres:5432/webhook_hub?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://hub_user:${POSTGRES_PASSWORD:-hub_password}@postgres:5432/webhook_hub?sslmode=disable
     expose:
       - "9187"
     depends_on:
@@ -154,6 +154,7 @@ services:
   redis-exporter:
     image: oliver006/redis_exporter:v1.62.0-alpine
     container_name: webhook-hub-redis-exporter
+    profiles: ["monitoring"]
     restart: unless-stopped
     # Chỉ INFO/đọc. KHÔNG chạy ở deployed: scrape 5s sẽ ăn quota lệnh Upstash (docs/MONITORING.md §Giới hạn).
     environment:
@@ -168,18 +169,18 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: webhook-hub-alertmanager
+    profiles: ["monitoring"]
     restart: unless-stopped
     volumes:
       - ./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanagerdata:/alertmanager
     ports:
-      - "9093:9093"
-    depends_on:
-      - alert-sink
+      - "127.0.0.1:9093:9093"
 
   alert-sink:
     image: mendhak/http-https-echo:33
     container_name: webhook-hub-alert-sink
+    profiles: ["monitoring"]
     restart: unless-stopped
     # In mọi request nhận được ra stdout: `docker logs webhook-hub-alert-sink`
     environment:

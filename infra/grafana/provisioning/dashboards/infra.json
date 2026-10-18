@@ -562,7 +562,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Kích thước database nghiệp vụ",
-      "description": "hub_db_size_bytes (hub-worker đọc pg_database_size ≤ 10 phút/lần) và pg_database_size_bytes từ exporter.",
+      "description": "hub_db_size_bytes (lọc > 0: gauge xuất 0 trước lần đọc đầu; hub-worker đọc pg_database_size ≤ 10 phút/lần) và pg_database_size_bytes từ exporter.",
       "datasource": {
         "type": "prometheus",
         "uid": "hub-prometheus"
@@ -586,7 +586,7 @@
             "uid": "hub-prometheus"
           },
           "refId": "A",
-          "expr": "hub_db_size_bytes",
+          "expr": "hub_db_size_bytes > 0",
           "legendFormat": "hub_db_size_bytes"
         },
         {

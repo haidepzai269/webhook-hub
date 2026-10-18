@@ -10,6 +10,12 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
+    # Dead-man's switch: Watchdog luôn bắn, gửi đều tới receiver riêng (không lẫn cảnh báo thật).
+    - matchers: ['alertname="Watchdog"']
+      receiver: watchdog
+      group_wait: 0s
+      group_interval: 5m
+      repeat_interval: 5m
     - matchers: ['severity="critical"']
       receiver: default
       repeat_interval: 1h
@@ -20,9 +26,19 @@ receivers:
       - url: http://alert-sink:8080/alertmanager
         send_resolved: true
 
+  # Local: chỉ chứng minh đường ống thông. Thật: kênh NGOÀI (Healthchecks.io, ping mỗi 5 phút; thiếu ping -> họ báo).
+  # Prometheus/Alertmanager chết thì chỉ kênh ngoài báo được. URL ping chứa token -> để trong file, KHÔNG vào repo.
+  - name: watchdog
+    webhook_configs:
+      - url: http://alert-sink:8080/watchdog
+        send_resolved: false
+        # url_file: /etc/alertmanager/secrets/healthchecks_url   # thay `url` khi nối Healthchecks.io
+
   # --- Chừa chỗ (bỏ comment + đổi route.receiver khi chốt) ---
   # - name: telegram
   #   telegram_configs:
+  #     # Bật Telegram/email: thêm vào service alertmanager (docker-compose.yml)
+  #     #   volumes: - ./infra/alertmanager/secrets:/etc/alertmanager/secrets:ro   (thư mục này PHẢI nằm trong .gitignore)
   #     - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token   # file ngoài repo
   #       chat_id: 0                                                     # số chat id thật
   #       parse_mode: HTML
@@ -37,8 +53,15 @@ receivers:
   #       send_resolved: true
   # SMS: Alertmanager không có receiver SMS gốc -> đi qua webhook_configs tới cổng SMS (eSMS/Twilio...) hoặc relay.
 
-# Cảnh báo critical che cảnh báo warning cùng tên + cùng instance (đỡ ồn).
+# TargetDown che luật con cùng job (chết hẳn thì không cần báo thêm "im"/"không consumer").
 inhibit_rules:
-  - source_matchers: ['severity="critical"']
-    target_matchers: ['severity="warning"']
-    equal: ['alertname', 'instance']
+  - source_matchers: ['alertname="TargetDown"']
+    target_matchers: ['alertname=~"WorkerSilent|WorkerHeartbeatMissing|RabbitNoConsumers|RabbitQueueMissing"']
+    equal: ['job']
+  # Dự báo đầy trong 24 giờ (critical) che dự báo 7 ngày (warning) của cùng ổ.
+  - source_matchers: ['alertname="DiskWillFillIn24Hours"']
+    target_matchers: ['alertname="DiskWillFillIn7Days"']
+    equal: ['mountpoint', 'instance']
+  - source_matchers: ['alertname="HostMemoryCritical"']
+    target_matchers: ['alertname="HostMemoryHigh"']
+    equal: ['instance']

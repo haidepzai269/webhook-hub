@@ -34,13 +34,23 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets: ['node-exporter:9100']
+    # Giảm series (RAM/đĩa Prometheus): bỏ nhóm không luật/dashboard nào dùng.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'node_(nfs|nfsd|softnet|interrupts|cooling_device|hwmon|edac|netstat|sockstat|schedstat|arp)_.*'
+        action: drop
   - job_name: 'cadvisor'
-    scrape_interval: 15s
+    # 30s (không 15s): cAdvisor là nguồn series nhiều nhất; rate[5m] vẫn đủ điểm.
+    scrape_interval: 30s
     static_configs:
       - targets: ['cadvisor:8080']
     # Docker Desktop (containerd image store): cAdvisor không biết tên container, chỉ có id cgroup /docker/<64 hex>.
     # Rút 12 ký tự đầu = cột ID của `docker ps` -> nhãn `container`. Cgroup không phải container Docker không có nhãn này.
     metric_relabel_configs:
+      # Luật/dashboard chỉ dùng: memory_working_set, cpu_usage_seconds, start_time_seconds, spec_memory_limit_bytes.
+      - source_labels: [__name__]
+        regex: 'container_(tasks_state|memory_failures_total|fs_.*|blkio_.*|network_.*|sockets|threads.*|file_descriptors|processes|spec_(cpu|memory_(reservation|swap)).*|memory_(mapped_file|cache|rss|swap|failcnt|max_usage_bytes|kernel_usage|usage_bytes)|cpu_(load_average_10s|system_seconds_total|user_seconds_total|cfs_.*)|oom_events_total|last_seen|referenced_bytes)'
+        action: drop
       - source_labels: [id]
         regex: '/docker/([0-9a-f]{12})[0-9a-f]{52}'
         target_label: container
@@ -57,6 +67,10 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets: ['rabbitmq:15692']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'erlang_vm_.*'
+        action: drop
   # Số tin / số consumer THEO TỪNG QUEUE: endpoint /metrics/detailed (không cần bật return_per_object_metrics toàn cục).
   - job_name: 'rabbitmq-queues'
     scrape_interval: 15s
