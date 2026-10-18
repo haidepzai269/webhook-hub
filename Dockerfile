@@ -41,7 +41,10 @@ ARG NEXT_PUBLIC_SHOP_API_URL=""
 ENV HUB_API_INTERNAL_URL=$HUB_API_INTERNAL_URL NEXT_PUBLIC_DEMO_SIMULATE=$NEXT_PUBLIC_DEMO_SIMULATE     NEXT_PUBLIC_DEMO_SEPAY_APIKEY=$NEXT_PUBLIC_DEMO_SEPAY_APIKEY     NEXT_PUBLIC_HUB_API_URL=$NEXT_PUBLIC_HUB_API_URL NEXT_PUBLIC_SHOP_API_URL=$NEXT_PUBLIC_SHOP_API_URL
 # S1-6 (ADR-047): lớp chặn thứ hai sau .dockerignore — không bao giờ build/nạp dist cũ (BB09 P0-1).
 RUN rm -rf libs/*/dist apps/*/dist
-RUN npm run build
+# ADR-253: mặc định KHÔNG build apps/web (Next build OOM >8GB trên Render; web deploy ở Vercel).
+# Local compose (service `web`) truyền BUILD_WEB=1.
+ARG BUILD_WEB=0
+RUN npm run build:server     && if [ "$BUILD_WEB" = "1" ]; then npm run build --workspace=apps/web; fi
 
 # Entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/
