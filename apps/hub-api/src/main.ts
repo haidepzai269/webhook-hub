@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { installBigIntJson, logger, setServiceName, testOnlyConfigProblems } from '@hub/common';
+import { installBigIntJson, logger, setServiceName, startEventLoopMonitor, startGrowthTicker, testOnlyConfigProblems } from '@hub/common';
+import { apiGrowth, eventLoopLag } from './modules/metrics/metrics';
 import { coldStartMiddleware } from './cold-start';
 import { assertAppRoleNotPrivileged, assertDatabaseLib, PrismaService } from '@hub/database';
 import { corsOptions } from './cors';
@@ -109,6 +110,9 @@ async function bootstrap() {
 
   // Review CB6 (Thấp 3, ADR-171): SIGTERM/SIGINT -> ghi nốt bộ đếm bản trùng (trần trong SHUTDOWN_TIMEOUT_MS) rồi thoát.
   const ingest = app.get(IngestService);
+  // LOGGING.md §3.2/§2.3: p99 event loop (cờ slow.hub_cpu) mỗi nhịp 5s + tổng hợp growth.window mỗi 60s — trong bộ nhớ, timer unref, 0 Redis/DB.
+  startEventLoopMonitor((ms) => eventLoopLag.set(ms / 1000));
+  startGrowthTicker(apiGrowth, ingest.canonical);
   installShutdown(() => ingest.duplicates.close());
 }
 

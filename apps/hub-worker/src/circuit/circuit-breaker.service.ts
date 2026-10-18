@@ -2,7 +2,7 @@ import { circuitTransitions } from '../metrics';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
-import { CircuitState, fastFailRedisOptions, logger } from '@hub/common';
+import { CircuitState, Cause, fastFailRedisOptions, logger } from '@hub/common';
 import { PrismaService } from '@hub/database';
 import {
   CIRCUIT_OPEN_MS as OPEN_FIRST_MS,
@@ -300,7 +300,7 @@ export class CircuitBreakerService {
    * Gửi thất bại (CHỈ lỗi phía đích: 5xx/408/429/mạng — consumer lọc, ADR-054): INCR+EXPIRE trong MỘT
    * script Lua. Đạt ngưỡng, hoặc probe HALF_OPEN thất bại -> OPEN.
    */
-  async recordFailure(target: CircuitTarget, view: CircuitView): Promise<CircuitView> {
+  async recordFailure(target: CircuitTarget, view: CircuitView, trigger?: Cause): Promise<CircuitView> {
     const k = this.keys(target.destinationId);
     let failures: number;
     try {
@@ -331,7 +331,11 @@ export class CircuitBreakerService {
         return { state: 'CLOSED', failures, degraded: true };
       }
       // Một dòng cho MỖI lần trip (kể cả trip lại sau probe thất bại), kèm số lần probe thất bại liên tiếp (`:trips`).
-      logger.warn({ destinationId: target.destinationId, failures, openSeconds, probeFailed, trips }, `Circuit breaker -> OPEN (hoãn gửi ${openSeconds}s)`);
+      // LOGGING.md §1: nói LỖI NÀO đã làm mở (`trigger_cause`: 5xx / timeout / mạng / 429 — consumer truyền) + tenant/destination + cause của hoãn.
+      logger.warn(
+        { cause: 'slow.deferred_circuit', blame: 'dich', tenantId: target.tenantId, destinationId: target.destinationId, trigger_cause: trigger, failures, openSeconds, probeFailed, trips },
+        `Circuit breaker -> OPEN (hoãn gửi ${openSeconds}s)`,
+      );
       await this.transition(target, 'OPEN', failures, false, halfOpenAt);
       return { state: 'OPEN', failures, openPttlMs: openSeconds * 1000 };
     }

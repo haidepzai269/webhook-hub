@@ -277,6 +277,26 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
     expect(o.stage_ms.queue_wait).toBeLessThan(2_000);
   });
 
+  it('metric nối với log (§7): hub_deliveries_total có nhãn cause; hub_log_events_total, hub_slow_total, hub_queue_wait_seconds đếm đủ', async () => {
+    const { workerRegistry } = require('../src/metrics');
+    const sum = async (name: string, pred: (l: Record<string, string>, metricName: string) => boolean) => {
+      const m = await workerRegistry.getSingleMetric(name).get();
+      return m.values.filter((v: any) => pred(v.labels, v.metricName)).reduce((a: number, v: any) => a + v.value, 0);
+    };
+    const t = setup(fail({ status: 503, error: 'x' }));
+    const b0 = await sum('hub_deliveries_total', (l) => l.status === 'RETRYING' && l.cause === 'fail.dest_5xx');
+    const l0 = await sum('hub_log_events_total', (l) => l.msg === 'delivery.attempt' && l.cause === 'fail.dest_5xx');
+    await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
+    expect((await sum('hub_deliveries_total', (l) => l.status === 'RETRYING' && l.cause === 'fail.dest_5xx')) - b0).toBe(1);
+    expect((await sum('hub_log_events_total', (l) => l.msg === 'delivery.attempt' && l.cause === 'fail.dest_5xx')) - l0).toBe(1);
+    const s0 = await sum('hub_slow_total', (l) => l.cause === 'slow.queue_wait');
+    const q0 = await sum('hub_queue_wait_seconds', (l, n) => l.queue === 'q.delivery.main' && n === 'hub_queue_wait_seconds_count');
+    const t2 = setup(ok(5));
+    await t2.consumer.handleMessage(amqp(buildSlimMsg(), {}, Date.now() - 9_000), t2.channel);
+    expect((await sum('hub_slow_total', (l) => l.cause === 'slow.queue_wait')) - s0).toBe(1);
+    expect((await sum('hub_queue_wait_seconds', (l, n) => l.queue === 'q.delivery.main' && n === 'hub_queue_wait_seconds_count')) - q0).toBe(1);
+  });
+
   it('replay = trace MỚI có link: header x-replay-of -> dòng có replay_of trỏ trace gốc, trace_id là trace mới', async () => {
     const NEW_TRACE = 'b'.repeat(32);
     const t = setup(ok());

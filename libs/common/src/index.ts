@@ -23,3 +23,5 @@ export * from './causes';
 export * from './slow-thresholds';
 export * from './trace-context';
 export * from './log-line';
+export * from './growth-window';
+export * from './event-loop';

@@ -1,5 +1,5 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
-import { setCanonicalObserver } from '@hub/common';
+import { GrowthWindow, resolveGrowth, setCanonicalObserver, slowThresholds } from '@hub/common';
 
 /**
  * Chỉ số Prometheus của hub-api (S3-4). Đếm TRONG BỘ NHỚ của tiến trình — 0 lệnh Redis (ngân sách R1).
@@ -163,8 +163,12 @@ export const growthTotal = new Counter({
   registers: [apiRegistry],
 });
 
+/** `growth.window` của hub-api (burst_source, dup_flood): tổng hợp trong bộ nhớ từ chính các canonical line; ticker 60s ở main.ts. */
+export const apiGrowth = new GrowthWindow(resolveGrowth(), slowThresholds().queueWaitMs);
+
 setCanonicalObserver((b) => {
   if (b.svc !== 'hub-api') return;
+  apiGrowth.observe(b);
   logEventsTotal.inc({ svc: b.svc, msg: String(b.record.msg), cause: b.cause ?? '' });
   if (b.slowCause) slowTotal.inc({ svc: b.svc, cause: b.slowCause });
   for (const [stage, ms] of Object.entries(b.stageMs)) if (typeof ms === 'number' && ms > 0) stageDuration.observe({ svc: b.svc, stage }, ms / 1000);

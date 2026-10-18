@@ -252,6 +252,24 @@ describe('ingest.done — canonical line theo từng đường (LOGGING.md §3, 
     expect(t.prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
+  it('metric nối với log (§7): hub_log_events_total đếm ĐỦ kể cả dòng bị mẫu bỏ; hub_ingest_requests_total có nhãn cause; hub_stage_duration_seconds theo chặng', async () => {
+    const { apiRegistry } = require('../src/modules/metrics/metrics');
+    const t = build();
+    t.svc.canonical = new CanonicalLogger({ log: { info: () => undefined, warn: () => undefined, error: () => undefined }, successSample: 0, dedupeWindowMs: 30_000 });
+    const count = async (name: string, labels: Record<string, string>) => {
+      const m = await apiRegistry.getSingleMetric(name).get();
+      return m.values.filter((v: any) => Object.entries(labels).every(([k, val]) => v.labels[k] === val)).reduce((a: number, v: any) => a + v.value, 0);
+    };
+    const before = await count('hub_log_events_total', { msg: 'ingest.done', cause: '' });
+    const beforeSig = await count('hub_ingest_requests_total', { outcome: 'REJECTED', cause: 'wrong.signature' });
+    for (let i = 0; i < 7; i++) await t.svc.ingestWebhook(good());
+    await t.svc.ingestWebhook(req(BAD_SIG));
+    expect((await count('hub_log_events_total', { msg: 'ingest.done', cause: '' })) - before).toBe(7); // log ghi 0 dòng ok (mẫu 0) nhưng metric đủ 7
+    expect((await count('hub_ingest_requests_total', { outcome: 'REJECTED', cause: 'wrong.signature' })) - beforeSig).toBe(1);
+    const stages = await apiRegistry.getSingleMetric('hub_stage_duration_seconds').get();
+    expect(stages.values.some((v: any) => v.metricName === 'hub_stage_duration_seconds_count' && v.labels.stage === 'db_commit' && v.value > 0)).toBe(true);
+  });
+
   it('lấy mẫu thành công: LOG_SUCCESS_SAMPLE thấp bỏ dòng ok nhưng lỗi vẫn ghi đủ', async () => {
     const t = build();
     t.svc.canonical = new CanonicalLogger({ log: { info: () => t.lines.push({ level: 'info', obj: {}, msg: 'ingest.done' }), warn: (o: any, m: string) => t.lines.push({ level: 'warn', obj: o, msg: m }), error: () => undefined }, successSample: 0, dedupeWindowMs: 30_000 });

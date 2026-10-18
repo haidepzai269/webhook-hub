@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { bearerAuthorized } from '@hub/crypto';
-import { setCanonicalObserver } from '@hub/common';
+import { GrowthWindow, resolveGrowth, setCanonicalObserver, slowThresholds } from '@hub/common';
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 /**
@@ -365,8 +365,12 @@ export const growthTotal = new Counter({
   registers: [workerRegistry],
 });
 
+/** `growth.window` của hub-worker (retry_storm, dlq_swell, backlog): tổng hợp trong bộ nhớ từ chính các canonical line; ticker 60s ở main.ts. */
+export const workerGrowth = new GrowthWindow(resolveGrowth(), slowThresholds().queueWaitMs);
+
 setCanonicalObserver((b) => {
   if (b.svc !== 'hub-worker') return;
+  workerGrowth.observe(b);
   logEventsTotal.inc({ svc: b.svc, msg: String(b.record.msg), cause: b.cause ?? '' });
   if (b.slowCause) slowTotal.inc({ svc: b.svc, cause: b.slowCause });
   for (const [stage, ms] of Object.entries(b.stageMs)) if (typeof ms === 'number' && ms > 0) stageDuration.observe({ svc: b.svc, stage }, ms / 1000);

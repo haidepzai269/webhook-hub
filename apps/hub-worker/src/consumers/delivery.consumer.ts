@@ -742,7 +742,7 @@ export class DeliveryConsumer {
       // nên không phải bằng chứng mới. Probe HALF_OPEN nhận 4xx (không tính): đích trả lời được nhưng
       // không chứng minh sống/chết -> NHẢ probe, giữ HALF_OPEN để lần gửi kế tiếp thử lại ngay.
       if (!circuitTimeout && countsTowardCircuit(result.status)) {
-        await this.circuitBreaker.recordFailure(circuit, view);
+        await this.circuitBreaker.recordFailure(circuit, view, causeOfSendFailure({ status: result.status, error: result.error }));
       } else if (isProbe) {
         log.info({ status: result.status }, 'Probe HALF_OPEN nhận 4xx (không tính vào circuit) -> nhả probe, giữ HALF_OPEN');
         await releaseProbe();
