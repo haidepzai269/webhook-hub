@@ -1,4 +1,5 @@
-import { startMetricsServer } from './metrics';
+import { startMetricsServer, setReadinessProbe } from './metrics';
+import { startExternalHeartbeatFromEnv, heartbeatAgeMs, isHeartbeatFresh } from './heartbeat';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
 import { setupRabbitMQTopology, QUEUES } from '@hub/messaging';
@@ -180,12 +181,44 @@ async function bootstrap() {
   );
   logger.info(`Đang lắng nghe consumer queue: ${QUEUES.DELIVERY_MAIN} (prefetch: 20, manual ack)`);
 
+  // ADR-248: readiness = đã qua bước subscribe cả hai consumer (không đang tắt) + Postgres trả lời + heartbeat KHÔNG cũ
+  // (chưa có beat nào = đang khởi động, chấp nhận; đã beat mà >45s không beat nữa = vòng relay kẹt -> not ready).
+  // Consumer đóng bất thường thì tiến trình đã tự thoát nên không cần dò thêm. Liveness (`/health/live`) không chạm gì.
+  const prismaForReady = PrismaService.getInstance();
+  setReadinessProbe(async () => {
+    const consumers = !shuttingDown;
+    let postgres = 'up';
+    let t: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        prismaForReady.$queryRaw`SELECT 1`,
+        new Promise((_, rej) => {
+          t = setTimeout(() => rej(new Error('timeout')), 3000);
+        }),
+      ]);
+    } catch {
+      postgres = 'down';
+    } finally {
+      if (t) clearTimeout(t);
+    }
+    const age = heartbeatAgeMs();
+    const heartbeat = age === null ? 'none' : isHeartbeatFresh() ? 'fresh' : 'stale';
+    return {
+      ok: consumers && postgres === 'up' && heartbeat !== 'stale',
+      checks: { consumers: consumers ? 'up' : 'down', postgres, heartbeat, heartbeatAgeSeconds: age === null ? 'none' : String(Math.round(age / 1000)) },
+    };
+  });
+  // ADR-248: dead-man's switch ngoài, tắt mặc định (không HEARTBEAT_URL = no-op).
+  const externalHeartbeat = startExternalHeartbeatFromEnv();
+  if (externalHeartbeat) logger.info('HEARTBEAT_URL đã bật: ping dịch vụ ngoài khi vòng outbox relay còn khoẻ');
+
   // 5. Graceful Shutdown theo ARCHITECTURE.md §5.6 (Render SIGTERM 25s timeout)
   const shutdownTimeoutMs = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '25000', 10);
 
   const handleShutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    externalHeartbeat?.stop();
     logger.info(`Nhận tín hiệu ${signal}. Bắt đầu graceful shutdown (timeout: ${shutdownTimeoutMs}ms)...`);
     outboxRelay.stop();
     sweeper.stop();

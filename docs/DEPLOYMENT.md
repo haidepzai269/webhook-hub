@@ -34,7 +34,7 @@
 
 | Thành phần | Nhà cung cấp | Ghi chú |
 |---|---|---|
-| `hub-api` | **Render** (Docker) | Web Service · `/health` · Socket.IO server |
+| `hub-api` | **Render** (Docker) | Web Service · `/health/live` (health check Render) · `/health/ready` · Socket.IO server |
 | `hub-worker` | **Render** (Docker) | Consumer + outbox relay + cleanup (ADR-020) |
 | `web` (dashboard + storefront UI) | **Vercel** | Next.js |
 | `shop` (backend) | **Render** Web Service (Docker, free) | Server Express chạy LIÊN TỤC (vòng tự đăng ký endpoint với hub, nhận push ký Standard Webhooks) — KHÔNG chạy kiểu serverless/route handler trên Vercel (thay ADR-022). Giao diện cửa hàng nằm trong `web` (Vercel) |
@@ -105,7 +105,7 @@ services:
     region: singapore
     dockerfilePath: ./Dockerfile
     dockerCommand: docker-entrypoint.sh hub-api     # entrypoint nhận: hub-api | hub-worker | shop | web | seed
-    healthCheckPath: /health
+    healthCheckPath: /health/live   # ADR-248: liveness, KHÔNG chạm Postgres/Redis/RabbitMQ (xem § Health)
     plan: free
     envVars: [...]
 
@@ -157,7 +157,7 @@ proxy Render ──► nginx :$PORT ──► hub-api 127.0.0.1:$EDGE_API_PORT (
 ```
 
 - **Rollback = một biến:** xoá `EDGE_NGINX` (hoặc đặt `0`) → Render khởi động lại → hub-api nghe thẳng `$PORT` như cũ.
-- **Health check** `/health` đi qua nginx, không bị cầu chì. Không cần đổi cấu hình health check của Render.
+- **Health check** (`/health`, `/health/live`, `/health/ready`) đi qua nginx (`location /` không có cầu chì). Xem §Health bên dưới (ADR-248).
 - **Tắt máy:** nginx nhận `SIGQUIT` (trả nốt request đang proxy, tối đa `EDGE_DRAIN_MS` − 1 s = 15 s — `worker_shutdown_timeout`, dẫn ra từ biến, luôn nhỏ hơn thời gian hub-api chờ), worker nhận
   `SIGTERM` ngay, hub-api nhận `SIGTERM` khi nginx đã thoát (chậm nhất `EDGE_DRAIN_MS`) — hub-api thoát ngay khi nhận
   SIGTERM (không drain HTTP), nên phải chờ nginx trả xong. Tổng vẫn trong 25 s.
@@ -505,6 +505,31 @@ Vercel **không chạy được WebSocket server** — nhưng không cần: serv
 
 ---
 
+## 7b. Health: live / ready / heartbeat worker (ADR-248)
+
+| Đường | Kiểm | Trả | Dùng cho |
+|---|---|---|---|
+| `GET /health/live` | không gì cả (process trả lời được) | luôn 200 | **Render health check path** (repo không có `HEALTHCHECK` Docker hay `render.yaml` — đặt tay trên dashboard) |
+| `GET /health/ready` | Postgres (CỨNG) · Redis · RabbitMQ (MỀM) | 503 chỉ khi Postgres rớt; mềm rớt = 200 `status:"degraded"` | monitor ngoài, dashboard, `wait_health` trong script |
+| `GET /health` | như `/ready` (đường cũ, JSON giữ nguyên + `required` mỗi phụ thuộc) | như `/ready` | keep-alive cron-job.org, script/verify cũ |
+
+- Redis được phép sai (BB-2) nên KHÔNG BAO GIỜ làm 503. RabbitMQ mềm vì ingest chỉ ghi `raw_events` + outbox vào Postgres; relay (hub-worker) mới publish.
+- Redis/RabbitMQ được cache 30s trong bộ nhớ (tiết kiệm quota Upstash, connection CloudAMQP) và dò single-flight. Hệ quả: vừa khởi động
+  mà Redis/Rabbit chưa sẵn sàng thì `degraded` có thể kéo dài tới 30s dù chúng đã lên. Timeout dò: Redis/Rabbit 3s, Postgres 8s
+  (để Neon cold-start không làm `/health` của cron-job.org 503 oan và gửi mail).
+- hub-worker `/health/ready` còn tính heartbeat: đã từng beat mà >45s không beat nữa -> 503 (vòng relay kẹt).
+- hub-worker (`:WORKER_METRICS_PORT`, mặc định 9101): `/health/live` luôn 200; `/health/ready` = consumer đã subscribe + Postgres.
+  Gauge `hub_worker_heartbeat_timestamp_seconds` (unix giây, lượt relay thành công gần nhất) cho Prometheus: `time() - hub_worker_heartbeat_timestamp_seconds > 120`.
+- Trên deployed (phương án D, `hub-all`) `WORKER_METRICS_PORT=0` nên worker không có cổng health -> dùng **`HEARTBEAT_URL`** (§ env vars) để biết worker kẹt.
+
+**Việc Admin phải tự làm (hệ thống KHÔNG tự đổi cấu hình hạ tầng thật):**
+1. Render dashboard → service `hub-api` → Settings → Health Check Path: đổi `/health` thành **`/health/live`**. Lý do: Render restart/ngừng chuyển
+   traffic khi health check fail; với `/health` cũ mọi lần Redis/RabbitMQ chớp là 503 -> restart oan cả hub-api (và hub-worker cùng container ở `hub-all`).
+   Nếu muốn deploy chỉ "xanh" khi DB sống, dùng `/health/ready` (chỉ 503 khi Postgres rớt) — đánh đổi: Neon chớp là Render có thể restart.
+2. cron-job.org: có thể GIỮ `/health` (không phải làm gì). Ping này đồng thời chạm `SELECT 1` nên giữ Neon thức; chỉ đổi sang `/health/live`
+   nếu không cần giữ Neon/Redis thức (nhẹ hơn nhưng không ấm DB).
+3. (Tuỳ chọn) Healthchecks.io: tạo check (period 1 phút, grace 3–5 phút), dán URL ping vào env `HEARTBEAT_URL` của service chạy hub-worker.
+
 ## 8. Keep-alive — cron-job.org, chỉ trong giờ thức (ADR-240)
 
 Render free cho **750 giờ instance/tháng dùng chung cả workspace**. Ping 24/7 thì `hub-all` ăn ~744 giờ, `shop` hết chỗ, và
@@ -512,7 +537,7 @@ lố hạn mức là Render tạm dừng **mọi** service free. Vì vậy chỉ
 
 | Job (cron-job.org) | Lịch | Múi giờ | Ghi chú |
 |---|---|---|---|
-| `GET https://hub-api-c9hg.onrender.com/health` | `*/5 7-22 * * *` | `Asia/Ho_Chi_Minh` | Ping cuối 22:55, ngủ ~23:10 → ~500 giờ/tháng |
+| `GET https://hub-api-c9hg.onrender.com/health` (giữ nguyên — vẫn ấm Neon; §7b) | `*/5 7-22 * * *` | `Asia/Ho_Chi_Minh` | Ping cuối 22:55, ngủ ~23:10 → ~500 giờ/tháng |
 | ~~shop~~ | — | — | **Không ping.** Đánh thức tay trước demo (mở trang shop, chờ ~1 phút) |
 
 - **UptimeRobot: tạm dừng** (pause, không xoá). Đừng bật lại kiểu 24/7. Muốn có trang trạng thái để chụp vào báo cáo thì
@@ -627,6 +652,10 @@ METRICS_TOKEN=           # BẮT BUỘC trên deployed: hub-api /metrics VÀ hub
                          # "Authorization: Bearer <token>" (review #6). Prometheus/scraper phải gửi token: trong
                          # prometheus.yml bỏ comment khối `authorization: {type: Bearer, credentials: ...}` ở cả 2 job
                          # (Prometheus không tự đọc env trong file cấu hình). Local: để trống.
+HEARTBEAT_URL=          # ADR-248, TẮT mặc định. URL dead-man's switch (Healthchecks.io, Better Stack heartbeat…). hub-worker GET URL này
+                         # mỗi HEARTBEAT_INTERVAL_MS CHỈ KHI vòng outbox relay vừa làm việc thành công (≤45s). Worker kẹt/chết -> hết ping
+                         # -> dịch vụ ngoài báo. Lỗi mạng chỉ log, timeout 5s. URL là bí mật (đừng commit). Chế độ hub-all cũng đọc biến này.
+HEARTBEAT_INTERVAL_MS=60000 # chu kỳ ping; đặt NHỎ HƠN "period" của check bên Healthchecks.io (kèm grace)
 WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
 INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
 EDGE_PENALTY_404_THRESHOLD=20  # hub-api, hộp phạt (EG2, ADR-177): số 404 do sourceKey KHÔNG tồn tại / 60s / IP thì chặn
@@ -768,7 +797,7 @@ Deploy lần đầu **luôn** mất một ngày. Mất nó ở Ngày 3 khi còn 
 - [ ] Tạo 5 tài khoản, **tất cả region Singapore**: Render · Neon · Upstash · CloudAMQP · Vercel (Vercel Functions ghim bằng `apps/web/vercel.json` `regions: ["sin1"]`. Sau redeploy, header `x-vercel-id` phải là `hkg1::sin1::…`, không được là `::iad1::`, xem §2)
 - [ ] `render.yaml` Blueprint, một Dockerfile multi-stage
 - [ ] `prisma migrate deploy` chạy được lên Neon bằng `DIRECT_URL`
-- [ ] `hub-api` lên, `/health` trả 200 với **cả ba** phụ thuộc xanh
+- [ ] `hub-api` lên, `/health/ready` trả 200 `healthy` với **cả ba** phụ thuộc xanh; Render Health Check Path = `/health/live` (§7b)
 - [ ] `hub-worker` lên, consume được `q.normalize` từ CloudAMQP
 - [ ] Đổi URL webhook GitHub từ tunnel → URL Render
 - [ ] **`git push` → tin nhắn Discord, đi qua hạ tầng thật**

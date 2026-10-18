@@ -162,7 +162,29 @@ export const alertEmailsTotal = new Counter({
 });
 
 /**
- * HTTP server tối giản chỉ phục vụ `/metrics` (S3-4) — worker không có Nest HTTP. Cổng
+ * ADR-248: unix giây của lượt làm việc THÀNH CÔNG gần nhất của outbox relay (heartbeat.ts `beat()`). Cũ dần = vòng lặp kẹt
+ * dù process còn sống. Alert gợi ý: `time() - hub_worker_heartbeat_timestamp_seconds > 120`.
+ */
+export const workerHeartbeat = new Gauge({
+  name: 'hub_worker_heartbeat_timestamp_seconds',
+  help: 'Unix giây của lượt làm việc thành công gần nhất của vòng lặp outbox relay (cũ dần = worker kẹt)',
+  registers: [workerRegistry],
+});
+
+/** ADR-248: readiness do main.ts cấp (consumer đã subscribe + Postgres). Chưa đặt = đang khởi động -> 503. */
+export type ReadinessResult = { ok: boolean; checks: Record<string, string> };
+let readinessProbe: (() => Promise<ReadinessResult>) | null = null;
+export function setReadinessProbe(fn: (() => Promise<ReadinessResult>) | null): void {
+  readinessProbe = fn;
+}
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+/**
+ * HTTP server tối giản chỉ phục vụ `/metrics` (S3-4) và `/health/live` + `/health/ready` (ADR-248) — worker không có Nest HTTP. Cổng
  * `WORKER_METRICS_PORT` (mặc định 9101; `0` = tắt). Chỉ mở trong mạng nội bộ compose, không publish ra host.
  */
 export function startMetricsServer(
@@ -180,6 +202,24 @@ export function startMetricsServer(
       }
       res.writeHead(200, { 'Content-Type': workerRegistry.contentType });
       res.end(await workerRegistry.metrics());
+      return;
+    }
+    // Health: không cần token (không trả dữ liệu nhạy cảm; mạng nội bộ). live KHÔNG chạm phụ thuộc nào.
+    if (req.method === 'GET' && req.url === '/health/live') {
+      sendJson(res, 200, { status: 'alive' });
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/health/ready') {
+      if (!readinessProbe) {
+        sendJson(res, 503, { status: 'starting' });
+        return;
+      }
+      try {
+        const r = await readinessProbe();
+        sendJson(res, r.ok ? 200 : 503, { status: r.ok ? 'ready' : 'not_ready', checks: r.checks });
+      } catch (e: any) {
+        sendJson(res, 503, { status: 'not_ready', checks: { probe: `error: ${e?.message ?? e}` } });
+      }
       return;
     }
     res.writeHead(404);
