@@ -509,12 +509,15 @@ Vercel **không chạy được WebSocket server** — nhưng không cần: serv
 
 | Đường | Kiểm | Trả | Dùng cho |
 |---|---|---|---|
-| `GET /health/live` | không gì cả (process trả lời được) | luôn 200 | **Render health check path**, Docker `HEALTHCHECK` |
+| `GET /health/live` | không gì cả (process trả lời được) | luôn 200 | **Render health check path** (repo không có `HEALTHCHECK` Docker hay `render.yaml` — đặt tay trên dashboard) |
 | `GET /health/ready` | Postgres (CỨNG) · Redis · RabbitMQ (MỀM) | 503 chỉ khi Postgres rớt; mềm rớt = 200 `status:"degraded"` | monitor ngoài, dashboard, `wait_health` trong script |
 | `GET /health` | như `/ready` (đường cũ, JSON giữ nguyên + `required` mỗi phụ thuộc) | như `/ready` | keep-alive cron-job.org, script/verify cũ |
 
 - Redis được phép sai (BB-2) nên KHÔNG BAO GIỜ làm 503. RabbitMQ mềm vì ingest chỉ ghi `raw_events` + outbox vào Postgres; relay (hub-worker) mới publish.
-- Redis/RabbitMQ được cache 30s trong bộ nhớ (tiết kiệm quota Upstash, connection CloudAMQP).
+- Redis/RabbitMQ được cache 30s trong bộ nhớ (tiết kiệm quota Upstash, connection CloudAMQP) và dò single-flight. Hệ quả: vừa khởi động
+  mà Redis/Rabbit chưa sẵn sàng thì `degraded` có thể kéo dài tới 30s dù chúng đã lên. Timeout dò: Redis/Rabbit 3s, Postgres 8s
+  (để Neon cold-start không làm `/health` của cron-job.org 503 oan và gửi mail).
+- hub-worker `/health/ready` còn tính heartbeat: đã từng beat mà >45s không beat nữa -> 503 (vòng relay kẹt).
 - hub-worker (`:WORKER_METRICS_PORT`, mặc định 9101): `/health/live` luôn 200; `/health/ready` = consumer đã subscribe + Postgres.
   Gauge `hub_worker_heartbeat_timestamp_seconds` (unix giây, lượt relay thành công gần nhất) cho Prometheus: `time() - hub_worker_heartbeat_timestamp_seconds > 120`.
 - Trên deployed (phương án D, `hub-all`) `WORKER_METRICS_PORT=0` nên worker không có cổng health -> dùng **`HEARTBEAT_URL`** (§ env vars) để biết worker kẹt.

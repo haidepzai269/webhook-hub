@@ -33,6 +33,7 @@ describe('HEARTBEAT_URL — dead-man switch (ADR-248)', () => {
     const [url, init] = f.mock.calls[0] as any[];
     expect(url).toBe('https://hc.example/abc');
     expect(init.signal).toBeDefined();
+    expect(init.redirect).toBe('error');
   });
 
   it('heartbeat nội bộ cũ -> KHÔNG gọi (để dịch vụ ngoài báo)', async () => {
@@ -50,6 +51,46 @@ describe('HEARTBEAT_URL — dead-man switch (ADR-248)', () => {
     await expect(pingExternalOnce({ url: 'https://hc.example/abc', fetchFn: f as any, now: 1_500, log })).resolves.toBe('error');
     expect(log.warn).toHaveBeenCalled();
     expect(JSON.stringify(log.warn.mock.calls)).not.toContain('hc.example/abc');
+  });
+
+  it('URL không parse được: validate lúc khởi động, vô hiệu, KHÔNG log giá trị (URL bí mật)', () => {
+    const warn = jest.fn();
+    const f = jest.fn();
+    for (const bad of ['not a url', 'ftp://hc.example/SECRET-TOKEN', 'SECRET-TOKEN-xyz']) {
+      expect(startExternalHeartbeat({ url: bad, fetchFn: f as any, log: { warn } })).toBeNull();
+    }
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/SECRET|not a url/);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('fetch ném lỗi có message chứa URL -> log không chứa URL; chỉ errName + cause.code', async () => {
+    beat(1_000);
+    const warn = jest.fn();
+    const f = jest.fn(async () => {
+      throw Object.assign(new TypeError('Failed to parse URL from https://hc.example/SECRET-TOKEN'), { cause: { code: 'ENOTFOUND' } });
+    });
+    await expect(pingExternalOnce({ url: 'https://hc.example/SECRET-TOKEN', fetchFn: f as any, now: 1_500, log: { warn } })).resolves.toBe('error');
+    const dump = JSON.stringify(warn.mock.calls);
+    expect(dump).not.toContain('SECRET-TOKEN');
+    expect(dump).toContain('ENOTFOUND');
+    expect(dump).toContain('TypeError');
+  });
+
+  it('HEARTBEAT_INTERVAL_MS bị kẹp tối thiểu 5s', async () => {
+    jest.useFakeTimers();
+    try {
+      beat(Date.now());
+      const f = jest.fn(async () => ({ ok: true, status: 200 }) as any);
+      const h = startExternalHeartbeat({ url: 'https://hc.example/abc', intervalMs: 10, fetchFn: f, log })!;
+      await jest.advanceTimersByTimeAsync(4000);
+      expect(f).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1100);
+      expect(f).toHaveBeenCalledTimes(1);
+      h.stop();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('HTTP không 2xx -> coi là lỗi (log), không ném', async () => {
@@ -70,13 +111,13 @@ describe('HEARTBEAT_URL — dead-man switch (ADR-248)', () => {
     try {
       beat(Date.now());
       const f = jest.fn(async () => ({ ok: true, status: 200 }) as any);
-      const h = startExternalHeartbeat({ url: 'https://hc.example/abc', intervalMs: 1000, fetchFn: f, log })!;
+      const h = startExternalHeartbeat({ url: 'https://hc.example/abc', intervalMs: 5000, fetchFn: f, log })!;
       expect(h).not.toBeNull();
-      await jest.advanceTimersByTimeAsync(3100);
+      await jest.advanceTimersByTimeAsync(15100);
       expect(f.mock.calls.length).toBeGreaterThanOrEqual(3);
       h.stop();
       const n = f.mock.calls.length;
-      await jest.advanceTimersByTimeAsync(5000);
+      await jest.advanceTimersByTimeAsync(20000);
       expect(f.mock.calls.length).toBe(n);
     } finally {
       jest.useRealTimers();

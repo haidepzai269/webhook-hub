@@ -1,3 +1,4 @@
+import * as amqp from 'amqplib';
 import { HealthController } from '../src/modules/health/health.controller';
 
 /**
@@ -31,6 +32,8 @@ function make(opts: { pg?: 'up' | 'down'; redis?: 'up' | 'down' | 'throw' | 'han
   );
   return { ctl, prisma, redis, rabbit };
 }
+
+jest.mock('amqplib', () => ({ connect: jest.fn() }));
 
 describe('health liveness/readiness (ADR-248)', () => {
   it('live: 200 và KHÔNG chạm Postgres/Redis/RabbitMQ dù tất cả đang chết', () => {
@@ -108,5 +111,44 @@ describe('health liveness/readiness (ADR-248)', () => {
     await ctl.ready(makeRes());
     await ctl.ready(makeRes());
     expect(redis.checkHealth).toHaveBeenCalledTimes(1);
+  });
+
+  it('single-flight: N request song song -> mỗi phụ thuộc mềm chỉ được dò đúng 1 lần', async () => {
+    const { ctl, redis, rabbit } = make({});
+    await Promise.all(Array.from({ length: 10 }, () => ctl.ready(makeRes())));
+    expect(redis.checkHealth).toHaveBeenCalledTimes(1);
+    expect(rabbit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('probeRabbit không rò connection (ADR-248)', () => {
+  const connect = amqp.connect as unknown as jest.Mock;
+  beforeEach(() => {
+    connect.mockReset();
+    (HealthController as any).PROBE_TIMEOUT_MS = 30;
+  });
+  afterAll(() => {
+    (HealthController as any).PROBE_TIMEOUT_MS = 3_000;
+  });
+  const ctlReal = () => new HealthController({ $queryRaw: async () => [1] } as any, { checkHealth: async () => true } as any);
+
+  it('handshake xong SAU timeout -> báo down nhưng connection vẫn bị close', async () => {
+    const close = jest.fn(async () => undefined);
+    connect.mockImplementation(() => new Promise((r) => setTimeout(() => r({ close }), 120)));
+    const res = makeRes();
+    await ctlReal().ready(res);
+    expect(res.body.dependencies.rabbitmq.status).toBe('down');
+    expect(close).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('connect nhanh -> up và close đúng 1 lần', async () => {
+    const close = jest.fn(async () => undefined);
+    connect.mockResolvedValue({ close });
+    const res = makeRes();
+    await ctlReal().ready(res);
+    expect(res.body.dependencies.rabbitmq.status).toBe('up');
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

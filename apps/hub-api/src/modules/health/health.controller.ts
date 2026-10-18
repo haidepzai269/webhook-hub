@@ -26,38 +26,62 @@ export class HealthController {
   /** Phụ thuộc mềm đắt (handshake TLS AMQP / quota lệnh Upstash) -> cache ngắn trong bộ nhớ, dashboard poll cũng không đốt. */
   private static readonly SOFT_CACHE_MS = 30_000;
   /** Mỗi phép kiểm có trần thời gian: dependency treo không được làm health check treo theo. */
-  private static readonly PROBE_TIMEOUT_MS = 3_000;
+  private static PROBE_TIMEOUT_MS = 3_000;
+  /**
+   * Postgres rộng hơn: `/health` là đường cron-job.org ping để giữ Neon thức, mà Neon cold-start có thể >3s —
+   * 503 oan sẽ khiến cron-job.org gửi mail báo lỗi.
+   */
+  private static PG_TIMEOUT_MS = 8_000;
 
   private softCache = new Map<string, { at: number; result: DepState }>();
+  /** Single-flight: request song song chờ chung MỘT phép kiểm (không mở N connection AMQP / N lệnh Redis). */
+  private inflight = new Map<string, Promise<DepState>>();
 
-  private withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
-    let t: NodeJS.Timeout;
+  private withTimeout<T>(p: Promise<T>, label: string, ms: number = HealthController.PROBE_TIMEOUT_MS): Promise<T> {
+    let t: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, rej) => {
-      t = setTimeout(() => rej(new Error(`${label} timeout ${HealthController.PROBE_TIMEOUT_MS}ms`)), HealthController.PROBE_TIMEOUT_MS);
+      t = setTimeout(() => rej(new Error(`${label} timeout ${ms}ms`)), ms);
       t.unref?.();
     });
     return Promise.race([p, timeout]).finally(() => clearTimeout(t));
   }
 
-  private async cached(key: string, probe: () => Promise<DepState>): Promise<DepState> {
+  private cached(key: string, probe: () => Promise<DepState>): Promise<DepState> {
     const hit = this.softCache.get(key);
-    if (hit && Date.now() - hit.at < HealthController.SOFT_CACHE_MS) return hit.result;
-    let result: DepState;
-    try {
-      result = await probe();
-    } catch (e: any) {
-      result = { status: 'down', message: e?.message ?? String(e) };
-    }
-    this.softCache.set(key, { at: Date.now(), result });
-    return result;
+    if (hit && Date.now() - hit.at < HealthController.SOFT_CACHE_MS) return Promise.resolve(hit.result);
+    const flying = this.inflight.get(key);
+    if (flying) return flying;
+    const run = (async (): Promise<DepState> => {
+      let result: DepState;
+      try {
+        result = await probe();
+      } catch (e: any) {
+        result = { status: 'down', message: e?.message ?? String(e) };
+      }
+      this.softCache.set(key, { at: Date.now(), result });
+      return result;
+    })().finally(() => this.inflight.delete(key));
+    this.inflight.set(key, run);
+    return run;
   }
 
   /** Mở connection mới mỗi lần là đắt — luôn gọi qua `cached`. Tách method để test thay thế. */
   protected async probeRabbit(): Promise<DepState> {
     const amqpUrl = process.env.RABBITMQ_URL || 'amqp://hub_admin:hub_secret@localhost:5672';
-    const conn = await this.withTimeout(amqp.connect(amqpUrl), 'rabbitmq');
-    await conn.close();
-    return { status: 'up' };
+    const connecting = amqp.connect(amqpUrl);
+    try {
+      const conn = await this.withTimeout(connecting, 'rabbitmq');
+      try {
+        await conn.close();
+      } catch {
+        /* đã đóng/đang đóng */
+      }
+      return { status: 'up' };
+    } catch (e) {
+      // Hết giờ chờ KHÔNG huỷ được handshake: nếu nó xong muộn thì phải đóng, kẻo rò connection (CloudAMQP free có trần).
+      connecting.then((c) => c.close()).catch(() => undefined);
+      throw e;
+    }
   }
 
   private async probeRedis(): Promise<DepState> {
@@ -67,7 +91,7 @@ export class HealthController {
 
   private async probePostgres(): Promise<DepState> {
     try {
-      await this.withTimeout(this.prisma.$queryRaw`SELECT 1`, 'postgres');
+      await this.withTimeout(this.prisma.$queryRaw`SELECT 1`, 'postgres', HealthController.PG_TIMEOUT_MS);
       return { status: 'up' };
     } catch (e: any) {
       return { status: 'down', message: e?.message ?? String(e) };
