@@ -42,4 +42,7 @@ regexes = [
   # apps/catchnet/test/*.spec.ts (LH2) — secret chuyển tiếp và admin token GIẢ của Worker trong vitest, dạng
   # "lh2-test-<tên>-0123456789abcdef" (đã xác minh 2026-10-15, không phải secret thật).
   '''lh2-test-[a-z-]+-0123456789abcdef(-x)?''',
+  # apps/hub-api/test/log-landmine.spec.ts (LOGGING.md §5, ADR-254) — API key GIẢ dùng làm "mìn" để khẳng định log KHÔNG
+  # lộ key (chứa chữ MINE; đã xác minh 2026-10-18, không phải khoá thật).
+  '''hk_live_MINEKEYMINEKEY1234567890''',
 ]
