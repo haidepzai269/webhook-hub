@@ -52,3 +52,46 @@ export function legacyAccountRedirect(
   const s = p.toString();
   return s ? `${ACCOUNT_ROUTES[target]}?${s}` : ACCOUNT_ROUTES[target];
 }
+
+/**
+ * ADR-268 (bổ sung ADR-237): tầng tài khoản không có sidebar dự án nên PHẢI có đường quay về rõ ràng.
+ * Đích về: `/dashboard` khi đã chọn dự án (kèm tên nếu là thành viên), `/projects` khi chưa.
+ */
+export interface BackToProject {
+  href: string;
+  projectName: string | null;
+}
+
+export function backToProjectLink(
+  projectId: string | null | undefined,
+  me: { memberships?: ReadonlyArray<{ projectId?: string; name?: string }> } | null | undefined,
+): BackToProject {
+  if (!projectId) return { href: ACCOUNT_ROUTES.projects, projectName: null };
+  const m = (me?.memberships ?? []).find((x) => x.projectId === projectId);
+  return { href: "/dashboard", projectName: m?.name ?? null };
+}
+
+/** Logo bấm được: vào dashboard dự án đang chọn, chưa chọn thì danh sách dự án. */
+export function brandHref(projectId: string | null | undefined): string {
+  return projectId ? "/dashboard" : ACCOUNT_ROUTES.projects;
+}
+
+export interface AccountNavEntry {
+  id: "projects" | AccountMenuId;
+  titleKey: MessageKey;
+  url: string;
+  active: boolean;
+}
+
+/** Điều hướng gọn của tầng tài khoản: Tất cả dự án + (theo vai trò) Cảnh báo, Cài đặt; đánh dấu mục đang mở. */
+export function accountNavEntries(me: AccountMeLike | null | undefined, pathname: string): AccountNavEntry[] {
+  const base = [
+    {
+      id: "projects" as const,
+      titleKey: "page.projects.home.all-projects" as MessageKey,
+      url: ACCOUNT_ROUTES.projects,
+    },
+    ...accountMenuItems(me),
+  ];
+  return base.map((i) => ({ ...i, active: pathname === i.url || pathname.startsWith(`${i.url}/`) }));
+}

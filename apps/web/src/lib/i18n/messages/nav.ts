@@ -26,6 +26,10 @@ export const nav = defineMessages("nav", {
     "nav.footer.open-shop": "Mở Shop",
     "nav.footer.logout": "Đăng xuất",
     "nav.account.cross-project": "Xuyên dự án",
+    "nav.account.aria": "Điều hướng tài khoản",
+    "nav.account.back-to-project": "Về dự án {name}",
+    "nav.account.back-to-current": "Về dự án đang chọn",
+    "nav.account.back-to-projects": "Về danh sách dự án",
   },
   en: {
     "nav.group.flow": "Data flow",
@@ -51,5 +55,9 @@ export const nav = defineMessages("nav", {
     "nav.footer.open-shop": "Open Shop",
     "nav.footer.logout": "Sign out",
     "nav.account.cross-project": "Across projects",
+    "nav.account.aria": "Account navigation",
+    "nav.account.back-to-project": "Back to {name}",
+    "nav.account.back-to-current": "Back to current project",
+    "nav.account.back-to-projects": "Back to all projects",
   },
 });

@@ -1,4 +1,11 @@
-import { ACCOUNT_ROUTES, accountMenuItems, legacyAccountRedirect } from "./account-routes";
+import {
+  ACCOUNT_ROUTES,
+  accountMenuItems,
+  accountNavEntries,
+  backToProjectLink,
+  brandHref,
+  legacyAccountRedirect,
+} from "./account-routes";
 
 /** ADR-237: Cảnh báo + Cài đặt ở tầng TÀI KHOẢN (menu tài khoản), không trong sidebar dự án. */
 describe("account-routes", () => {
@@ -45,5 +52,45 @@ describe("account-routes", () => {
     );
     // giá trị lạ được mã hoá, không ghép thô vào URL
     expect(legacyAccountRedirect("alerts", { q: "a&b=c" })).toBe("/alerts?q=a%26b%3Dc");
+  });
+});
+
+/** ADR-268: đường quay về + điều hướng gọn của tầng tài khoản (bổ sung ADR-237, vẫn không sidebar dự án). */
+describe("account-routes: đường quay về & điều hướng tầng tài khoản", () => {
+  const me = {
+    user: { isOperator: true },
+    memberships: [{ projectId: "p1", name: "Cafe", role: "owner" }],
+  };
+
+  it("có dự án đang chọn (là thành viên): về /dashboard kèm tên dự án", () => {
+    expect(backToProjectLink("p1", me)).toEqual({ href: "/dashboard", projectName: "Cafe" });
+  });
+
+  it("dự án đang chọn không nằm trong memberships (operator): vẫn về /dashboard, không tên", () => {
+    expect(backToProjectLink("px", me)).toEqual({ href: "/dashboard", projectName: null });
+  });
+
+  it("chưa chọn dự án: về /projects", () => {
+    expect(backToProjectLink(null, me)).toEqual({ href: "/projects", projectName: null });
+  });
+
+  it("logo: /dashboard khi có dự án, /projects khi chưa", () => {
+    expect(brandHref("p1")).toBe("/dashboard");
+    expect(brandHref(null)).toBe("/projects");
+  });
+
+  it("điều hướng tầng tài khoản: Tất cả dự án luôn có; Cảnh báo/Cài đặt theo vai trò; đánh dấu active", () => {
+    const nav = accountNavEntries(me, "/alerts");
+    expect(nav.map((i) => [i.id, i.active])).toEqual([
+      ["projects", false],
+      ["alerts", true],
+      ["settings", false],
+    ]);
+    expect(
+      accountNavEntries({ user: { isOperator: false }, memberships: [{ role: "developer" }] }, "/projects").map(
+        (i) => i.id,
+      ),
+    ).toEqual(["projects"]);
+    expect(accountNavEntries(null, "/projects").map((i) => i.id)).toEqual(["projects"]);
   });
 });
