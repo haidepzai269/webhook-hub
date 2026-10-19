@@ -1,5 +1,7 @@
 # LH2 — việc còn phải chạy ở máy công ty
 
+> **ĐÃ CHẠY 2026-10-19 (máy công ty, master `62a2545`): §3/3b/3c ĐẠT hết, T-7 không trượt.** Mục 1–2 do CI phủ (job `unit` cài nginx thật, job `catchnet`). Số liệu ở §16 SPEC-hub-sap (mục LH2, "workerd thật"). Chưa đo được CPU ms (workerd local không báo). Stats nay có thêm `pendingBytes`/`deadBytes`/`caughtToday`.
+
 Máy nhà yếu RAM nên chưa chạy các bước dưới đây (luật Admin 2026-10-15). Đã chạy ở máy nhà: vitest `apps/catchnet` 36/36 (sau REVIEW-LH2 lượt 2), `tsc` của catchnet, jest `edge-nginx.spec` + `ingest-catchnet.spec` (42 pass, 3 skip vì cần nginx thật), `verify:map` (0 mồ côi, 0 trùng).
 
 **Nhánh:** `feat/lh` · **SHA lúc viết file:** `3163882` (commit chứa file này đứng ngay sau). Chỉ chạy LOCAL. **Cấm** `wrangler deploy`, `wrangler d1 create`, `--remote`, và cấm gọi Cloudflare/Render/Neon thật.
