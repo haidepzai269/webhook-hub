@@ -672,6 +672,11 @@ COLD_START_WINDOW_S=60   # request đầu của hub-api trong cửa sổ này: h
 EVENT_LOOP_LAG_P99_MS=200 # gauge hub_event_loop_lag_seconds (đọc mỗi 5s, trong bộ nhớ)
 GROWTH_BURST_FACTOR=5    # growth.window: burst_source khi > factor × đường nền (và ≥ GROWTH_MIN_COUNT=100/60s); còn GROWTH_DUP_RATIO, GROWTH_DLQ_MIN, GROWTH_RETRY_RATIO, GROWTH_BACKLOG_WINDOWS
                          # Log KHÔNG chạm Redis/Postgres thêm (ngân sách R1 giữ nguyên — `apps/hub-api/test/redis-budget.spec.ts`); mọi đồng hồ/bộ đếm ở bộ nhớ
+SENTRY_DSN=             # ADR-258, TẮT khi trống. Admin tự tạo project Sentry (region EU, gói Developer 5k errors) rồi dán DSN vào env của CẢ HAI service Render
+                         # (hub-api và hub-worker dùng CHUNG một DSN; phân biệt bằng tag `svc`). Chỉ lỗi bất ngờ của hub (blame=hub) mới được gửi — §11.1 LOGGING.md.
+SENTRY_ENVIRONMENT=      # tuỳ chọn (trống -> 'deployed' khi có RENDER)
+SENTRY_RELEASE=          # tuỳ chọn: git sha của bản deploy
+SENTRY_MAX_PER_MIN=10    # trần event/phút/tiến trình; SENTRY_DEDUPE_WINDOW_MS=300000 (cùng fingerprint 1 lần / 5 phút). Đếm trong bộ nhớ, không Redis (R1)
 WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
 INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
 EDGE_PENALTY_404_THRESHOLD=20  # hub-api, hộp phạt (EG2, ADR-177): số 404 do sourceKey KHÔNG tồn tại / 60s / IP thì chặn

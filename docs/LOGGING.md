@@ -497,7 +497,7 @@ Kết quả: bảng Sentry lọc theo tag `frontend_cause` ∈ {`cold_start`, `s
 
 ---
 
-## 12. Trạng thái triển khai giai đoạn 2A (2026-10-18)
+## 12. Trạng thái triển khai giai đoạn 2A (2026-10-18) và 2B backend (2026-10-19)
 
 Admin chốt cả 8 đề xuất: `trace_id` = `correlationId` bỏ `-`; lấy mẫu dòng thành công 10% deployed / 100% local; ngưỡng chậm ingest 500 ms, delivery 3 s, queue_wait 5 s (env, một file); replay = trace mới + `replay_of`; header `x-hub-cold` (backend làm đợt này, frontend đọc ở 2B); `exposedHeaders`.
 
@@ -515,7 +515,8 @@ Admin chốt cả 8 đề xuất: `trace_id` = `correlationId` bỏ `-`; lấy m
 | 9 Event-loop monitor | **Xong** — đọc mỗi 5 s (timer `unref`, trong bộ nhớ) | `event-loop.ts`, `main.ts` hai app |
 | 10 Env + docs | **Xong** | `.env.example`, `docs/DEPLOYMENT.md` (§ env), `docs/ERRORS.md`, tài liệu này |
 | 11 Console | **Chưa — 2B** (`StageReason` thêm `cause`/`blame`, waterfall từ `stage_ms`) | `apps/web/**` |
-| 12 Sentry backend / 14 frontend / 15 env | **Chưa — 2B** | — |
+| 12 Sentry backend | **Xong (2026-10-19, ADR-258)** — `reportUnexpected` một cửa, `@sentry/node` 11.8.0; nối ở móc canonical line (`setUnexpectedHook`), `ServiceExceptionFilter`, outbox relay, `uncaughtException`/`unhandledRejection`; scrub chung `errInfo`/`scrubSecrets`/`scrubDeep`; fingerprint `[svc,cause,class,chặng]` + dedupe + `SENTRY_MAX_PER_MIN`; flush ≤ 2s lúc tắt; không DSN = no-op. **Lệch ADR-251:** một DSN chung (`SENTRY_DSN`) thay vì hai. **Chưa:** metric `hub_sentry_events_total`, `sentry_event_id` trên canonical line, đo RSS có/không SDK (§11.5c) — cần DSN thật | `libs/common/src/sentry.ts`, `libs/common/test/sentry.spec.ts` |
+| 14 Sentry frontend / 15 env web | **Chưa — 2B (apps/web)** | — |
 | 13 `exposedHeaders` + `x-hub-cold` | **Xong** — `['x-request-id','x-hub-cold']`, không mở rộng origin/credentials; header chỉ ở phản hồi đầu của tiến trình, bỏ qua health/metrics/OPTIONS | `cors.ts`, `cold-start.ts` |
 
 **Chỗ lệch thiết kế (ghi ADR-254/255):**

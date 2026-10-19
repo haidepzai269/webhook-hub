@@ -1,4 +1,4 @@
-import { CAUSES, Cause } from './causes';
+import { CAUSES, Cause, SENTRY_CAUSES } from './causes';
 import { scrubSecrets } from './auth/redact';
 import { newSpanId } from './trace-context';
 import { DEFAULT_SLOW_THRESHOLDS, SlowThresholds, resolveLogSettings, slowThresholds } from './slow-thresholds';
@@ -225,6 +225,16 @@ export function setCanonicalObserver(fn: CanonicalObserver | null): void {
   observer = fn;
 }
 
+/**
+ * LOGGING.md §11 (ADR-258): móc DUY NHẤT từ canonical line sang Sentry. Nhận lỗi THÔ (còn stack) của dòng có cause thuộc
+ * `SENTRY_CAUSES`; do `initSentry` đặt (không DSN -> không bao giờ đặt -> không tốn gì). Không ném.
+ */
+export type UnexpectedHook = (input: CanonicalInput, b: BuiltLine) => void;
+let unexpectedHook: UnexpectedHook | null = null;
+export function setUnexpectedHook(fn: UnexpectedHook | null): void {
+  unexpectedHook = fn;
+}
+
 interface LogLike {
   debug?: (o: object, m?: string) => void;
   info: (o: object, m?: string) => void;
@@ -276,6 +286,11 @@ export class CanonicalLogger {
         observer?.(b);
       } catch {
         /* metric không làm hỏng log */
+      }
+      try {
+        if (unexpectedHook && b.cause && input.err !== undefined && input.err !== null && SENTRY_CAUSES.has(b.cause)) unexpectedHook(input, b);
+      } catch {
+        /* Sentry không làm hỏng log */
       }
       let record = b.record;
       if (b.sampleClass === 'sample') {
