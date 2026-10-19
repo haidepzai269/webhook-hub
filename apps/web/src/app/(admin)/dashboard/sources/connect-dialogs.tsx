@@ -342,10 +342,13 @@ export function ConnectionDialog({
   source,
   onClose,
   onConnect,
+  onArchive,
 }: {
   source: { id: string; provider: string } | null;
   onClose: () => void;
   onConnect: (s: { id: string; provider: string }) => void;
+  /** ADR-260: nguồn tạo tay chỉ có một việc làm được ở đây — lưu trữ (mở hộp xác nhận ở trang). */
+  onArchive?: (s: { id: string; provider: string }) => void;
 }) {
   const t = useT();
   const { confirm, confirmDialog } = useConfirm();
@@ -400,7 +403,24 @@ export function ConnectionDialog({
         {mode === "loading" || mode === "connect" ? (
           <p className="text-sm">{t("common.loading")}</p>
         ) : !c ? (
-          <p className="text-muted-foreground text-sm">{t("page.sources.connection.manual")}</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-muted-foreground text-sm">{t("page.sources.connection.manual")}</p>
+            <p className="text-sm">{t("page.sources.connection.manual-howto")}</p>
+            {onArchive && source && (
+              <div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    onClose();
+                    onArchive(source);
+                  }}
+                >
+                  {t("page.sources.archive.button")}
+                </Button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="flex flex-col gap-3">
             <StatusLine c={c} />

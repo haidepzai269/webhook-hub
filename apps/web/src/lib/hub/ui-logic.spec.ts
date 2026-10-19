@@ -4,6 +4,7 @@ import * as path from "path";
 import { createT } from "../i18n/dictionary";
 import {
   AUDIT_KEY,
+  archiveWarningMode,
   connectionDialogMode,
   countdownTicker,
   describeDeleteConflict,
@@ -213,6 +214,22 @@ describe("connectionDialogMode — nút Kết nối trên dòng Nguồn", () => 
     expect(connectionDialogMode(null, "github", ["payos", "stripe"])).toBe("manual");
     expect(connectionDialogMode(undefined, "payos", ["payos"])).toBe("loading");
     expect(connectionDialogMode(null, "payos", undefined)).toBe("loading");
+  });
+});
+
+describe("archiveWarningMode — hộp Lưu trữ nguồn (ADR-260)", () => {
+  const ok = { isPending: false, isError: false };
+  it("chỉ 'manual' khi chắc chắn không có kết nối (404) hoặc đã DISCONNECTED; CONNECTED/FAILED... -> managed", () => {
+    expect(archiveWarningMode(null, ok)).toBe("manual");
+    expect(archiveWarningMode({ status: "DISCONNECTED" }, ok)).toBe("manual");
+    expect(archiveWarningMode({ status: "CONNECTED" }, ok)).toBe("managed");
+    expect(archiveWarningMode({ status: "FAILED" }, ok)).toBe("managed");
+  });
+  it("đang tải -> pending; lỗi (403/5xx/mạng) -> error — không bao giờ rơi về manual", () => {
+    expect(archiveWarningMode(undefined, { isPending: true, isError: false })).toBe("pending");
+    expect(archiveWarningMode(undefined, ok)).toBe("pending");
+    expect(archiveWarningMode(undefined, { isPending: false, isError: true })).toBe("error");
+    expect(archiveWarningMode({ status: "CONNECTED" }, { isPending: false, isError: true })).toBe("error");
   });
 });
 
