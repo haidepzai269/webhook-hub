@@ -87,9 +87,9 @@ export function errInfo(err: unknown): ErrInfo {
   if (err === null || err === undefined) return { class: 'Error', code: 'UNKNOWN', msg: '' };
   if (typeof err === 'string') return { class: 'Error', code: 'UNKNOWN', msg: clean(err) };
   const e = err as { name?: unknown; code?: unknown; errno?: unknown; message?: unknown; meta?: { modelName?: unknown }; cause?: { code?: unknown }; constructor?: { name?: string } };
-  const name = typeof e.name === 'string' && e.name && e.name !== 'Error' ? e.name : e.constructor?.name && e.constructor.name !== 'Object' ? e.constructor.name : 'Error';
+  const name = scrubSecrets(typeof e.name === 'string' && e.name && e.name !== 'Error' ? e.name : e.constructor?.name && e.constructor.name !== 'Object' ? e.constructor.name : 'Error').slice(0, 80);
   const rawCode = e.code ?? e.errno ?? e.cause?.code;
-  const code = rawCode === undefined || rawCode === null || rawCode === '' ? 'UNKNOWN' : String(rawCode).slice(0, 40);
+  const code = rawCode === undefined || rawCode === null || rawCode === '' ? 'UNKNOWN' : scrubSecrets(String(rawCode)).slice(0, 40);
   if (name.startsWith('PrismaClient')) {
     const model = typeof e.meta?.modelName === 'string' ? e.meta.modelName : '';
     return { class: name, code, msg: `${code === 'UNKNOWN' ? '' : code} ${model}`.trim().slice(0, 200) };

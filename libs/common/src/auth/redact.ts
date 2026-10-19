@@ -26,6 +26,11 @@ export const LOG_REDACT_OPTIONS = {
   censor: '***',
 };
 
+// Cơ sở của tối ưu khoá object < MIN_SECRET_MATCH_LEN ký tự bỏ qua scrubSecrets (logger.ts, ADR-256): mọi mẫu dưới đây khớp tối thiểu >= 8 ký tự.
+// Thêm mẫu NGẮN (vd `sk_`) thì thêm mẫu vào PATTERN_MIN_SAMPLES; test `redact-min-match` đỏ nếu mẫu < 8 hoặc quên thêm mẫu.
+export const MIN_SECRET_MATCH_LEN = 8;
+export const PATTERN_MIN_SAMPLES: string[] = ['hk_live_AAAAAAAA', 'whsec_AAAAAA', '__Host-hub_at=A', 'hub_csrf=A', 'Bearer AAAAAAAA'];
+export const SECRET_PATTERN_COUNT = (): number => PATTERNS.length;
 const PATTERNS: [RegExp, string][] = [
   [/\bhk_(live|test)_[A-Za-z0-9_-]{8,}/g, 'hk_$1_***'],
   // LOGGING.md §5: signing secret của endpoint (`whsec_…`) không bao giờ vào log.
