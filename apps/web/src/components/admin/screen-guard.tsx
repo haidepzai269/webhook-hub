@@ -50,13 +50,16 @@ export function ScreenGuard({ minWidth, children }: { minWidth: number; children
   const path = usePathname();
   const width = useViewportWidth();
   const shownWidth = useDebounced(width, 400);
-  // null = chưa đọc sessionStorage: coi như đang đo, để không chớp màn xin lỗi rồi mới vào trang khi đã "Vẫn tiếp tục".
-  const [override, setOverride] = useState<boolean | null>(null);
+  // Override gắn với đường dẫn đã đọc: path đổi mà layout không remount thì giá trị cũ không còn hiệu lực (coi như chưa đọc).
+  // null = chưa đọc sessionStorage → coi như đang đo, để không chớp màn xin lỗi rồi mới vào trang khi đã "Vẫn tiếp tục".
+  const [stored, setStored] = useState<{ path: string; value: boolean } | null>(null);
+  const override = stored?.path === path ? stored.value : null;
+  const setOverride = (value: boolean) => setStored({ path, value });
   useEffect(() => {
     try {
-      setOverride(sessionStorage.getItem(guardStorageKey(path)) === "1");
+      setStored({ path, value: sessionStorage.getItem(guardStorageKey(path)) === "1" });
     } catch {
-      setOverride(false);
+      setStored({ path, value: false });
     }
   }, [path]);
 
