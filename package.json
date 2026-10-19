@@ -2,6 +2,9 @@
   "name": "webhook-hub-monorepo",
   "version": "1.0.0",
   "private": true,
+  "overrides": {
+    "rollup": "4.64.0"
+  },
   "workspaces": [
     "apps/*",
     "!apps/catchnet",

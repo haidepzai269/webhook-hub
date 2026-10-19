@@ -11,11 +11,28 @@ function walk(dir: string): string[] {
     return /\.(ts|tsx)$/.test(n) && !/\.spec\.ts$/.test(n) ? [p] : [];
   });
 }
+/** import … from · export … from · import "…" (side-effect) · import("…") · require("…") · import x = require("…") */
+const SDK_REF = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']@sentry\//;
 const files = walk(SRC).map((p) => ({ rel: relative(SRC, p).split(sep).join("/"), text: readFileSync(p, "utf8") }));
 
 describe("Sentry web: một cửa, Replay tắt", () => {
+  it("regex bắt đủ mọi kiểu tham chiếu SDK", () => {
+    for (const src of [
+      'import * as S from "@sentry/nextjs";',
+      "import { x } from '@sentry/react'",
+      'export * from "@sentry/nextjs";',
+      'export { init } from "@sentry/browser"',
+      'import "@sentry/nextjs";',
+      'const S = require("@sentry/nextjs");',
+      'import S = require("@sentry/nextjs");',
+      'await import("@sentry/nextjs")',
+    ])
+      expect(SDK_REF.test(src)).toBe(true);
+    expect(SDK_REF.test('import x from "./sentry/other"')).toBe(false);
+  });
   it("chỉ lib/sentry/init.client.ts import @sentry/nextjs và gọi captureException", () => {
-    const importers = files.filter((f) => /from\s+["']@sentry\//.test(f.text) || /import\(["']@sentry\//.test(f.text)).map((f) => f.rel);
+    // import ... from "@sentry/…", export ... from "@sentry/…", import "@sentry/…" (side-effect), import("…"), require("…"), import x = require("…")
+    const importers = files.filter((f) => SDK_REF.test(f.text)).map((f) => f.rel);
     expect(importers).toEqual(["lib/sentry/init.client.ts"]);
     const capturers = files.filter((f) => /\bcaptureException\s*\(/.test(f.text)).map((f) => f.rel);
     expect(capturers).toEqual(["lib/sentry/init.client.ts"]);

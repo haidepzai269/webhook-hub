@@ -14,6 +14,9 @@ const SECRETS = [
   "nguyen.van.a@example.com",
   "s3cr3tPassw0rd!",
   "postgres-pass-9999",
+  "sk-ant-api03-FAKEFAKEFAKE1234",
+  "AIzaSyBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+  "FAKESESSIONVALUE99",
 ];
 
 function leaks(obj: unknown): string[] {
@@ -119,6 +122,14 @@ describe("scrubWebEvent: test không-lọt (§11.9e)", () => {
     const e = Object.assign(new Error("boom"), { name: "HubApiError", status: 500, requestId: "bad id whsec_MfKQ9r8GKYqrTwjBfAbcdEFGH12345" });
     const out = scrubWebEvent({ exception: { values: [{ type: "HubApiError", value: "boom" }] } }, e);
     expect(out.tags.request_id).toBeUndefined();
+  });
+});
+
+describe("scrubText: khoá Anthropic / Google / cookie session", () => {
+  it("che sk-ant-, AIza..., session=<giá trị> trong chuỗi tự do và message lỗi", () => {
+    const out = scrubWebEvent({ message: "lỗi sk-ant-api03-FAKEFAKEFAKE1234 và AIzaSyBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE với session=FAKESESSIONVALUE99; Path=/" }, new Error("x"));
+    expect(leaks(out)).toEqual([]);
+    expect(out.message).toContain("session=***");
   });
 });
 

@@ -29,7 +29,7 @@ export const LOG_REDACT_OPTIONS = {
 // Cơ sở của tối ưu khoá object < MIN_SECRET_MATCH_LEN ký tự bỏ qua scrubSecrets (logger.ts, ADR-256): mọi mẫu dưới đây khớp tối thiểu >= 8 ký tự.
 // Thêm mẫu NGẮN (vd `sk_`) thì thêm mẫu vào PATTERN_MIN_SAMPLES; test `redact-min-match` đỏ nếu mẫu < 8 hoặc quên thêm mẫu.
 export const MIN_SECRET_MATCH_LEN = 8;
-export const PATTERN_MIN_SAMPLES: string[] = ['hk_live_AAAAAAAA', 'whsec_AAAAAA', '__Host-hub_at=A', 'hub_csrf=A', 'Bearer AAAAAAAA'];
+export const PATTERN_MIN_SAMPLES: string[] = ['hk_live_AAAAAAAA', 'whsec_AAAAAA', '__Host-hub_at=A', 'hub_csrf=A', 'Bearer AAAAAAAA', 'sk-ant-AAAAAAAA', 'AIzaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'session=AAAAAA'];
 export const SECRET_PATTERN_COUNT = (): number => PATTERNS.length;
 const PATTERNS: [RegExp, string][] = [
   [/\bhk_(live|test)_[A-Za-z0-9_-]{8,}/g, 'hk_$1_***'],
@@ -38,6 +38,10 @@ const PATTERNS: [RegExp, string][] = [
   [/(__Host-hub_(?:at|rt|oauth)=)[^;\s"]+/g, '$1***'],
   [/(hub_csrf=)[^;\s"]+/g, '$1***'],
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1***'],
+  // Khoá Anthropic, khoá Google API, cookie phiên dạng `session=<giá trị>` (Sentry web dùng chung bộ luật này).
+  [/\bsk-ant-[A-Za-z0-9_-]{8,}/g, 'sk-ant-***'],
+  [/\bAIza[A-Za-z0-9_-]{30,}/g, 'AIza***'],
+  [/\b((?:session|sessionid|jsessionid|sid|connect\.sid)=)[^;\s"&]{6,}/gi, '$1***'],
 ];
 
 export function scrubSecrets(s: string): string {
