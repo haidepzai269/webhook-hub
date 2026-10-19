@@ -60,7 +60,7 @@ async function fetchText(path: string, init: RequestInit, timeoutMs: number): Pr
 }
 
 /**
- * `t` theo ngôn ngữ giao diện ĐANG hiển thị: <html lang> do boot script đặt và LanguageSwitcher cập nhật
+ * `t` theo ngôn ngữ giao diện ĐANG hiển thị: <html lang> do boot script đặt và useChangeLanguage cập nhật
  * (preference-runtime) — hubFetch không nằm trong cây React nên không dùng được useT().
  */
 function uiT(): TranslateFn {

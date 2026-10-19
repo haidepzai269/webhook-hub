@@ -209,6 +209,7 @@ export function ConnectSourceDialog({
                       key={c.provider}
                       type="button"
                       size="sm"
+                      className="max-sm:min-h-10"
                       variant={spec?.provider === c.provider ? "default" : "outline"}
                       onClick={() => (
                         setProvider(c.provider), setCreds({}), setAck(false), setMode(null), setExistingId("")
@@ -225,6 +226,7 @@ export function ConnectSourceDialog({
                   <Button
                     type="button"
                     size="sm"
+                    className="max-sm:min-h-10"
                     variant={effMode === "existing" ? "default" : "outline"}
                     disabled={!candidates.length}
                     onClick={() => setMode("existing")}
@@ -234,6 +236,7 @@ export function ConnectSourceDialog({
                   <Button
                     type="button"
                     size="sm"
+                    className="max-sm:min-h-10"
                     variant={effMode === "new" ? "default" : "outline"}
                     onClick={() => setMode("new")}
                   >
@@ -397,7 +400,7 @@ export function ConnectionDialog({
       <AdminDialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t("page.sources.connect.title")}</DialogTitle>
-          <DialogDescription className="font-mono text-xs">{c?.ingestUrl ?? ""}</DialogDescription>
+          <DialogDescription className="break-all font-mono text-xs">{c?.ingestUrl ?? ""}</DialogDescription>
         </DialogHeader>
         <DialogBody>
         {mode === "loading" || mode === "connect" ? (
@@ -410,6 +413,7 @@ export function ConnectionDialog({
               <div>
                 <Button
                   size="sm"
+                  className="max-sm:min-h-10"
                   variant="destructive"
                   onClick={() => {
                     onClose();
@@ -436,6 +440,7 @@ export function ConnectionDialog({
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
+                className="max-sm:min-h-10"
                 variant="outline"
                 disabled={act.isPending || !c.hasCredentials}
                 onClick={() => act.mutate("retry")}
@@ -444,6 +449,7 @@ export function ConnectionDialog({
               </Button>
               <Button
                 size="sm"
+                className="max-sm:min-h-10"
                 variant="destructive"
                 disabled={act.isPending}
                 onClick={async () => {
@@ -454,6 +460,7 @@ export function ConnectionDialog({
               </Button>
               <Button
                 size="sm"
+                className="max-sm:min-h-10"
                 variant="destructive"
                 disabled={act.isPending || !c.hasCredentials}
                 onClick={async () => {

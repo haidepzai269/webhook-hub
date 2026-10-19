@@ -1,0 +1,36 @@
+/* Storefront không có Tailwind (ADR-025) -> lịch dùng CSS mặc định của react-day-picker + vài dòng nối với biến của Sarab. */
+.sdp {
+  position: relative;
+}
+.sdp .fctrl {
+  padding-right: 48px;
+}
+.sdp-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 46px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+}
+.sdp-pop {
+  z-index: 100000;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
+  --rdp-accent-color: var(--primary);
+  --rdp-accent-background-color: rgba(232, 40, 26, 0.12);
+  --rdp-day-height: 40px;
+  --rdp-day-width: 40px;
+  font-family: "Poppins", sans-serif;
+  font-size: 0.85rem;
+  color: var(--dark);
+}
+.sdp-pop button {
+  font-family: inherit;
+}

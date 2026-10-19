@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 
 import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { AUDIT_MOBILE_CARD } from "@/components/admin/mobile-card-specs";
 import { PageHeader } from "@/components/admin/page-header";
 import { TimeRange } from "@/components/admin/time-range";
 import { Badge } from "@/components/ui/badge";
@@ -144,7 +145,7 @@ function AuditView() {
           placeholder={t("page.audit.filter.actor-placeholder")}
           maxLength={ACTOR_MAX}
           list="audit-actors"
-          className="h-8 w-48 text-xs"
+          className="h-8 w-full text-xs sm:w-48"
           aria-label={t("page.audit.filter.actor")}
         />
         <datalist id="audit-actors">
@@ -153,7 +154,7 @@ function AuditView() {
           ))}
         </datalist>
         <Select value={v.action ?? ALL} onValueChange={(a) => url.setFilter({ action: a === ALL ? null : a })}>
-          <SelectTrigger size="sm" className="w-56" aria-label={t("page.audit.filter.action")}>
+          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label={t("page.audit.filter.action")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -176,7 +177,7 @@ function AuditView() {
           </SelectContent>
         </Select>
         <Select value={v.entityType ?? ALL} onValueChange={(e) => url.setFilter({ entityType: e === ALL ? null : e })}>
-          <SelectTrigger size="sm" className="w-48" aria-label={t("page.audit.filter.entity-type")}>
+          <SelectTrigger size="sm" className="w-full sm:w-48" aria-label={t("page.audit.filter.entity-type")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -204,6 +205,7 @@ function AuditView() {
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
+        mobile={AUDIT_MOBILE_CARD}
         searchPlaceholder={t("page.audit.search-placeholder")}
         emptyText={t(filtered ? "page.audit.empty-filtered" : "page.audit.empty")}
         footer={
