@@ -976,7 +976,7 @@ FIFO đòi **single-flight theo partition key**: trong mỗi key chỉ được 
 | Khái niệm | Trong code | Ghi chú |
 |---|---|---|
 | **Project** = biên cô lập | `hub.projects`; cột `tenant_id` ở mọi bảng GIỮ TÊN, nghĩa là `project_id` | Không project nào đọc/ghi được dữ liệu project khác, kể cả biết UUID (repo + khoá ngoại ghép subscription→đích) |
-| **Service** = một API key | `hub.api_keys` (sha256, `key_prefix` 12 ký tự), scope `publish:events` · `read:events` · `manage:endpoints` · `manage:sources`, `readTypes` | Key thô trả **một lần** lúc tạo; revoke chỉ ngắt đúng service đó |
+| **Service** = một API key | `hub.api_keys` (sha256, `key_prefix` 12 ký tự), scope `publish:events` · `read:events` · `manage:endpoints` · `manage:sources` · `read:unverified` (chỉ owner cấp), `readTypes` | Key thô trả **một lần** lúc tạo; revoke chỉ ngắt đúng service đó |
 | **Connection string** | `hubs://<key>@<host>/<project>` (`hub://` cho http local) | `HUB_PUBLIC_URL`; SDK parse |
 | Console (người dùng) | `/api/v1/projects`, `/api/v1/projects/:id/keys`; `?projectId=` đọc ở **một** guard `ProjectScopeGuard` (luật `resolveProjectScope`: tồn tại + là thành viên, hoặc operator — HTTP và vé socket dùng chung). `GET /api/v1/projects?include=stats` (trang "Tất cả dự án", ADR-235): mỗi project kèm `stats` chỉ gồm số đếm, một lượt đọc qua escape hatch `memberProjectStatsAcrossTenants` / `operatorProjectStatsAcrossTenants` (gate `project-stats-cross-tenant`), 0 lệnh Redis | Cookie phiên (`SessionGuard`, §7.4) |
 | API cho service | `/v1/p/:project/{me, events (POST/GET), endpoints, endpoints/:id/verify, subscriptions, sources, sources/:id/inspect}` | `ApiKeyGuard` + `@RequireScope`; lỗi đầu vào 422 có tên trường |

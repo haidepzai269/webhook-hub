@@ -81,6 +81,18 @@ describe('POST /api/v1/deliveries/replay-bulk (S2-3)', () => {
     expect(db.deliveries.length + db.outbox.length + db.audit.length).toBe(0);
   });
 
+  it('dryRun đặt HTTP 200 (xem trước không tạo tài nguyên); chạy thật không đổi status (giữ 201 mặc định của @Post)', async () => {
+    const dry = build();
+    const resDry = { status: jest.fn() };
+    await dry.controller.replayBulk(TENANT, 'admin', { reason: 'đích sống lại', dryRun: true }, resDry);
+    expect(resDry.status).toHaveBeenCalledWith(200);
+
+    const real = build();
+    const resReal = { status: jest.fn() };
+    await real.controller.replayBulk(TENANT, 'admin', { reason: 'đích sống lại', dryRun: false, ids: refs.map((r) => r.id) }, resReal);
+    expect(resReal.status).not.toHaveBeenCalled();
+  });
+
   it('[AF:#28][BP:T5] (phần f) chạy thật -> N delivery (generation+1) + N outbox delivery.replayed gọn + 1 audit, trong 1 transaction', async () => {
     const { controller, prisma, db } = build();
     const res: any = await controller.replayBulk(TENANT, 'admin', {

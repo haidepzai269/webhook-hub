@@ -28,10 +28,10 @@ const OWNER: Scope[] = [...DEVELOPER, 'manage:members', 'manage:project', 'traff
 export const ROLE_SCOPES: Readonly<Record<MemberRoleName, readonly Scope[]>> = { viewer: VIEWER, developer: DEVELOPER, owner: OWNER };
 
 /**
- * Scope một API key ĐƯỢC cấp. `manage:keys` / `manage:members` / `manage:project` / `read:project` /
- * `replay:deliveries` KHÔNG BAO GIỜ: máy không được tự đúc key hay tự thêm người (chặn leo thang đặc quyền).
+ * Scope một API key ĐƯỢC cấp: KHÔNG định nghĩa ở đây — nguồn duy nhất là `API_SCOPES` (+ `OWNER_GRANTED_API_SCOPES`) ở
+ * `api-key.ts`. `manage:keys` / `manage:members` / `manage:project` / `read:project` / `replay:deliveries` /
+ * `storage:*` / `traffic:read` KHÔNG BAO GIỜ cấp cho key (máy không được tự đúc key hay tự thêm người).
  */
-export const KEY_GRANTABLE_SCOPES: readonly Scope[] = ['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'storage:read', 'storage:write', 'read:unverified'];
 
 export function isScope(s: unknown): s is Scope {
   return typeof s === 'string' && (ALL_SCOPES as readonly string[]).includes(s);

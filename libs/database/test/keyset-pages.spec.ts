@@ -124,4 +124,20 @@ describeDb('TenantScopedRepository keyset pages (Postgres)', () => {
     await expect(repo.findDeliveryPage({ dir: 'older', limit: 50 })).resolves.toEqual({ rows: [] });
     await expect(repo.findAuditLogPage({ dir: 'older', limit: 50 })).resolves.toEqual([]);
   });
+
+  it('attempts[] của trang DLQ/deliveries luôn theo attemptNo tăng dần (kể cả khi chèn lệch thứ tự)', async () => {
+    const e = await owner.event.create({
+      data: { id: `KSO${runId}`, tenantId: tenantA, idempotencyKey: `kso:${runId}`, correlationId: randomUUID(), type: 't.test', source: 'test', data: {} },
+    });
+    const sub = await owner.subscription.findFirstOrThrow({ where: { tenantId: tenantA } });
+    const d = await owner.delivery.create({ data: { tenantId: tenantA, eventId: e.id, subscriptionId: sub.id, status: 'DEAD' } });
+    microIds.push(d.id);
+    for (const n of [5, 1, 4, 2, 6, 3]) await owner.deliveryAttempt.create({ data: { deliveryId: d.id, attemptNo: n, responseStatus: 500 } });
+    const repo = new TenantScopedRepository(appDb, tenantA);
+    const { rows } = await repo.findDeliveryPage({ dir: 'older', limit: 100, dlq: true });
+    const row = rows.find((r) => r.id === d.id);
+    expect(row?.attempts.map((a) => a.attemptNo)).toEqual([1, 2, 3, 4, 5, 6]);
+    const list = await repo.findDeliveries({ id: d.id });
+    expect(list[0].attempts.map((a) => a.attemptNo)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
 });

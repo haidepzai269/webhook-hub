@@ -15,6 +15,7 @@
     "incremental": true,
     "plugins": [{ "name": "next" }],
     "paths": { "@/*": ["./src/*"], "@hub/flow": ["../../libs/common/src/flow/index.ts"],
+      "@hub/common/auth/roles": ["../../libs/common/src/auth/roles.ts"],
       "@hub/common/alerts/text": ["../../libs/common/src/alerts/text.ts"],
       "@hub/common/auth/redact": ["../../libs/common/src/auth/redact.ts"],
       "@hub/providers/catalog": ["../../libs/providers/src/catalog/index.ts"]

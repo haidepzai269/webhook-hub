@@ -18,7 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HubApiError } from "@/lib/hub/client";
 import { type ProjectSummary, useFlowProjectStore, useProjects } from "@/lib/hub/flow-project";
-import { useIsOperator } from "@/lib/hub/me-store";
+import { canScope } from "@/lib/hub/effective-role";
+import { useIsOperator, useMeStore } from "@/lib/hub/me-store";
 import { useSetUnverifiedSources, useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useSetStorageQuota } from "@/lib/hub/storage-queries";
 import type { MessageKey } from "@/lib/i18n/dictionary";
@@ -115,6 +116,7 @@ function UnverifiedSourcesSetting({ projectId, canEdit }: { projectId: string; c
 export default function ProjectsPage() {
   const t = useT();
   const operator = useIsOperator();
+  const me = useMeStore((s) => s.me);
   const roleLabel = useCallback((role: string | undefined) => (role && ROLE_KEY[role] ? t(ROLE_KEY[role]) : (role ?? "—")), [t]);
   const { data, isLoading, error, refetch } = useProjects();
   const projectId = useFlowProjectStore((s) => s.projectId);
@@ -223,7 +225,7 @@ export default function ProjectsPage() {
       {projectId && (data ?? []).some((p) => p.id === projectId) && (
         <UnverifiedSourcesSetting
           projectId={projectId}
-          canEdit={operator || (data ?? []).find((p) => p.id === projectId)?.role === "owner"}
+          canEdit={canScope(me, projectId, "manage:project")}
         />
       )}
 

@@ -1,7 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
-import { ROLE_SCOPES, KEY_GRANTABLE_SCOPES } from '@hub/common';
+import { ROLE_SCOPES, ALL_SCOPES, API_SCOPES, OWNER_GRANTED_API_SCOPES } from '@hub/common';
 import { ProjectScopeGuard } from '../src/modules/console/project-scope.guard';
 import { REQUIRE_SCOPE_KEY, NO_PROJECT_SCOPE_KEY, PUBLIC_ROUTE_KEY } from '../src/modules/service-api/require-scope.decorator';
 import { ApiController } from '../src/modules/api/api.controller';
@@ -42,8 +42,11 @@ describe('ROLE_SCOPES (SPEC-auth §2.2) — MỘT hằng số cho guard, web, do
     expect(ROLE_SCOPES.developer).toEqual(['read:project', 'read:events', 'publish:events', 'manage:endpoints', 'manage:sources', 'replay:deliveries', 'manage:keys', 'storage:read']);
     // PK5 (E4, ADR-206): `read:unverified` — polling trả event chưa xác thực; chỉ bó owner, owner cấp cho key.
     expect(ROLE_SCOPES.owner).toEqual([...ROLE_SCOPES.developer, 'manage:members', 'manage:project', 'traffic:read', 'storage:write', 'read:unverified']);
-    // QT4 (§5.6): key có `storage:write` gọi được `apply` gợi ý dọn; chỉ owner cấp được (role phải có scope mới cấp).
-    expect(KEY_GRANTABLE_SCOPES).toEqual(['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'storage:read', 'storage:write', 'read:unverified']);
+    // MỘT nguồn cho scope của key: `API_SCOPES` (api-key.ts). Không có `storage:*` / `manage:*` / `replay:deliveries`.
+    expect(API_SCOPES).toEqual(['publish:events', 'read:events', 'manage:endpoints', 'manage:sources', 'read:unverified']);
+    expect(API_SCOPES.every((s) => (ALL_SCOPES as readonly string[]).includes(s))).toBe(true);
+    expect(API_SCOPES.filter((s) => /^(manage:(keys|members|project)|read:project|replay:deliveries|storage:|traffic:)/.test(s))).toEqual([]);
+    expect(OWNER_GRANTED_API_SCOPES).toEqual(['read:unverified']);
   });
 });
 

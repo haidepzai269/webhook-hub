@@ -65,10 +65,37 @@ describe('POST /api/v1/subscriptions — đích phải cùng tenant (S1-5)', () 
     expect(client.subscription.create).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['thiếu name', { destinationId: DEST_A, eventTypes: ['a.b'] }, 'name'],
+    ['name không phải chuỗi', { destinationId: DEST_A, name: 5, eventTypes: ['a.b'] }, 'name'],
+    ['name rỗng', { destinationId: DEST_A, name: '   ', eventTypes: ['a.b'] }, 'name'],
+    ['name > 255 ký tự', { destinationId: DEST_A, name: 'x'.repeat(256), eventTypes: ['a.b'] }, 'name'],
+    ['template sai kiểu', { destinationId: DEST_A, name: 'ok', eventTypes: ['a.b'], template: 7 }, 'template'],
+  ])('%s -> 400 bad_request (không phải 500 PrismaClientValidationError), không chạm DB', async (_t, body, field) => {
+    const { controller, client } = build();
+    const err: any = await controller.createSubscription(TENANT_A, 'admin', body as any).catch((e) => e);
+    expect(err.getStatus()).toBe(400);
+    expect(err.getResponse()).toMatchObject({ error: 'bad_request', field });
+    expect(client.destination.findFirst).not.toHaveBeenCalled();
+    expect(client.subscription.create).not.toHaveBeenCalled();
+  });
+
   it('đích cùng tenant -> tạo được, tenantId lấy từ token', async () => {
     const { controller, created } = build();
     await controller.createSubscription(TENANT_A, 'admin', { destinationId: DEST_A, name: 'ok', eventTypes: ['a.b'] });
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ tenantId: TENANT_A, destinationId: DEST_A });
+  });
+});
+
+describe('POST /api/v1/destinations — thiếu name -> 400 (cùng lỗi với subscriptions)', () => {
+  it.each([[undefined], [''], [7]])('name=%p -> 400 bad_request, không chạm DB', async (name) => {
+    const client: any = { destination: { create: jest.fn() } };
+    const prisma: any = { forTenant: () => new TenantScopedRepository(client, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') };
+    const controller = new ApiController(prisma);
+    const err: any = await controller.createDestination('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'admin', { type: 'discord', name } as any).catch((e) => e);
+    expect(err.getStatus()).toBe(400);
+    expect(err.getResponse()).toMatchObject({ error: 'bad_request', field: 'name' });
+    expect(client.destination.create).not.toHaveBeenCalled();
   });
 });

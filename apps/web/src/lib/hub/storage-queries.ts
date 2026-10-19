@@ -2,9 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { canReadStorage, type StorageOverview, type StoragePolicies, type StoragePolicyView } from "@/lib/storage/storage-logic";
+import { type StorageOverview, type StoragePolicies, type StoragePolicyView } from "@/lib/storage/storage-logic";
 
 import { HubApiError, hubFetch } from "./client";
+import { canScope } from "./effective-role";
 import { useMeStore } from "./me-store";
 
 /**
@@ -35,8 +36,7 @@ export function useStorage(projectId: string | null, opts: { poll?: boolean } = 
 /** Review QT-S3 L9: người đang xem có `storage:read` trên `projectId`? (vai trò từ `/auth/me`; chưa nạp -> false). */
 export function useCanReadStorage(projectId: string | null): boolean {
   return useMeStore((s) => {
-    if (!projectId || !s.me) return false;
-    return canReadStorage(s.me.memberships.find((m) => m.projectId === projectId)?.role, s.me.user.isOperator === true);
+    return canScope(s.me, projectId, "storage:read");
   });
 }
 

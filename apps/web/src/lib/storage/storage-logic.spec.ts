@@ -1,6 +1,5 @@
 import {
   barPct,
-  canReadStorage,
   cleanBodyFor,
   confirmKeys,
   formatBytes,
@@ -59,14 +58,5 @@ describe("QT7 trang Dung lượng — logic thuần", () => {
     expect(parseQuotaInput("102401")).toBeUndefined();
     expect(sourceCountVars({ sources: { count: 3, limit: 20 } })).toEqual({ count: 3, limit: 20 });
     expect(sourceCountVars(undefined)).toBeNull();
-  });
-
-  it("review QT-S3 L9: banner chỉ gọi GET storage khi có storage:read — owner/developer/operator; viewer / không thành viên thì không", () => {
-    expect(canReadStorage("owner", false)).toBe(true);
-    expect(canReadStorage("developer", false)).toBe(true);
-    expect(canReadStorage(undefined, true)).toBe(true);
-    expect(canReadStorage("viewer", true)).toBe(true);
-    expect(canReadStorage("viewer", false)).toBe(false);
-    expect(canReadStorage(undefined, false)).toBe(false);
   });
 });
