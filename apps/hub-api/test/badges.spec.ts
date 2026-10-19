@@ -51,4 +51,13 @@ describe('badges: parse mốc last-seen', () => {
     expect(isPgInvalidInput(new Error('connection refused'))).toBe(false);
     expect(isPgInvalidInput(null)).toBe(false);
   });
+
+  it('qs: mảng / object (?events[]=5, ?dlq[]=<iso>, ?dlq[a]=b) bị 400, không lọt xuống SQL', () => {
+    expect(() => parseBadgeSeq(['5'])).toThrow();
+    expect(() => parseBadgeSeq({ a: '5' })).toThrow();
+    expect(() => parseBadgeAt('dlq', ['2026-10-19T03:00:00Z'])).toThrow();
+    expect(() => parseBadgeAt('deliveries', ['head'])).toThrow();
+    expect(() => parseBadgeAt('dlq', { a: 'b' })).toThrow();
+    expect(() => parseBadgeAt('dlq', 123)).toThrow();
+  });
 });

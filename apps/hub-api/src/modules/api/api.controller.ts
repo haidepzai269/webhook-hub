@@ -86,10 +86,11 @@ function requireAlsoScope(req: RequestWithPrincipal | undefined, scope: string) 
   }
 }
 
-const BADGE_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
 /** ADR-269: mốc badge — seq số nguyên dương, hoặc ISO 8601 CÓ múi giờ (tránh ::timestamptz hiểu theo múi của session). */
-export function parseBadgeSeq(v: string | undefined): string | null {
+export function parseBadgeSeq(v: unknown): string | null {
   if (v === undefined || v === '') return null;
+  // qs của Express biến `?events[]=5` / `?events[a]=b` thành mảng/object — RegExp ép về chuỗi sẽ lọt xuống SQL (42846 -> 500).
+  if (typeof v !== 'string') throw badParam('events', 'events phải là một chuỗi số seq, không phải mảng/object');
   if (v === BADGE_HEAD) return v;
   if (!/^\d{1,18}$/.test(v)) throw badParam('events', 'events phải là số seq nguyên');
   return v;
@@ -109,8 +110,9 @@ export function isValidBadgeInstant(v: string): boolean {
   }
   return true;
 }
-export function parseBadgeAt(field: string, v: string | undefined): string | null {
+export function parseBadgeAt(field: string, v: unknown): string | null {
   if (v === undefined || v === '') return null;
+  if (typeof v !== 'string') throw badParam(field, `${field} phải là một chuỗi ISO 8601, không phải mảng/object`);
   if (v === BADGE_HEAD) return v;
   if (!isValidBadgeInstant(v)) throw badParam(field, `${field} phải là ISO 8601 hợp lệ có múi giờ, năm >= 1970 (vd 2026-10-19T03:00:00.000000Z)`);
   return v;
@@ -699,7 +701,7 @@ export class ApiController {
       return await this.prisma.forTenant(tenantId).badgeSnapshot(since);
     } catch (e) {
       // Phòng thủ lớp thứ hai: giá trị lọt qua parse mà Postgres vẫn từ chối (lớp 22xxx) là lỗi tham số, không phải lỗi server.
-      if (isPgInvalidInput(e)) throw badParam('since', 'Mốc last-seen không hợp lệ');
+      if (isPgInvalidInput(e)) throw badParam('events|deliveries|dlq', 'Mốc last-seen không hợp lệ');
       throw e;
     }
   }
