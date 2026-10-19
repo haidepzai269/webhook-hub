@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,6 +21,17 @@ import { ErrorState } from "@/components/admin/state";
 import { chartTimeFormatters } from "@/lib/hub/format";
 import { TONE_VAR } from "@/components/flow/tokens";
 import { useLocale, useT } from "@/lib/i18n/use-t";
+
+import {
+  bucketLabelFor,
+  formatSelection,
+  type KbState,
+  kbStep,
+  overlayIndexes,
+  type Selection,
+  selectionFromLabels,
+} from "./chart-selection";
+import { useChartSelection } from "./selection-context";
 
 const SERIES = {
   events: { labelKey: "page.dashboard.chart.events", color: "var(--chart-1)" },
@@ -44,6 +55,7 @@ export function EventsChart() {
   );
   const { time: hourFmt, day: dayFmt } = chartTimeFormatters(locale, TZ);
   const [range, setRange] = useState<TimeseriesRange>("24h");
+  const { selection, select, hoverAt } = useChartSelection();
   const { data, isLoading, isPlaceholderData, error, refetch } = useTimeseries(range);
   // Định dạng nhãn theo range CỦA DỮ LIỆU đang vẽ, không theo nút vừa bấm — tránh vẽ bucket giờ bằng nhãn ngày.
   const dataRange: TimeseriesRange =
@@ -51,6 +63,86 @@ export function EventsChart() {
       ? "7d"
       : "24h";
   const fmt = dataRange === "24h" ? hourFmt : dayFmt;
+
+  // ADR-262: chọn khoảng. Kéo chỉ cập nhật `drag` (vẽ lớp phủ, KHÔNG truy vấn); nhả chuột mới ghi URL -> khối bên dưới mới tải.
+  const buckets = useMemo(() => (data ?? []).map((d) => d.bucket), [data]);
+  const [drag, setDrag] = useState<{ a: string; b: string } | null>(null);
+  const dragRef = useRef<{ a: string; b: string } | null>(null);
+  const bucketsRef = useRef(buckets);
+  bucketsRef.current = buckets;
+  const rangeRef = useRef(dataRange);
+  rangeRef.current = dataRange;
+  const labelOf = (e: { activeLabel?: string | number }) => (typeof e.activeLabel === "string" ? e.activeLabel : null);
+  const cancelPendingRef = useRef<() => void>(() => {});
+  const endDrag = useCallback(() => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDrag(null);
+    if (!d) return;
+    // Cùng bucket (kéo < 1 bucket) = bấm = trọn bucket đó.
+    const sel = selectionFromLabels(d.a, d.b, rangeRef.current);
+    cancelPendingRef.current();
+    if (sel) select(sel);
+  }, [select]);
+  useEffect(() => {
+    window.addEventListener("mouseup", endDrag); // nhả chuột ngoài vùng vẽ vẫn chốt
+    return () => window.removeEventListener("mouseup", endDrag);
+  }, [endDrag]);
+  // Bàn phím: mũi tên chọn từng bucket, Shift mở rộng/thu hẹp (anchor cố định). Lớp phủ đổi tức thì (`pending`), còn ghi URL
+  // gom 350ms để giữ phím không bắn từng truy vấn. `kb` nhớ vùng nó vừa tạo: vùng chọn đổi từ nơi khác (chuột, ✕, Esc) thì bỏ.
+  const kb = useRef<{ st: KbState; key: string } | null>(null);
+  const [pending, setPending] = useState<Selection | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPending = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setPending(null);
+  }, []);
+  useEffect(() => cancelPending, [cancelPending]);
+  // Esc khi đang kéo: huỷ lượt kéo (không ghi URL); luôn huỷ phím đang chờ ghi. Pha capture + preventDefault để Esc toàn trang không bỏ luôn vùng chọn cũ.
+  useEffect(() => {
+    const onEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      cancelPending();
+      if (dragRef.current) {
+        dragRef.current = null;
+        setDrag(null);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onEsc, true);
+    return () => window.removeEventListener("keydown", onEsc, true);
+  }, [cancelPending]);
+  cancelPendingRef.current = cancelPending;
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if ((e.key !== "ArrowLeft" && e.key !== "ArrowRight") || buckets.length === 0) return;
+    e.preventDefault();
+    const cur = overlayIndexes(buckets, pending ?? selection);
+    const curKey = pending ? `${pending.from}|${pending.to}` : selection ? `${selection.from}|${selection.to}` : "";
+    const prev: KbState | null = kb.current?.key === curKey ? kb.current.st : cur ? { anchor: cur.i1, focus: cur.i2 } : null;
+    const st = kbStep(prev, e.key === "ArrowLeft" ? -1 : 1, e.shiftKey, buckets.length);
+    const sel = selectionFromLabels(buckets[st.anchor], buckets[st.focus], dataRange);
+    if (!sel) return;
+    kb.current = { st, key: `${sel.from}|${sel.to}` };
+    setPending(sel);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      select(sel);
+      setPending(null);
+    }, 350);
+  };
+  // Đổi 24 giờ / 7 ngày -> xoá vùng chọn (trục khác bucket, giữ lại dễ gây hiểu nhầm).
+  const changeRange = (r: TimeseriesRange) => {
+    if (r === range) return;
+    setRange(r);
+    kb.current = null;
+    cancelPending();
+    if (selection) select(null);
+  };
+  const preview = drag ? selectionFromLabels(drag.a, drag.b, dataRange) : (pending ?? selection);
+  const ov = overlayIndexes(buckets, preview);
+  const hoverLabel = hoverAt ? bucketLabelFor(buckets, hoverAt, dataRange) : null;
 
   return (
     <Card className="h-full">
@@ -66,7 +158,7 @@ export function EventsChart() {
             variant="outline"
             size="sm"
             value={range}
-            onValueChange={(v) => v && setRange(v as TimeseriesRange)}
+            onValueChange={(v) => v && changeRange(v as TimeseriesRange)}
           >
             <ToggleGroupItem value="24h">{t("page.dashboard.chart.range-24h")}</ToggleGroupItem>
             <ToggleGroupItem value="7d">{t("page.dashboard.chart.range-7d")}</ToggleGroupItem>
@@ -79,11 +171,42 @@ export function EventsChart() {
         ) : isLoading && !data ? (
           <CardSkeleton lines={6} className="h-64" />
         ) : (
+          <>
+          <p className="mb-1 text-muted-foreground text-xs">
+            <span className="max-md:hidden">{t("page.dashboard.sel.hint")}</span>
+            <span className="md:hidden">{t("page.dashboard.sel.hint-touch")}</span>
+          </p>
+          {/* Lưu ý bàn phím: vùng vẽ focus được (mũi tên/Shift/Esc); đường thay thế đầy đủ là trang Sự kiện có bộ lọc thời gian. */}
+          <div
+            role="group"
+            tabIndex={0}
+            aria-label={t("page.dashboard.sel.chart-label")}
+            onKeyDown={onKeyDown}
+            className="touch-pan-y select-none rounded-md focus-visible:outline-2 focus-visible:outline-ring"
+          >
           <ChartContainer
             config={chartConfig}
             className={`aspect-auto h-64 w-full transition-opacity ${isPlaceholderData ? "opacity-50" : ""}`}
           >
-            <AreaChart data={data ?? []} margin={{ left: -16, right: 8 }}>
+            <AreaChart
+              data={data ?? []}
+              margin={{ left: -16, right: 8 }}
+              onMouseDown={(e, ev) => {
+                const l = labelOf(e);
+                if (l && (ev as unknown as MouseEvent).button === 0) {
+                  dragRef.current = { a: l, b: l };
+                  setDrag({ a: l, b: l });
+                }
+              }}
+              onMouseMove={(e) => {
+                const l = labelOf(e);
+                const d = dragRef.current;
+                if (l && d && d.b !== l) {
+                  dragRef.current = { a: d.a, b: l };
+                  setDrag(dragRef.current);
+                }
+              }}
+            >
               <defs>
                 {(Object.keys(SERIES) as (keyof typeof SERIES)[]).map((k) => (
                   <linearGradient key={k} id={`fill-${k}`} x1="0" y1="0" x2="0" y2="1">
@@ -120,9 +243,27 @@ export function EventsChart() {
               <Area dataKey="succeeded" type="monotone" stroke="var(--color-succeeded)" fill="url(#fill-succeeded)" />
               <Area dataKey="retrying" type="monotone" stroke="var(--color-retrying)" fill="url(#fill-retrying)" />
               <Area dataKey="dead" type="monotone" stroke="var(--color-dead)" fill="url(#fill-dead)" />
+              {/* Lớp phủ vùng chọn (token, không hex): ngoài vùng mờ đi, trong vùng nhuộm màu chính. */}
+              {ov && ov.i1 > 0 && (
+                <ReferenceArea x1={buckets[0]} x2={buckets[ov.i1]} fill="var(--background)" fillOpacity={0.6} stroke="none" ifOverflow="visible" />
+              )}
+              {ov && ov.i2 < buckets.length - 1 && (
+                <ReferenceArea x1={buckets[ov.i2]} x2={buckets[buckets.length - 1]} fill="var(--background)" fillOpacity={0.6} stroke="none" ifOverflow="visible" />
+              )}
+              {ov && (
+                <ReferenceArea x1={buckets[ov.i1]} x2={buckets[ov.i2]} fill="var(--primary)" fillOpacity={0.1} stroke="var(--primary)" strokeOpacity={0.5} ifOverflow="visible" />
+              )}
+              {ov && ov.i1 === ov.i2 && <ReferenceLine x={buckets[ov.i1]} stroke="var(--primary)" strokeWidth={2} />}
+              {/* Rê dòng sự kiện bên dưới -> vạch dọc mốc của nó (như Network tab). */}
+              {hoverLabel && <ReferenceLine x={hoverLabel} stroke="var(--foreground)" strokeDasharray="3 3" strokeOpacity={0.7} />}
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
           </ChartContainer>
+          </div>
+          {selection && (
+            <p className="sr-only">{t("page.dashboard.sel.area-label", { range: formatSelection(selection) })}</p>
+          )}
+          </>
         )}
       </CardContent>
     </Card>
