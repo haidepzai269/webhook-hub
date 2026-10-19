@@ -1,8 +1,9 @@
-# MON1 (ADR-249). Receiver CHƯA chốt: Admin đang chọn email / Telegram bot / SMS.
-# `default` hiện chỉ gửi webhook tới alert-sink (container echo, xem log: docker logs webhook-hub-alert-sink)
-# để luồng Prometheus -> Alertmanager -> receiver chạy thật mà không cần secret.
-# KHÔNG đặt token/mật khẩu thật vào file này (file nằm trong git). Khi chốt receiver: dùng `bot_token_file`/
-# `auth_password_file` trỏ tới file secret mount từ ngoài repo.
+# MON1 (ADR-249) + Telegram local (ADR-257).
+# `default` luôn gửi webhook tới alert-sink (container echo: docker logs webhook-hub-alert-sink) để luồng
+# Prometheus -> Alertmanager -> receiver chạy thật mà không cần secret.
+# Telegram: file này là TEMPLATE. entrypoint.sh (mount vào container) đọc infra/alertmanager/secrets/telegram_bot_token
+# + telegram_chat_id (gitignored); đủ cả hai thì giữ các khối TELEGRAM (điền chat_id), thiếu thì CẮT chúng đi
+# -> Alertmanager vẫn lên, chỉ còn alert-sink. KHÔNG đặt token/chat_id thật vào file này (file nằm trong git).
 route:
   receiver: default
   group_by: ['alertname', 'severity']
@@ -16,6 +17,17 @@ route:
       group_wait: 0s
       group_interval: 5m
       repeat_interval: 5m
+    # TELEGRAM-ROUTE-BEGIN
+    # Cảnh báo thật (warning/critical) -> Telegram, rồi `continue` để vẫn rơi xuống default/alert-sink.
+    # Watchdog đã bị route trên chặn (không continue) và severity=none không khớp -> không bao giờ tới Telegram.
+    - matchers: ['severity=~"warning|critical"']
+      receiver: telegram
+      continue: true
+      repeat_interval: 4h
+      routes:
+        - matchers: ['severity="critical"']
+          repeat_interval: 1h
+    # TELEGRAM-ROUTE-END
     - matchers: ['severity="critical"']
       receiver: default
       repeat_interval: 1h
@@ -34,15 +46,28 @@ receivers:
         send_resolved: false
         # url_file: /etc/alertmanager/secrets/healthchecks_url   # thay `url` khi nối Healthchecks.io
 
-  # --- Chừa chỗ (bỏ comment + đổi route.receiver khi chốt) ---
-  # - name: telegram
-  #   telegram_configs:
-  #     # Bật Telegram/email: thêm vào service alertmanager (docker-compose.yml)
-  #     #   volumes: - ./infra/alertmanager/secrets:/etc/alertmanager/secrets:ro   (thư mục này PHẢI nằm trong .gitignore)
-  #     - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token   # file ngoài repo
-  #       chat_id: 0                                                     # số chat id thật
-  #       parse_mode: HTML
-  #       send_resolved: true
+  # TELEGRAM-RECEIVER-BEGIN
+  # Bật: Admin tự chép token + chat_id vào infra/alertmanager/secrets/ (xem *.example, docs/MONITORING.md §4).
+  # parse_mode mặc định của Alertmanager là HTML và nó tự escape giá trị template ("<7 ngày" -> "&lt;7 ngày"), nên an toàn.
+  # Giờ hiển thị theo UTC (template Alertmanager không đổi múi giờ được).
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token
+        chat_id: 1 # @CHAT_ID@
+        send_resolved: true
+        message: |-
+          {{ if eq .Status "firing" }}[ĐANG BÁO] {{ .Alerts.Firing | len }} cảnh báo{{ else }}[ĐÃ HẾT] {{ .Alerts.Resolved | len }} cảnh báo{{ end }}
+          {{ range .Alerts }}
+          {{ if eq .Status "firing" }}[ĐANG BÁO]{{ else }}[ĐÃ HẾT]{{ end }} {{ .Labels.alertname }} - mức: {{ .Labels.severity }}
+          {{ if .Annotations.summary }}Tóm tắt: {{ .Annotations.summary }}
+          {{ end }}{{ if .Annotations.description }}Mô tả: {{ .Annotations.description }}
+          {{ end }}Từ: {{ .StartsAt.Format "15:04:05 02/01/2006" }} UTC{{ if eq .Status "resolved" }} đến {{ .EndsAt.Format "15:04:05 02/01/2006" }} UTC{{ end }}
+          {{ end }}
+          Grafana: http://localhost:3001
+          Alertmanager: http://localhost:9093
+  # TELEGRAM-RECEIVER-END
+
+  # --- Chừa chỗ ---
   # - name: email
   #   email_configs:
   #     - to: 'ops@example.com'

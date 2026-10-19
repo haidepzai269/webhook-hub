@@ -20,3 +20,7 @@ verify/.results/
 verify/.last-run.json
 verify/.last-red.json
 verify/.mail/
+
+# ADR-257: secret Telegram của Alertmanager (token + chat_id); chỉ *.example được commit
+infra/alertmanager/secrets/*
+!infra/alertmanager/secrets/*.example
