@@ -20,7 +20,7 @@
  *   3. Dùng: client → `const t = useT(); t("page.sources.title")`;
  *            server → `const t = await getT(); t("page.sources.title")`.
  *      Biến: chuỗi "Đã xoá {count} mục" + `t("…", { count: 3 })`.
- *      Đổi ngôn ngữ: LanguageSwitcher ghi cookie rồi gọi `router.refresh()` → server component (getT) render lại
+ *      Đổi ngôn ngữ: useChangeLanguage (menu bánh răng) ghi cookie rồi gọi `router.refresh()` → server component (getT) render lại
  *      ngay; client component (useT) đổi theo store. Ai tự viết nút đổi ngôn ngữ khác cũng PHẢI refresh như vậy.
  *   4. `dictionary.spec.ts` tự kiểm tra mọi locale đủ khoá, không rỗng — chạy `npx jest apps/web/src/lib/i18n`.
  *   Từ dùng chung (Lưu, Huỷ, Xoá, Đang tải…) → `common.*`, đừng lặp ở từng trang.
