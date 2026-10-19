@@ -32,6 +32,7 @@ import { DEFAULT_LOCALE, LOCALES, type Locale } from "./locales";
 import { admin } from "./messages/admin";
 import { alerts } from "./messages/alerts";
 import { auth } from "./messages/auth";
+import { boundary } from "./messages/boundary";
 import { common } from "./messages/common";
 import { errors } from "./messages/errors";
 import { flow } from "./messages/flow";
@@ -73,6 +74,7 @@ const NAMESPACES = {
     ...flow.vi,
     ...journey.vi,
     ...mobile.vi,
+    ...boundary.vi,
     ...pageDashboard.vi,
     ...pageEvents.vi,
     ...pageDeliveries.vi,
@@ -103,6 +105,7 @@ const NAMESPACES = {
     ...flow.en,
     ...journey.en,
     ...mobile.en,
+    ...boundary.en,
     ...pageDashboard.en,
     ...pageEvents.en,
     ...pageDeliveries.en,

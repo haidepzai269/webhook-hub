@@ -11,4 +11,10 @@ describe('CORS (MS-P2-6)', () => {
       credentials: true,
     });
   });
+  it('LOGGING §11.9d: exposedHeaders có x-request-id + x-hub-cold ở CẢ hai chế độ (console cross-origin mới đọc được); không mở rộng origin', () => {
+    for (const env of [{}, { WEB_PUBLIC_URL: 'https://hub.example.com' }]) {
+      expect(corsOptions(env).exposedHeaders).toEqual(['x-request-id', 'x-hub-cold']);
+    }
+    expect(corsOptions({ WEB_PUBLIC_URL: 'https://hub.example.com' }).origin).toEqual(['https://hub.example.com']);
+  });
 });
