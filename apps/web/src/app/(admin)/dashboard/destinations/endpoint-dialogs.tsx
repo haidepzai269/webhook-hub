@@ -242,16 +242,17 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
       <AdminDialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{ep?.name ?? t("page.destinations.endpoint.fallback-title")}</DialogTitle>
-          <DialogDescription className="font-mono text-xs">{ep?.url ?? ""}</DialogDescription>
+          <DialogDescription className="break-all font-mono text-xs">{ep?.url ?? ""}</DialogDescription>
         </DialogHeader>
         <DialogBody>
         {ep && (
           <div className="flex flex-col gap-3">
             <VerificationLine verification={ep.verification} error={ep.verificationError} fix={ep.verificationFix} />
             {secret && <EndpointSecretOnce secret={secret} />}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
+                className="max-sm:min-h-10"
                 variant="outline"
                 disabled={verify.isPending}
                 onClick={() =>
@@ -269,6 +270,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
               {ep.managedBy !== "service" && (
                 <Button
                   size="sm"
+                  className="max-sm:min-h-10"
                   variant="destructive"
                   disabled={rotate.isPending}
                   onClick={async () => {
@@ -290,7 +292,7 @@ export function EndpointDetailDialog({ id, onClose }: { id: string | null; onClo
               )}
               <ul className="flex flex-col gap-1">
                 {(detail.data?.deliveries ?? []).map((d) => (
-                  <li key={d.id} className="flex gap-2 font-mono text-xs">
+                  <li key={d.id} className="flex flex-wrap gap-x-2 break-all font-mono text-xs">
                     <span>{formatDateTime(d.createdAt, locale)}</span>
                     <DeliveryStatusLabel status={d.status} />
                     <span>{d.eventType}</span>

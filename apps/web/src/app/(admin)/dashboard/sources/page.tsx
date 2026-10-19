@@ -11,6 +11,7 @@ import { z } from "zod";
 import { toneTextClass } from "@/components/admin/status-badge";
 import { CopyButton } from "@/components/admin/copy-button";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { SOURCE_MOBILE_CARD } from "@/components/admin/mobile-card-specs";
 import { FormDialog } from "@/components/admin/form-dialog";
 import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { PageHeader } from "@/components/admin/page-header";
@@ -317,7 +318,7 @@ const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] =
     enableSorting: false,
     enableHiding: false,
     cell: ({ row }) => (
-      <div className="flex">
+      <div className="flex max-md:w-full">
         {row.original.provider === "generic" && <ListenButton id={row.original.id} />}
         {canTraffic && <TrafficButton id={row.original.id} />}
         <ConnectionButton id={row.original.id} />
@@ -447,7 +448,7 @@ export default function SourcesPage() {
         title={t("page.sources.title")}
         description={t("page.sources.description")}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <SourceCount />
             <Button onClick={() => (setPreset(null), setConnectOpen(true))}>
               <Plug />
@@ -486,6 +487,7 @@ export default function SourcesPage() {
               getRowId={(s) => s.id}
               isLoading={isLoading}
               error={error}
+              mobile={SOURCE_MOBILE_CARD}
               searchPlaceholder={t("page.sources.search")}
               emptyText={t("page.sources.empty")}
             />
