@@ -3,6 +3,7 @@ import {
   eventsHref,
   floorBucket,
   formatSelection,
+  kbStep,
   moveIndex,
   overlayIndexes,
   parseSelection,
@@ -73,5 +74,17 @@ describe("chart-selection", () => {
     if (!s) throw new Error("null");
     expect(formatSelection(s)).toBe("14-10 00:00 → 16-10 23:59");
     expect(eventsHref(s)).toBe(`/dashboard/events?from=${encodeURIComponent(s.from)}&to=${encodeURIComponent(s.to)}`);
+  });
+
+  it("kbStep: Shift giữ anchor, mở rộng rồi thu hẹp; không Shift chọn một bucket", () => {
+    let k = kbStep(null, -1, false, 24);
+    expect(k).toEqual({ anchor: 22, focus: 22 });
+    k = kbStep(k, -1, true, 24);
+    k = kbStep(k, -1, true, 24);
+    expect(k).toEqual({ anchor: 22, focus: 20 });
+    k = kbStep(k, 1, true, 24); // thu hẹp, anchor không trượt
+    expect(k).toEqual({ anchor: 22, focus: 21 });
+    expect(kbStep(k, 1, false, 24)).toEqual({ anchor: 22, focus: 22 });
+    expect(kbStep({ anchor: 0, focus: 0 }, -1, true, 24)).toEqual({ anchor: 0, focus: 0 });
   });
 });

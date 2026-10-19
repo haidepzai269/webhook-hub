@@ -84,6 +84,22 @@ export function moveIndex(current: number | null, delta: number, n: number): num
   return Math.max(0, Math.min(n - 1, base + delta));
 }
 
+export interface KbState {
+  anchor: number;
+  focus: number;
+}
+
+/**
+ * Bàn phím: bước tiếp theo của (anchor, focus). Không Shift: cả hai về bucket mới (chọn đúng một bucket). Có Shift: anchor
+ * GIỮ NGUYÊN, chỉ focus dịch — Shift+← / Shift+→ nhờ vậy mở rộng và thu hẹp đúng. `prev` null = chưa có trạng thái
+ * (bắt đầu từ bucket cuối); người gọi truyền {anchor:i1, focus:i2} của vùng chọn hiện có để tiếp tục từ đó.
+ */
+export function kbStep(prev: KbState | null, delta: number, shift: boolean, n: number): KbState {
+  const base = prev ?? { anchor: Math.max(0, n - 1), focus: Math.max(0, n - 1) };
+  const focus = moveIndex(base.focus, delta, n);
+  return { anchor: shift ? Math.max(0, Math.min(n - 1, base.anchor)) : focus, focus };
+}
+
 /** "14-10 00:00" theo GMT+7 (tính tay, không phụ thuộc múi giờ máy). */
 export function formatVn(iso: string): string {
   const d = new Date(Date.parse(iso) + VN_OFFSET_MS);

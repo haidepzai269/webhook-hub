@@ -59,13 +59,14 @@ export function RangeEvents({ selection }: { selection: Selection }) {
             size="sm"
             className="max-md:min-h-10 max-md:px-3"
             onClick={() => select(null)}
-            aria-label={t("page.dashboard.sel.clear")}
             title={t("page.dashboard.sel.clear")}
           >
+            {/* Tên truy cập = chữ hiển thị + "Bỏ chọn" (WCAG 2.5.3 label-in-name). */}
             <span className="tabular-nums">{t("page.dashboard.sel.chip", { range: label })}</span>
+            <span className="sr-only">{t("page.dashboard.sel.clear")}</span>
             <X className="size-3.5" aria-hidden />
           </Button>
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="outline" size="sm" className="max-md:min-h-10 max-md:px-3">
             <Link href={eventsHref(selection)}>{t("page.dashboard.recent.view-all")}</Link>
           </Button>
         </CardAction>

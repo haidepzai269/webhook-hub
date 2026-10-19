@@ -48,10 +48,27 @@ function Inner({ children }: { children: ReactNode }) {
   return <SelectionCtx.Provider value={value}>{children}</SelectionCtx.Provider>;
 }
 
+/** Khung chờ giữ đúng bố cục lưới (biểu đồ | thời gian thực / sự kiện) để không dịch layout khi hiện thật. */
+function SelectionFallback() {
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 md:gap-6 xl:grid-cols-3">
+        <div className="min-w-0 xl:col-span-2">
+          <CardSkeleton lines={6} className="h-80" />
+        </div>
+        <div className="min-w-0">
+          <CardSkeleton lines={6} className="h-80" />
+        </div>
+      </div>
+      <CardSkeleton lines={6} className="h-64" />
+    </>
+  );
+}
+
 export function SelectionProvider({ children }: { children: ReactNode }) {
   // useSearchParams cần Suspense; dữ liệu bên trong vốn tải phía client nên khung chờ chỉ là thoáng qua.
   return (
-    <Suspense fallback={<CardSkeleton lines={6} className="h-64" />}>
+    <Suspense fallback={<SelectionFallback />}>
       <Inner>{children}</Inner>
     </Suspense>
   );
