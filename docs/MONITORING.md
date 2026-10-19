@@ -152,4 +152,23 @@ docker logs webhook-hub-alertmanager 2>&1 | grep entrypoint   # "Telegram BẬT"
 
 Ràng buộc đã biết: không chạy exporter đo kiểu local ở Render/free tier (autosuspend + quota; Upstash tính theo lệnh; CloudAMQP giới hạn connection). Nên dùng: `/health` + cron-job.org cho tầng 1 và "còn sống", số đo của chính nền tảng (Render/Neon/Upstash/CloudAMQP dashboard) cho tầng 2–3, `/metrics` của app (đã có `METRICS_TOKEN`) cho tầng 4, Sentry cho tầng 5.
 
+### 7.1. Cảnh báo hạn mức gói free qua Telegram (LOG-CAUSE 7, ADR-263)
+
+Gói free Neon/Upstash không tự cảnh báo, nên `hub-worker` (job `QuotaAlertJob`, KHÔNG phải hub-api) tự đo thưa và nhắn Telegram cho Admin.
+
+| Tài nguyên | Đo bằng | Trần | Chi phí |
+|---|---|---|---|
+| Neon - dung lượng | `pg_database_size` | `QUOTA_NEON_STORAGE_BYTES` (mặc định `DB_DISK_BUDGET_MB` = 512MB) | 1 truy vấn nhẹ / 15 phút |
+| Upstash - lệnh/tháng | `INFO` -> `total_commands_processed` cộng dồn theo tháng UTC (**ước lượng**) | `QUOTA_UPSTASH_COMMANDS_PER_MONTH` (500.000, DEPLOYMENT §5.2) | 1 lệnh Redis / 15 phút |
+| Upstash - dung lượng | `INFO` -> `used_memory` | `QUOTA_UPSTASH_MEMORY_BYTES` (**chưa có mặc định, cần Admin xác nhận số của gói**; không đặt = không đo) | cùng lệnh `INFO` |
+| Neon - compute-hours | không đo | - | không có cách rẻ trong DB; xem dashboard Neon |
+
+- Mức: warning ≥ 80% (`QUOTA_WARN_PCT`), critical ≥ 95% (`QUOTA_CRIT_PCT`); chỉ nhắn khi ĐỔI mức, nhắc lại sau 24h (`QUOTA_REPEAT_MS`); hạ mức có đệm 2 điểm %.
+- Trạng thái "đã báo mức nào" nằm ở key Redis `quota:alert:state` (TTL 40 ngày) nên sống qua lần khởi động lại hằng ngày. Redis mất key = báo lại đúng một lần.
+- Cần cả `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` (cùng biến với đích Telegram); thiếu một = tắt hẳn, log 1 dòng lúc khởi động.
+- Kiểm tay trước khi tin số lệnh: `redis-cli -u $REDIS_URL INFO | grep total_commands_processed`. Không có trường này thì job chỉ log cảnh báo và bỏ qua Upstash.
+- Giả định (chưa kiểm chứng): `total_commands_processed` đơn điệu, riêng cho database, nhất quán giữa các lần gọi. Delta được kẹp theo `giây × QUOTA_UPSTASH_MAX_CMD_PER_SEC` (mặc định 200); mẫu bất thường (giảm quá mức kẹp / tăng quá mức kẹp) bị BỎ, đếm vào `anomalies` và log "INFO total_commands_processed bất thường" (tối đa 1 lần/giờ). Nhiều mẫu bất thường = INFO không ổn định, hãy tin dashboard Upstash. Kiểm chứng: chạy `INFO` vài lần cách nhau vài phút và so.
+- Redis lỗi (vd hết hạn mức Upstash): job vẫn đo Neon, dùng trạng thái tạm trong bộ nhớ và ghi rõ trong tin nhắn.
+- Giới hạn: số lệnh trước lần đo đầu của tháng không biết; Upstash chưa xác nhận cách tính EVAL.
+
 > TODO (nối sau): bảng "tầng → công cụ ở deployed", cách báo động deployed (cùng receiver Alertmanager đã chốt hay kênh khác).
