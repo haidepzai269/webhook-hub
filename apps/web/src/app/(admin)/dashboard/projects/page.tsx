@@ -182,7 +182,7 @@ export default function ProjectsPage() {
                 {t("page.projects.select")}
               </Button>
             ) : (
-              <Button size="sm" variant="ghost" asChild>
+              <Button size="sm" variant="ghost" className="max-md:min-h-10" asChild>
                 <Link href="/dashboard/api-keys">
                   <KeyRound />
                   {t("page.projects.api-keys")}
