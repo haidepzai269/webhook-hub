@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { installBigIntJson, logger, setServiceName, startEventLoopMonitor, startGrowthTicker, testOnlyConfigProblems } from '@hub/common';
+import { flushSentry, initSentry, installBigIntJson, logger, setServiceName, startEventLoopMonitor, startGrowthTicker, testOnlyConfigProblems } from '@hub/common';
 import { apiGrowth, eventLoopLag } from './modules/metrics/metrics';
 import { coldStartMiddleware } from './cold-start';
 import { assertAppRoleNotPrivileged, assertDatabaseLib, PrismaService } from '@hub/database';
@@ -14,7 +14,7 @@ import { configureBodyParsers, installHooksPathGuard } from './body-parsers';
 import { IngestService } from './modules/ingest/ingest.service';
 import { installPenaltyGate } from './modules/ingest/penalty-gate';
 import { installHubOutcome } from './modules/ingest/hub-outcome';
-import { installShutdown } from './shutdown';
+import { installShutdown, onShutdownFlush } from './shutdown';
 import { parseTrustProxy } from './trust-proxy';
 
 function assertMasterKeyConfigured(): void {
@@ -50,6 +50,8 @@ function assertNoTestOnlyConfig(): void {
 
 async function bootstrap() {
   setServiceName('hub-api'); // LOGGING.md §3.1: `svc` ở mọi dòng log
+  // LOGGING.md §11 (ADR-258): Sentry bật CHỈ khi có SENTRY_DSN; không DSN = no-op hoàn toàn. Không đụng rawBody/middleware đọc body.
+  if (initSentry('hub-api')) onShutdownFlush(() => flushSentry(2000).then(() => undefined));
   installBigIntJson(); // S1: events.seq / audit_logs.id là BIGINT -> JSON là chuỗi
   assertNoTestOnlyConfig();
   // S1-6: bản build lệch (dist cũ của @hub/database) phải chết ngay lúc khởi động.

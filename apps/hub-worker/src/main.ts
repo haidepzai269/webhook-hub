@@ -16,8 +16,8 @@ import { DeliveryConsumer } from './consumers/delivery.consumer';
 import { InFlightTracker } from './consumers/in-flight';
 import { BACKPRESSURE_DB, FailureRateController } from './backpressure/failure-rate.controller';
 import { runGated } from './backpressure/gate';
-import { gracefulStop } from './shutdown';
-import { installBigIntJson, logger, setServiceName, startEventLoopMonitor, startGrowthTicker, testOnlyConfigProblems } from '@hub/common';
+import { gracefulStop, shutdownWithinBudget } from './shutdown';
+import { flushSentry, initSentry, installBigIntJson, logger, setServiceName, startEventLoopMonitor, startGrowthTicker, testOnlyConfigProblems } from '@hub/common';
 import * as amqp from 'amqplib';
 
 function assertMasterKeyConfigured(): void {
@@ -62,6 +62,7 @@ async function connectAmqpWithRetry(url: string): Promise<amqp.ChannelModel> {
 
 async function bootstrap() {
   setServiceName('hub-worker'); // LOGGING.md §3.1: `svc` ở mọi dòng log
+  initSentry('hub-worker'); // LOGGING.md §11 (ADR-258): chỉ bật khi có SENTRY_DSN
   installBigIntJson(); // S1: events.seq / audit_logs.id là BIGINT -> JSON là chuỗi
   // S1-6: bản build lệch (dist cũ) phải chết NGAY lúc khởi động, không đợi message đầu tiên vào DLQ.
   assertDatabaseLib();
@@ -235,8 +236,8 @@ async function bootstrap() {
     const emailsStopped = alertEmails.stop();
 
     try {
-      await Promise.race([
-        (async () => {
+      await shutdownWithinBudget(
+        async () => {
           // Thứ tự (src/shutdown.ts, có test): cancel consumer -> backpressure.shutdown() (C5) -> chờ handler có permit (+ việc
           // nền, cùng ngân sách) -> đóng channel. Chừa ~5s cuối cho việc đóng kết nối (25s < SIGKILL 30s của Render).
           const { idle, stillRunning } = await gracefulStop({
@@ -258,9 +259,10 @@ async function bootstrap() {
             },
           });
           logger.info({ idle, stillRunning }, 'Graceful shutdown hoàn tất thành công!');
-        })(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Shutdown timeout vượt quá giới hạn')), shutdownTimeoutMs)),
-      ]);
+        },
+        shutdownTimeoutMs,
+        flushSentry, // ADR-258: flush ≤2s nằm TRONG SHUTDOWN_TIMEOUT_MS; không DSN = trả ngay
+      );
       process.exit(0);
     } catch (e: any) {
       logger.error({ err: e.message }, 'Lỗi trong quá trình shutdown, buộc dừng tiến trình');
