@@ -68,6 +68,26 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.connect.failed": "Kết nối thất bại: {message}",
     "page.sources.connection.manual":
       "Nguồn này tạo bằng tay (dán URL ở trang quản trị của nhà cung cấp) — không có kết nối do hub quản lý.",
+    "page.sources.connection.manual-howto":
+      "Muốn ngừng nhận sự kiện từ nguồn này: (1) gỡ URL webhook ở trang quản trị của nhà cung cấp (hub không tự gỡ được vì không giữ khoá truy cập của bạn); (2) lưu trữ nguồn ở đây để hub từ chối mọi request còn sót.",
+    "page.sources.archive.button": "Lưu trữ nguồn",
+    "page.sources.archive.row-label": "Lưu trữ nguồn “{name}”",
+    "page.sources.archive.title": "Lưu trữ nguồn “{name}”?",
+    "page.sources.archive.effect":
+      "Request gửi tới URL của nguồn này sẽ bị từ chối ngay (404 ở /hooks, 409 source_inactive ở /v1/p). Nguồn biến khỏi danh sách và bản đồ luồng.",
+    "page.sources.archive.history": "Sự kiện và lịch sử đã nhận vẫn được giữ để đối soát.",
+    "page.sources.archive.cascade": "Đăng ký nhận chỉ lọc theo nguồn này cũng được lưu trữ theo.",
+    "page.sources.archive.irreversible": "Không hoàn tác được trên giao diện.",
+    "page.sources.archive.managed":
+      "Nguồn này có kết nối do hub quản lý. Lưu trữ chỉ xoá thông tin xác thực đã lưu, KHÔNG gỡ URL ở nhà cung cấp — hãy bấm “Ngắt” trong hộp kết nối trước.",
+    "page.sources.archive.managed-open": "Mở hộp kết nối",
+    "page.sources.archive.manual": "Nhớ gỡ URL webhook ở trang quản trị của nhà cung cấp, nếu không họ sẽ tiếp tục gửi và nhận lỗi.",
+    "page.sources.archive.checking": "Đang kiểm tra kết nối của nguồn…",
+    "page.sources.archive.error":
+      "Không xác định được nguồn này có kết nối do hub quản lý hay không (lỗi khi đọc kết nối). Hãy mở hộp kết nối để kiểm tra rồi thử lại — nút Lưu trữ đang bị khoá.",
+    "page.sources.archive.confirm": "Lưu trữ",
+    "page.sources.archive.confirming": "Đang lưu trữ…",
+    "page.sources.archive.done": "Đã lưu trữ nguồn “{name}”",
     "page.sources.connection.credentials": "Thông tin xác thực: {value}",
     "page.sources.connection.credentials-saved": "đã lưu (mã hoá)",
     "page.sources.connection.credentials-deleted": "đã xoá — kết nối lại phải nhập lại",
@@ -362,6 +382,26 @@ export const pageSources = defineMessages("page.sources", {
     "page.sources.connect.failed": "Connection failed: {message}",
     "page.sources.connection.manual":
       "This source was created manually (URL pasted in the provider's dashboard) — there is no hub-managed connection.",
+    "page.sources.connection.manual-howto":
+      "To stop receiving events from this source: (1) remove the webhook URL in the provider's dashboard (the hub cannot, it holds no access key of yours); (2) archive the source here so the hub rejects any leftover requests.",
+    "page.sources.archive.button": "Archive source",
+    "page.sources.archive.row-label": "Archive source “{name}”",
+    "page.sources.archive.title": "Archive source “{name}”?",
+    "page.sources.archive.effect":
+      "Requests to this source's URL are rejected immediately (404 on /hooks, 409 source_inactive on /v1/p). The source disappears from the list and the flow map.",
+    "page.sources.archive.history": "Events and history already received are kept for reconciliation.",
+    "page.sources.archive.cascade": "Subscriptions that filter only on this source are archived too.",
+    "page.sources.archive.irreversible": "Cannot be undone from the UI.",
+    "page.sources.archive.managed":
+      "This source has a hub-managed connection. Archiving only deletes the stored credentials and does NOT remove the URL at the provider — press “Disconnect” in the connection dialog first.",
+    "page.sources.archive.managed-open": "Open connection dialog",
+    "page.sources.archive.manual": "Remember to remove the webhook URL in the provider's dashboard, otherwise it keeps sending and getting errors.",
+    "page.sources.archive.checking": "Checking the source's connection…",
+    "page.sources.archive.error":
+      "Could not determine whether this source has a hub-managed connection (failed to read it). Open the connection dialog to check, then retry — Archive is locked.",
+    "page.sources.archive.confirm": "Archive",
+    "page.sources.archive.confirming": "Archiving…",
+    "page.sources.archive.done": "Source “{name}” archived",
     "page.sources.connection.credentials": "Credentials: {value}",
     "page.sources.connection.credentials-saved": "saved (encrypted)",
     "page.sources.connection.credentials-deleted": "deleted — reconnecting requires entering them again",
