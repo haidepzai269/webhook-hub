@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import type { HubColumn } from "@/components/admin/data-table";
+import type { MobileCardSpec } from "@/components/admin/responsive-table-logic";
 import { DeliverySummary } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +73,14 @@ export const buildEventColumns = (t: TranslateFn): HubColumn<HubEvent>[] => [
     cell: ({ row }) => <span className="font-mono text-muted-foreground text-xs">{row.original.id}</span>,
   },
 ];
+
+/** Thẻ trên điện thoại (ADR-261): kiểu sự kiện + tóm tắt giao đứng đầu. */
+export const EVENT_MOBILE_CARD: MobileCardSpec = {
+  title: "type",
+  badge: "deliveries",
+  meta: ["receivedAt", "source", "subject"],
+  wide: ["subject"],
+};
 
 export function useEventColumns(): HubColumn<HubEvent>[] {
   const t = useT();

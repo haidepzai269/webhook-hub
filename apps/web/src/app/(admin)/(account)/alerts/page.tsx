@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import { useAuthBooting } from "@/components/admin/auth-guard";
 import { CursorPager } from "@/components/admin/cursor-pager";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import type { MobileCardSpec } from "@/components/admin/responsive-table-logic";
 import { PageHeader } from "@/components/admin/page-header";
 import { PageSkeleton } from "@/components/admin/skeletons";
 import { ProjectChip, SeverityDot, useAlertText } from "@/components/alerts/alert-ui";
@@ -32,6 +33,9 @@ import { AlertSheet } from "./_components/alert-sheet";
 const ALL = "__all";
 
 type Row = AlertView & { text: AlertText };
+
+/** Thẻ trên điện thoại (ADR-261): tiêu đề cảnh báo + mức độ; bấm thẻ mở chi tiết như bấm dòng. */
+const ALERT_MOBILE_CARD: MobileCardSpec = { title: "alert", badge: "severity", meta: ["project", "state", "openedAt"], wide: ["openedAt"] };
 
 const buildColumns = (t: TranslateFn): HubColumn<Row>[] => [
   {
@@ -134,7 +138,7 @@ function AlertsView() {
       {!isOperator && <p className="mb-3 text-muted-foreground text-sm">{t("alerts.owner-scope")}</p>}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select value={v.project ?? ALL} onValueChange={(p) => url.setFilter({ project: p === ALL ? null : p })}>
-          <SelectTrigger size="sm" className="w-48" aria-label={t("page.alerts.filter.project")}>
+          <SelectTrigger size="sm" className="w-full sm:w-48" aria-label={t("page.alerts.filter.project")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="[&_[role=option]]:cursor-pointer">
@@ -152,7 +156,7 @@ function AlertsView() {
           </SelectContent>
         </Select>
         <Select value={v.severity ?? ALL} onValueChange={(s) => url.setFilter({ severity: s === ALL ? null : s })}>
-          <SelectTrigger size="sm" className="w-40" aria-label={t("page.alerts.filter.severity")}>
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={t("page.alerts.filter.severity")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="[&_[role=option]]:cursor-pointer">
@@ -165,7 +169,7 @@ function AlertsView() {
           </SelectContent>
         </Select>
         <Select value={v.state ?? ALL} onValueChange={(s) => url.setFilter({ state: s === ALL ? null : s })}>
-          <SelectTrigger size="sm" className="w-40" aria-label={t("page.alerts.filter.state")}>
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={t("page.alerts.filter.state")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="[&_[role=option]]:cursor-pointer">
@@ -175,7 +179,7 @@ function AlertsView() {
           </SelectContent>
         </Select>
         <Select value={v.rule ?? ALL} onValueChange={(r) => url.setFilter({ rule: r === ALL ? null : r })}>
-          <SelectTrigger size="sm" className="w-60" aria-label={t("page.alerts.filter.rule")}>
+          <SelectTrigger size="sm" className="w-full sm:w-60" aria-label={t("page.alerts.filter.rule")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="[&_[role=option]]:cursor-pointer">
@@ -202,6 +206,7 @@ function AlertsView() {
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
+        mobile={ALERT_MOBILE_CARD}
         onRowClick={(a) => setSelected(a.id)}
         searchPlaceholder={t("page.alerts.search-placeholder")}
         emptyText={t(filtered ? "page.alerts.empty-filtered" : "page.alerts.empty")}

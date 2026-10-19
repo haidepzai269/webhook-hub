@@ -54,12 +54,12 @@ export function TimeRange({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-1 text-muted-foreground text-xs">
+      <div className="flex w-full items-center gap-1 text-muted-foreground text-xs sm:w-auto">
         <Input
           type="datetime-local"
           aria-label={t("admin.time-range.from")}
           aria-invalid={Boolean(error)}
-          className="h-8 w-48 text-xs"
+          className="h-8 min-w-0 flex-1 text-xs sm:w-48 sm:flex-none"
           value={fromLocal}
           onChange={(e) => {
             edited.current = true;
@@ -71,7 +71,7 @@ export function TimeRange({
           type="datetime-local"
           aria-label={t("admin.time-range.to")}
           aria-invalid={Boolean(error)}
-          className="h-8 w-48 text-xs"
+          className="h-8 min-w-0 flex-1 text-xs sm:w-48 sm:flex-none"
           value={toLocal}
           onChange={(e) => {
             edited.current = true;

@@ -259,10 +259,13 @@ function SidebarTrigger({
   className,
   onClick,
   label = "Toggle Sidebar",
+  icon,
   ...props
 }: React.ComponentProps<typeof Button> & {
   /** Nhãn cho trình đọc màn hình — app truyền bản đã dịch. */
   label?: string
+  /** Thay icon mặc định (PanelLeft) — vd ☰ (Menu) cho nút mở ngăn kéo trên mobile. */
+  icon?: React.ReactNode
 }) {
   const { toggleSidebar } = useSidebar()
 
@@ -279,7 +282,7 @@ function SidebarTrigger({
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      {icon ?? <PanelLeftIcon />}
       <span className="sr-only">{label}</span>
     </Button>
   )

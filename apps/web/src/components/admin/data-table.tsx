@@ -26,8 +26,12 @@ import {
 import { SearchInput } from "@/components/admin/search-input";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 import { useT } from "@/lib/i18n/use-t";
+
+import { type MobileCardSpec, planMobileCard } from "./responsive-table-logic";
 
 export type HubColumn<T extends RowData> = ColumnDef<DataTableFeatures, T>;
 
@@ -54,6 +58,8 @@ interface DataTableProps<T extends RowData> {
   footer?: ReactNode;
   /** Class thêm cho từng hàng (vd làm mờ hàng đã thu hồi). */
   rowClassName?: (row: T) => string | undefined;
+  /** Dưới `md` vẽ DANH SÁCH THẺ thay bảng (ADR-261). Không khai báo = giữ bảng cuộn ngang như cũ. */
+  mobile?: MobileCardSpec;
 }
 
 /** Bảng dữ liệu chung của admin — khung data-table của Studio Admin (TanStack Table v9). */
@@ -71,8 +77,11 @@ export function DataTable<T extends RowData>({
   toolbar,
   footer,
   rowClassName,
+  mobile,
 }: DataTableProps<T>) {
   const t = useT();
+  const isMobile = useIsMobile();
+  const cards = Boolean(mobile) && isMobile;
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
@@ -106,7 +115,8 @@ export function DataTable<T extends RowData>({
 
   const rows = table.getRowModel().rows;
   const colCount = table.getVisibleLeafColumns().length;
-  const hideable = table.getAllLeafColumns().filter((c) => c.getCanHide());
+  const hideable = cards ? [] : table.getAllLeafColumns().filter((c) => c.getCanHide());
+  const cardPlan = mobile ? planMobileCard(mobile, table.getVisibleLeafColumns().map((c) => c.id)) : null;
 
   return (
     <div className="space-y-3">
@@ -157,6 +167,83 @@ export function DataTable<T extends RowData>({
         </div>
       </div>
 
+      {cards && cardPlan ? (
+        <ul className={`space-y-2 transition-opacity ${isStale ? "opacity-60" : ""}`}>
+          {isLoading && !data ? (
+            [0, 1, 2, 3].map((i) => (
+              <li key={i}>
+                <Skeleton className="h-24 w-full rounded-lg" />
+              </li>
+            ))
+          ) : error ? (
+            <li className="rounded-lg border bg-card p-4 text-center text-destructive text-sm">
+              {t("common.load-error")}: {error.message}
+            </li>
+          ) : rows.length ? (
+            rows.map((row) => {
+              const byId = new Map(row.getVisibleCells().map((c) => [c.column.id, c]));
+              const render = (id: string | null) => {
+                const cell = id ? byId.get(id) : undefined;
+                return cell ? <table.FlexRender cell={cell} /> : null;
+              };
+              const headerOf = (id: string) => {
+                const h = table.getColumn(id)?.columnDef.header;
+                return typeof h === "string" ? h : id;
+              };
+              return (
+                <li key={row.id}>
+                  {/* Thẻ bấm được giữ ngữ nghĩa của hàng bảng: focus bàn phím + Enter/Space. */}
+                  <div
+                    className={cn(
+                      "rounded-lg border bg-card p-3",
+                      onRowClick && "cursor-pointer active:bg-muted/60 focus-visible:bg-muted focus-visible:outline-none",
+                      rowClassName?.(row.original),
+                    )}
+                    role={onRowClick ? "button" : undefined}
+                    tabIndex={onRowClick ? 0 : undefined}
+                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                    onKeyDown={
+                      onRowClick
+                        ? (e) => {
+                            if (e.target !== e.currentTarget) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onRowClick(row.original);
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">{render(cardPlan.title)}</div>
+                      {cardPlan.badge && <div className="shrink-0">{render(cardPlan.badge)}</div>}
+                    </div>
+                    {cardPlan.meta.length > 0 && (
+                      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                        {cardPlan.meta.map((m) => (
+                          <div key={m.id} className={cn("min-w-0", m.wide && "col-span-2")}>
+                            <dt className="text-muted-foreground">{headerOf(m.id)}</dt>
+                            <dd className="min-w-0 break-words [&_[data-cell-text]]:max-w-full">{render(m.id)}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                    {cardPlan.actions && (
+                      // Vùng chạm ≥ 40px; bấm nút không kích hoạt onRowClick của thẻ.
+                      // biome-ignore lint/a11y/useKeyWithClickEvents: chỉ chặn nổi bọt, nút bên trong tự xử lý phím
+                      <div className="mt-3 flex [&_button]:min-h-10 [&_button]:flex-1" onClick={(e) => e.stopPropagation()}>
+                        {render(cardPlan.actions)}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })
+          ) : (
+            <li className="rounded-lg border bg-card p-6 text-center text-muted-foreground text-sm">{emptyText ?? t("common.empty")}</li>
+          )}
+        </ul>
+      ) : (
       <div className={`overflow-x-auto rounded-lg border bg-card transition-opacity ${isStale ? "opacity-60" : ""}`}>
         <Table>
           <TableHeader className="bg-muted/30">
@@ -234,6 +321,7 @@ export function DataTable<T extends RowData>({
           </TableBody>
         </Table>
       </div>
+      )}
 
       {footer && <div className="flex justify-end">{footer}</div>}
 

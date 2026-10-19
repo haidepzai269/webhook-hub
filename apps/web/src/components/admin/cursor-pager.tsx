@@ -30,9 +30,10 @@ export function CursorPager({
   const t = useT();
   const canPrev = Boolean(prev) && !loading;
   const canNext = Boolean(next) && !loading;
-  const off = "aria-disabled:pointer-events-auto aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+  // Mobile: nút cao 40px (vùng chạm).
+  const off = "max-md:h-10 aria-disabled:pointer-events-auto aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
   return (
-    <nav aria-label={t("common.pager.label")} className="flex items-center gap-2 text-sm">
+    <nav aria-label={t("common.pager.label")} className="flex flex-wrap items-center justify-end gap-2 text-sm">
       <span className="text-muted-foreground text-xs" aria-live="polite">
         {prev ? t("common.pager.older") : t("common.pager.at-newest")}
         {loading ? ` · ${t("common.pager.loading")}` : ""}

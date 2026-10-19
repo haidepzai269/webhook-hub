@@ -13,7 +13,7 @@ import { CopyButton } from "@/components/admin/copy-button";
 import { ErrorState } from "@/components/admin/state";
 import { AttemptsCard, FlowCard, HeadersCard, PayloadCard, Waterfall } from "@/components/flow/detail-cards";
 import { ExecutionStatusPill } from "@/components/flow/execution-bits";
-import { JourneyCanvas, journeyHeight } from "@/components/flow/journey-canvas";
+import { JourneyView } from "@/components/flow/journey-view";
 import { TonePill } from "@/components/flow/pills";
 import { ProviderIcon } from "@/components/flow/provider-icon";
 import { StageSheet } from "@/components/flow/stage-sheet";
@@ -164,7 +164,7 @@ export default function EventJourneyPage() {
           }
           actions={
             <>
-            <Button variant="outline" size="sm" onClick={createFrom} disabled={!raw}>
+            <Button variant="outline" size="sm" className="max-md:min-h-10" onClick={createFrom} disabled={!raw}>
               <WandSparkles {...ICON} />
               {t("page.events.detail.create-from")}
             </Button>
@@ -172,7 +172,7 @@ export default function EventJourneyPage() {
             {!event?.trimmedAt && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="replay">
+                <Button variant="replay" className="max-md:min-h-10">
                   <RotateCcw {...ICON} />
                   {t("page.events.detail.replay")}
                   <ChevronDown {...ICON} />
@@ -243,16 +243,14 @@ export default function EventJourneyPage() {
         title={t("page.events.detail.journey")}
         right={<span className="text-muted-foreground text-xs">{t("page.events.detail.journey-hint")}</span>}
       >
-        <div className="flow-canvas overflow-hidden rounded-xl border" style={{ height: journeyHeight(branches.length) + 30, borderColor: "var(--flow-card-border)" }}>
-          <JourneyCanvas
-            stages={stages}
-            branches={branches}
-            provider={raw?.provider}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onAction={onAction}
-          />
-        </div>
+        <JourneyView
+          stages={stages}
+          branches={branches}
+          provider={raw?.provider}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onAction={onAction}
+        />
         <div className="mt-3">
           <Waterfall stages={stages} branches={branches} />
         </div>

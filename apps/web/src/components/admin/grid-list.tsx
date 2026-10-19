@@ -18,10 +18,12 @@ import { useT } from "@/lib/i18n/use-t";
  *
  * - `template`: giá trị `grid-template-columns` dùng chung cho tiêu đề và mọi hàng.
  * - `density`: `md` (trang, hàng cao, viền dưới) | `sm` (ngăn log, hàng sát).
+ * - `stack` (ADR-261): dưới `md` ẩn tiêu đề cột và xếp hàng thành THẺ 2 cột (nơi dùng đặt `col-span-*` cho từng ô); từ `md`
+ *   trở lên là lưới `template` như cũ.
  */
 
 type Density = "md" | "sm";
-const Ctx = createContext<{ template: string; density: Density }>({ template: "none", density: "md" });
+const Ctx = createContext<{ template: string; density: Density; stack: boolean }>({ template: "none", density: "md", stack: false });
 
 const HEADER_BASE: Record<Density, string> = {
   md: "border-b bg-muted/40 px-4 py-2 font-medium text-muted-foreground text-xs",
@@ -32,6 +34,7 @@ export function GridList({
   template,
   headers,
   density = "md",
+  stack = false,
   sticky = false,
   minWidth,
   headerStyle,
@@ -47,6 +50,7 @@ export function GridList({
   /** Nhãn từng cột; chuỗi rỗng/`null` = cột không có tiêu đề. */
   headers: ReactNode[];
   density?: Density;
+  stack?: boolean;
   /** Tiêu đề dính đầu vùng cuộn (ngăn log). */
   sticky?: boolean;
   /** Hẹp hơn mức này thì cuộn ngang trong khung cha thay vì đè chữ. */
@@ -63,10 +67,10 @@ export function GridList({
 }) {
   const t = useT();
   return (
-    <Ctx.Provider value={{ template, density }}>
+    <Ctx.Provider value={{ template, density, stack }}>
       <div className={className} style={minWidth ? { minWidth } : undefined}>
         <div
-          className={cn("grid items-center gap-3", HEADER_BASE[density], sticky && "sticky top-0 z-[1]")}
+          className={cn("grid items-center gap-3", HEADER_BASE[density], sticky && "sticky top-0 z-[1]", stack && "max-md:hidden")}
           style={{ gridTemplateColumns: template, ...headerStyle }}
         >
           {headers.map((h, i) => (
@@ -112,13 +116,14 @@ export function GridListRow({
   style?: CSSProperties;
   children: ReactNode;
 }) {
-  const { template, density } = useContext(Ctx);
+  const { template, density, stack } = useContext(Ctx);
   const cls = cn(
     "grid items-center gap-3 border-l-2 hover:bg-muted/40 focus-visible:bg-muted/60 focus-visible:outline-none",
+    stack && "max-md:grid-cols-2 max-md:gap-y-1.5 max-md:py-3 md:[grid-template-columns:var(--gl-cols)]",
     density === "md" ? "cursor-pointer border-b px-4 py-2 text-sm last:border-b-0" : "px-3 py-1",
     className,
   );
-  const st: CSSProperties = { gridTemplateColumns: template, borderLeftColor: tone, ...style };
+  const st: CSSProperties = { ...(stack ? { "--gl-cols": template } : { gridTemplateColumns: template }), borderLeftColor: tone, ...style } as CSSProperties;
   if (href) {
     return (
       <Link href={href} className={cls} style={st}>
