@@ -2,6 +2,8 @@
 
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
 
+import { ShopDatePicker } from "./ShopDatePicker";
+
 const iconBox: CSSProperties = {
   width: 46,
   height: 46,
@@ -163,13 +165,11 @@ export function Reservation() {
                     <label className="flbl" htmlFor="resDate">
                       Ngày *
                     </label>
-                    <input
+                    <ShopDatePicker
                       id="resDate"
-                      type="date"
-                      className="fctrl"
                       required
                       value={form.date}
-                      onChange={set("date")}
+                      onChange={(date) => setForm((f) => ({ ...f, date }))}
                     />
                   </div>
                   <div className="col-sm-6">
