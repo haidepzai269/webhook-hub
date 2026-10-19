@@ -8,6 +8,7 @@ import { OutboxRelay } from './scheduler/outbox.relay';
 import { DeliverySweeper } from './scheduler/delivery.sweeper';
 import { CleanupJob } from './scheduler/cleanup.job';
 import { StorageJob } from './scheduler/storage.job';
+import { QuotaAlertJob } from './scheduler/quota-alert.job';
 import { StorageCleanRunner } from './scheduler/storage-clean.runner';
 import { AlertEvaluator } from './scheduler/alert.evaluator';
 import { AlertEmailSender } from './scheduler/alert-email.sender';
@@ -86,6 +87,7 @@ async function bootstrap() {
   const cleanup = app.get(CleanupJob);
   const storage = app.get(StorageJob);
   const storageClean = app.get(StorageCleanRunner);
+  const quotaAlert = app.get(QuotaAlertJob);
   const alertEvaluator = app.get(AlertEvaluator);
   const alertEmails = app.get(AlertEmailSender);
 
@@ -114,6 +116,7 @@ async function bootstrap() {
     cleanup.stop();
     storage.stop();
     storageClean.stop();
+    quotaAlert.stop();
     void alertEvaluator.stop();
     void alertEmails.stop();
     process.exit(1);
@@ -230,6 +233,7 @@ async function bootstrap() {
     cleanup.stop();
     storage.stop();
     storageClean.stop();
+    quotaAlert.stop();
     // CB2: không hẹn lượt cảnh báo mới; lượt đang chạy dừng ở ranh giới luật (chờ nó trong ngân sách bên dưới).
     const alertsStopped = alertEvaluator.stop();
     // CB5: vòng gửi email dừng trước dòng kế tiếp, dòng chưa gửi được trả lại outbox.

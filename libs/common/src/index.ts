@@ -26,3 +26,4 @@ export * from './log-line';
 export * from './growth-window';
 export * from './event-loop';
 export * from './sentry';
+export * from './quota';
