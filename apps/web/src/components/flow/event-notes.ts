@@ -115,6 +115,49 @@ export function expectedProbe(i: ProbeInput): ProbeInfo | null {
   return stopped && (delivering?.total ?? 0) === 0 ? probe : null;
 }
 
+/**
+ * "Không có đích" (ADR-259): sự kiện chuẩn đã nhận + lưu + chuẩn hoá nhưng KHÔNG subscription nào khớp kiểu →
+ * chặng Định tuyến `skipped` (server: reason `no_subscription`), Giao `skipped` total 0, không lỗi, không phải probe.
+ * Đây là dừng có chủ đích của cấu hình, không phải hỏng — UI vẽ trung tính + gợi ý tạo Subscription. Không cần đổi backend.
+ */
+export function noDestination(i: ProbeInput): boolean {
+  if (i.type === null || i.failedAt) return false;
+  const routed = dot(i.summary, "routed");
+  const normalized = dot(i.summary, "normalized");
+  if (routed?.status !== "skipped" || !normalized || normalized.status === "skipped") return false;
+  if (i.summary.some((d) => d.status === "failed")) return false;
+  if ((dot(i.summary, "delivering")?.total ?? 0) !== 0) return false;
+  return expectedProbe(i) === null;
+}
+
+/**
+ * Vai của từng chấm trong dải 6 ô (giữ 6 ô để hàng thẳng cột):
+ * - `real`: chấm có trạng thái thật (ok/warning/fail/probe…) hoặc điểm dừng có chủ đích kiểu trùng / adapter bỏ qua (⊘).
+ * - `stop`: Định tuyến của "không có đích" — dừng có chủ đích, kèm số 0.
+ * - `faded`: SAU điểm dừng (skipped, không áp dụng) — chấm nhỏ mờ, đường nối nét đứt.
+ * `stopIdx`: chỉ số điểm dừng; đường nối vào ô i > stopIdx là nét đứt.
+ */
+export type DotRole = "real" | "stop" | "faded";
+
+export function pipelineRoles(i: ProbeInput): { roles: DotRole[]; stopIdx: number } {
+  const n = i.summary.length;
+  let stopIdx = -1;
+  i.summary.forEach((d, k) => {
+    if (d.status !== "skipped") stopIdx = k;
+  });
+  const noDest = noDestination(i);
+  const routedIdx = i.summary.findIndex((d) => d.stage === "routed");
+  if (noDest && routedIdx >= 0) stopIdx = routedIdx;
+  else if (i.type === null && !i.failedAt && !i.summary.some((d) => d.status === "failed") && stopIdx + 1 < n) {
+    // Trùng / adapter không sinh event: chấm skipped ngay sau chấm thật cuối là điểm dừng (⊘ giữ nguyên).
+    stopIdx += 1;
+  }
+  const roles = i.summary.map((d, k): DotRole =>
+    noDest && k === routedIdx ? "stop" : k > stopIdx && d.status === "skipped" ? "faded" : "real",
+  );
+  return { roles, stopIdx };
+}
+
 const PR_ACTIONS: Record<string, MessageKey> = {
   opened: "journey.pr.opened",
   closed: "journey.pr.closed",

@@ -20,6 +20,11 @@ export const journey = defineMessages("journey", {
     "journey.exec.failed": "Thất bại",
     "journey.exec.in-progress": "Đang xử lý",
     "journey.exec.rejected": "Bị từ chối",
+    "journey.exec.no-destination": "Đã nhận · không có đích",
+    "journey.stop.stage": "dừng — 0 đăng ký khớp",
+    "journey.stop.tooltip": "Định tuyến · 0 đăng ký khớp kiểu {type} — tạo đăng ký nhận để giao",
+    "journey.stop.card-hint": "Tạo đăng ký nhận khớp kiểu sự kiện này để giao đi",
+    "journey.pipeline.na": "không áp dụng",
     // Request kiểm tra kết nối của provider (event-notes PROBES, ADR-159).
     "journey.probe.label": "Kiểm tra kết nối",
     "journey.probe.payos.note":
@@ -134,6 +139,11 @@ export const journey = defineMessages("journey", {
     "journey.exec.failed": "Failed",
     "journey.exec.in-progress": "In progress",
     "journey.exec.rejected": "Rejected",
+    "journey.exec.no-destination": "Received · no destination",
+    "journey.stop.stage": "stopped — 0 subscriptions matched",
+    "journey.stop.tooltip": "Routing · 0 subscriptions match type {type} — create a Subscription to deliver",
+    "journey.stop.card-hint": "Create a Subscription matching this event type to deliver it",
+    "journey.pipeline.na": "not applicable",
     "journey.probe.label": "Connection test",
     "journey.probe.payos.note":
       "PayOS checks the hub URL when you click “Connect PayOS” — not a payment, not a QR code; stopping at Normalize is expected, nothing is delivered",

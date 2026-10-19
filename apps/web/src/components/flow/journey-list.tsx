@@ -1,12 +1,14 @@
 "use client";
 
 import type { FlowBranch, StageView } from "@hub/flow";
+import { Contrast } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n/use-t";
 
 import { ACTION_ICON, ACTION_LABEL, type OnStageAction } from "./journey-canvas";
-import { buildJourneyList, type JourneyStep } from "./journey-list-logic";
+import type { pipelineRoles } from "./event-notes";
+import { buildJourneyList, type JourneyStep, stageRoleMap, stepCardView } from "./journey-list-logic";
 import { ProviderIcon } from "./provider-icon";
 import { clock, countdown, fmtMs, useNow } from "./time";
 import { destinationIcon, ICON, ICON_SM, STATUS_TONE, StatusGlyph, stageIcon, stageLabelKey, stageStatusKey, TONE_VAR, toneStyle } from "./tokens";
@@ -31,7 +33,8 @@ function StepCard({
 }) {
   const t = useT();
   const { stage, deltaMs } = step;
-  const tone = step.intentionalStop ? "idle" : STATUS_TONE[stage.status];
+  const view = stepCardView(step);
+  const tone = view.idleTone ? "idle" : STATUS_TONE[stage.status];
   const Icon = stageIcon(stage.key, stage.status);
   const color = TONE_VAR[tone];
   const nextAt = typeof stage.detail?.nextAttemptAt === "string" ? (stage.detail.nextAttemptAt as string) : null;
@@ -55,7 +58,7 @@ function StepCard({
           open();
         }
       }}
-      className={`flow-card relative cursor-pointer rounded-2xl px-3 py-2.5 ${selectedId === stage.id ? "is-selected" : ""}`}
+      className={`flow-card relative cursor-pointer rounded-2xl ${view.faded ? "px-3 py-1.5 opacity-60" : "px-3 py-2.5"} ${selectedId === stage.id ? "is-selected" : ""}`}
       data-tone={tone}
       style={toneStyle(tone)}
     >
@@ -65,9 +68,26 @@ function StepCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-1.5 font-medium text-[11px] uppercase tracking-wide" style={{ color }}>
-            <StatusGlyph status={stage.status} small />
+            {view.glyph === "stop" ? (
+              <Contrast {...ICON_SM} aria-hidden />
+            ) : view.glyph === "dot" ? (
+              <span className="inline-flex w-[13px] justify-center" aria-hidden>
+                <span className="size-1 rounded-full bg-current opacity-35" />
+              </span>
+            ) : (
+              <StatusGlyph status={stage.status} small />
+            )}
             <span>{t(stageLabelKey(stage.key))}</span>
-            <span className="normal-case opacity-80">· {t(stageStatusKey(stage.status))}</span>
+            {view.glyph === "stop" ? (
+              <>
+                <span className="tabular-nums" aria-hidden>
+                  0
+                </span>
+                <span className="sr-only">{t("journey.stop.stage")}</span>
+              </>
+            ) : (
+              <span className="normal-case opacity-80">· {t(view.glyph === "dot" ? "journey.pipeline.na" : stageStatusKey(stage.status))}</span>
+            )}
           </div>
         </div>
         {deltaMs !== null && deltaMs > 0 && (
@@ -77,7 +97,7 @@ function StepCard({
         )}
       </div>
       <div className="mt-1.5 break-words font-semibold text-[13px] leading-[1.3]">{stage.title}</div>
-      {stage.subtitle && (
+      {stage.subtitle && !view.faded && (
         <div className="mt-0.5 break-words text-[12px] leading-4" style={{ color: "var(--flow-text-dim)" }}>
           {stage.subtitle}
         </div>
@@ -96,12 +116,17 @@ function StepCard({
           </span>
         </div>
       )}
-      {stage.reason && stage.status !== "ok" && (
+      {stage.reason && stage.status !== "ok" && !view.faded && (
         <div className="mt-1 break-words text-[12px] leading-4" style={{ color }}>
           {stage.reason.message}
         </div>
       )}
-      {stage.actions && stage.actions.length > 0 && (
+      {view.hint && (
+        <div className="mt-0.5 text-[12px] leading-4" style={{ color: "var(--flow-text-dim)" }}>
+          {t("journey.stop.card-hint")}
+        </div>
+      )}
+      {stage.actions && stage.actions.length > 0 && !view.faded && (
         <div className="mt-2 flex flex-wrap gap-2">
           {stage.actions.map((a) => {
             const AI = ACTION_ICON[a];
@@ -137,6 +162,7 @@ export function JourneyList({
   selectedId,
   onSelect,
   onAction,
+  ctx,
 }: {
   stages: StageView[];
   branches: FlowBranch[];
@@ -144,10 +170,11 @@ export function JourneyList({
   selectedId: string | null;
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
+  ctx?: Parameters<typeof pipelineRoles>[0];
 }) {
   const t = useT();
   const now = useNow(1000);
-  const list = buildJourneyList(stages, branches);
+  const list = buildJourneyList(stages, branches, ctx ? stageRoleMap(ctx) : {});
   return (
     <section className="space-y-3" aria-label={t("mobile.journey.aria")}>
       <ol className="space-y-2">

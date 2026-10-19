@@ -20,7 +20,7 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
-import { Settings2, RotateCcw, Skull } from "lucide-react";
+import { Contrast, Settings2, RotateCcw, Skull } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/lib/i18n/dictionary";
@@ -90,7 +90,9 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
   const { stage, provider, selected, onSelect, onAction, branch } = data;
   const t = useT();
   const now = useNow(1000);
-  const tone = STATUS_TONE[stage.status];
+  // Định tuyến không khớp subscription nào (không phải probe) = dừng CÓ CHỦ ĐÍCH, không phải "bỏ qua" (ADR-259).
+  const stopped = stage.key === "routed" && stage.status === "skipped" && stage.reason?.code !== "provider_probe";
+  const tone = stopped ? "idle" : STATUS_TONE[stage.status];
   const Icon = stageIcon(stage.key, stage.status);
   const nextAt = typeof stage.detail?.nextAttemptAt === "string" ? (stage.detail.nextAttemptAt as string) : null;
   const tier = typeof stage.detail?.tier === "string" ? (stage.detail.tier as string) : null;
@@ -115,8 +117,16 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1 font-medium text-[11px] uppercase tracking-wide" style={{ color: TONE_VAR[tone] }}>
-            <StatusGlyph status={stage.status} small />
+            {stopped ? <Contrast {...ICON_SM} aria-hidden /> : <StatusGlyph status={stage.status} small />}
             {t(stageLabelKey(stage.key))}
+            {stopped && (
+              <>
+                <span className="tabular-nums" aria-hidden>
+                  0
+                </span>
+                <span className="sr-only">{t("journey.stop.stage")}</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -145,6 +155,11 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
       {stage.reason && stage.status !== "ok" && (
         <div className="mt-1 text-[11.5px] leading-4" style={{ color: TONE_VAR[tone] }} title={stage.reason.message}>
           {stage.reason.message}
+        </div>
+      )}
+      {stopped && stage.reason?.code === "no_subscription" && (
+        <div className="mt-0.5 text-[11.5px] leading-4" style={{ color: "var(--flow-text-dim)" }}>
+          {t("journey.stop.card-hint")}
         </div>
       )}
       {stage.actions && stage.actions.length > 0 && (

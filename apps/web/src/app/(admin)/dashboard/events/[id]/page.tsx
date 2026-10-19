@@ -13,6 +13,7 @@ import { CopyButton } from "@/components/admin/copy-button";
 import { ErrorState } from "@/components/admin/state";
 import { AttemptsCard, FlowCard, HeadersCard, PayloadCard, Waterfall } from "@/components/flow/detail-cards";
 import { ExecutionStatusPill } from "@/components/flow/execution-bits";
+import { expectedProbe, noDestination } from "@/components/flow/event-notes";
 import { JourneyView } from "@/components/flow/journey-view";
 import { TonePill } from "@/components/flow/pills";
 import { ProviderIcon } from "@/components/flow/provider-icon";
@@ -130,6 +131,14 @@ export default function EventJourneyPage() {
   const replayable = branches.filter((b) => b.stages[b.stages.length - 1].actions?.includes("replay_delivery"));
   const displayId = event?.id ?? raw?.id ?? data.id;
   const selectedId = selected?.stage.id ?? null;
+  // Cùng quy tắc với danh sách: ping/probe -> pill "Kiểm tra kết nối"; không subscription -> "Đã nhận · không có đích".
+  const pillCtx = {
+    type: event?.type ?? null,
+    provider: raw?.provider ?? "",
+    summary: data.summary,
+    failedAt: data.failedAt,
+    probe: stages.find((s) => s.key === "routed")?.reason?.code === "provider_probe",
+  };
 
   const createFrom = () => {
     try {
@@ -151,7 +160,7 @@ export default function EventJourneyPage() {
           title={t("page.events.detail.title")}
           adornment={
             <>
-              <ExecutionStatusPill status={data.executionStatus} />
+              <ExecutionStatusPill status={data.executionStatus} probe={expectedProbe(pillCtx)} noDest={noDestination(pillCtx)} />
               {/* PK5 khoá 2 (REVIEW-PK5 TB-1): hub không kiểm chữ ký nguồn này — chặng "Xác thực" cũng là cảnh báo, không xanh. */}
               <UnverifiedBadge of={journeyUnverified(data) ? { verified: false } : null} />
             </>
@@ -250,6 +259,7 @@ export default function EventJourneyPage() {
           selectedId={selectedId}
           onSelect={onSelect}
           onAction={onAction}
+          ctx={pillCtx}
         />
         <div className="mt-3">
           <Waterfall stages={stages} branches={branches} />

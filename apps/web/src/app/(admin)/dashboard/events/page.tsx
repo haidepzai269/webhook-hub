@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
 import { GridList, GridListRow } from "@/components/admin/grid-list";
-import { expectedProbe } from "@/components/flow/event-notes";
+import { expectedProbe, noDestination } from "@/components/flow/event-notes";
 import { EXECUTION_TONE, ExecutionStatusPill, FailedAt, MiniPipeline } from "@/components/flow/execution-bits";
 import { ProjectPicker } from "@/components/flow/project-picker";
 import { ProviderIcon } from "@/components/flow/provider-icon";
@@ -242,7 +242,7 @@ function ExecutionsView() {
               key={i.id}
               onActivate={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
               className={cn(ROW_CARD, anim.className)}
-              tone={probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]]}
+              tone={probe || (i.status === "succeeded" && noDestination(i)) ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]]}
               style={{ contentVisibility: "auto", containIntrinsicSize: "auto 44px", ...anim.style }}
             >
               {/* Thời gian */}
@@ -276,7 +276,7 @@ function ExecutionsView() {
               {/* Đường ống */}
               <MiniPipeline summary={i.summary} context={i} />
               {/* Trạng thái */}
-              <ExecutionStatusPill status={i.status} probe={probe} />
+              <ExecutionStatusPill status={i.status} probe={probe} noDest={noDestination(i)} />
               {/* Hỏng ở */}
               <FailedAt failedAt={i.failedAt} status={i.status} />
               {/* Xem nhanh */}

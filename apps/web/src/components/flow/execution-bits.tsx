@@ -3,14 +3,14 @@
 import { Fragment } from "react";
 
 import type { ExecutionStatus, FlowFailedAt, FlowSummaryDot } from "@hub/flow";
-import { CircleAlert, CircleCheck, CircleX, Info, LoaderCircle, ShieldX } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleX, Contrast, Info, LoaderCircle, ShieldX } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CellTooltip } from "@/components/ui/cell-tooltip";
 import type { MessageKey, TranslateFn } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 
-import { expectedProbe, type ProbeInfo, stageHint } from "./event-notes";
+import { expectedProbe, pipelineRoles, type ProbeInfo, stageHint } from "./event-notes";
 import { TonePill } from "./pills";
 import { ICON_SM, STATUS_TONE, StatusGlyph, stageLabelKey, stageStatusKey, type Tone, TONE_VAR } from "./tokens";
 
@@ -35,8 +35,24 @@ const TOOLTIP_DELAY_MS = 150;
 const EXECUTION_ICON = { succeeded: CircleCheck, failed: CircleX, in_progress: LoaderCircle, rejected: ShieldX } as const;
 
 /** `probe` (từ `expectedProbe`): request kiểm tra kết nối đúng thiết kế → pill trung tính, không "Thành công" xanh. */
-export function ExecutionStatusPill({ status, probe }: { status: ExecutionStatus; probe?: ProbeInfo | null }) {
+export function ExecutionStatusPill({
+  status,
+  probe,
+  noDest,
+}: {
+  status: ExecutionStatus;
+  probe?: ProbeInfo | null;
+  /** `noDestination()` — nhận xong nhưng không subscription nào khớp: trung tính, không "Thành công" xanh (ADR-259). */
+  noDest?: boolean;
+}) {
   const t = useT();
+  if (noDest && !probe && status === "succeeded") {
+    return (
+      <TonePill tone="idle" icon={<Info {...ICON_SM} aria-hidden />}>
+        {t("journey.exec.no-destination")}
+      </TonePill>
+    );
+  }
   if (probe) {
     return (
       <TonePill tone="idle" icon={<Info {...ICON_SM} aria-hidden />}>
@@ -79,43 +95,83 @@ export function MiniPipeline({
 }) {
   const t = useT();
   const probe = context ? expectedProbe({ ...context, summary }) : null;
+  const { roles, stopIdx } = context
+    ? pipelineRoles({ ...context, summary })
+    : { roles: summary.map(() => "real" as const), stopIdx: summary.length };
   return (
     <div className="flex items-center" aria-hidden={decorative ? true : undefined}>
       {summary.map((d, i) => {
+        const role = roles[i];
+        const faded = role === "faded";
+        const stop = role === "stop";
         // Probe đúng thiết kế (ADR-159): chấm "!" ở Normalize vẽ trung tính (icon Info + nhãn probe), không vàng.
         const asProbe = probe !== null && d.stage === "normalized" && d.status === "warning";
-        const color = asProbe ? TONE_VAR.idle : TONE_VAR[STATUS_TONE[d.status]];
-        const statusLabel = asProbe ? t(probe.label) : t(stageStatusKey(d.status));
-        const dests = d.stage === "delivering" && d.total !== undefined && d.total > 0 ? `${d.okCount}/${d.total}` : null;
-        const hint = context ? stageHint({ ...context, summary }, d, t) : null;
+        const color = asProbe || stop || faded ? TONE_VAR.idle : TONE_VAR[STATUS_TONE[d.status]];
         const stageLabel = t(stageLabelKey(d.stage));
+        const statusLabel = asProbe
+          ? t(probe.label)
+          : stop
+            ? t("journey.stop.stage")
+            : faded
+              ? t("journey.pipeline.na")
+              : t(stageStatusKey(d.status));
+        const dests = d.stage === "delivering" && d.total !== undefined && d.total > 0 ? `${d.okCount}/${d.total}` : null;
+        const hint = stop
+          ? t("journey.stop.tooltip", { type: context?.type ?? "" })
+          : context && !faded
+            ? stageHint({ ...context, summary }, d, t)
+            : null;
         const destsText = dests ? t("journey.pipeline.dests", { dests }) : null;
+        // Nối vào ô sau điểm dừng: nét đứt (mờ). Trước đó: nét liền.
+        const dashed = i > stopIdx;
         return (
           <Fragment key={d.stage}>
-            {i > 0 && <span className="h-px w-2.5" style={{ background: "var(--flow-card-border)" }} />}
+            {i > 0 && (
+              <span
+                className="w-2.5 border-t"
+                data-dashed={dashed ? "" : undefined}
+                style={{ borderColor: "var(--flow-card-border)", borderTopStyle: dashed ? "dashed" : "solid", opacity: dashed ? 0.6 : 1 }}
+              />
+            )}
             <Tooltip delayDuration={TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1" style={{ color }}>
-                  {asProbe ? <Info {...ICON_SM} aria-hidden /> : <StatusGlyph status={d.status} small />}
+                <span className="inline-flex items-center gap-1" style={{ color }} data-role={role}>
+                  {faded ? (
+                    <span className="inline-flex w-[13px] justify-center" aria-hidden>
+                      <span className="size-1 rounded-full bg-current opacity-35" />
+                    </span>
+                  ) : stop ? (
+                    <Contrast {...ICON_SM} aria-hidden />
+                  ) : asProbe ? (
+                    <Info {...ICON_SM} aria-hidden />
+                  ) : (
+                    <StatusGlyph status={d.status} small />
+                  )}
                   {!decorative && <span className="sr-only">{`${stageLabel}: ${statusLabel}${destsText ? ` (${destsText})` : ""}`}</span>}
-                  {dests && (
+                  {(dests || stop) && (
                     <span className="font-medium text-2xs tabular-nums" aria-hidden>
-                      {dests}
+                      {stop ? "0" : dests}
                     </span>
                   )}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="font-sans">
                 <span className="flex flex-col gap-0.5">
-                  <span>
-                    <span className="font-medium">{stageLabel}</span>
-                    <span className="opacity-80">
-                      {" · "}
-                      {statusLabel}
-                      {destsText && ` · ${destsText}`}
-                    </span>
-                  </span>
-                  {hint && <span className="line-clamp-2 opacity-80">{hint}</span>}
+                  {stop ? (
+                    <span>{hint}</span>
+                  ) : (
+                    <>
+                      <span>
+                        <span className="font-medium">{stageLabel}</span>
+                        <span className="opacity-80">
+                          {" · "}
+                          {statusLabel}
+                          {destsText && ` · ${destsText}`}
+                        </span>
+                      </span>
+                      {hint && <span className="line-clamp-2 opacity-80">{hint}</span>}
+                    </>
+                  )}
                 </span>
               </TooltipContent>
             </Tooltip>

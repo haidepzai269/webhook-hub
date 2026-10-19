@@ -1,4 +1,4 @@
-import { buildJourneyList, isIntentionalStop } from "./journey-list-logic";
+import { buildJourneyList, isIntentionalStop, stageRoleMap, stepCardView } from "./journey-list-logic";
 
 type StageView = { id: string; key: string; status: string; offsetMs: number | null; reason?: { code: string } };
 type FlowBranch = { deliveryId: string; stages: StageView[] };
@@ -39,5 +39,29 @@ describe("buildJourneyList", () => {
     expect(buildJourneyList([stop], []).steps[0].intentionalStop).toBe(true);
     const probe = st({ id: "routed", key: "routed", status: "skipped", reason: { code: "provider_probe" } });
     expect(isIntentionalStop(probe)).toBe(false);
+  });
+});
+
+describe("vai chặng → thẻ", () => {
+  const dot = (stage: string, status: string) => ({ stage, status }) as never;
+  const summary = [dot("received", "ok"), dot("verified", "ok"), dot("persisted", "ok"), dot("normalized", "ok"), dot("routed", "skipped"), dot("delivering", "skipped")];
+  const ctx = { type: "payment.succeeded", provider: "payos", summary, failedAt: null, probe: false } as never;
+
+  it("stageRoleMap lấy từ pipelineRoles: không có đích → routed `stop`, giao `faded`", () => {
+    const m = stageRoleMap(ctx);
+    expect(m.routed).toBe("stop");
+    expect(m.delivering).toBe("faded");
+    expect(m.received).toBe("real");
+  });
+
+  it("stepCardView: dừng = trung tính + glyph dừng + gợi ý chỉ khi no_subscription; faded thu nhỏ", () => {
+    const stages = [st({ id: "routed", key: "routed", status: "skipped", reason: { code: "no_subscription" } }), st({ id: "delivering", key: "delivering", status: "skipped" })];
+    const { steps } = buildJourneyList(stages, [], stageRoleMap(ctx));
+    expect(stepCardView(steps[0])).toEqual({ idleTone: true, glyph: "stop", faded: false, hint: true });
+    expect(stepCardView(steps[1])).toEqual({ idleTone: true, glyph: "dot", faded: true, hint: false });
+    const other = buildJourneyList([st({ id: "routed", key: "routed", status: "skipped", reason: { code: "subscription_inactive" } })], []).steps[0];
+    expect(stepCardView(other).hint).toBe(false);
+    const ok = buildJourneyList([st({ id: "received", key: "received" })], [], stageRoleMap(ctx)).steps[0];
+    expect(stepCardView(ok)).toEqual({ idleTone: false, glyph: "status", faded: false, hint: false });
   });
 });

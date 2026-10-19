@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobileState } from "@/hooks/use-mobile";
 
 import { JourneyCanvas, journeyHeight, type OnStageAction } from "./journey-canvas";
+import type { pipelineRoles } from "./event-notes";
 import { JourneyList } from "./journey-list";
 
 /**
@@ -19,13 +20,16 @@ export function JourneyView(props: {
   selectedId: string | null;
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
+  /** Cùng ngữ cảnh với pill/MiniPipeline của trang (`pillCtx`) — để danh sách mobile mờ đúng chặng như dải mini. */
+  ctx?: Parameters<typeof pipelineRoles>[0];
 }) {
   const mobile = useIsMobileState();
   if (mobile === undefined) return <Skeleton className="w-full rounded-xl" style={{ height: journeyHeight(props.branches.length) + 30 }} />;
-  if (mobile) return <JourneyList {...props} />;
+  const { ctx, ...rest } = props;
+  if (mobile) return <JourneyList {...rest} ctx={ctx} />;
   return (
     <div className="flow-canvas overflow-hidden rounded-xl border" style={{ height: journeyHeight(props.branches.length) + 30, borderColor: "var(--flow-card-border)" }}>
-      <JourneyCanvas {...props} />
+      <JourneyCanvas {...rest} />
     </div>
   );
 }
