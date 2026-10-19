@@ -39,6 +39,7 @@ import { header } from "./messages/header";
 import { insights } from "./messages/insights";
 import { journey } from "./messages/journey";
 import { layout } from "./messages/layout";
+import { mobile } from "./messages/mobile";
 import { nav } from "./messages/nav";
 import { pageAlerts } from "./messages/page-alerts";
 import { pageApiKeys } from "./messages/page-api-keys";
@@ -71,6 +72,7 @@ const NAMESPACES = {
     ...errors.vi,
     ...flow.vi,
     ...journey.vi,
+    ...mobile.vi,
     ...pageDashboard.vi,
     ...pageEvents.vi,
     ...pageDeliveries.vi,
@@ -100,6 +102,7 @@ const NAMESPACES = {
     ...errors.en,
     ...flow.en,
     ...journey.en,
+    ...mobile.en,
     ...pageDashboard.en,
     ...pageEvents.en,
     ...pageDeliveries.en,

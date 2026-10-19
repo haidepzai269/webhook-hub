@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 import type { ExecutionStatus } from "@hub/flow";
 import { Eye, Pause, Play, X } from "lucide-react";
+import { cn } from "cn";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/admin/page-header";
@@ -54,6 +55,13 @@ const isIdPrefix = (x: string) => /^[0-9A-Za-z_-]{4,36}$/.test(x);
  * Pipeline cố 9rem (đủ 6 chấm + khoảng cách), Status cố 7.5rem, FailedAt co giãn.
  */
 const GRID_COLS = "7rem 7.5rem minmax(0,1fr) 9rem 7.5rem minmax(0,1fr) 2rem";
+
+/**
+ * Dưới `md` (ADR-261) hàng thành thẻ 2 cột — xếp lại ô bằng `order`/`col-span` theo thứ tự con ở trên:
+ * [thời gian | trạng thái] / [kiểu · đối tượng] / [nhà cung cấp | đường ống] / [hỏng ở]. Nút xem nhanh ẩn (chạm thẻ = mở hành trình đầy đủ).
+ */
+const ROW_CARD =
+  "max-md:[&>:nth-child(1)]:order-1 max-md:[&>:nth-child(5)]:order-2 max-md:[&>:nth-child(5)]:justify-self-end max-md:[&>:nth-child(3)]:order-3 max-md:[&>:nth-child(3)]:col-span-2 max-md:[&>:nth-child(2)]:order-4 max-md:[&>:nth-child(4)]:order-5 max-md:[&>:nth-child(4)]:justify-self-end max-md:[&>:nth-child(6)]:order-6 max-md:[&>:nth-child(6)]:col-span-2 max-md:[&>:nth-child(7)]:hidden";
 
 /**
  * V2 — Danh sách hành trình (SPEC-event-flow-ui §4). Dùng `/flow/executions` (KHÔNG dùng
@@ -143,7 +151,7 @@ function ExecutionsView() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Tabs value={status} onValueChange={(id) => url.setFilter({ status: id === "all" ? null : id })}>
+        <Tabs className="max-w-full overflow-x-auto" value={status} onValueChange={(id) => url.setFilter({ status: id === "all" ? null : id })}>
           <TabsList variant="segmented">
             {TABS.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>
@@ -154,7 +162,7 @@ function ExecutionsView() {
           </TabsList>
         </Tabs>
         <Select value={source || ALL} onValueChange={(x) => url.setFilter({ source: x === ALL ? null : x })}>
-          <SelectTrigger size="sm" className="w-48" aria-label={t("page.events.filter.source")}>
+          <SelectTrigger size="sm" className="w-full sm:w-48" aria-label={t("page.events.filter.source")}>
             <SelectValue placeholder={t("page.events.filter.source")} />
           </SelectTrigger>
           <SelectContent>
@@ -167,7 +175,7 @@ function ExecutionsView() {
           </SelectContent>
         </Select>
         <Select value={destination || ALL} onValueChange={(x) => url.setFilter({ destination: x === ALL ? null : x })}>
-          <SelectTrigger size="sm" className="w-52" aria-label={t("page.events.filter.destination")}>
+          <SelectTrigger size="sm" className="w-full sm:w-52" aria-label={t("page.events.filter.destination")}>
             <SelectValue placeholder={t("page.events.filter.destination")} />
           </SelectTrigger>
           <SelectContent>
@@ -180,7 +188,7 @@ function ExecutionsView() {
           </SelectContent>
         </Select>
         <SearchInput
-          wrapperClassName="w-48"
+          wrapperClassName="w-full sm:w-48"
           value={typeInput}
           onChange={(e) => setTypeInput(e.target.value)}
           placeholder={t("page.events.filter.type")}
@@ -188,7 +196,7 @@ function ExecutionsView() {
           className="font-mono text-xs"
         />
         <SearchInput
-          wrapperClassName="w-48"
+          wrapperClassName="w-full sm:w-48"
           value={idInput}
           onChange={(e) => setIdInput(e.target.value)}
           placeholder={t("page.events.filter.id")}
@@ -209,6 +217,7 @@ function ExecutionsView() {
       <div className="flow-surface overflow-hidden rounded-2xl">
         <GridList
           template={GRID_COLS}
+          stack
           headers={[
             t("page.events.col.time"),
             t("page.events.col.provider"),
@@ -232,7 +241,7 @@ function ExecutionsView() {
             <GridListRow
               key={i.id}
               onActivate={() => router.push(`/dashboard/events/${encodeURIComponent(i.id)}`)}
-              className={anim.className}
+              className={cn(ROW_CARD, anim.className)}
               tone={probe || (i.status === "succeeded" && noDestination(i)) ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]]}
               style={{ contentVisibility: "auto", containIntrinsicSize: "auto 44px", ...anim.style }}
             >

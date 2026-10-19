@@ -27,7 +27,7 @@ import { useUrlParams } from "@/lib/hub/use-url-params";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useLocale, useT } from "@/lib/i18n/use-t";
 
-import { useDeliveryColumns } from "../deliveries/_components/delivery-columns";
+import { DELIVERY_MOBILE_CARD, useDeliveryColumns } from "../deliveries/_components/delivery-columns";
 
 const ALL = "__all__";
 const REASON_MIN = 5;
@@ -285,7 +285,7 @@ function DlqView() {
         title={t("page.dlq.title")}
         description={t("page.dlq.description")}
         actions={
-          <Button onClick={() => setBulkOpen(true)} disabled={!data?.items.length}>
+          <Button className="max-md:min-h-10" onClick={() => setBulkOpen(true)} disabled={!data?.items.length}>
             <ListRestart />
             {t("page.dlq.bulk")}
           </Button>
@@ -293,7 +293,7 @@ function DlqView() {
       />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select value={v.destination ?? ALL} onValueChange={(d) => url.setFilter({ destination: d === ALL ? null : d })}>
-          <SelectTrigger size="sm" className="w-52" aria-label={t("page.dlq.filter.destination")}>
+          <SelectTrigger size="sm" className="w-full sm:w-52" aria-label={t("page.dlq.filter.destination")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -306,7 +306,7 @@ function DlqView() {
           </SelectContent>
         </Select>
         <Select value={v.errorKind ?? ALL} onValueChange={(k) => url.setFilter({ errorKind: k === ALL ? null : k })}>
-          <SelectTrigger size="sm" className="w-56" aria-label={t("page.dlq.filter.error-kind")}>
+          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label={t("page.dlq.filter.error-kind")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -319,7 +319,7 @@ function DlqView() {
           </SelectContent>
         </Select>
         <Select value={v.age ?? ALL} onValueChange={(a) => url.setFilter({ age: a === ALL ? null : a })}>
-          <SelectTrigger size="sm" className="w-44" aria-label={t("page.dlq.filter.age")}>
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label={t("page.dlq.filter.age")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -346,6 +346,7 @@ function DlqView() {
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
+        mobile={{ ...DELIVERY_MOBILE_CARD, actions: "actions" }}
         searchPlaceholder={t("page.dlq.search")}
         emptyText={filtered ? t("page.dlq.no-match") : t("page.dlq.empty")}
         footer={

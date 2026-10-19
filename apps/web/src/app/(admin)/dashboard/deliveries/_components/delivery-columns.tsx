@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { HubColumn } from "@/components/admin/data-table";
+import type { MobileCardSpec } from "@/components/admin/responsive-table-logic";
 import { DeliveryStatusBadge, toneTextClass } from "@/components/admin/status-badge";
 import { UnverifiedBadge } from "@/components/flow/unverified-badge";
 import { formatDateTime, httpTone } from "@/lib/hub/format";
@@ -159,6 +160,14 @@ export const buildDeliveryColumns = (t: TranslateFn): HubColumn<Delivery>[] => [
     cell: ({ row }) => <TimeCell iso={row.original.updatedAt} />,
   },
 ];
+
+/** Thẻ trên điện thoại (ADR-261): đích + trạng thái đứng đầu, lỗi cuối cần cả hàng để đọc hết. */
+export const DELIVERY_MOBILE_CARD: MobileCardSpec = {
+  title: "destination",
+  badge: "status",
+  meta: ["eventType", "http", "attempts", "nextAttemptAt", "updatedAt", "lastError"],
+  wide: ["eventType", "lastError"],
+};
 
 export function useDeliveryColumns(): HubColumn<Delivery>[] {
   const t = useT();

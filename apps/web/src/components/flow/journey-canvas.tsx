@@ -56,13 +56,13 @@ interface DeliveryData {
   [k: string]: unknown;
 }
 
-const ACTION_LABEL: Record<StageAction, MessageKey> = {
+export const ACTION_LABEL: Record<StageAction, MessageKey> = {
   replay_delivery: "journey.action.replay-delivery",
   renormalize: "journey.action.renormalize",
   open_dlq: "journey.action.open-dlq",
   open_config: "journey.action.open-config",
 };
-const ACTION_ICON = { replay_delivery: RotateCcw, renormalize: RotateCcw, open_dlq: Skull, open_config: Settings2 } as const;
+export const ACTION_ICON = { replay_delivery: RotateCcw, renormalize: RotateCcw, open_dlq: Skull, open_config: Settings2 } as const;
 
 function NodeShell({ tone, selected, width, children, onClick }: { tone: string; selected: boolean; width: number; children: React.ReactNode; onClick: () => void }) {
   return (

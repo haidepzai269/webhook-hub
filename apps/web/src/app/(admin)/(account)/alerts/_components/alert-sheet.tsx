@@ -94,6 +94,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
                 <Button
                   key={x.labelKey}
                   size="sm"
+                  className="max-md:min-h-10"
                   variant={i === 0 ? "default" : "outline"}
                   onClick={() => {
                     onClose();
@@ -105,7 +106,7 @@ function Body({ alert: a, subjectName, onClose }: { alert: AlertView; subjectNam
                 </Button>
               ))}
               {isOperator && !a.acknowledgedAt && !resolved && (
-                <Button size="sm" variant="ghost" disabled={ack.isPending} onClick={() => ack.mutate(a.id)}>
+                <Button size="sm" variant="ghost" className="max-md:min-h-10" disabled={ack.isPending} onClick={() => ack.mutate(a.id)}>
                   {t("page.alerts.sheet.ack")}
                 </Button>
               )}

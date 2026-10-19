@@ -8,7 +8,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { useEvents } from "@/lib/hub/queries";
 import { useT } from "@/lib/i18n/use-t";
 
-import { useEventColumns } from "../events/_components/event-columns";
+import { EVENT_MOBILE_CARD, useEventColumns } from "../events/_components/event-columns";
 
 export function RecentEvents() {
   const { data, isLoading, error } = useEvents(undefined, 10);
@@ -33,6 +33,7 @@ export function RecentEvents() {
           isLoading={isLoading}
           error={error}
           pageSize={false}
+          mobile={EVENT_MOBILE_CARD}
           emptyText={t("page.dashboard.recent.empty")}
         />
       </CardContent>

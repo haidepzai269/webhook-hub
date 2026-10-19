@@ -19,7 +19,7 @@ import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 import { deliveryStatusKey } from "@/components/admin/status-badge";
 
-import { useDeliveryColumns } from "./_components/delivery-columns";
+import { DELIVERY_MOBILE_CARD, useDeliveryColumns } from "./_components/delivery-columns";
 
 const ALL = "__all";
 const CODE_PRESETS = ["2xx", "4xx", "5xx", "none"] as const;
@@ -61,7 +61,7 @@ function DeliveriesView() {
       />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select value={v.status ?? ALL} onValueChange={(s) => url.setFilter({ status: s === ALL ? null : s })}>
-          <SelectTrigger size="sm" className="w-40" aria-label={t("page.deliveries.filter.status")}>
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={t("page.deliveries.filter.status")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -74,7 +74,7 @@ function DeliveriesView() {
           </SelectContent>
         </Select>
         <Select value={v.destination ?? ALL} onValueChange={(d) => url.setFilter({ destination: d === ALL ? null : d })}>
-          <SelectTrigger size="sm" className="w-52" aria-label={t("page.deliveries.filter.destination")}>
+          <SelectTrigger size="sm" className="w-full sm:w-52" aria-label={t("page.deliveries.filter.destination")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -87,7 +87,7 @@ function DeliveriesView() {
           </SelectContent>
         </Select>
         <Select value={CODE_PRESETS.includes(v.code as never) ? (v.code as string) : ALL} onValueChange={(c) => url.setFilter({ code: c === ALL ? null : c })}>
-          <SelectTrigger size="sm" className="w-40" aria-label={t("page.deliveries.filter.code")}>
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={t("page.deliveries.filter.code")}>
             <SelectValue placeholder={t("page.deliveries.filter.code")} />
           </SelectTrigger>
           <SelectContent>
@@ -105,7 +105,7 @@ function DeliveriesView() {
           onBlur={(e) => commitCode(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && commitCode(codeInput)}
           placeholder={t("page.deliveries.filter.code-exact")}
-          className="h-8 w-36 font-mono text-xs"
+          className="h-8 w-full font-mono text-xs sm:w-36"
           aria-label={t("page.deliveries.filter.code-exact-aria")}
         />
         <TimeRange key={url.resetToken} from={v.from} to={v.to} onChange={(r) => url.setFilter(r)} />
@@ -124,6 +124,7 @@ function DeliveriesView() {
         isStale={isPlaceholderData}
         error={error}
         pageSize={false}
+        mobile={DELIVERY_MOBILE_CARD}
         searchPlaceholder={t("page.deliveries.search")}
         emptyText={filtered ? t("page.deliveries.no-match") : t("page.deliveries.empty")}
         footer={

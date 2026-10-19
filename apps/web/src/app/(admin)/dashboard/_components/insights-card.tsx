@@ -32,7 +32,7 @@ export function InsightsCard() {
     const Icon = ICON[i.code];
     const action = insightActions(i)[0];
     return (
-      <div key={i.code} className="flex min-w-0 items-start gap-3">
+      <div key={i.code} className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
         <Icon className={`mt-0.5 size-5 shrink-0 ${INSIGHT_TONE[text.level]}`} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 font-medium text-sm">
@@ -57,7 +57,7 @@ export function InsightsCard() {
           {text.detail && <p className="text-muted-foreground text-xs">{text.detail}</p>}
         </div>
         {action && (
-          <Button asChild size="sm" variant="outline" className="shrink-0">
+          <Button asChild size="sm" variant="outline" className="shrink-0 max-sm:min-h-10 max-sm:w-full">
             <Link href={action.href}>{t(action.labelKey)}</Link>
           </Button>
         )}

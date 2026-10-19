@@ -1,8 +1,9 @@
 import * as React from "react";
 
-const MOBILE_BREAKPOINT = 768;
+const MOBILE_BREAKPOINT = 768; // = breakpoint `md` của Tailwind
 
-export function useIsMobile() {
+/** `undefined` = chưa đo (SSR / render đầu) — nơi tốn tài nguyên (canvas) chờ đo xong rồi mới dựng. */
+export function useIsMobileState(): boolean | undefined {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined);
 
   React.useEffect(() => {
@@ -15,5 +16,9 @@ export function useIsMobile() {
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
-  return !!isMobile;
+  return isMobile;
+}
+
+export function useIsMobile() {
+  return !!useIsMobileState();
 }

@@ -26,4 +26,12 @@ describe("SheetContent — bề rộng ghi đè được từ nơi dùng", () =>
     expect(merged).toContain("w-(--sidebar-width)");
     expect(merged).not.toContain("w-full");
   });
+
+  // ADR-261: mobile — sheet chiếm hết bề ngang (không vượt 100vw), hộp thoại luôn chừa lề và không cao quá khung nhìn.
+  it("mobile: SheetContent mặc định w-full; DialogContent chừa lề 2rem + giới hạn 90dvh", () => {
+    expect(read("sheet.tsx")).toMatch(/\["w-full", SHEET_SIZE\[size\]\]/);
+    expect(read("dialog.tsx")).toContain("w-[calc(100%-2rem)]");
+    expect(read("overlay-size.ts")).not.toMatch(/(?<!sm:)max-w-(sm|lg|2xl)/);
+    expect(read("overlay-size.ts")).toContain("90dvh");
+  });
 });
