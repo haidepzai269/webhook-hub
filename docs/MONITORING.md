@@ -95,9 +95,24 @@ Cả bộ ~250 MiB. VM Docker có ~5,8 GiB, còn dư (kể cả stack `hubv` n�
 
 Luật ở `infra/prometheus/rules/infra.yml` (đã qua `promtool check rules`: 32 rule = 5 recording + 27 alert): `Watchdog` (luôn bắn); target down; RAM/CPU host; disk `predict_linear` 7 ngày (warning) và 24 giờ (critical) + dưới 10%; **ổ C: Windows** theo ngưỡng tuyệt đối GB (§5); RAM container gần trần / > 1,5 GiB, CPU container, restart liên tục; Postgres connection > 80% `max_connections`, `pg_up`, `hub_db_size_bytes` tăng > 200 MiB/giờ, `hub_storage_near_full`; Redis down / > 85% maxmemory; RabbitMQ backlog tăng liên tục ở `q.normalize` và `q.delivery.main`, consumer = 0, queue chính biến mất, DLQ > 0; `WorkerSilent` + `WorkerHeartbeatMissing`. Mỗi alert có `for:`, `severity` (`warning`|`critical`) và mô tả tiếng Việt "bộ phận nào bị bệnh gì".
 
-## 4. Alertmanager — receiver CHƯA chốt
+## 4. Alertmanager — Telegram local (ADR-257)
 
-Admin đang chọn giữa email / Telegram bot / SMS. Hiện `infra/alertmanager/alertmanager.yml` có receiver `default` gửi webhook về service `alert-sink` (echo ghi log) để luồng Prometheus → Alertmanager → receiver chạy thật. Khối Telegram và email đã chừa sẵn ở dạng bình luận; khi bật phải mount thư mục secret vào service `alertmanager` (`./infra/alertmanager/secrets:/etc/alertmanager/secrets:ro`, thư mục đó phải nằm trong `.gitignore`). **Không đưa token/mật khẩu vào file này** — dùng `bot_token_file` / `auth_password_file` trỏ tới file mount từ ngoài repo. SMS: Alertmanager không có receiver SMS gốc, đi qua `webhook_configs` tới cổng SMS.
+`infra/alertmanager/alertmanager.yml` là **template**; `entrypoint.sh` (mount vào container) render nó lúc khởi động. Receiver `default` luôn gửi webhook về `alert-sink` (echo ghi log). Telegram chỉ bật khi Admin tự đặt hai file vào `infra/alertmanager/secrets/` (thư mục gitignored, chỉ `*.example` nằm trong git):
+
+```
+cd infra/alertmanager/secrets
+printf '%s\n' 'DÁN_TOKEN_Ở_ĐÂY'   > telegram_bot_token   # dạng 123456789:AA...; KHÔNG qua git/chat. File .example chỉ là mẫu định dạng
+printf '%s\n' 'DÁN_CHAT_ID_Ở_ĐÂY' > telegram_chat_id     # số (chat riêng: dương; nhóm: âm)
+sudo chown 65534 telegram_bot_token telegram_chat_id      # container chạy user nobody (65534)
+chmod 600 telegram_bot_token telegram_chat_id             # KHÔNG dùng 644: mọi user trên máy host đọc được token
+docker compose --profile monitoring up -d --force-recreate alertmanager
+docker logs webhook-hub-alertmanager 2>&1 | grep entrypoint   # "Telegram BẬT" hoặc "Telegram TẮT"
+```
+
+- Entrypoint bỏ dòng `#` và dòng trống, cần đúng 1 dòng giá trị; token phải khớp `^[0-9]+:[A-Za-z0-9_-]+$`, chat_id là số. Sai/thiếu/không đọc được (vd. chmod 600 mà chưa chown 65534) -> log nêu rõ lý do và `Telegram TẮT`, Alertmanager vẫn lên và chỉ gửi `alert-sink`. Config render còn được `amtool check-config` kiểm; lỗi/marker lệch thì tự rơi về bản TẮT. Đổi file secret thì phải recreate container.
+- Route: chỉ `severity` warning/critical vào Telegram (rồi `continue` sang `default`); **Watchdog và severity=none không bao giờ tới Telegram**. Gom `alertname,severity`, `group_wait 30s`, `group_interval 5m`, lặp 4h (critical 1h). Tin nhắn tiếng Việt: tên luật, mức, tóm tắt, mô tả, ĐANG BÁO/ĐÃ HẾT, giờ UTC, link Grafana/Alertmanager local.
+- Kiểm tra không cần token thật: `amtool check-config` template; hoặc chạy container thử với `api_url:` trỏ vào server HTTP giả (chỉ bản sao tạm, không commit) rồi `POST /api/v2/alerts`; xác nhận nhận `/bot<token>/sendMessage` với đúng `chat_id` + `text`.
+- Email / SMS vẫn là chỗ chừa (comment) trong `alertmanager.yml`. `HEARTBEAT_URL` (Healthchecks.io) là kênh khác, không liên quan Telegram.
 
 **Watchdog (dead-man's switch):** luật `Watchdog` luôn bắn, route riêng sang receiver `watchdog` (nhắc lại mỗi 5 phút). Local nó chỉ trỏ `alert-sink` (chứng minh đường ống Prometheus → Alertmanager → receiver thông). Giới hạn: **Prometheus hoặc Alertmanager chết thì chỉ kênh NGOÀI báo được**. Khi chốt kênh: trỏ receiver `watchdog` tới Healthchecks.io (ping mỗi 5 phút, thiếu ping họ gửi cảnh báo) bằng `url_file` (URL chứa token, không đưa vào repo; chỗ chừa đã có trong `alertmanager.yml`).
 
