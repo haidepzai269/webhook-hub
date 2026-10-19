@@ -25,6 +25,8 @@ export interface NavItem {
   titleKey: MessageKey;
   url: string;
   icon: LucideIcon;
+  /** ADR-269: có thì mục này mang badge "chưa xem" (Flow map KHÔNG có). */
+  badgeKey?: "events" | "deliveries" | "dlq";
 }
 
 export interface NavGroup {
@@ -40,9 +42,9 @@ export const sidebarItems: NavGroup[] = [
     items: [
       // SPEC-event-flow-ui V3: màn đầu tiên — nhìn là biết luồng nào chạy, luồng nào crash.
       { id: "flow-map", titleKey: "nav.item.flow-map", url: "/dashboard/flow", icon: Network },
-      { id: "events", titleKey: "nav.item.events", url: "/dashboard/events", icon: Activity },
-      { id: "deliveries", titleKey: "nav.item.deliveries", url: "/dashboard/deliveries", icon: Send },
-      { id: "dlq", titleKey: "nav.item.dlq", url: "/dashboard/dlq", icon: Skull },
+      { id: "events", titleKey: "nav.item.events", url: "/dashboard/events", icon: Activity, badgeKey: "events" },
+      { id: "deliveries", titleKey: "nav.item.deliveries", url: "/dashboard/deliveries", icon: Send, badgeKey: "deliveries" },
+      { id: "dlq", titleKey: "nav.item.dlq", url: "/dashboard/dlq", icon: Skull, badgeKey: "dlq" },
     ],
   },
   {

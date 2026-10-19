@@ -1,0 +1,7 @@
+# ADR-269 — Badge "chưa xem" trên sidebar dự án, phương án B (2026-10-19)
+
+**Vấn đề:** Dev đang ở trang khác không biết có event mới / delivery mới / delivery vào DLQ; phải bấm từng tab. Cần badge số trên sidebar mà không thêm lệnh Redis vào đường nóng (R1/ADR-062), không sửa worker, không đếm quét bảng.
+
+**Chọn:** B = server stateless + mốc ở client. `GET /api/v1/badges?events=<seq>&deliveries=<iso>&dlq=<iso>` (ProjectScopeGuard, `TenantScopedRepository.badgeSnapshot`, 0 lệnh Redis) trả mỗi tab `{count kẹp 10 bằng LIMIT, latest, cursor}`; events theo `seq`, deliveries theo `created_at`, DLQ theo `updated_at` + DEAD + `notSuperseded` (index một phần `deliveries_dead_tenant_updated_idx`, KHÔNG lọc `created_at`). Mốc last-seen ở localStorage `hub:seen:<userId>:<projectId>:<tab>` (xoá khi đăng xuất; lần đầu gửi `head` để server trả mốc hiện tại, không tràn số). Client cộng dồn từ `subscribeHubSocket` (gom, flush 500ms), poll lại 30s làm lưới an toàn, vào/rời tab thì đẩy mốc tới `cursor`. Chỉ events / deliveries / dlq có badge; Flow map KHÔNG (nó là bản đồ, không phải danh sách để "đọc hết").
+
+**Đánh đổi:** Mốc nằm theo trình duyệt nên KHÔNG đồng bộ đa thiết bị (máy khác thấy lại số đó là "mới"); đổi lại không thêm bảng/cột `last_seen`, không thêm ghi DB mỗi lần mở tab. Số live có thể lệch tối đa 30s đến lượt poll sửa; đường DEAD không phát socket được bù bằng poll. Chi phí: 1 truy vấn nhẹ (3 truy vấn LIMIT 10) mỗi 30s mỗi tab đang mở.

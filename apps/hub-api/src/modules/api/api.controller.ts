@@ -17,7 +17,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter, DLQ_ERROR_KINDS, DlqErrorKind } from '@hub/database';
+import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter, DLQ_ERROR_KINDS, DlqErrorKind, BADGE_HEAD } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType, replayTraceFields } from '@hub/common';
 import { Prisma } from '@prisma/client';
@@ -84,6 +84,21 @@ function requireAlsoScope(req: RequestWithPrincipal | undefined, scope: string) 
   if (!Array.isArray(scopes) || !scopes.includes(scope)) {
     throw new HttpException({ error: 'missing_scope', message: `Role hiện tại không có quyền ${scope}`, required: scope }, HttpStatus.FORBIDDEN);
   }
+}
+
+const BADGE_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
+/** ADR-269: mốc badge — seq số nguyên dương, hoặc ISO 8601 CÓ múi giờ (tránh ::timestamptz hiểu theo múi của session). */
+export function parseBadgeSeq(v: string | undefined): string | null {
+  if (v === undefined || v === '') return null;
+  if (v === BADGE_HEAD) return v;
+  if (!/^\d{1,18}$/.test(v)) throw badParam('events', 'events phải là số seq nguyên');
+  return v;
+}
+export function parseBadgeAt(field: string, v: string | undefined): string | null {
+  if (v === undefined || v === '') return null;
+  if (v === BADGE_HEAD) return v;
+  if (!BADGE_AT_RE.test(v) || Number.isNaN(Date.parse(v))) throw badParam(field, `${field} phải là ISO 8601 có múi giờ (vd 2026-10-19T03:00:00.000000Z)`);
+  return v;
 }
 
 function assertUuid(id: string, what: string) {
@@ -642,6 +657,25 @@ export class ApiController {
   @RequireScope('read:project')
   async listDlq(@CurrentTenant() tenantId: string, @Query() q: DeliveryListQuery) {
     return listDeliveryPage(this.prisma.forTenant(tenantId), q ?? {}, 'dlq');
+  }
+
+  /**
+   * ADR-269: badge "chưa xem" của sidebar dự án. `events=<seq>`, `deliveries=<ISO>`, `dlq=<ISO>` = mốc last-seen của client
+   * (thiếu = bỏ qua tab đó). Mỗi tab trả { count (kẹp 10), latest, cursor }. Chỉ đọc, qua TenantScopedRepository, 0 lệnh Redis.
+   */
+  @Get('badges')
+  @RequireScope('read:project')
+  async getBadges(
+    @CurrentTenant() tenantId: string,
+    @Query('events') events?: string,
+    @Query('deliveries') deliveries?: string,
+    @Query('dlq') dlq?: string,
+  ) {
+    return this.prisma.forTenant(tenantId).badgeSnapshot({
+      events: parseBadgeSeq(events),
+      deliveries: parseBadgeAt('deliveries', deliveries),
+      dlq: parseBadgeAt('dlq', dlq),
+    });
   }
 
   // --- Replay Delivery (§5.3 Replay: attempt_generation + 1) ---
