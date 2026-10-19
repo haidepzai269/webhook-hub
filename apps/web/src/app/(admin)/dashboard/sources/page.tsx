@@ -29,6 +29,7 @@ import { useUnverifiedSources } from "@/lib/hub/project-queries";
 import { useCreateSource, useSources } from "@/lib/hub/queries";
 import { isUnverifiedSource, unverifiedSourceBlocked } from "@/lib/hub/unverified";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { canScope } from "@/lib/hub/effective-role";
 import { useMeStore } from "@/lib/hub/me-store";
 import { useCanViewTraffic } from "@/lib/hub/traffic-queries";
 import { useSetKeepLonger, useStorage } from "@/lib/hub/storage-queries";
@@ -89,10 +90,8 @@ function ArchiveButton({ id, name }: { id: string; name: string }) {
   const t = useT();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const me = useMeStore((s) => s.me);
-  // Scope thật của route archive: manage:sources + manage:endpoints = developer và owner (roles.ts) + operator.
-  const can =
-    me?.user.isOperator === true ||
-    (me?.memberships ?? []).some((m) => m.projectId === projectId && (m.role === "owner" || m.role === "developer"));
+  // Scope thật của route archive: manage:sources + manage:endpoints (effectiveRole: operator chỉ như owner khi không là thành viên).
+  const can = canScope(me, projectId, "manage:sources", "manage:endpoints");
   if (!can) return null;
   return <IconButton icon={<Archive />} onClick={() => open(id)} label={t("page.sources.archive.row-label", { name })} />;
 }
@@ -344,7 +343,7 @@ function KeepLongerCell({ source }: { source: Source }) {
   const t = useT();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const me = useMeStore((s) => s.me);
-  const canWrite = me?.user.isOperator === true || (me?.memberships ?? []).some((m) => m.projectId === projectId && m.role === "owner");
+  const canWrite = canScope(me, projectId, "storage:write");
   const keep = useSetKeepLonger();
   return (
     <KeepLongerSwitch

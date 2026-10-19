@@ -112,14 +112,6 @@ export interface StorageBanner {
   toastOnOpen: boolean;
 }
 
-/**
- * Review QT-S3 L9: ai có `storage:read` trên project (khớp ROLE_SCOPES của server: owner, developer, người vận hành) — viewer
- * và người không là thành viên KHÔNG gọi `GET …/storage` (đỡ một 403 mỗi lần layout mount). Server vẫn là trọng tài.
- */
-export function canReadStorage(role: string | undefined, isOperator: boolean): boolean {
-  return isOperator || role === "owner" || role === "developer";
-}
-
 /** Banner theo nấc (§3, §9, E1, E5). OK -> null. Không bao giờ có nút "Nâng cấp" (chưa có gói trả phí). */
 export function storageBannerFor(level: StorageLevel, lockEnabled: boolean): StorageBanner | null {
   switch (level) {

@@ -11,6 +11,7 @@ import {
   Body,
   Query,
   Req,
+  Res,
   HttpException,
   HttpStatus,
   UseGuards,
@@ -243,6 +244,10 @@ export class ApiController {
   async createDestination(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     // KN1 (SPEC-ket-noi §3.1, ADR-138): endpoint webhook đi route riêng — hub sinh whsec_, challenge, subscription cùng tx.
     if (body?.type === 'webhook') throw hubError('use_endpoints_route', {}, 'Endpoint webhook tạo bằng POST /api/v1/endpoints (hub sinh secret + challenge)');
+    // Cùng lỗi với createSubscription: thiếu `name` từng xuống Prisma -> 500. Chặn ở biên: 400.
+    if (typeof body?.name !== 'string' || !body.name.trim() || body.name.length > 255) {
+      throw hubError('bad_request', { field: 'name' }, 'name bắt buộc: chuỗi 1–255 ký tự');
+    }
     const masterKey = getMasterKey();
     return this.withAudit(tenantId, async (repo) => {
       const created = await repo.createDestination({
@@ -364,6 +369,13 @@ export class ApiController {
   @RequireScope('manage:endpoints')
   async createSubscription(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
     if (typeof body?.destinationId !== 'string' || !UUID_RE.test(body.destinationId)) throw new NotFoundException('Destination không tồn tại');
+    // Thiếu/sai kiểu `name`/`template` từng lọt xuống Prisma -> PrismaClientValidationError -> 500. Chặn ở biên: 400.
+    if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > 255) {
+      throw hubError('bad_request', { field: 'name' }, 'name bắt buộc: chuỗi 1–255 ký tự');
+    }
+    if (body.template !== undefined && body.template !== null && typeof body.template !== 'string') {
+      throw hubError('bad_request', { field: 'template' }, 'template phải là chuỗi hoặc null');
+    }
     const eventTypes = parseEventTypes(body?.eventTypes);
     const acceptUnverified = parseAcceptUnverified(body?.acceptUnverified);
     return this.withAudit(tenantId, async (txRepo) => {
@@ -746,7 +758,12 @@ export class ApiController {
    */
   @Post('deliveries/replay-bulk')
   @RequireScope('replay:deliveries')
-  async replayBulk(@CurrentTenant() tenantId: string, @CurrentUser() actor: string, @Body() body: any) {
+  async replayBulk(
+    @CurrentTenant() tenantId: string,
+    @CurrentUser() actor: string,
+    @Body() body: any,
+    @Res({ passthrough: true }) res?: { status(code: number): unknown },
+  ) {
     // Review SPEC-2 #2 (ADR-054): `dryRun` BẮT BUỘC là boolean JSON. Chuỗi "true" từng bị coi là
     // "không phải true" -> chạy thật. Thiếu cũng 400: thao tác ghi hàng loạt phải nói rõ ý định.
     if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new BadRequestException('Body phải là object JSON');
@@ -789,6 +806,8 @@ export class ApiController {
     // ADR-161 (T3): chỉ delivery còn nơi nhận — cùng điều kiện cho xem trước và chạy thật.
     filter.replayableOnly = true;
     if (body.dryRun) {
+      // Xem trước chỉ đọc, không tạo tài nguyên -> 200 (chạy thật giữ 201 mặc định của @Post).
+      res?.status(HttpStatus.OK);
       // Lấy 501 để biết CHẮC có bị cắt không (đúng 500 dòng thì không "chạm trần").
       const found = await this.prisma.forTenant(tenantId).findDeadDeliveryRefs(filter, REPLAY_BULK_LIMIT + 1);
       const refs = found.slice(0, REPLAY_BULK_LIMIT);

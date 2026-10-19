@@ -653,7 +653,7 @@ export class TenantScopedRepository {
       include: {
         event: true,
         subscription: { include: { destination: true } },
-        attempts: true,
+        attempts: { orderBy: { attemptNo: 'asc' } },
       },
     });
   }
@@ -787,7 +787,7 @@ export class TenantScopedRepository {
     if (keys.length === 0) return { rows: [] };
     const full = await this.prisma.delivery.findMany({
       where: { id: { in: keys.map((k) => k.id) }, tenantId: this.tenantId },
-      include: { event: true, subscription: { include: { destination: true } }, attempts: true },
+      include: { event: true, subscription: { include: { destination: true } }, attempts: { orderBy: { attemptNo: 'asc' } } },
     });
     const byId = new Map(full.map((d) => [d.id, d]));
     const rows: DeliveryPageRow[] = [];

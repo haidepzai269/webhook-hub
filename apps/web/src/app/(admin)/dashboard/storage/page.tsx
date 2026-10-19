@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { HubApiError } from "@/lib/hub/client";
 import { useFlowProjectStore } from "@/lib/hub/flow-project";
+import { canScope } from "@/lib/hub/effective-role";
 import { useMeStore } from "@/lib/hub/me-store";
 import {
   useApplySuggestion,
@@ -63,7 +64,7 @@ export default function StoragePage() {
   const t = useT();
   const projectId = useFlowProjectStore((s) => s.projectId);
   const me = useMeStore((s) => s.me);
-  const canWrite = me?.user.isOperator === true || (me?.memberships ?? []).some((m) => m.projectId === projectId && m.role === "owner");
+  const canWrite = canScope(me, projectId, "storage:write");
   const q = useStorage(projectId, { poll: true });
   const booting = useAuthBooting();
   const forbidden = q.error instanceof HubApiError && q.error.status === 403;
