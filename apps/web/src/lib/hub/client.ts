@@ -8,6 +8,10 @@ export class HubApiError extends Error {
     readonly status: number,
     message: string,
     readonly body?: unknown,
+    /** `x-request-id` của hub (nối lỗi giao diện với log backend — LOGGING.md §11.9d). Chỉ để báo lỗi, không hiển thị. */
+    readonly requestId?: string,
+    /** `x-hub-cold: 1` — hub vừa thức dậy từ ngủ (Render free). */
+    readonly cold?: boolean,
   ) {
     super(message);
     this.name = "HubApiError";
@@ -175,10 +179,16 @@ export async function hubFetch<T>(path: string, init: HubFetchInit = {}, retried
   if (res.status === 401) {
     if (!retried && (generation !== refreshGeneration || (await refreshSession()))) return hubFetch<T>(path, init, true);
     redirectToLogin();
-    throw new HubApiError(401, uiT()("errors.api.session-invalid"), body);
+    throw new HubApiError(401, uiT()("errors.api.session-invalid"), body, res.headers.get("x-request-id") ?? undefined);
   }
   if (!res.ok) {
-    throw new HubApiError(res.status, errorMessageOf(body, uiT()) || `HTTP ${res.status}`, body);
+    throw new HubApiError(
+      res.status,
+      errorMessageOf(body, uiT()) || `HTTP ${res.status}`,
+      body,
+      res.headers.get("x-request-id") ?? undefined,
+      res.headers.get("x-hub-cold") === "1",
+    );
   }
   return body as T;
 }
