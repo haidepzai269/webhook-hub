@@ -168,6 +168,7 @@ Gói free Neon/Upstash không tự cảnh báo, nên `hub-worker` (job `QuotaAle
 - Cần cả `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` (cùng biến với đích Telegram); thiếu một = tắt hẳn, log 1 dòng lúc khởi động.
 - Kiểm tay trước khi tin số lệnh: `redis-cli -u $REDIS_URL INFO | grep total_commands_processed`. Không có trường này thì job chỉ log cảnh báo và bỏ qua Upstash.
 - Giả định (chưa kiểm chứng): `total_commands_processed` đơn điệu, riêng cho database, nhất quán giữa các lần gọi. Delta được kẹp theo `giây × QUOTA_UPSTASH_MAX_CMD_PER_SEC` (mặc định 200); mẫu bất thường (giảm quá mức kẹp / tăng quá mức kẹp) bị BỎ, đếm vào `anomalies` và log "INFO total_commands_processed bất thường" (tối đa 1 lần/giờ). Nhiều mẫu bất thường = INFO không ổn định, hãy tin dashboard Upstash. Kiểm chứng: chạy `INFO` vài lần cách nhau vài phút và so.
+- Khoảng thời gian tính kẹp bị chặn ở `QUOTA_UPSTASH_MAX_GAP_SEC` (mặc định 1800s): sau ngủ đêm ~8h mức kẹp vẫn chỉ 1800 × 200 = 360k, không nới lên ~5,76M. Đang dùng trạng thái tạm (đọc state lỗi) thì job KHÔNG ghi đè state trong Redis; đọc lại được mới gộp rồi ghi.
 - Redis lỗi (vd hết hạn mức Upstash): job vẫn đo Neon, dùng trạng thái tạm trong bộ nhớ và ghi rõ trong tin nhắn.
 - Giới hạn: số lệnh trước lần đo đầu của tháng không biết; Upstash chưa xác nhận cách tính EVAL.
 

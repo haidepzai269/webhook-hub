@@ -715,6 +715,7 @@ QUOTA_REPEAT_MS=86400000             # nhắc lại khi mức không đổi, t�
 QUOTA_NEON_STORAGE_BYTES=            # trần dung lượng Neon; trống = DB_DISK_BUDGET_MB × 1MiB
 QUOTA_UPSTASH_COMMANDS_PER_MONTH=500000 # §5.2
 QUOTA_UPSTASH_MAX_CMD_PER_SEC=200    # kẹp delta bộ đếm INFO giữa hai lần đo (giây × giá trị này); mẫu vượt bị bỏ
+QUOTA_UPSTASH_MAX_GAP_SEC=1800       # trần khoảng thời gian tính kẹp (sau ngủ đêm không nới mức kẹp): mức kẹp tối đa = GAP × MAX_CMD_PER_SEC
 QUOTA_UPSTASH_MEMORY_BYTES=          # CẦN ADMIN XÁC NHẬN số của gói Upstash; trống = không đo dung lượng Redis
 DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078); đổi phải restart worker
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần

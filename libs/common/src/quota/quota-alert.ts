@@ -17,6 +17,8 @@ export const DEFAULT_UPSTASH_COMMANDS_PER_MONTH = 500_000;
  * trung bình); 200/s dư >100 lần cho đỉnh thật mà vẫn chặn số nhảy hàng triệu giữa hai lần INFO (đọc nhầm node/tenant).
  */
 export const DEFAULT_UPSTASH_MAX_CMD_PER_SEC = 200;
+/** 30 phút: gấp đôi nhịp đo 15 phút; mức kẹp tối đa = 1800 × 200 = 360k lệnh dù tiến trình ngủ bao lâu. */
+export const DEFAULT_UPSTASH_MAX_GAP_SEC = 1800;
 export const DEFAULT_QUOTA_WARN_PCT = 80;
 export const DEFAULT_QUOTA_CRIT_PCT = 95;
 export const DEFAULT_QUOTA_INTERVAL_MS = 15 * 60_000;
@@ -34,6 +36,8 @@ export interface QuotaConfig {
   upstashMemoryBytes: number | null;
   /** Trần tốc độ hợp lý của bộ đếm lệnh (lệnh/giây) — kẹp delta giữa hai lần INFO. */
   upstashMaxCmdPerSec: number;
+  /** Trần khoảng thời gian tính kẹp (giây): sau khoảng ngủ đêm ~8h, elapsed không được nới mức kẹp lên hàng triệu. */
+  upstashMaxGapSec: number;
 }
 
 function num(v: string | undefined): number | null {
@@ -59,6 +63,7 @@ export function resolveQuotaConfig(env: Record<string, string | undefined> = pro
     upstashCommandsPerMonth: num(env.QUOTA_UPSTASH_COMMANDS_PER_MONTH) ?? DEFAULT_UPSTASH_COMMANDS_PER_MONTH,
     upstashMemoryBytes: num(env.QUOTA_UPSTASH_MEMORY_BYTES),
     upstashMaxCmdPerSec: num(env.QUOTA_UPSTASH_MAX_CMD_PER_SEC) ?? DEFAULT_UPSTASH_MAX_CMD_PER_SEC,
+    upstashMaxGapSec: num(env.QUOTA_UPSTASH_MAX_GAP_SEC) ?? DEFAULT_UPSTASH_MAX_GAP_SEC,
   };
 }
 
@@ -130,13 +135,13 @@ export function parseInfoNumber(info: string, key: string): number | null {
  *    nhau — đa node/tenant), đặt lại mốc, đếm bất thường. Dao động 11M↔9M vì thế không làm `acc` phồng.
  *  - sang tháng mới / lần đầu: chỉ đặt mốc (lệnh dùng trước đó trong kỳ không biết).
  */
-export function advanceCommandPeriod(prev: CommandPeriod | undefined, cur: number, now: number, maxPerSec = DEFAULT_UPSTASH_MAX_CMD_PER_SEC): CommandPeriod {
+export function advanceCommandPeriod(prev: CommandPeriod | undefined, cur: number, now: number, maxPerSec = DEFAULT_UPSTASH_MAX_CMD_PER_SEC, maxGapSec = DEFAULT_UPSTASH_MAX_GAP_SEC): CommandPeriod {
   const period = periodOf(now);
   if (!prev || prev.period !== period) return { period, last: cur, at: now, acc: 0, anomalies: 0 };
   const anomalies = prev.anomalies ?? 0;
   if (prev.last === null) return { period, last: cur, at: now, acc: prev.acc, anomalies };
   const elapsedSec = Math.max(1, (now - (prev.at ?? now)) / 1000);
-  const cap = elapsedSec * maxPerSec;
+  const cap = Math.min(elapsedSec, maxGapSec) * maxPerSec;
   let delta = 0;
   let bad = false;
   if (cur >= prev.last) {

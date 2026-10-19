@@ -131,9 +131,12 @@ describe('QuotaAlertJob (ADR-263)', () => {
     const redis = makeRedis();
     const { job, fetchMock, advance } = make({ redis });
     await job.tick(); // mốc đầu: acc 0
-    advance(3_600_000); // kẹp 200/s × 3600s = 720k
-    redis.cmds += 420_000; // 84%
-    const r = await job.tick();
+    let r = await job.tick();
+    for (let i = 0; i < 4; i++) {
+      advance(900_000); // kẹp 200/s × 900s = 180k mỗi nhịp
+      redis.cmds += 105_000; // 4 nhịp = 420k = 84%
+      r = await job.tick();
+    }
     expect(r.readings.find((x) => x.id === 'upstash_commands')).toMatchObject({ used: 420_000, level: 'warning' });
     const text = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body).text;
     expect(text).toContain('Upstash');
@@ -208,5 +211,33 @@ describe('QuotaAlertJob (ADR-263)', () => {
     prisma.databaseSizeBytes.mockRejectedValue(new Error('neon asleep'));
     const r = await job.tick();
     expect(r.readings.map((x) => x.id)).toEqual(['upstash_commands']);
+  });
+
+  it('degraded: không ghi đè state tốt trong Redis; hồi phục thì gộp rồi mới ghi', async () => {
+    const good = { v: 1, resources: { neon_storage: { level: 'warning', notifiedAt: 5 } }, persistedAt: 1 };
+    const redis = makeRedis({ [QUOTA_STATE_KEY]: JSON.stringify(good) });
+    const realGet = redis.get.getMockImplementation()!;
+    redis.get.mockRejectedValueOnce(new Error('blip'));
+    const { job, prisma, fetchMock } = make({ redis, size: 450 * MB });
+    await job.tick(); // degraded: state tạm trống -> báo up (kèm dòng tạm)
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(redis.store.get(QUOTA_STATE_KEY)!)).toEqual(good); // KHÔNG bị ghi đè
+    prisma.databaseSizeBytes.mockResolvedValue(500 * MB); // critical
+    redis.get.mockImplementation(realGet);
+    await job.tick(); // hồi phục: gộp (bản tạm notifiedAt mới hơn thắng) rồi ghi
+    const saved = JSON.parse(redis.store.get(QUOTA_STATE_KEY)!);
+    expect(saved.resources.neon_storage.level).toBe('critical');
+    expect(saved.resources.neon_storage.notifiedAt).toBeGreaterThan(5);
+  });
+
+  it('stop() rồi start() lại vẫn chạy được', async () => {
+    const { job, fetchMock } = make({ size: 450 * MB });
+    job.start();
+    job.stop();
+    expect((await job.runOnce()).skipped).toBe(true);
+    job.start();
+    expect((await job.runOnce()).skipped).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    job.stop();
   });
 });

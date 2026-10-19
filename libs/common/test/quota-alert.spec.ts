@@ -42,7 +42,7 @@ describe('quota-alert (ADR-263)', () => {
 
   it('cấu hình: mặc định theo DEPLOYMENT, env ghi đè, ngưỡng sai quay về mặc định', () => {
     const d = resolveQuotaConfig({});
-    expect(d).toMatchObject({ warnPct: 80, critPct: 95, neonStorageBytes: 512 * 1024 * 1024, upstashCommandsPerMonth: 500_000, upstashMemoryBytes: null, upstashMaxCmdPerSec: 200 });
+    expect(d).toMatchObject({ warnPct: 80, critPct: 95, neonStorageBytes: 512 * 1024 * 1024, upstashCommandsPerMonth: 500_000, upstashMemoryBytes: null, upstashMaxCmdPerSec: 200, upstashMaxGapSec: 1800 });
     expect(resolveQuotaConfig({ DB_DISK_BUDGET_MB: '100' }).neonStorageBytes).toBe(100 * 1024 * 1024);
     expect(resolveQuotaConfig({ QUOTA_NEON_STORAGE_BYTES: '1000', QUOTA_UPSTASH_MEMORY_BYTES: '2000' })).toMatchObject({ neonStorageBytes: 1000, upstashMemoryBytes: 2000 });
     expect(resolveQuotaConfig({ QUOTA_WARN_PCT: '90', QUOTA_CRIT_PCT: '85' })).toMatchObject({ warnPct: 80, critPct: 95 });
@@ -80,6 +80,16 @@ describe('quota-alert (ADR-263)', () => {
     for (let i = 1; i <= 8; i++) q = advanceCommandPeriod(q, i % 2 ? 9_000_000 : 11_000_000, t0 + i * 900_000);
     expect(q.acc).toBe(0);
     expect(q.anomalies).toBe(8);
+  });
+
+  it('khoảng ngủ dài (8h): mẫu lệch nhỏ hơn mức kẹp cũ vẫn bị bỏ, không cộng phồng', () => {
+    const t0 = Date.parse('2026-10-10T00:00:00Z');
+    const p = advanceCommandPeriod(undefined, 11_000_000, t0);
+    const night = advanceCommandPeriod(p, 9_000_000, t0 + 8 * 3_600_000); // 9M < 200×28800 = 5,76M? không: 9M > 5,76M nhưng thử cả mẫu 4M
+    expect(night.acc).toBe(0);
+    const small = advanceCommandPeriod(p, 4_000_000, t0 + 8 * 3_600_000); // kẹp cũ 5,76M sẽ coi là reset và cộng 4M
+    expect(small).toMatchObject({ acc: 0, anomalies: 1 });
+    expect(advanceCommandPeriod(p, 11_000_000 + 300_000, t0 + 8 * 3_600_000).acc).toBe(300_000); // tăng thật ≤ 360k vẫn cộng
   });
 
   it('tin nhắn tiếng Việt có tài nguyên, %, số/trần, mức, gợi ý; mức ok không có gợi ý', () => {

@@ -189,7 +189,7 @@ export class QuotaAlertJob implements OnModuleInit, OnModuleDestroy {
         }
       } else {
         const before = state.upstash;
-        state.upstash = advanceCommandPeriod(before, cmds, now, this.cfg.upstashMaxCmdPerSec);
+        state.upstash = advanceCommandPeriod(before, cmds, now, this.cfg.upstashMaxCmdPerSec, this.cfg.upstashMaxGapSec);
         if (!before || before.period !== state.upstash.period) dirty = true;
         if ((state.upstash.anomalies ?? 0) > (before?.anomalies ?? 0) && before?.period === state.upstash.period) {
           dirty = true;
@@ -220,7 +220,8 @@ export class QuotaAlertJob implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (dirty || now - state.persistedAt >= QUOTA_CHECKPOINT_MS) await this.saveState(state, now);
+    // Đang degraded (đọc state lỗi) thì KHÔNG ghi: state tạm không được đè state tốt trong Redis. Đọc lại được -> gộp rồi mới ghi.
+    if (!this.degraded && (dirty || now - state.persistedAt >= QUOTA_CHECKPOINT_MS)) await this.saveState(state, now);
     return { skipped: false, readings, sent };
   }
 
