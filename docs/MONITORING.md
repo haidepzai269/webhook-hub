@@ -111,6 +111,7 @@ docker logs webhook-hub-alertmanager 2>&1 | grep entrypoint   # "Telegram BẬT"
 
 - Entrypoint bỏ dòng `#` và dòng trống, cần đúng 1 dòng giá trị; token phải khớp `^[0-9]+:[A-Za-z0-9_-]+$`, chat_id là số. Sai/thiếu/không đọc được (vd. chmod 600 mà chưa chown 65534) -> log nêu rõ lý do và `Telegram TẮT`, Alertmanager vẫn lên và chỉ gửi `alert-sink`. Config render còn được `amtool check-config` kiểm; lỗi/marker lệch thì tự rơi về bản TẮT. Đổi file secret thì phải recreate container.
 - Route: chỉ `severity` warning/critical vào Telegram (rồi `continue` sang `default`); **Watchdog và severity=none không bao giờ tới Telegram**. Gom `alertname,severity`, `group_wait 30s`, `group_interval 5m`, lặp 4h (critical 1h). Tin nhắn tiếng Việt: tên luật, mức, tóm tắt, mô tả, ĐANG BÁO/ĐÃ HẾT, giờ UTC, link Grafana/Alertmanager local.
+- **Cách nhanh:** `./infra/alertmanager/test-telegram.sh [warning|critical|that|doi-token]` — hỏi chat_id + token (gõ không hiện) nếu chưa có file, ghi secret đúng quyền ở trên, recreate Alertmanager, kiểm `Telegram BẬT`, rồi bắn cảnh báo giả qua `amtool` (`that` = tắt `redis-exporter` để có `TargetDown` thật). Không in secret.
 - Kiểm tra không cần token thật: `amtool check-config` template; hoặc chạy container thử với `api_url:` trỏ vào server HTTP giả (chỉ bản sao tạm, không commit) rồi `POST /api/v2/alerts`; xác nhận nhận `/bot<token>/sendMessage` với đúng `chat_id` + `text`.
 - Email / SMS vẫn là chỗ chừa (comment) trong `alertmanager.yml`. `HEARTBEAT_URL` (Healthchecks.io) là kênh khác, không liên quan Telegram.
 
