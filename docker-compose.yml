@@ -165,14 +165,19 @@ services:
       redis:
         condition: service_healthy
 
-  # Receiver CHƯA chốt (email / Telegram / SMS) -> `default` gửi webhook tới alert-sink chỉ để ghi log. Xem infra/alertmanager.
+  # `default` gửi webhook tới alert-sink (log); Telegram bật khi có file secret (ADR-257). Xem infra/alertmanager.
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: webhook-hub-alertmanager
     profiles: ["monitoring"]
     restart: unless-stopped
+    # ADR-257: entrypoint render template + bật/tắt Telegram theo file secret (gitignored)
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    command: []
     volumes:
       - ./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./infra/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - ./infra/alertmanager/secrets:/etc/alertmanager/secrets:ro
       - alertmanagerdata:/alertmanager
     ports:
       - "127.0.0.1:9093:9093"
