@@ -25,19 +25,24 @@ describeDb('GET /badges — badgeSnapshot (Postgres, ADR-269)', () => {
     const sub = await raw.subscription.create({ data: { tenantId: t, destinationId: dest.id, name: 'b', eventTypes: ['*'] } });
     return { source: source.id, raw: rawEv.id, sub: sub.id };
   }
-  const mkEvent = (t: string, rawId: string, n: number) =>
-    raw.event.create({
-      data: { id: `EVB${t === A ? 'A' : 'B'}${run}${n}`, tenantId: t, rawEventId: rawId, idempotencyKey: `bevt:${t}:${n}`, correlationId: randomUUID(), type: 'payment.received', source: 'payos', subject: 's', data: {} },
+  // events.raw_event_id UNIQUE (1 raw : 1 event) -> mỗi event một raw_event riêng.
+  const mkEvent = async (t: string, sourceId: string, n: number) => {
+    const rawEv = await raw.rawEvent.create({
+      data: { sourceId, idempotencyKey: `b:raw:${t}:${n}`, headers: {}, body: {}, bodyRaw: Buffer.from('{}'), signatureValid: true },
     });
+    return raw.event.create({
+      data: { id: `EVB${t === A ? 'A' : 'B'}${run}${n}`, tenantId: t, rawEventId: rawEv.id, idempotencyKey: `bevt:${t}:${n}`, correlationId: randomUUID(), type: 'payment.received', source: 'payos', subject: 's', data: {} },
+    });
+  };
 
   beforeAll(async () => {
     const a = await mkTenant(A, 'a');
     const b = await mkTenant(B, 'b');
     ids.srcA = a.source; ids.srcB = b.source; ids.rawA = a.raw; ids.rawB = b.raw; ids.subA = a.sub; ids.subB = b.sub;
-    const first = await mkEvent(A, a.raw, 0);
+    const first = await mkEvent(A, a.source, 0);
     ids.seqBefore = first.seq.toString();
-    for (let i = 1; i <= 12; i++) await mkEvent(A, a.raw, i); // 12 mới hơn mốc
-    await mkEvent(B, b.raw, 1); // tenant khác: không được lọt
+    for (let i = 1; i <= 12; i++) await mkEvent(A, a.source, i); // 12 mới hơn mốc
+    await mkEvent(B, b.source, 1); // tenant khác: không được lọt
     const evA = first.id;
     // deliveries: 1 DEAD cũ về created_at nhưng MỚI về updated_at (DLQ phải thấy), 1 DEAD đã bị replay, 1 SUCCEEDED mới
     await raw.delivery.create({ data: { tenantId: A, eventId: evA, subscriptionId: ids.subA, attemptGeneration: 1, status: 'DEAD', attemptCount: 5, createdAt: old, updatedAt: new Date() } });
