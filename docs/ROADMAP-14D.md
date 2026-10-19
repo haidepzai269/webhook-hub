@@ -168,6 +168,6 @@ Báo cáo · slide · tập dượt trước hội đồng = **thêm ít nhất 
 
 ## Việc làm mỗi ngày, tốn 2 phút
 
-Mỗi khi quyết định một thứ → ghi **3 dòng** vào [`adr/README.md`](adr/README.md): vấn đề — chọn gì — đánh đổi gì.
+Mỗi khi quyết định một thứ → ghi **3 dòng** vào một file ADR riêng `docs/adr/NNNN-<slug>.md` (từ ADR-267, xem đầu [`adr/README.md`](adr/README.md); `npm run adr:new`): vấn đề — chọn gì — đánh đổi gì.
 
 Ghi lúc đang làm: 2 phút. Ghi lại sau khi xong: hai ngày, và bạn sẽ bịa — **bịa sai**, vì người ta quên lý do thật của quyết định của chính mình sau đúng bốn ngày. Đề tài này chấm nặng *architecture và hiểu bản chất*: thứ được chấm không phải code bạn viết, mà là **lý do bạn viết như thế**.

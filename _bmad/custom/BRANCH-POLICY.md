@@ -19,5 +19,5 @@ Không rõ nhánh thuộc loại nào thì coi là nhánh giao việc: chỉ pus
 ## Khi gộp
 
 - Gộp `master` vào nhánh bằng merge commit. Không rebase, không force push.
-- Trùng số ADR: nhánh vào sau phải đổi số. Ngay trước khi chọn số mới, grep số ADR lớn nhất trên `origin/master` và trên các nhánh đang mở.
+- ADR (ADR-267): mỗi ADR một file `docs/adr/NNNN-<slug>.md`, bổ sung ADR cũ ở `docs/adr/bo-sung/NNNN-YYYY-MM-DD-<slug>.md`; KHÔNG sửa `docs/adr/README.md` (đóng băng ở ADR-266). Trùng số ADR: gate `adr-unique` đỏ ở nhánh vào sau; nhánh đó đổi tên file và số trong tiêu đề sang số kế tiếp mà gate nêu. Trước khi chọn số, `git fetch` rồi xem số lớn nhất trên `origin/master` (`npm run adr:new` tự lấy số theo cây hiện tại).
 - Gitleaks (image CI ghim `v8.18.4`) phải báo sạch trước khi push, và chạy thành một bước riêng.

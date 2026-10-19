@@ -1,10 +1,15 @@
 # Nhật ký quyết định kiến trúc (ADR)
 
-> **Append-only.** Thêm ở cuối, không sửa mục cũ. Quyết định cũ sai → viết mục mới, ghi `Thay thế ADR-00X`.
+> **ĐÃ ĐÓNG BĂNG ở ADR-266 (ADR-267).** File này giữ ADR-001 → ADR-266 nguyên văn; KHÔNG thêm gì vào đây nữa (gate `adr-unique` trong `npm run verify:gates` sẽ đỏ). Lý do: một file chung thì hai nhánh song song luôn xung đột ở cuối file.
+>
+> **Quy ước từ ADR-267, vẫn append-only:**
+> - **ADR mới:** mỗi ADR một file `docs/adr/NNNN-<slug-không-dấu>.md` (vd `0267-adr-moi-file.md`). Lấy số + tạo file: `npm run adr:new -- "<tiêu đề>"`. Quyết định cũ sai → ADR mới, ghi `Thay thế ADR-00X`.
+> - **Bổ sung cho ADR cũ** (≤ 266 hoặc ADR file đã chốt): file mới `docs/adr/bo-sung/NNNN-YYYY-MM-DD-<slug>.md`, NNNN = số ADR được bổ sung. Không sửa mục gốc, không sửa README.
+> - **Trùng số giữa hai nhánh:** nhánh vào sau đổi tên file và số trong tiêu đề (gate nêu số kế tiếp).
 >
 > **Mẫu 3 dòng — mỗi quyết định tốn 2 phút:**
 > ```
-> ## ADR-0XX — <tiêu đề>   (ngày)
+> # ADR-NNNN — <tiêu đề>   (ngày)
 > **Vấn đề:** ...
 > **Chọn:** ...
 > **Đánh đổi:** ...
@@ -2686,3 +2691,7 @@ không thấy gì.
 **Chọn:** (1) Thêm `react-day-picker@10.0.2` (ghim chính xác, phát hành 2026-09-30; kéo `date-fns@4.4.0`, `@date-fns/tz@1.5.0` gián tiếp) và `ui/calendar.tsx`, `ui/input-group.tsx` lấy từ registry shadcn `radix-nova` (`npx shadcn add --view`), cộng `ui/date-picker-input.tsx` (Field + InputGroup + Popover `asChild` + Calendar, ↓ mở lịch, `collisionPadding`, cell 40px dưới `sm`). `TimeRange` = ô ngày + ô giờ `HH:mm` TỰ LÀM (không `type="time"`: giờ 12/24 theo hệ điều hành, bánh xe gốc trên điện thoại). Parse/format thuần ở `lib/hub/date-input.ts` (vi `dd/MM/yyyy`, en `MM/dd/yyyy`, có test). Hợp đồng `TimeRange` giữ nguyên: URL ISO UTC, "Đến" …:59.999, gom 500ms, chỉ ghi khi người xem sửa, sai khuôn / "Từ" sau "Đến" thì báo lỗi và không ghi URL. Storefront (ADR-025, không Tailwind) dùng `ShopDatePicker` = cùng `date-input.ts` + react-day-picker với CSS mặc định, không shadcn. (2) `DisplaySettings`: một DropdownMenu sau nút bánh răng ("Cài đặt hiển thị") có nhóm radio Ngôn ngữ, Giao diện (sáng/tối/theo hệ thống) và — chỉ dashboard dự án, từ md — mục "Tuỳ chỉnh bố cục…" mở `LayoutControlsPanel` cũ. Cơ chế lưu giữ nguyên (`useChangeLanguage` = thân cũ của LanguageSwitcher; `setPreference("theme_mode")`). Dùng chung ở `AccountTopBar`.
 
 **Đánh đổi:** thêm 3 gói vào bundle console (lịch + date-fns, chỉ locale vi/en được import); mất nút đổi ngôn ngữ/theme một chạm (nay hai chạm); Nhật ký "Từ/Đến" rộng hơn ở desktop (ô ngày + ô giờ mỗi đầu); storefront có hai CSS lịch riêng thay vì dùng chung shadcn; ô giờ không có bánh xe cuộn của hệ điều hành, phải gõ.
+
+---
+
+ADR-267 trở đi: mỗi ADR một file trong `docs/adr/` (xem đầu file).
