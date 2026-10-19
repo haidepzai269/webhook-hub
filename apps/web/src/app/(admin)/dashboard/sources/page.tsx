@@ -3,7 +3,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Activity, Ear, Link2, Plug, Plus } from "lucide-react";
+import { Activity, Archive, Ear, Link2, Plug, Plus } from "lucide-react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -66,6 +66,7 @@ import { errorTextOf } from "@/lib/hub/ui-logic";
 import { useT } from "@/lib/i18n/use-t";
 import { sourceCountVars } from "@/lib/storage/storage-logic";
 
+import { ArchiveSourceDialog } from "./archive-dialog";
 import { ConnectionDialog, ConnectSourceDialog } from "./connect-dialogs";
 import { GenericFields, type SourceFormValues } from "./generic-fields";
 import { ListenSheet } from "./listen-sheet";
@@ -79,6 +80,21 @@ function ConnectionButton({ id }: { id: string }) {
   return (
     <IconButton icon={<Link2 />} onClick={() => open(id)} label={t("page.sources.connection-button")} />
   );
+}
+
+/** ADR-260: nút "Lưu trữ nguồn" trên MỌI dòng (developer/owner/operator — theo scope manage:sources + manage:endpoints của route archive). */
+const OpenArchive = createContext<(id: string) => void>(() => undefined);
+function ArchiveButton({ id, name }: { id: string; name: string }) {
+  const open = useContext(OpenArchive);
+  const t = useT();
+  const projectId = useFlowProjectStore((s) => s.projectId);
+  const me = useMeStore((s) => s.me);
+  // Scope thật của route archive: manage:sources + manage:endpoints = developer và owner (roles.ts) + operator.
+  const can =
+    me?.user.isOperator === true ||
+    (me?.memberships ?? []).some((m) => m.projectId === projectId && (m.role === "owner" || m.role === "developer"));
+  if (!can) return null;
+  return <IconButton icon={<Archive />} onClick={() => open(id)} label={t("page.sources.archive.row-label", { name })} />;
 }
 
 /** EG5 (ADR-181): nút "Lưu lượng" trên từng dòng mở khối Lưu lượng của nguồn (không tạo trang mới). */
@@ -305,6 +321,7 @@ const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] =
         {row.original.provider === "generic" && <ListenButton id={row.original.id} />}
         {canTraffic && <TrafficButton id={row.original.id} />}
         <ConnectionButton id={row.original.id} />
+        <ArchiveButton id={row.original.id} name={row.original.name} />
       </div>
     ),
   },
@@ -366,6 +383,8 @@ export default function SourcesPage() {
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [preset, setPreset] = useState<{ provider: string; sourceId: string } | null>(null);
   const connectionSource = data?.find((s) => s.id === connectionId) ?? null;
+  const [archiveId, setArchiveId] = useState<string | null>(null);
+  const archiveSource = data?.find((s) => s.id === archiveId) ?? null;
   const [trafficId, setTrafficId] = useState<string | null>(null);
   const trafficSource = data?.find((s) => s.id === trafficId) ?? null;
   const [listenId, setListenId] = useState<string | null>(null);
@@ -451,12 +470,15 @@ export default function SourcesPage() {
         source={connectionSource}
         onClose={() => setConnectionId(null)}
         onConnect={(s) => (setPreset({ provider: s.provider, sourceId: s.id }), setConnectOpen(true))}
+        onArchive={(s) => setArchiveId(s.id)}
       />
+      <ArchiveSourceDialog source={archiveSource} onClose={() => setArchiveId(null)} onOpenConnection={setConnectionId} />
       <TrafficSheet source={trafficSource} onClose={() => setTrafficId(null)} />
       <ListenSheet source={listenSource} onClose={() => setListenId(null)} />
       <OpenListen.Provider value={setListenId}>
       <OpenTraffic.Provider value={setTrafficId}>
         <OpenConnection.Provider value={setConnectionId}>
+        <OpenArchive.Provider value={setArchiveId}>
           <InsightRowsProvider code="I-silent">
             <DataTable
               data={data}
@@ -468,6 +490,7 @@ export default function SourcesPage() {
               emptyText={t("page.sources.empty")}
             />
           </InsightRowsProvider>
+        </OpenArchive.Provider>
         </OpenConnection.Provider>
       </OpenTraffic.Provider>
       </OpenListen.Provider>
