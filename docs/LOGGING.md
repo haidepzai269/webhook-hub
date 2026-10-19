@@ -203,11 +203,29 @@ Chuẩn bị OTel (đợt sau): `trace_id/span_id` định dạng W3C ⇒ OTel S
 | Thành công lưu lượng cao | `ingest.done`/`delivery.attempt` thành công: **lấy mẫu** `LOG_SUCCESS_SAMPLE` (mặc định 0.1 deployed, 1 local) + **đếm** thay vì ghi (metric đã có). **Lỗi, chậm, hoãn, DEAD: luôn ghi** |
 | Bão log lặp | Gộp theo `(cause, source_id\|destination_id)` ≤ 1 dòng / `LOG_DEDUPE_WINDOW_MS` (mặc định 30s), kèm `suppressed: n` — đúng cách normalize đã làm (`normalize.consumer.ts:191-194`). Bộ nhớ trần (LRU ≤ 1000 khoá) |
 | Request bị chặn trong ban | **không** ghi từng request; `growth.window` + `suppressed` đủ (đã có metric `hub_ingest_penalty_blocked_total`) |
-| Dung lượng log Render free | Dòng thành công ~300–400 byte; ước 10 req/s × 10% ≈ 3.5 MB/giờ. Edge access log đã có (`DEPLOYMENT.md:164`) — **không** nhân đôi thông tin đó trong app log |
+| Dung lượng log Render free | Dòng thành công ~300–400 byte (đo 2026-10-19: `ingest.done` ≈ 430 B, `delivery.attempt` ≈ 585 B — §6.1); ước 10 req/s × 10% ≈ 3.5 MB/giờ. Edge access log đã có (`DEPLOYMENT.md:164`) — **không** nhân đôi thông tin đó trong app log |
 | Upstash/Redis quota | Log **không** chạm Redis. Lấy mẫu/dedupe/cờ cold-start/event-loop đều trong bộ nhớ |
 | DB | Log **không** truy vấn DB để làm giàu |
 | Đồng bộ | pino ghi đồng bộ stdout; nếu đo thấy ảnh hưởng p95 thì `pino.destination({ sync:false })` — quyết bằng số liệu local (k6), không đoán |
 
+
+### 6.1 Đo k6 trước/sau giai đoạn 2A (2026-10-19, máy công ty, LOCAL hubv, không qua tunnel)
+
+TRƯỚC = master `62a2545`, SAU = `feat/log-cause` `3daaac1` (đã có scrubDeep ADR-256). `k6/ingest-github.js` 10 → 50 → 100 RPS × 60 s (6.900 request, 38,33 RPS TB, 0% lỗi), 2 lượt mỗi ô, load 1,9–3,0 trên máy 12 CPU / 31 GB. Cấu hình A: hubv mặc định (`NODE_ENV=development`, Prisma in mọi `prisma:query`, gấp > 8 lần log pino). Cấu hình B: `NODE_ENV=test` (Prisma chỉ log `error`, còn lại đúng log pino).
+
+| Ingest (ms, lượt 1 / lượt 2) | p50 | p95 | p99 |
+|---|---|---|---|
+| A TRƯỚC | 11,15 / 8,67 | 20,28 / 19,22 | 25,85 / 24,22 |
+| A SAU | 11,56 / 12,35 | 20,24 / 19,71 | 23,58 / 22,78 |
+| B TRƯỚC | 12,35 / 12,01 | 19,44 / 19,01 | 22,69 / 21,71 |
+| B SAU | 11,65 / 11,70 | 20,79 / 19,22 | 23,82 / 22,78 |
+
+- p95 SAU − TRƯỚC: A ≈ 0 → +0,5 ms; B +0,2 → +1,3 ms. Hai lượt cùng bản đã lệch ≈ 1 ms, nên **không tách được khỏi nhiễu**. Ngưỡng p95 < 200 ms đạt với biên lớn.
+- Đường giao (`delivery-e2e.js`, 30 RPS × 60 s, cấu hình A): e2e p95 1189,5 → 1188 ms, giao p95 657 → 647 ms, `hub_delivery_handle_seconds` TB 83 → 85 ms. Trong nhiễu; phần lớn e2e là `outbox_lag`.
+- Log pino (local, `LOG_SUCCESS_SAMPLE=1`): hub-api 38 → 76 dòng/s, 327 → 431 B/dòng; hub-worker 75 → 112 dòng/s, 304 → 403 B/dòng (thêm `ingest.done`, `normalize.done`). Deployed lấy mẫu 10% nên phần thêm nhỏ hơn nhiều.
+- **Kết luận:** ở tải này **chưa cần** `pino.destination({ sync:false })`. Muốn khẳng định chênh ≈ 1 ms ở cấu hình B thì đo ở tải > 100 RPS.
+- **Ước lượng (không đo):** dòng `fail.dest_*` ≈ 800–950 B (dòng thành công 585 B + `cause`/`blame`/`err`). Đích hỏng ở 1000 evt/s ≈ 0,8–0,95 MB/s ≈ 3 GB/giờ ở worker, chưa tính retry (tới 6 lần thử mỗi event). Hạn mức log Render: **chưa tra**.
+- Số thô: scratchpad phiên máy công ty (`before*/after*.k6.txt`), không lưu vào repo.
 ---
 
 ## 7. Nối với metrics
