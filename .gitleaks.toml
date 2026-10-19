@@ -45,4 +45,14 @@ regexes = [
   # apps/hub-api/test/log-landmine.spec.ts (LOGGING.md §5, ADR-254) — API key GIẢ dùng làm "mìn" để khẳng định log KHÔNG
   # lộ key (chứa chữ MINE; đã xác minh 2026-10-18, không phải khoá thật).
   '''hk_live_MINEKEYMINEKEY1234567890''',
+  # apps/web/src/lib/sentry/scrub.spec.ts (ADR-264, test không-lọt §11.9e) — "mìn" GIẢ để khẳng định scrub che hết:
+  # bảng chữ cái tuần tự, sk_live_ toàn "x", JWT mẫu công khai của jwt.io (sub "1234567890"), giá trị VIẾT HOA tự đặt
+  # (đã xác minh 2026-10-19, không phải secret thật).
+  '''ghp_abcdefghijklmnopqrstuvwxyz0123456789''',
+  '''hk_(test|live)_ABCDEFGHIJKLMNOP12345678''',
+  '''hk_test_zyxwvutsrqponm98765432''',
+  '''sk_live_51Hx{10}ABCDEF''',
+  '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.dozjgNryP4J3jVmNHl0w5N''',
+  '''whsec_MfKQ9r8GKYqrTwjBfAbcdEFGH12345''',
+  '''(SESSIONTOKENVALUE123|CSRFVALUE12345|s3cr3tPassw0rd!)''',
 ]
