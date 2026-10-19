@@ -13,7 +13,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Hai môi trường · Render/Vercel/Neon/Upstash/CloudAMQP · ràng buộc free tier · env vars |
 | [`docs/MONITORING.md`](docs/MONITORING.md) | Theo dõi sức khỏe 6 tầng (LOCAL: Prometheus + exporter + Alertmanager + dashboard "Hạ tầng") · giới hạn Windows/WSL2 · ADR-249 |
 | [`docs/LOGGING.md`](docs/LOGGING.md) | Log tự nói nguyên nhân sơ bộ: taxonomy `cause` (chậm/sai/tăng nhanh), canonical log line, `stage_ms`, `traceparent` W3C + Sentry/RUM — THIẾT KẾ (ADR-250..252), chưa code |
-| [`docs/adr/README.md`](docs/adr/README.md) | Nhật ký quyết định — **append-only, ghi ngay khi quyết định** |
+| [`docs/adr/README.md`](docs/adr/README.md) | Nhật ký quyết định — **append-only, ghi ngay khi quyết định**. README đóng băng ở ADR-266; từ ADR-267 **mỗi ADR một file** `docs/adr/NNNN-<slug>.md` (`npm run adr:new -- "<tiêu đề>"`), bổ sung ADR cũ ở `docs/adr/bo-sung/NNNN-YYYY-MM-DD-<slug>.md` (ADR-267) |
 | `webhook-hub-y-tuong.md` | Ý tưởng gốc. **Chỉ tham khảo.** Mâu thuẫn với ARCHITECTURE.md → ARCHITECTURE.md thắng. |
 
 ## Năm bất biến — phá một cái là bug kiến trúc, không phải đánh đổi
@@ -35,7 +35,7 @@ Chấm nặng: **logic core · kiến trúc · hiểu bản chất webhook · ba
 - **Adapter ra kiểu chuẩn** theo `docs/EVENT-CATALOG.md`; `payment.*`/`repo.*` sai khuôn là lỗi normalize vĩnh viễn, không hạ cấp âm thầm.
 - **HMAC tính trên `body_raw` (bytes), không phải trên JSON đã parse.**
 - **Không query DB trực tiếp.** Đi qua `TenantScopedRepository` — kể cả query "chỉ để debug". Một chỗ lọt là BB-5 chết.
-- **Ghi ADR 3 dòng mỗi khi quyết định gì đó** (vấn đề / chọn / đánh đổi). Lúc làm tốn 2 phút; ghi lại sau thì mất hai ngày và sẽ bịa sai.
+- **Ghi ADR 3 dòng mỗi khi quyết định gì đó** (vấn đề / chọn / đánh đổi) — vào FILE RIÊNG `docs/adr/NNNN-<slug>.md`, KHÔNG thêm vào `docs/adr/README.md` (đã đóng băng, ADR-267; `npm run adr:new`). Lúc làm tốn 2 phút; ghi lại sau thì mất hai ngày và sẽ bịa sai.
 
 ## Cạm bẫy đã biết (đừng mắc lại)
 

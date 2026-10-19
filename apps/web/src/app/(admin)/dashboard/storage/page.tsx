@@ -294,7 +294,7 @@ function SuggestionsCard({ canWrite }: { canWrite: boolean }) {
               <div className="text-muted-foreground text-xs">{t("page.storage.suggestion.frees", { size: formatBytes(s.estimatedBytes), count: s.estimatedEvents })}</div>
               <div className="text-muted-foreground text-xs">{s.reason}</div>
             </div>
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 gap-2 max-sm:w-full max-sm:[&>button]:min-h-10 max-sm:[&>button]:flex-1">
               {suggestionActions(s).map((a) => (
                 <Button key={a} size="sm" variant={a === "delete" ? "destructive" : "default"} disabled={!canWrite} onClick={() => setPending({ s, action: a })}>
                   {t(`page.storage.action.${a}` as MessageKey)}
@@ -439,6 +439,7 @@ function AutoCleanCard({ canWrite }: { canWrite: boolean }) {
           <p className="text-muted-foreground text-xs">{t("page.storage.auto.note")}</p>
           <Button
             size="sm"
+            className="max-sm:min-h-10 max-sm:w-full"
             disabled={!canWrite || !draft || save.isPending}
             onClick={() =>
               save.mutate(rows, {

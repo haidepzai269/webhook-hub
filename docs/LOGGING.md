@@ -1,6 +1,6 @@
 # LOGGING — log phải tự nói "chậm / sai / tăng nhanh vì đâu"
 
-> Trạng thái: **ĐÃ TRIỂN KHAI giai đoạn 2A (2026-10-18, ADR-254/255)** cho log + `cause` + trace_id + metric + `x-hub-cold` (§1–§10, bước 0–11 và 13). **Chưa làm (đợt 2B):** Sentry backend/frontend (§11, bước 12/14/15) và console (§8, bước 11). Chi tiết đã làm / còn lại / chỗ lệch thiết kế: **§12**. Các mục §1 (Audit) mô tả hiện trạng TRƯỚC giai đoạn 2A.
+> Trạng thái: **ĐÃ TRIỂN KHAI giai đoạn 2A (2026-10-18, ADR-254/255)** cho log + `cause` + trace_id + metric + `x-hub-cold` (§1–§10, bước 0–11 và 13). Sentry backend (bước 12, ADR-258) và Sentry frontend (bước 14/15, ADR-264) đã làm. **Chưa làm:** console (§8, bước 11: `cause`/`blame` vào `StageReason`, waterfall từ `stage_ms`) và các phần cần DSN thật (§12). Chi tiết đã làm / còn lại / chỗ lệch thiết kế: **§12**. Các mục §1 (Audit) mô tả hiện trạng TRƯỚC giai đoạn 2A.
 > Mục tiêu (Admin): nhìn một dòng log là biết **sơ bộ** do đâu (triage) để quyết định có đáng đào sâu bằng trace không.
 > Log là tầng 1 (rẻ, luôn bật); metric là tầng 2 (đếm theo `cause`); trace (OpenTelemetry, sau) là tầng 3 (đào sâu một ca).
 > Mâu thuẫn với `ARCHITECTURE.md` → ARCHITECTURE.md thắng.
@@ -397,7 +397,7 @@ Cơ chế: **một cửa duy nhất** `reportUnexpected(err, ctx)` trong `libs/c
 |---|---|
 | hub-api | `instrument.ts` import **đầu tiên** của `main.ts`, trước `@nestjs/core` (đúng yêu cầu docs NestJS), gọi `initSentry('hub-api')`. **Không đụng** `NestFactory.create(AppModule, { rawBody: true })` (cạm bẫy #1) và không thêm middleware đọc body. Không dùng `SentryModule.forRoot()` nếu nó thêm interceptor/handler đọc request (kiểm trước); tối thiểu chỉ `reportUnexpected` ở filter hiện có |
 | hub-worker | `instrument.ts` riêng, `initSentry('hub-worker')`; capture ở `catch` ngoài cùng của consumer + `unhandledRejection`; fire-and-forget, không chặn ack/nack |
-| **hub-all** (`docker/hub-all.js` chạy **hai tiến trình** hub-api + hub-worker, ADR-129) | mỗi tiến trình init **riêng** với DSN riêng → BB-4 giữ (hai process, không chia sẻ trạng thái); supervisor và nginx không init Sentry |
+| **hub-all** (`docker/hub-all.js` chạy **hai tiến trình** hub-api + hub-worker, ADR-129) | mỗi tiến trình init **riêng** (BB-4 giữ: hai process, không chia sẻ trạng thái) nhưng **cùng một `SENTRY_DSN`** (ADR-258): đặt MỘT lần trên service Render `hub-all` thì cả hai tiến trình con đều nhận (`docker/hub-all.js` truyền nguyên env); phân biệt bằng tag `svc`. Supervisor và nginx không init Sentry |
 | apps/web | `instrumentation.ts` + cấu hình client của `@sentry/nextjs`, chỉ lỗi; không tracing/replay; không `tunnelRoute` |
 
 BB-3: `reportUnexpected` chạy **sau** quyết định ACK / ack-nack, `catch` bên trong, không `await` trên đường nóng. Sentry không dùng Redis/DB, không truy vấn thêm để làm giàu sự kiện; `redis-budget.spec.ts` giữ xanh. DSN trống → `initSentry` return ngay và **không import SDK** (`await import()` có điều kiện) → no-op hoàn toàn.
@@ -406,10 +406,12 @@ BB-3: `reportUnexpected` chạy **sau** quyết định ACK / ack-nack, `catch` 
 
 | Biến | Dùng cho | Ghi chú |
 |---|---|---|
-| `SENTRY_DSN_HUB_API`, `SENTRY_DSN_HUB_WORKER`, `SENTRY_DSN_WEB` | runtime từng tiến trình | **trống = no-op hoàn toàn** (mặc định local/test) |
-| `SENTRY_RELEASE`, `DEPLOY_ENV` | tag release/environment | build arg git sha |
+| `SENTRY_DSN` | runtime hub-api + hub-worker (cùng một DSN, ADR-258) | **trống = no-op hoàn toàn** (mặc định local/test). Bản ADR-251 cũ ghi `SENTRY_DSN_HUB_API`/`SENTRY_DSN_HUB_WORKER`: **không còn dùng** |
+| `NEXT_PUBLIC_SENTRY_DSN` | web, **lúc build** (Vercel; Next inline vào bundle) | **trống = no-op, SDK không vào bundle** (ADR-264). Thay tên `SENTRY_DSN_WEB` của ADR-251. DSN trình duyệt vốn công khai; nên là một *client key* riêng của cùng project, thẻ `svc=web` |
+| `SENTRY_RELEASE`, `SENTRY_ENVIRONMENT`, `DEPLOY_ENV` | tag release/environment | build arg git sha. Web: `SENTRY_RELEASE` rồi `VERCEL_GIT_COMMIT_SHA`; `SENTRY_ENVIRONMENT` rồi `deployed` nếu có `VERCEL` |
+| `SENTRY_TRACES_SAMPLE_RATE_WEB` | web, lúc build | tuỳ chọn, 0–1; trống = 0.1 deployed / 0 local (web vitals) |
 | `SENTRY_MAX_PER_MIN`, `SENTRY_DEDUPE_WINDOW_MS` | §11.3 | |
-| `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT_WEB` | **chỉ build apps/web** (upload source map) | secret CI/Vercel; không có ở runtime hub-api/worker |
+| `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT_WEB` | **chỉ build apps/web** (upload source map) | secret CI/Vercel; không có ở runtime hub-api/worker. Thiếu token = build vẫn thành công, không upload, không sinh source map |
 
 **Hạn mức free — chỉ số đã xác minh từ sentry.io/pricing (2026-10-18):** gói Developer có **5k errors**, **5M spans** (không dùng, tracing tắt), **1 user**, tra cứu **30 ngày**. Trang không nêu chu kỳ của 5k errors (chưa xác minh là mỗi tháng) → không ghi. Hệ quả: 5k là ít, nên cổng `blame = hub` + dedupe/fingerprint là bắt buộc, không phải tối ưu.
 
@@ -486,7 +488,7 @@ Kết quả: bảng Sentry lọc theo tag `frontend_cause` ∈ {`cold_start`, `s
 | Source map | `withSentryConfig` với `authToken` (= `SENTRY_AUTH_TOKEN`), `org`, `project` (= `SENTRY_PROJECT_WEB`) **chỉ có ở môi trường build Vercel**, không phải runtime, không commit; source map ẩn khỏi bundle công khai (tên tuỳ chọn ở bản cài — docs trang manual-setup **không** nêu `hideSourceMaps`, chưa xác minh). `widenClientFileUpload` tuỳ chọn (tăng thời gian build) |
 | `tunnelRoute` | **Không dùng** ở đợt đầu: docs cảnh báo tăng tải server; đổi lại ad-blocker có thể chặn Sentry (chấp nhận — console là công cụ của dev; ghi vào đánh đổi) |
 | CSP | Hiện **chưa có CSP** → không chặn Sentry. Khi thêm CSP: `connect-src` thêm domain ingest của Sentry (dạng `https://<id>.ingest.<region>.sentry.io` — **host chính xác lấy từ DSN, chưa xác minh định dạng theo vùng**), không dùng `*`; `worker-src blob:` chỉ cần nếu bật Replay (đợt đầu tắt) |
-| Env web | `NEXT_PUBLIC_SENTRY_DSN` (= giá trị `SENTRY_DSN_WEB`, Next chỉ inline biến `NEXT_PUBLIC_*` vào bundle — như `NEXT_PUBLIC_HUB_API_URL`); DSN không bí mật nhưng để trống là no-op |
+| Env web | `NEXT_PUBLIC_SENTRY_DSN` (tên DUY NHẤT, ADR-264; `SENTRY_DSN_WEB` bỏ; Next chỉ inline biến `NEXT_PUBLIC_*` vào bundle — như `NEXT_PUBLIC_HUB_API_URL`); DSN không bí mật nhưng để trống là no-op |
 
 **Test/kiểm thủ công chứng minh secret không lọt (RED trước, giai đoạn 2):**
 1. *Unit:* thay transport Sentry bằng giả; gọi `beforeSend`/`beforeBreadcrumb` với sự kiện chứa `whsec_abc…`, `hk_live_…`, `Authorization`, connection string `…://hk_live_…@…`, email, URL `?token=…#secret` → output không chứa chuỗi nào, URL đã bỏ query/hash.
@@ -516,7 +518,7 @@ Admin chốt cả 8 đề xuất: `trace_id` = `correlationId` bỏ `-`; lấy m
 | 10 Env + docs | **Xong** | `.env.example`, `docs/DEPLOYMENT.md` (§ env), `docs/ERRORS.md`, tài liệu này |
 | 11 Console | **Chưa — 2B** (`StageReason` thêm `cause`/`blame`, waterfall từ `stage_ms`) | `apps/web/**` |
 | 12 Sentry backend | **Xong (2026-10-19, ADR-258)** — `reportUnexpected` một cửa, `@sentry/node` 11.8.0; nối ở móc canonical line (`setUnexpectedHook`), `ServiceExceptionFilter`, outbox relay, `uncaughtException`/`unhandledRejection`; scrub chung `errInfo`/`scrubSecrets`/`scrubDeep`; fingerprint `[svc,cause,class,chặng]` + dedupe + `SENTRY_MAX_PER_MIN`; flush ≤ 2s lúc tắt; không DSN = no-op. **Lệch ADR-251:** một DSN chung (`SENTRY_DSN`) thay vì hai. **Chưa:** metric `hub_sentry_events_total`, `sentry_event_id` trên canonical line, đo RSS có/không SDK (§11.5c) — cần DSN thật | `libs/common/src/sentry.ts`, `libs/common/test/sentry.spec.ts` |
-| 14 Sentry frontend / 15 env web | **Chưa — 2B (apps/web)** | — |
+| 14 Sentry frontend / 15 env web | **Xong (2026-10-19, ADR-264)** — `@sentry/nextjs` 11.4.0 (dòng 11.x như `@sentry/node`; bản ≥ 2 tuần tuổi); MỘT cửa vào SDK (`lib/sentry/init.client.ts`, test khoá); không `NEXT_PUBLIC_SENTRY_DSN` = không `withSentryConfig`, không `import()` SDK (nhánh chết lúc build); `scrubWebEvent`/`scrubBreadcrumb` thuần + dùng chung `scrubSecrets` (test không-lọt); chỉ giữ breadcrumb điều hướng; request chỉ còn method + url bỏ query/userinfo; allowlist tag; dedupe + 10/phút trong bộ nhớ; `dataCollection` tắt hết (SDK 11 đã bỏ `sendDefaultPii`); Replay TẮT; tracing 0.1 (web vitals) chỉ gắn `sentry-trace` vào `/api`,`/auth`; `global-error.tsx` + `(admin)/error.tsx` dùng `StatusScreen`; `HubApiError` mang `requestId`/`cold` -> thẻ `request_id`, `cold`, `frontend_cause` (bỏ lỗi 4xx có chủ đích); source map chỉ upload khi có `SENTRY_AUTH_TOKEN` rồi xoá khỏi build. **Chưa:** lỗi server component (`onRequestError`), `frontend_cause` slow_frontend/suspected_cold_start, kiểm thủ công trên Sentry UI + đo bundle trên Vercel (cần DSN thật), CSP | `apps/web/src/lib/sentry/*`, `instrumentation-client.ts`, `app/global-error.tsx`, `next.config.mjs` |
 | 13 `exposedHeaders` + `x-hub-cold` | **Xong** — `['x-request-id','x-hub-cold']`, không mở rộng origin/credentials; header chỉ ở phản hồi đầu của tiến trình, bỏ qua health/metrics/OPTIONS | `cors.ts`, `cold-start.ts` |
 
 **Chỗ lệch thiết kế (ghi ADR-254/255):**

@@ -759,7 +759,7 @@ webhook-hub/
 ├── docs/
 │   ├── ARCHITECTURE.md            # file này
 │   ├── ROADMAP-14D.md             # lộ trình + DoD từng ngày
-│   └── adr/README.md              # nhật ký quyết định (append-only)
+│   └── adr/                       # nhật ký quyết định (append-only): README = ADR-001..266, NNNN-*.md = từ ADR-267
 ├── apps/
 │   ├── hub-api/                   # NestJS — ingest + REST + Socket.IO        -> Render
 │   │   └── src/modules/{auth,ingest,sources,destinations,subscriptions,events,metrics,realtime}

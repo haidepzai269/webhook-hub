@@ -12,6 +12,7 @@ import { CreateProjectDialog } from "@/components/admin/create-project-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { ErrorState } from "@/components/admin/state";
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { PROJECT_MOBILE_CARD } from "@/components/admin/mobile-card-specs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -177,13 +178,13 @@ export default function ProjectsPage() {
         enableHiding: false,
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="text-right">
+          <div className="text-right max-md:flex">
             {row.original.id !== projectId ? (
               <Button size="sm" variant="outline" onClick={() => setProjectId(row.original.id)}>
                 {t("page.projects.select")}
               </Button>
             ) : (
-              <Button size="sm" variant="ghost" asChild>
+              <Button size="sm" variant="ghost" className="max-md:min-h-10" asChild>
                 <Link href="/dashboard/api-keys">
                   <KeyRound />
                   {t("page.projects.api-keys")}
@@ -217,6 +218,7 @@ export default function ProjectsPage() {
         getRowId={(p) => p.id}
         isLoading={isLoading}
         pageSize={false}
+        mobile={PROJECT_MOBILE_CARD}
         emptyText={t("common.empty")}
       />
       )}

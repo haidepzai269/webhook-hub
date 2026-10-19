@@ -672,8 +672,8 @@ COLD_START_WINDOW_S=60   # request đầu của hub-api trong cửa sổ này: h
 EVENT_LOOP_LAG_P99_MS=200 # gauge hub_event_loop_lag_seconds (đọc mỗi 5s, trong bộ nhớ)
 GROWTH_BURST_FACTOR=5    # growth.window: burst_source khi > factor × đường nền (và ≥ GROWTH_MIN_COUNT=100/60s); còn GROWTH_DUP_RATIO, GROWTH_DLQ_MIN, GROWTH_RETRY_RATIO, GROWTH_BACKLOG_WINDOWS
                          # Log KHÔNG chạm Redis/Postgres thêm (ngân sách R1 giữ nguyên — `apps/hub-api/test/redis-budget.spec.ts`); mọi đồng hồ/bộ đếm ở bộ nhớ
-SENTRY_DSN=             # ADR-258, TẮT khi trống. Admin tự tạo project Sentry (region EU, gói Developer 5k errors) rồi dán DSN vào env của CẢ HAI service Render
-                         # (hub-api và hub-worker dùng CHUNG một DSN; phân biệt bằng tag `svc`). Chỉ lỗi bất ngờ của hub (blame=hub) mới được gửi — §11.1 LOGGING.md.
+SENTRY_DSN=             # ADR-258, TẮT khi trống. Admin tự tạo project Sentry (region EU, gói Developer 5k errors) rồi dán DSN vào env của service Render `hub-all`
+                         # MỘT LẦN: `docker/hub-all.js` truyền nguyên env cho cả hai tiến trình con (hub-api và hub-worker dùng CHUNG một DSN; phân biệt bằng tag `svc`). Chỉ lỗi bất ngờ của hub (blame=hub) mới được gửi — §11.1 LOGGING.md.
 SENTRY_ENVIRONMENT=      # tuỳ chọn (trống -> 'deployed' khi có RENDER)
 SENTRY_RELEASE=          # tuỳ chọn: git sha của bản deploy
 SENTRY_MAX_PER_MIN=10    # trần event/phút/tiến trình; SENTRY_DEDUPE_WINDOW_MS=300000 (cùng fingerprint 1 lần / 5 phút). Đếm trong bộ nhớ, không Redis (R1)
@@ -708,6 +708,15 @@ STORAGE_RECALIBRATE_INTERVAL_MS=86400000 # hub-worker: nhịp hiệu chỉnh (qu
 STORAGE_LOCK_ENABLED=0            # hub-api + hub-worker: 1 = trả 507 khi LOCKED/HARD_LOCKED. MẶC ĐỊNH 0 ở production (E5)
 STORAGE_AUTO_CLEAN_ENABLED=0      # hub-worker (+ hub-api cho câu console): 1 = chạy dọn tự động theo policy. MẶC ĐỊNH 0 (E5)
 SOURCE_LIMIT_PER_PROJECT=20       # hub-api: trần source chưa lưu trữ mỗi project (operator miễn), 409 source_limit
+# --- Cảnh báo hạn mức gói free qua Telegram (LOG-CAUSE 7, ADR-263; MONITORING §7.1) --- hub-worker; cần TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, thiếu = tắt
+QUOTA_CHECK_INTERVAL_MS=900000       # nhịp đo, kẹp 60000–3600000 (mỗi nhịp ~2 lệnh Redis: SET NX khoá + INFO)
+QUOTA_WARN_PCT=80  QUOTA_CRIT_PCT=95 # ngưỡng mức warning / critical
+QUOTA_REPEAT_MS=86400000             # nhắc lại khi mức không đổi, tối thiểu 1 giờ
+QUOTA_NEON_STORAGE_BYTES=            # trần dung lượng Neon; trống = DB_DISK_BUDGET_MB × 1MiB
+QUOTA_UPSTASH_COMMANDS_PER_MONTH=500000 # §5.2
+QUOTA_UPSTASH_MAX_CMD_PER_SEC=200    # kẹp delta bộ đếm INFO giữa hai lần đo (giây × giá trị này); mẫu vượt bị bỏ
+QUOTA_UPSTASH_MAX_GAP_SEC=1800       # trần khoảng thời gian tính kẹp (sau ngủ đêm không nới mức kẹp): mức kẹp tối đa = GAP × MAX_CMD_PER_SEC
+QUOTA_UPSTASH_MEMORY_BYTES=          # CẦN ADMIN XÁC NHẬN số của gói Upstash; trống = không đo dung lượng Redis
 DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078); đổi phải restart worker
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần
                          # WEB_PUBLIC_URL (gốc deep link trong thư) + MAIL_DRIVER/MAIL_FROM/GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN
@@ -763,6 +772,14 @@ WEB_PROXY_SECRET=          # RUNTIME (không phải NEXT_PUBLIC_, không vào bu
                            #        -H 'x-forwarded-for: 6.6.6.6' -H 'x-real-ip: 6.6.6.6' -d '{"email":"x@y.vn","name":"x","password":"..."}'
                            #   3. khoá mới phải là rl:reg:ip:<IP THẬT của máy bạn>, KHÔNG phải rl:reg:ip:6.6.6.6.
                            #   Thấy 6.6.6.6 = Vercel không ghi đè header -> báo lại, đừng dựa vào giới hạn theo IP.
+NEXT_PUBLIC_SENTRY_DSN=    # ADR-264. Sentry cho console. TRỐNG = tắt hẳn (không SDK trong bundle). DSN trình duyệt vốn công khai (nằm trong JS bundle) —
+                           # nên tạo một *Client Key* riêng trong CÙNG project Sentry của hub (đặt rate limit cho key đó, thu hồi độc lập) thay vì dùng lại key của Render.
+SENTRY_ENVIRONMENT=        # tuỳ chọn (trống -> 'deployed' khi build trên Vercel)
+SENTRY_RELEASE=            # tuỳ chọn (trống -> VERCEL_GIT_COMMIT_SHA do Vercel đặt sẵn)
+SENTRY_TRACES_SAMPLE_RATE_WEB= # tuỳ chọn 0–1 (web vitals); trống -> 0.1 deployed. Tốn span của hạn mức Sentry
+SENTRY_AUTH_TOKEN=         # BUILD-ONLY, SECRET (Vercel -> Environment Variables, chỉ tick "Build"). Có thì upload source map rồi xoá khỏi build; thiếu thì build vẫn xanh, không upload.
+SENTRY_ORG=                # slug org Sentry (chỉ khi upload source map)
+SENTRY_PROJECT_WEB=        # slug project Sentry (chỉ khi upload source map; cùng project với hub-api/hub-worker)
 NEXT_PUBLIC_DEMO_SIMULATE= # chỉ 'true' ở LOCAL (ADR-027). Deployed: để trống
 NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DEMO_SIMULATE=true: seed key SePay cho nút giả lập. KHÔNG BAO GIỜ đặt trên Vercel
 ```

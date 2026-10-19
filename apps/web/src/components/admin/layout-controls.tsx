@@ -1,22 +1,22 @@
 "use client";
 
-import { Settings } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { IconButton } from "@/components/admin/icon-button";
 import { type FontKey, fontOptions } from "@/lib/fonts/registry";
 import { useT } from "@/lib/i18n/use-t";
 import type { ContentLayout, NavbarStyle, SidebarCollapsible, SidebarVariant } from "@/lib/preferences/layout";
 import { THEME_PRESET_OPTIONS, type ThemeMode, type ThemePreset } from "@/lib/preferences/theme";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-/** Bảng tuỳ chỉnh giao diện của Studio Admin; nhãn theo namespace `layout.*` (lib/i18n/messages/layout.ts). */
-export function LayoutControls() {
+/**
+ * Nội dung bảng tuỳ chỉnh bố cục của Studio Admin; nhãn theo namespace `layout.*` (lib/i18n/messages/layout.ts).
+ * ADR-266: không còn nút bánh răng riêng — `DisplaySettings` mở bảng này từ mục "Tuỳ chỉnh bố cục…".
+ */
+export function LayoutControlsPanel() {
   const t = useT();
   const { values, resolvedThemeMode, setPreference, resetPreferences } = usePreferencesStore(
     useShallow((state) => ({
@@ -34,11 +34,6 @@ export function LayoutControls() {
     };
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <IconButton size="icon" variant="outline" icon={<Settings />} label={t("header.layout-controls")} />
-      </PopoverTrigger>
-      <PopoverContent align="end">
         <div className="flex flex-col gap-5">
           <div className="space-y-1.5">
             <h4 className="font-medium text-sm leading-none">{t("layout.title")}</h4>
@@ -172,7 +167,5 @@ export function LayoutControls() {
             </Button>
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
   );
 }

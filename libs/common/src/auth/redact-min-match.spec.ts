@@ -9,4 +9,11 @@ describe('redact — độ dài khớp tối thiểu của PATTERNS', () => {
       expect(scrubSecrets(sample)).not.toBe(sample);
     }
   });
+
+  it('khoá Anthropic / Google và cookie session= bị che', () => {
+    const k = 'AIzaFAKE' + 'B'.repeat(35);
+    const out = scrubSecrets(`a sk-ant-api03-FAKEFAKEFAKE1234 b ${k} c session=FAKEVALUE123456; Path=/ d connect.sid=s%3AFAKEVALUE123`);
+    expect(out).not.toMatch(/FAKEFAKEFAKE1234|BBBBBBBB|FAKEVALUE123456|FAKEVALUE123/);
+    expect(out).toContain('session=***');
+  });
 });

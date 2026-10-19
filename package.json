@@ -2,6 +2,9 @@
   "name": "webhook-hub-monorepo",
   "version": "1.0.0",
   "private": true,
+  "overrides": {
+    "rollup": "4.64.0"
+  },
   "workspaces": [
     "apps/*",
     "!apps/catchnet",
@@ -42,6 +45,7 @@
     "demo:rehearse": "ts-node --transpile-only -P tsconfig.json verify/cli/demo.ts rehearse",
     "demo:warm": "ts-node --transpile-only -P tsconfig.json verify/cli/demo.ts warm",
     "verify:selftest": "ts-node --transpile-only -P tsconfig.json verify/scenarios/stack-isolation.ts",
+    "adr:new": "ts-node --transpile-only -P tsconfig.json scripts/adr-new.ts",
     "verify:gates": "ts-node --transpile-only -P tsconfig.json verify/cli/gates.ts",
     "verify:e2e:auth": "ts-node --transpile-only -P tsconfig.json verify/scenarios/auth-e2e.ts",
     "hub-sim": "ts-node --transpile-only -P tsconfig.json tools/hub-sim/cli.ts",
