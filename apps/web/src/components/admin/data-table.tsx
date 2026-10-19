@@ -27,7 +27,7 @@ import { SearchInput } from "@/components/admin/search-input";
 import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsMobileState } from "@/hooks/use-mobile";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -80,8 +80,10 @@ export function DataTable<T extends RowData>({
   mobile,
 }: DataTableProps<T>) {
   const t = useT();
-  const isMobile = useIsMobile();
-  const cards = Boolean(mobile) && isMobile;
+  // Có `mobile`: chưa đo viewport thì vẽ khung chờ (không nháy bảng rộng rồi mới sang thẻ); không có `mobile` thì như cũ.
+  const viewport = useIsMobileState();
+  const measuring = Boolean(mobile) && viewport === undefined;
+  const cards = Boolean(mobile) && viewport === true;
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
@@ -167,7 +169,13 @@ export function DataTable<T extends RowData>({
         </div>
       </div>
 
-      {cards && cardPlan ? (
+      {measuring ? (
+        <div aria-busy="true" className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-24 w-full rounded-lg" />
+          ))}
+        </div>
+      ) : cards && cardPlan ? (
         <ul className={`space-y-2 transition-opacity ${isStale ? "opacity-60" : ""}`}>
           {isLoading && !data ? (
             [0, 1, 2, 3].map((i) => (

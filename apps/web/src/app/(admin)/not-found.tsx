@@ -13,11 +13,11 @@ export default async function AdminNotFound() {
   const t = await getT();
   return (
     <main>
-    <StatusScreen icon={FileQuestion} code="404" title={t("mobile.notfound.title")} description={t("mobile.notfound.desc")}>
-      <Button asChild className="min-h-10">
-        <Link href="/dashboard">{t("mobile.guard.home")}</Link>
-      </Button>
-    </StatusScreen>
+      <StatusScreen icon={FileQuestion} code="404" title={t("mobile.notfound.title")} description={t("mobile.notfound.desc")}>
+        <Button asChild className="min-h-10">
+          <Link href="/dashboard">{t("mobile.guard.home")}</Link>
+        </Button>
+      </StatusScreen>
     </main>
   );
 }

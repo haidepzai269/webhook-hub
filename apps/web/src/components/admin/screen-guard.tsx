@@ -50,14 +50,17 @@ export function ScreenGuard({ minWidth, children }: { minWidth: number; children
   const path = usePathname();
   const width = useViewportWidth();
   const shownWidth = useDebounced(width, 400);
-  const [override, setOverride] = useState(false);
+  // null = chưa đọc sessionStorage: coi như đang đo, để không chớp màn xin lỗi rồi mới vào trang khi đã "Vẫn tiếp tục".
+  const [override, setOverride] = useState<boolean | null>(null);
   useEffect(() => {
     try {
       setOverride(sessionStorage.getItem(guardStorageKey(path)) === "1");
-    } catch {}
+    } catch {
+      setOverride(false);
+    }
   }, [path]);
 
-  const state = decideGuard(width, minWidth, override);
+  const state = decideGuard(override === null ? null : width, minWidth, override === true);
   if (state === "measuring") return <Skeleton className="h-64 w-full rounded-xl" aria-hidden />;
   if (state === "ok") return <>{children}</>;
 
