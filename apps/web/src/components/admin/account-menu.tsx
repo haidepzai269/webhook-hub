@@ -8,8 +8,7 @@ import { usePathname } from "next/navigation";
 
 import { BellRing, FolderKanban, LogOut, Settings, Settings2 } from "lucide-react";
 
-import { LanguageSwitcher } from "@/components/admin/language-switcher";
-import { ThemeSwitcher } from "@/components/admin/theme-switcher";
+import { DisplaySettings } from "@/components/admin/display-settings";
 import { AlertBell } from "@/components/alerts/alert-bell";
 import { initials } from "@/components/flow/brand-fallback";
 import { Button } from "@/components/ui/button";
@@ -142,8 +141,7 @@ export function AccountTopBar({ demo = false }: { demo?: boolean }) {
         <div className="flex items-center gap-2">
           {/* Chuông tự ẩn với người không xem được cảnh báo (và ở demo — chưa có /auth/me). */}
           <AlertBell />
-          <LanguageSwitcher />
-          <ThemeSwitcher />
+          <DisplaySettings />
           <AccountMenu demo={demo} />
         </div>
       </div>

@@ -8,10 +8,8 @@ import { Menu } from "lucide-react";
 import { AccountMenu } from "@/components/admin/account-menu";
 import { AppSidebar } from "@/components/admin/app-sidebar";
 import { AuthGuard } from "@/components/admin/auth-guard";
-import { LanguageSwitcher } from "@/components/admin/language-switcher";
-import { LayoutControls } from "@/components/admin/layout-controls";
+import { DisplaySettings } from "@/components/admin/display-settings";
 import { RealtimeBadge } from "@/components/admin/realtime-badge";
-import { ThemeSwitcher } from "@/components/admin/theme-switcher";
 import { AlertBanner } from "@/components/alerts/alert-banner";
 import { AlertBell } from "@/components/alerts/alert-bell";
 import { AlertNotifier } from "@/components/alerts/alert-notifier";
@@ -68,14 +66,10 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                   <RealtimeBadge />
-                  {/* Tuỳ chỉnh bố cục là việc của máy tính — ẩn dưới md cho thanh trên không tràn ở 360px. */}
-                  <div className="max-md:hidden">
-                    <LayoutControls />
-                  </div>
                   {/* CB4/QT6: chuông cảnh báo — operator + owner (component tự ẩn với người khác); "Xem tất cả" -> /alerts. */}
                   <AlertBell />
-                  <LanguageSwitcher />
-                  <ThemeSwitcher />
+                  {/* ADR-266: Ngôn ngữ + Sáng/Tối + (từ md) Tuỳ chỉnh bố cục gộp trong menu bánh răng — hiện cả trên mobile. */}
+                  <DisplaySettings withLayout />
                   {/* ADR-237: menu tài khoản — Tất cả dự án, Cảnh báo, Cài đặt (tầng tài khoản, không trong sidebar dự án). */}
                   <AccountMenu />
                 </div>
