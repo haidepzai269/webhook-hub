@@ -17,7 +17,7 @@ export async function routeEventToSubscriptions(
   repoTx: TenantScopedRepository,
   tenantId: string,
   /** PK5 khoá 4: `verified: false` -> chỉ subscription `acceptUnverified`. Vắng = true (event của hub, dữ liệu cũ). */
-  evt: { id: string; type: string; sourceId: string | null; correlationId: string; verified?: boolean },
+  evt: { id: string; type: string; sourceId: string | null; correlationId: string; verified?: boolean; traceparent?: string },
   log: Pick<typeof logger, 'info'> = logger,
 ): Promise<EventReceivedNotice['deliveries']> {
   const routed: EventReceivedNotice['deliveries'] = [];
@@ -42,15 +42,20 @@ export async function routeEventToSubscriptions(
     await tx.outbox.create({
       data: {
         topic: DELIVERY_REQUESTED_TOPIC,
-        payload: buildDeliveryMessage({
-          deliveryId: delivery.id,
-          tenantId,
-          attemptGeneration: 1,
-          attemptCount: 0,
-          correlationId: String(evt.correlationId),
-          destinationId: sub.destinationId ?? sub.destination?.id,
-          rateLimitRps: rps ?? undefined,
-        }) as unknown as Prisma.InputJsonValue,
+        payload: {
+          ...buildDeliveryMessage({
+            deliveryId: delivery.id,
+            tenantId,
+            attemptGeneration: 1,
+            attemptCount: 0,
+            correlationId: String(evt.correlationId),
+            destinationId: sub.destinationId ?? sub.destination?.id,
+            rateLimitRps: rps ?? undefined,
+          }),
+          // LOGGING.md §4: ngữ cảnh trace của chặng normalize nằm trong JSON của outbox; relay đưa nó vào HEADER AMQP và BỎ khỏi
+          // body — message delivery trên dây vẫn đúng 7 khoá (S1-1). Event `hub.*` (emitHubEvent) không có -> không thêm.
+          ...(evt.traceparent ? { traceparent: evt.traceparent } : {}),
+        } as unknown as Prisma.InputJsonValue,
       },
     });
     routed.push({

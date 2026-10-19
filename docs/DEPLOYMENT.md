@@ -658,6 +658,20 @@ HEARTBEAT_URL=          # ADR-248, TẮT mặc định. URL dead-man's switch (H
                          # mỗi HEARTBEAT_INTERVAL_MS CHỈ KHI vòng outbox relay vừa làm việc thành công (≤45s). Worker kẹt/chết -> hết ping
                          # -> dịch vụ ngoài báo. Lỗi mạng chỉ log, timeout 5s. URL là bí mật (đừng commit). Chế độ hub-all cũng đọc biến này.
 HEARTBEAT_INTERVAL_MS=60000 # chu kỳ ping; đặt NHỎ HƠN "period" của check bên Healthchecks.io (kèm grace)
+LOG_LEVEL=info          # deployed = info; local = debug. Log là JSON một dòng (pino), mỗi sự kiện then chốt đúng MỘT dòng `ingest.done`/
+                         # `normalize.done`/`delivery.attempt`/`growth.window` có `cause`, `blame`, `stage_ms`, `trace_id` — xem docs/LOGGING.md §9 (ADR-250/254/255)
+LOG_SUCCESS_SAMPLE=     # 0..1; trống = deployed 0.1 (Render đặt RENDER) / local 1. Chỉ dòng THÀNH CÔNG bị lấy mẫu; lỗi, chậm, hoãn, DEAD luôn ghi.
+                         # Số đếm không phụ thuộc mẫu: `hub_log_events_total{svc,msg,cause}`. Ước 10 req/s × 10% ≈ 3,5 MB/giờ (log Render free)
+LOG_DEDUPE_WINDOW_MS=30000 # gộp dòng lặp ≤ 1 dòng/cửa sổ/(cause, source|destination), dòng sau mang `sampled.suppressed`
+SLOW_INGEST_MS=500       # ngưỡng "chậm" — một nơi duy nhất libs/common/src/slow-thresholds.ts; vượt = ghi đủ + cause slow.*
+SLOW_DELIVERY_MS=3000    # chặng gọi đích
+SLOW_NORMALIZE_MS=1000
+SLOW_QUEUE_WAIT_MS=5000  # chờ hàng đợi QUÁ hạn (đã trừ chờ cố ý của retry)
+SLOW_RELAY_LAG_MS=3000   # tuổi dòng outbox lúc relay
+COLD_START_WINDOW_S=60   # request đầu của hub-api trong cửa sổ này: header `x-hub-cold: 1` (console đọc để phân biệt Render vừa thức dậy) + slow.cold_start
+EVENT_LOOP_LAG_P99_MS=200 # gauge hub_event_loop_lag_seconds (đọc mỗi 5s, trong bộ nhớ)
+GROWTH_BURST_FACTOR=5    # growth.window: burst_source khi > factor × đường nền (và ≥ GROWTH_MIN_COUNT=100/60s); còn GROWTH_DUP_RATIO, GROWTH_DLQ_MIN, GROWTH_RETRY_RATIO, GROWTH_BACKLOG_WINDOWS
+                         # Log KHÔNG chạm Redis/Postgres thêm (ngân sách R1 giữ nguyên — `apps/hub-api/test/redis-budget.spec.ts`); mọi đồng hồ/bộ đếm ở bộ nhớ
 WORKER_METRICS_PORT=9101 # hub-worker trên Render là background worker không nhận traffic ngoài -> đặt 0 nếu không scrape
 INGEST_RATE_LIMIT_PER_MIN=100 # trần request/phút/source (S3-4)
 EDGE_PENALTY_404_THRESHOLD=20  # hub-api, hộp phạt (EG2, ADR-177): số 404 do sourceKey KHÔNG tồn tại / 60s / IP thì chặn

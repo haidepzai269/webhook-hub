@@ -1,5 +1,6 @@
 import * as http from 'http';
 import { bearerAuthorized } from '@hub/crypto';
+import { GrowthWindow, resolveGrowth, setCanonicalObserver, slowThresholds } from '@hub/common';
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 /**
@@ -31,7 +32,7 @@ export const unverifiedSkipped = new Counter({
 export const deliveriesTotal = new Counter({
   name: 'hub_deliveries_total',
   help: 'Số lần gửi tới đích theo loại đích và kết quả',
-  labelNames: ['destination_type', 'status'] as const,
+  labelNames: ['destination_type', 'status', 'cause'] as const,
   registers: [workerRegistry],
 });
 
@@ -314,4 +315,66 @@ export const cleanupSuggestedEmitted = new Counter({
   help: 'Số event hub.project.cleanup_suggested đã phát (qua outbox)',
   labelNames: ['reason'] as const,
   registers: [workerRegistry],
+});
+
+// ---- LOGGING.md §7 (ADR-250): metric nối với log — nhãn `cause` là enum đóng (~33 giá trị), KHÔNG tenant/source/destination ----
+
+/** Mỗi canonical line ĐÃ GHI hoặc BỊ LẤY MẪU BỎ đều đếm ở đây — số trên Grafana không phụ thuộc mẫu log. */
+export const logEventsTotal = new Counter({
+  name: 'hub_log_events_total',
+  help: 'Số dòng canonical log (ghi hoặc bị lấy mẫu bỏ) theo svc, msg, cause',
+  labelNames: ['svc', 'msg', 'cause'] as const,
+  registers: [workerRegistry],
+});
+
+export const slowTotal = new Counter({
+  name: 'hub_slow_total',
+  help: 'Số lần vượt ngưỡng chậm theo nguyên nhân slow.* (ngưỡng SLOW_*_MS)',
+  labelNames: ['svc', 'cause'] as const,
+  registers: [workerRegistry],
+});
+
+export const stageDuration = new Histogram({
+  name: 'hub_stage_duration_seconds',
+  help: 'Thời gian từng chặng (queue_wait, outbox_lag, deliver_prep, dest_http, db_persist, adapter, db_read, db_write…)',
+  labelNames: ['svc', 'stage'] as const,
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+  registers: [workerRegistry],
+});
+
+/** Thời gian message nằm trong hàng đợi QUÁ hạn (đã trừ chờ cố ý của tầng retry/hoãn). `queue` là tên hàng đợi cố định. */
+export const queueWaitSeconds = new Histogram({
+  name: 'hub_queue_wait_seconds',
+  help: 'Thời gian message chờ trong hàng đợi quá hạn trước khi consumer nhận (không tính chờ cố ý của tầng retry)',
+  labelNames: ['queue'] as const,
+  buckets: [0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 15, 60],
+  registers: [workerRegistry],
+});
+
+/** p99 độ trễ event loop (giây) — cờ `slow.hub_cpu`; đọc mỗi nhịp 5s, trong bộ nhớ. */
+export const eventLoopLag = new Gauge({
+  name: 'hub_event_loop_lag_seconds',
+  help: 'p99 độ trễ event loop của tiến trình (perf_hooks.monitorEventLoopDelay)',
+  registers: [workerRegistry],
+});
+
+export const growthTotal = new Counter({
+  name: 'hub_growth_total',
+  help: 'Số cửa sổ growth.window kích hoạt theo nguyên nhân growth.*',
+  labelNames: ['cause'] as const,
+  registers: [workerRegistry],
+});
+
+/** `growth.window` của hub-worker (retry_storm, dlq_swell, backlog): tổng hợp trong bộ nhớ từ chính các canonical line; ticker 60s ở main.ts. */
+export const workerGrowth = new GrowthWindow(resolveGrowth(), slowThresholds().queueWaitMs);
+
+setCanonicalObserver((b) => {
+  if (b.svc !== 'hub-worker') return;
+  workerGrowth.observe(b);
+  logEventsTotal.inc({ svc: b.svc, msg: String(b.record.msg), cause: b.cause ?? '' });
+  if (b.slowCause) slowTotal.inc({ svc: b.svc, cause: b.slowCause });
+  for (const [stage, ms] of Object.entries(b.stageMs)) if (typeof ms === 'number' && ms > 0) stageDuration.observe({ svc: b.svc, stage }, ms / 1000);
+  const queue = b.record.msg === 'delivery.attempt' ? 'q.delivery.main' : b.record.msg === 'normalize.done' ? 'q.normalize' : '';
+  if (queue && typeof b.stageMs.queue_wait === 'number') queueWaitSeconds.observe({ queue }, b.stageMs.queue_wait / 1000);
+  if (b.record.msg === 'growth.window' && b.cause) growthTotal.inc({ cause: b.cause });
 });

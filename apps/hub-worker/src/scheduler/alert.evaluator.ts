@@ -24,6 +24,7 @@ import {
   SILENT_BASELINE_WINDOW_MS,
   STREAK_QUIET_CLOSE_MS,
   SubjectLifecycle,
+  alertRuleCause,
   evalAuthRejected,
   evalCircuitOpen,
   evalClientError,
@@ -518,7 +519,8 @@ export class AlertEvaluator implements OnModuleInit, OnModuleDestroy {
 
   private transitioned(alert: AlertRow, rule: AlertRuleCode, to: 'OPEN' | 'RESOLVED') {
     alertTransitions.inc({ rule, to });
-    logger.info({ tenantId: alert.tenantId, alertId: alert.id, rule, subjectId: alert.subjectId, to }, 'Cảnh báo đổi trạng thái');
+    // LOGGING.md §1/§7: `cause` của luật (bảng ánh xạ cạnh causes.ts) để nối cảnh báo <-> log/metric theo cùng một từ vựng.
+    logger.info({ tenantId: alert.tenantId, alertId: alert.id, rule, cause: alertRuleCause(rule) ?? undefined, subjectId: alert.subjectId, to }, 'Cảnh báo đổi trạng thái');
     const notice = toAlertChangedNotice({ id: alert.id, tenantId: alert.tenantId, rule, state: to });
     // BB-2: Redis chỉ là đường realtime — lỗi (đồng bộ hay bất đồng bộ) bị nuốt, trạng thái trong Postgres đã COMMIT.
     // Mất một thông báo thì chuông vẫn poll 30s (§5.3).

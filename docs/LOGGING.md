@@ -1,6 +1,6 @@
 # LOGGING — log phải tự nói "chậm / sai / tăng nhanh vì đâu"
 
-> Trạng thái: **THIẾT KẾ (giai đoạn 1, ADR-250)** — chưa có dòng code nào theo tài liệu này. Giai đoạn 2 ở §10.
+> Trạng thái: **ĐÃ TRIỂN KHAI giai đoạn 2A (2026-10-18, ADR-254/255)** cho log + `cause` + trace_id + metric + `x-hub-cold` (§1–§10, bước 0–11 và 13). **Chưa làm (đợt 2B):** Sentry backend/frontend (§11, bước 12/14/15) và console (§8, bước 11). Chi tiết đã làm / còn lại / chỗ lệch thiết kế: **§12**. Các mục §1 (Audit) mô tả hiện trạng TRƯỚC giai đoạn 2A.
 > Mục tiêu (Admin): nhìn một dòng log là biết **sơ bộ** do đâu (triage) để quyết định có đáng đào sâu bằng trace không.
 > Log là tầng 1 (rẻ, luôn bật); metric là tầng 2 (đếm theo `cause`); trace (OpenTelemetry, sau) là tầng 3 (đào sâu một ca).
 > Mâu thuẫn với `ARCHITECTURE.md` → ARCHITECTURE.md thắng.
@@ -191,6 +191,7 @@ Chuẩn bị OTel (đợt sau): `trace_id/span_id` định dạng W3C ⇒ OTel S
 - **Cấm tuyệt đối trong log:** `body_raw`/body event, `data` của event, secret (`whsec_`, `hk_live_…`, signing secret, token), **giá trị** header chữ ký, số tài khoản, URL đích có query/token. Cho phép: tên header, độ dài, `sha256` cắt 8 hex để đối chiếu (như DLQ `delivery.consumer.ts:76`), `bytes`, host của đích (không path/query).
 - `err.msg` luôn qua `scrubSecrets`; `redact` của pino (`logger.ts:13`) là lưới an toàn thứ hai — **không** thay cho việc không đưa dữ liệu vào. Lỗi Prisma chứa tham số truy vấn: chỉ lấy `code` + tên model, không lấy `message` nguyên văn của `PrismaClientKnownRequestError` cho `err.msg`.
 - Test hợp đồng (§9) có một "bãi mìn": request chứa `whsec_…`, chuỗi giống số tài khoản, header chữ ký → quét toàn bộ output log, không được xuất hiện.
+- **Đã triển khai (review 2A):** `formatters.log` của pino scrub đệ quy chuỗi trong object/mảng (sâu ≤ 8 — phần sâu hơn thành `'[deep]'`, ≤ 60 phần tử, ≤ 200 khoá — phần dư có dấu `[truncated N]`; `Error` thô -> `{class, message, code, stack}` đã scrub (Prisma chỉ code + model/meta), Buffer/Map/Set thành nhãn, ADR-256); khoá object, `class`/`code` của lỗi cũng scrub; `Error.cause` giữ ở `causedBy` (có trần sâu); nút không đọc được thành `'[unserializable]'` — logging không bao giờ ném; `logMethod` cũng không ném (retry với chuỗi an toàn) và scrub `msg` khi đối số đầu là `Error`; **lưu ý đọc log:** `err.type` của Error thô là `Object` (serializer pino ghi đè) — tên lớp ở `err.class`; bindings của `logger.child()`/`setBindings()` và đối số format object (`'m %j', {…}`) được scrub (`createLogger` bọc `child`/`setBindings` một lần ở logger gốc); mọi lỗi đi qua `errInfo`; URL trong `err.msg` chỉ giữ host (bỏ userinfo/path/query). Giới hạn: bí mật không theo mẫu (`whsec_`, `hk_`, Bearer, số dài) nằm trong văn bản tự do thì không phát hiện được — nên không đưa dữ liệu vào log ngay từ đầu.
 - Mặc định `LOG_LEVEL`: local=`debug`, deployed=`info`. `debug` không bao giờ có trong đường nóng production.
 
 ---
@@ -202,11 +203,29 @@ Chuẩn bị OTel (đợt sau): `trace_id/span_id` định dạng W3C ⇒ OTel S
 | Thành công lưu lượng cao | `ingest.done`/`delivery.attempt` thành công: **lấy mẫu** `LOG_SUCCESS_SAMPLE` (mặc định 0.1 deployed, 1 local) + **đếm** thay vì ghi (metric đã có). **Lỗi, chậm, hoãn, DEAD: luôn ghi** |
 | Bão log lặp | Gộp theo `(cause, source_id\|destination_id)` ≤ 1 dòng / `LOG_DEDUPE_WINDOW_MS` (mặc định 30s), kèm `suppressed: n` — đúng cách normalize đã làm (`normalize.consumer.ts:191-194`). Bộ nhớ trần (LRU ≤ 1000 khoá) |
 | Request bị chặn trong ban | **không** ghi từng request; `growth.window` + `suppressed` đủ (đã có metric `hub_ingest_penalty_blocked_total`) |
-| Dung lượng log Render free | Dòng thành công ~300–400 byte; ước 10 req/s × 10% ≈ 3.5 MB/giờ. Edge access log đã có (`DEPLOYMENT.md:164`) — **không** nhân đôi thông tin đó trong app log |
+| Dung lượng log Render free | Dòng thành công ~300–400 byte (đo 2026-10-19: `ingest.done` ≈ 430 B, `delivery.attempt` ≈ 585 B — §6.1); ước 10 req/s × 10% ≈ 3.5 MB/giờ. Edge access log đã có (`DEPLOYMENT.md:164`) — **không** nhân đôi thông tin đó trong app log |
 | Upstash/Redis quota | Log **không** chạm Redis. Lấy mẫu/dedupe/cờ cold-start/event-loop đều trong bộ nhớ |
 | DB | Log **không** truy vấn DB để làm giàu |
 | Đồng bộ | pino ghi đồng bộ stdout; nếu đo thấy ảnh hưởng p95 thì `pino.destination({ sync:false })` — quyết bằng số liệu local (k6), không đoán |
 
+
+### 6.1 Đo k6 trước/sau giai đoạn 2A (2026-10-19, máy công ty, LOCAL hubv, không qua tunnel)
+
+TRƯỚC = master `62a2545`, SAU = `feat/log-cause` `3daaac1` (đã có scrubDeep ADR-256). `k6/ingest-github.js` 10 → 50 → 100 RPS × 60 s (6.900 request, 38,33 RPS TB, 0% lỗi), 2 lượt mỗi ô, load 1,9–3,0 trên máy 12 CPU / 31 GB. Cấu hình A: hubv mặc định (`NODE_ENV=development`, Prisma in mọi `prisma:query`, gấp > 8 lần log pino). Cấu hình B: `NODE_ENV=test` (Prisma chỉ log `error`, còn lại đúng log pino).
+
+| Ingest (ms, lượt 1 / lượt 2) | p50 | p95 | p99 |
+|---|---|---|---|
+| A TRƯỚC | 11,15 / 8,67 | 20,28 / 19,22 | 25,85 / 24,22 |
+| A SAU | 11,56 / 12,35 | 20,24 / 19,71 | 23,58 / 22,78 |
+| B TRƯỚC | 12,35 / 12,01 | 19,44 / 19,01 | 22,69 / 21,71 |
+| B SAU | 11,65 / 11,70 | 20,79 / 19,22 | 23,82 / 22,78 |
+
+- p95 SAU − TRƯỚC: A ≈ 0 → +0,5 ms; B +0,2 → +1,3 ms. Hai lượt cùng bản đã lệch ≈ 1 ms, nên **không tách được khỏi nhiễu**. Ngưỡng p95 < 200 ms đạt với biên lớn.
+- Đường giao (`delivery-e2e.js`, 30 RPS × 60 s, cấu hình A): e2e p95 1189,5 → 1188 ms, giao p95 657 → 647 ms, `hub_delivery_handle_seconds` TB 83 → 85 ms. Trong nhiễu; phần lớn e2e là `outbox_lag`.
+- Log pino (local, `LOG_SUCCESS_SAMPLE=1`): hub-api 38 → 76 dòng/s, 327 → 431 B/dòng; hub-worker 75 → 112 dòng/s, 304 → 403 B/dòng (thêm `ingest.done`, `normalize.done`). Deployed lấy mẫu 10% nên phần thêm nhỏ hơn nhiều.
+- **Kết luận:** ở tải này **chưa cần** `pino.destination({ sync:false })`. Muốn khẳng định chênh ≈ 1 ms ở cấu hình B thì đo ở tải > 100 RPS.
+- **Ước lượng (không đo):** dòng `fail.dest_*` ≈ 800–950 B (dòng thành công 585 B + `cause`/`blame`/`err`). Đích hỏng ở 1000 evt/s ≈ 0,8–0,95 MB/s ≈ 3 GB/giờ ở worker, chưa tính retry (tới 6 lần thử mỗi event). Hạn mức log Render: **chưa tra**.
+- Số thô: scratchpad phiên máy công ty (`before*/after*.k6.txt`), không lưu vào repo.
 ---
 
 ## 7. Nối với metrics
@@ -475,3 +494,38 @@ Kết quả: bảng Sentry lọc theo tag `frontend_cause` ∈ {`cold_start`, `s
 3. *E2E (Playwright, nếu repo có) hoặc thủ công:* mở console → tạo endpoint để hiện `SecretOnce` và mở chi tiết sự kiện có payload → gây một lỗi JS có chủ đích (nút ẩn `?__throw=1` chỉ ở local) → **chặn request tới `*.ingest.*sentry.io`**, lưu envelope → `grep` toàn envelope tìm secret vừa hiện, giá trị payload, email: **không thấy**. Lặp lại với Replay bật + `replaysOnErrorSampleRate:1` (cấu hình thử) và xác nhận vùng `data-sentry-block` là placeholder rỗng trong replay payload — **chỉ chạy ở local, không bật ở deployed**.
 4. *Thủ công trên Sentry UI (sau deploy thử):* mở một issue frontend, xem Breadcrumbs / Request / URL / Tags: không có secret, không query/hash.
 5. *CORS:* trên deployed, một fetch từ console tới hub-api đọc được `x-request-id`; origin lạ **không** (không mở rộng CORS).
+
+---
+
+## 12. Trạng thái triển khai giai đoạn 2A (2026-10-18)
+
+Admin chốt cả 8 đề xuất: `trace_id` = `correlationId` bỏ `-`; lấy mẫu dòng thành công 10% deployed / 100% local; ngưỡng chậm ingest 500 ms, delivery 3 s, queue_wait 5 s (env, một file); replay = trace mới + `replay_of`; header `x-hub-cold` (backend làm đợt này, frontend đọc ở 2B); `exposedHeaders`.
+
+| Bước §10 | Trạng thái | Ở đâu |
+|---|---|---|
+| 0 Test hợp đồng | **Xong** | `apps/hub-api/test/log-contract.spec.ts`, `log-landmine.spec.ts`, `cold-start.spec.ts`; `apps/hub-worker/test/log-contract.spec.ts`; `libs/common/test/{causes,log-line,trace-context,growth-window}.spec.ts` |
+| 1 `causes.ts`, `slow-thresholds.ts`, `log-line.ts`, `trace-context.ts` | **Xong** | `libs/common/src/` (+ `growth-window.ts`, `event-loop.ts`); `svc` bằng `mixin` + `setServiceName()` (lệch: không phải `base` — ADR-254) |
+| 2 Ingest — `ingest.done` mọi outcome | **Xong**, kể cả từ chối (chữ ký, nguồn lạ/tắt/lệch provider, 413/414/405, hộp phạt IP+cặp+gate, 429, 507, unverified, thiếu khoá chống trùng), body-parser 4xx, trùng, lỗi DB | `ingest.service.ts`, `body-parsers.ts`, `penalty-gate.ts` |
+| 3 `traceparent`/`ingestedAt` vào payload outbox | **Xong** | `OutboxPayload` (`types.ts`) |
+| 4 Relay đóng dấu | **Xong** — `properties.timestamp` (ms), `x-outbox-age-ms`, `traceparent`, `x-replay-of`; body delivery giữ 7 khoá (ADR-255) | `outbox.relay.ts` |
+| 5 Normalize | **Xong** — `normalize.done`, `queue_wait`, tách `wrong.schema_mismatch` / `fail.hub_unknown` / `fail.poison_message` | `normalize.consumer.ts`, `route-event.ts` |
+| 6 Delivery + circuit | **Xong** — `delivery.attempt` mọi nhánh (thất bại còn retry có `http_status`, `err`, `stage_ms.dest_http`, `attempt`, `destination_id`), `x-due-at`, `traceparent` giữ qua retry và gửi ra đích, `fail.exhausted` kèm `last_cause`; circuit OPEN ghi `trigger_cause` | `delivery.consumer.ts`, `webhook.sender.ts`, `circuit-breaker.service.ts` |
+| 7 `growth.window` + cause cho alert/storage | **Xong** (burst_source, dup_flood, retry_storm, dlq_swell, backlog); `alertRuleCause()` + `cause` ở log đổi trạng thái cảnh báo và nấc dung lượng. **Chưa:** `growth.storage` theo byte/giờ (cần số đo mới); `queue depth` thật của broker (backlog suy từ `queue_wait`/`outbox_lag` ở các dòng log) | `growth-window.ts`, `alert.evaluator.ts`, `storage-alerts.ts` |
+| 8 Metric | **Xong** — nhãn `cause` ở `hub_ingest_requests_total`, `hub_deliveries_total`; mới: `hub_log_events_total`, `hub_slow_total`, `hub_stage_duration_seconds`, `hub_queue_wait_seconds`, `hub_event_loop_lag_seconds`, `hub_growth_total` | `metrics.ts` hai app |
+| 9 Event-loop monitor | **Xong** — đọc mỗi 5 s (timer `unref`, trong bộ nhớ) | `event-loop.ts`, `main.ts` hai app |
+| 10 Env + docs | **Xong** | `.env.example`, `docs/DEPLOYMENT.md` (§ env), `docs/ERRORS.md`, tài liệu này |
+| 11 Console | **Chưa — 2B** (`StageReason` thêm `cause`/`blame`, waterfall từ `stage_ms`) | `apps/web/**` |
+| 12 Sentry backend / 14 frontend / 15 env | **Chưa — 2B** | — |
+| 13 `exposedHeaders` + `x-hub-cold` | **Xong** — `['x-request-id','x-hub-cold']`, không mở rộng origin/credentials; header chỉ ở phản hồi đầu của tiến trình, bỏ qua health/metrics/OPTIONS | `cors.ts`, `cold-start.ts` |
+
+**Chỗ lệch thiết kế (ghi ADR-254/255):**
+1. `svc` qua `mixin`, không phải `base`.
+2. `traceparent` đến từ client chỉ nhận ở `/v1/p/:project/events` (đã xác thực); `/hooks` luôn sinh trace mới.
+3. Lỗi DB tạm thời trong tx ingest → **503** `service_unavailable` + `fail.hub_db`; lỗi lạ giữ **500** + `fail.hub_unknown`.
+4. Gộp dòng lặp áp thêm cho `fail.hub_db|hub_broker|hub_redis` (bão lỗi hạ tầng — ADR-231); các `fail.*` còn lại luôn ghi.
+5. `growth.window` đọc từ chính canonical line (observer, kể cả dòng bị mẫu bỏ) — không thêm điểm đo.
+6. Delivery outbox row có 8 khoá (`traceparent`); message trên dây vẫn 7 khoá. Ba test khoá-khoá-outbox (`normalize-consumer`, `replay-message`, `replay-bulk`) được cập nhật; regex nhãn metric ở `penalty-box`/`penalty-gate` cho phép nhãn `cause`.
+7. `delivery.attempt` ghi `err.code` dạng `HTTP_5xx|HTTP_4xx|HTTP_429|HTTP_408|TIMEOUT|ECONNREFUSED…`; sender chưa trả `errorKind` nên timeout/mạng nhận ra bằng chuỗi lỗi (`causeOfSendFailure`).
+8. `http_status`/`outcome` của `ingest.done` suy từ chính phản hồi; nhánh lỡ quên `cause` rơi về lưới đỡ theo status (`causeOfStatus`).
+
+**Hướng dẫn đọc log:** `jq 'select(.msg=="ingest.done" and .cause)'` lọc dòng có nguyên nhân; `jq 'select(.trace_id=="…")'` theo một trace qua cả hai tiến trình; `stage_ms` cho biết chặng nào chiếm thời gian (`rt` của nginx − `total_ms` lớn = thời gian ở proxy/khởi động); `sampled.suppressed` cho biết có dòng bị gộp; `trace_origin: orphan|correlation` = message mất ngữ cảnh (cũ/replay thủ công).

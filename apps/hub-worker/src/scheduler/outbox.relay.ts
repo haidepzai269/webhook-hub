@@ -3,8 +3,9 @@ import { beat } from '../heartbeat';
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { EXCHANGES, ROUTING_KEYS } from '@hub/messaging';
-import { logger } from '@hub/common';
+import { CAUSES, LogThrottle, REPLAY_OF_HEADER, TRACEPARENT_HEADER, errInfo, logger } from '@hub/common';
 import * as amqp from 'amqplib';
+import { classifyInfraError } from '../consumers/infra-errors';
 
 // Transaction giữ khoá FOR UPDATE ... SKIP LOCKED trong lúc publish lên RabbitMQ
 // (publisher confirms có thể mất vài trăm ms tới vài giây khi batch lớn / broker chậm).
@@ -34,11 +35,41 @@ export function routeForTopic(topic: string) {
   return TOPIC_ROUTES[topic] ?? DEFAULT_ROUTE;
 }
 
+/** Lỗi sinh ra ở phía broker (confirm nack / channel đóng) — để phân biệt với PG khi ghi log (`fail.hub_broker`). */
+function markBroker(err: unknown): unknown {
+  if (err && typeof err === 'object') (err as { hubBroker?: boolean }).hubBroker = true;
+  return err;
+}
+
+export function relayFailureCause(err: unknown): 'fail.hub_broker' | 'fail.hub_db' | 'fail.hub_unknown' {
+  if ((err as { hubBroker?: boolean } | null)?.hubBroker) return 'fail.hub_broker';
+  return classifyInfraError(err) === 'transient' ? 'fail.hub_db' : 'fail.hub_unknown';
+}
+
+/**
+ * Message trên dây = payload outbox, nhưng `traceparent`/`replayOf`/`ingestedAt` của message DELIVERY đi bằng HEADER (không vào
+ * body): body delivery giữ đúng các khoá của DeliveryMessage (S1-1). Message `event.received` giữ nguyên payload (normalize đọc
+ * OutboxPayload). `x-outbox-age-ms` = tuổi dòng outbox lúc SELECT (đồng hồ PG, miễn nhiễm lệch giờ) — LOGGING.md §3.2.
+ */
+export function wireOf(topic: string, payload: any, ageSeconds: number): { body: unknown; headers: Record<string, unknown> } {
+  const p = payload ?? {};
+  const headers: Record<string, unknown> = { 'x-correlation-id': p.correlationId };
+  if (typeof p.traceparent === 'string') headers[TRACEPARENT_HEADER] = p.traceparent;
+  if (typeof p.replayOf === 'string') headers[REPLAY_OF_HEADER] = p.replayOf;
+  const age = Number(ageSeconds);
+  headers['x-outbox-age-ms'] = Number.isFinite(age) && age > 0 ? Math.round(age * 1000) : 0;
+  if (!topic.startsWith('delivery.')) return { body: p, headers };
+  const { traceparent: _t, replayOf: _r, ingestedAt: _i, ...body } = p;
+  return { body, headers };
+}
+
 @Injectable()
 export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   private isRunning = false;
   private timer: NodeJS.Timeout | null = null;
   private channel: amqp.ConfirmChannel | null = null;
+  /** Broker/PG rớt thì mỗi nhịp ~500ms đều lỗi -> tối đa 1 dòng / 30s (kèm số đã gộp), như normalize/delivery. */
+  private readonly errorLogThrottle = new LogThrottle();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -97,7 +128,12 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
         logger.debug({ count: publishedCount, full }, 'Outbox Relay đã publish xong batch');
       }
     } catch (err: any) {
-      logger.error({ err: err.message }, 'Lỗi trong chu kỳ Outbox Relay');
+      // LOGGING.md §2.2: phân biệt PG rớt (fail.hub_db) / broker nack-đóng (fail.hub_broker) / lạ (fail.hub_unknown) — trước đây chỉ err.message.
+      const suppressed = this.errorLogThrottle.take();
+      if (suppressed !== null) {
+        const cause = relayFailureCause(err);
+        logger.error({ cause, blame: CAUSES[cause].blame, err: errInfo(err), suppressedSinceLastLog: suppressed }, 'Lỗi trong chu kỳ Outbox Relay (log gộp tối đa 1 dòng/30s)');
+      }
     } finally {
       this.scheduleNext(full);
     }
@@ -129,16 +165,24 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
         outboxLag.set(rows.length === 0 ? 0 : Math.max(0, Number(rows[0].age_s) || 0));
         if (rows.length === 0) return 0;
 
+        // LOGGING.md §3.2/§4: đóng dấu thời điểm publish (queue_wait = now − max(published_ts, due_ts) ở consumer), tuổi dòng outbox
+        // (age_s đã SELECT sẵn — 0 truy vấn thêm) và ngữ cảnh trace. Header, không phải body.
+        const publishedAt = Date.now();
         const confirms = rows.map((item) => {
           const { exchange, routingKey } = routeForTopic(item.topic);
+          const { body, headers } = wireOf(item.topic, item.payload, item.age_s);
           return new Promise<void>((resolve, reject) => {
-            channel.publish(
-              exchange,
-              routingKey,
-              Buffer.from(JSON.stringify(item.payload)),
-              { persistent: true, headers: { 'x-correlation-id': item.payload?.correlationId } },
-              (err) => (err ? reject(err) : resolve()),
-            );
+            try {
+              channel.publish(
+                exchange,
+                routingKey,
+                Buffer.from(JSON.stringify(body)),
+                { persistent: true, timestamp: publishedAt, headers },
+                (err) => (err ? reject(markBroker(err)) : resolve()),
+              );
+            } catch (err) {
+              reject(markBroker(err)); // channel đóng giữa chừng: amqplib ném đồng bộ
+            }
           });
         });
         // Chờ broker xác nhận CẢ LÔ trước khi đánh dấu — lỗi một message là rollback cả lô.

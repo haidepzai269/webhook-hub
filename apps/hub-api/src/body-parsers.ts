@@ -1,8 +1,10 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { INestApplication } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { MAX_API_BODY_BYTES, MAX_INGEST_PAYLOAD_BYTES, ProviderType } from '@hub/common';
+import { CanonicalLogger, MAX_API_BODY_BYTES, MAX_INGEST_PAYLOAD_BYTES, ProviderType, newTraceId } from '@hub/common';
 import { ProviderRegistry } from '@hub/providers';
+import { IngestService } from './modules/ingest/ingest.service';
+import { providerMetricLabel } from './modules/ingest/blocked-ack';
 import { ingestRequests } from './modules/metrics/metrics';
 import { hubError } from './modules/errors/hub-error';
 import { ensureRequestId } from './modules/errors/request-id';
@@ -34,9 +36,38 @@ function countTooLarge(req: Request): void {
     } catch {
       /* provider lạ -> 'unknown' */
     }
-    ingestRequests.inc({ provider: label, outcome: 'TOO_LARGE' });
+    ingestRequests.inc({ provider: label, outcome: 'TOO_LARGE', cause: 'wrong.payload_shape' });
   } catch {
     /* metric không bao giờ làm hỏng request */
+  }
+}
+
+/**
+ * LOGGING.md §1/§10: lỗi parser của `/hooks/*` (413 quá trần, 400 JSON hỏng, 415…) trước đây KHÔNG để lại dấu vết ở log. Một dòng
+ * `ingest.done` `wrong.payload_shape` (dedupe theo cause — bão 413 không thành bão log). `canonical` do `configureBodyParsers`
+ * lấy từ IngestService (cùng instance với ingest). KHÔNG ghi body — chỉ status, `bytes` (độ dài khai báo) và loại lỗi.
+ */
+let parserCanonical: CanonicalLogger | undefined;
+function logParserReject(req: Request, err: any): void {
+  try {
+    const status = Number(err?.status ?? err?.statusCode);
+    if (!parserCanonical || !(status >= 400 && status < 500)) return;
+    const seg = (req.originalUrl ?? req.url ?? '').split('?')[0].split('/')[2] ?? '';
+    const len = Number(req.headers['content-length']);
+    parserCanonical.emit({
+      svc: 'hub-api',
+      msg: 'ingest.done',
+      outcome: 'rejected',
+      traceId: newTraceId(),
+      provider: providerMetricLabel(seg),
+      httpStatus: status,
+      bytes: Number.isFinite(len) ? len : undefined,
+      cause: 'wrong.payload_shape',
+      totalMs: 0,
+      extra: { policy: typeof err?.type === 'string' ? String(err.type).slice(0, 60) : `parser_${status}`, ...(req.headers['content-type'] ? { content_type: String(req.headers['content-type']) } : {}) },
+    });
+  } catch {
+    /* log không bao giờ làm hỏng request */
   }
 }
 
@@ -44,6 +75,7 @@ function countingOversize(parser: RequestHandler): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) =>
     parser(req, res, (err?: any) => {
       if (err && Number(err.status ?? err.statusCode) === 413) countTooLarge(req);
+      if (err) logParserReject(req, err);
       next(err);
     });
 }
@@ -112,6 +144,11 @@ export function installHooksPathGuard(app: INestApplication): void {
  * nào chạy, controller dùng Buffer rỗng.
  */
 export function configureBodyParsers(app: NestExpressApplication): void {
+  try {
+    parserCanonical = app.get(IngestService).canonical; // không có IngestService (test dựng app tối giản) -> không log
+  } catch {
+    parserCanonical = undefined;
+  }
   const hooksJson = nestExpress.json({ limit: MAX_INGEST_PAYLOAD_BYTES, verify: keepRawBody });
   const hooksForm = nestExpress.urlencoded({ limit: MAX_INGEST_PAYLOAD_BYTES, extended: true, verify: keepRawBody });
   const hooksRaw = nestExpress.raw({ type: () => true, limit: MAX_INGEST_PAYLOAD_BYTES, verify: keepRawBody });

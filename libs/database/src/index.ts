@@ -27,3 +27,4 @@ export function assertDatabaseLib(): void {
     }
   }
 }
+export * from './infra-errors';

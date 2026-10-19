@@ -27,6 +27,10 @@ x-request-id: 6f1c0e9a-…                       // có trên MỌI response c�
 - Lỗi máy chủ (`internal_error`) không bao giờ lộ stack hay message gốc — chỉ có `requestId`; chi tiết nằm ở log server.
 - Gửi kèm `x-request-id` của riêng bạn (8–128 ký tự `A-Za-z0-9._-`) thì hub dùng luôn id đó — tiện nối log hai bên.
 - Tra log: `docker compose logs hub-api | grep <requestId>`.
+- **Nối với log của admin (docs/LOGGING.md, ADR-250):** mỗi mã ở dưới là một phần của bảng nguyên nhân `cause` (`libs/common/src/causes.ts` —
+  trường `error` tham chiếu mục `## <mã>` ở đây, test `causes.spec.ts` khoá). Dòng log `ingest.done` mang `cause` (vd `wrong.unknown_source`, `fail.hub_db`
+  ↔ `service_unavailable`), `blame` và `request_id`/`trace_id`; khách chỉ thấy `error`/`message`/`fix`/`requestId` — không bao giờ `blame` hay stack.
+- Trình duyệt (console) đọc được `x-request-id` và `x-hub-cold` nhờ `Access-Control-Expose-Headers`; `x-hub-cold: 1` = hub-api vừa khởi động (cold start), không phải lỗi.
 
 ## Lỗi challenge của endpoint (`verificationFix`)
 

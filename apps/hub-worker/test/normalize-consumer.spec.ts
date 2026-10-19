@@ -130,7 +130,9 @@ describe('NormalizeConsumer (S1-1, S1-2, S1-3, S1-5)', () => {
     await new NormalizeConsumer(prisma).handleMessage(buildMsg(), buildChannel());
 
     const payload = outboxRows[0].payload;
-    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId']);
+    // LOGGING.md §4: + `traceparent` (ngữ cảnh trace, không phải secret) trong JSON của outbox; relay chuyển thành HEADER và bỏ khỏi body
+    // (message delivery trên dây vẫn đúng 7 khoá — kiểm ở log-contract.spec.ts).
+    expect(Object.keys(payload).sort()).toEqual(['attemptCount', 'attemptGeneration', 'correlationId', 'deliveryId', 'destinationId', 'rateLimitRps', 'tenantId', 'traceparent']);
     expect(payload).toMatchObject({ deliveryId: 'del-1', tenantId: TENANT, attemptCount: 0, attemptGeneration: 1, destinationId: 'dest-0', rateLimitRps: 0 });
     expect(JSON.stringify(payload)).not.toMatch(/config|signingSecret|"event"/);
   });

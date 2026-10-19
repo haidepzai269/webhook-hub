@@ -170,7 +170,7 @@ export class StorageAlerts implements OnModuleInit {
         await repo.enqueueAlertEmails(alertId, 'OPEN', users, plan.send.tag);
       }
       await repo.markStorageSignaled({ signaledLevel: level, notifiedLevel: plan.notifiedLevel, notifiedAt: plan.notifiedAt });
-      logger.info({ tenantId, from: signaled, to: level, changed, email: plan.send?.reason ?? null }, 'Storage alerts: đã báo nấc dung lượng');
+      logger.info({ cause: 'growth.storage', tenantId, from: signaled, to: level, changed, email: plan.send?.reason ?? null }, 'Storage alerts: đã báo nấc dung lượng');
       return { notices, acted: true };
     });
     if (!out) return false;

@@ -1,4 +1,4 @@
-import { startMetricsServer, setReadinessProbe } from './metrics';
+import { startMetricsServer, setReadinessProbe, eventLoopLag, workerGrowth } from './metrics';
 import { startExternalHeartbeatFromEnv, heartbeatAgeMs, isHeartbeatFresh } from './heartbeat';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
@@ -17,7 +17,7 @@ import { InFlightTracker } from './consumers/in-flight';
 import { BACKPRESSURE_DB, FailureRateController } from './backpressure/failure-rate.controller';
 import { runGated } from './backpressure/gate';
 import { gracefulStop } from './shutdown';
-import { installBigIntJson, logger, testOnlyConfigProblems } from '@hub/common';
+import { installBigIntJson, logger, setServiceName, startEventLoopMonitor, startGrowthTicker, testOnlyConfigProblems } from '@hub/common';
 import * as amqp from 'amqplib';
 
 function assertMasterKeyConfigured(): void {
@@ -61,6 +61,7 @@ async function connectAmqpWithRetry(url: string): Promise<amqp.ChannelModel> {
 }
 
 async function bootstrap() {
+  setServiceName('hub-worker'); // LOGGING.md §3.1: `svc` ở mọi dòng log
   installBigIntJson(); // S1: events.seq / audit_logs.id là BIGINT -> JSON là chuỗi
   // S1-6: bản build lệch (dist cũ) phải chết NGAY lúc khởi động, không đợi message đầu tiên vào DLQ.
   assertDatabaseLib();
@@ -168,6 +169,9 @@ async function bootstrap() {
 
   // 4. Delivery Consumer (prefetch = 20)
   const deliveryConsumer = app.get(DeliveryConsumer);
+  // LOGGING.md §3.2/§2.3: p99 event loop (cờ slow.hub_cpu) mỗi nhịp 5s + tổng hợp growth.window mỗi 60s — cả hai trong bộ nhớ, timer unref, 0 Redis/DB.
+  startEventLoopMonitor((ms) => eventLoopLag.set(ms / 1000));
+  startGrowthTicker(workerGrowth, deliveryConsumer.canonical);
   const deliveryChannel = await connection.createChannel();
   deliveryChannel.on('close', exitOnChannelClose('delivery'));
   deliveryChannel.on('error', onChannelError('delivery'));

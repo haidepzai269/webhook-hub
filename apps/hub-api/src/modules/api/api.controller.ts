@@ -18,7 +18,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter, DLQ_ERROR_KINDS, DlqErrorKind } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
-import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType } from '@hub/common';
+import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType, replayTraceFields } from '@hub/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { SessionGuard } from '../auth/session.guard';
@@ -715,7 +715,8 @@ export class ApiController {
           attemptCount: 0,
         });
         await tx.outbox.create({
-          data: { topic: 'delivery.replayed', payload: deliveryMsg as unknown as Prisma.InputJsonValue },
+          // LOGGING.md §4: replay = trace MỚI + link về trace gốc (`replayOf`); relay đưa hai khoá này vào HEADER, body vẫn 7 khoá (S1-1).
+          data: { topic: 'delivery.replayed', payload: { ...deliveryMsg, ...replayTraceFields(delivery.event.correlationId) } as unknown as Prisma.InputJsonValue },
         });
         // S2-3: audit CÙNG transaction — có replay thì chắc chắn có dấu vết, và ngược lại.
         await this.prisma.forTenant(tenantId, tx).createAuditLog({
@@ -834,15 +835,18 @@ export class ApiController {
             await tx.outbox.createMany({
               data: refs.map((r, i) => ({
                 topic: 'delivery.replayed',
-                payload: buildDeliveryMessage({
-                  deliveryId: items[i].newDeliveryId,
-                  tenantId,
-                  attemptGeneration: items[i].generation,
-                  attemptCount: 0,
-                  correlationId: r.correlationId,
-                  destinationId: r.destinationId,
-                  rateLimitRps: r.rateLimitRps ?? undefined,
-                }) as unknown as Prisma.InputJsonValue,
+                payload: {
+                  ...buildDeliveryMessage({
+                    deliveryId: items[i].newDeliveryId,
+                    tenantId,
+                    attemptGeneration: items[i].generation,
+                    attemptCount: 0,
+                    correlationId: r.correlationId,
+                    destinationId: r.destinationId,
+                    rateLimitRps: r.rateLimitRps ?? undefined,
+                  }),
+                  ...replayTraceFields(r.correlationId), // LOGGING.md §4: trace mới + replayOf (header, không vào body)
+                } as unknown as Prisma.InputJsonValue,
               })),
             });
           }

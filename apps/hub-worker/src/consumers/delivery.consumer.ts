@@ -7,8 +7,20 @@ import { Prisma } from '@prisma/client';
 import { CircuitBreakerService, CircuitTarget, CircuitView } from '../circuit/circuit-breaker.service';
 import { SenderRegistry } from '../senders/sender.registry';
 import { SendResult } from '../senders/sender.interface';
+import { performance } from 'perf_hooks';
 import { EXCHANGES, ROUTING_KEYS, circuitDeferTier, circuitMaxDeferMs, getNextRetryQueue, retryQueueForDelay, retryTtlMs } from '@hub/messaging';
 import {
+  CanonicalLogger,
+  CanonicalOutcome,
+  Cause,
+  ErrInfo,
+  Stage,
+  TRACEPARENT_HEADER,
+  causeOfSendFailure,
+  computeQueueWait,
+  errInfo,
+  formatTraceparent,
+  traceFromHeaders,
   logger,
   CircuitState,
   DeliveryAttemptNotice,
@@ -204,11 +216,121 @@ function toNormalizedEvent(row: DeliveryForSend): NormalizedEvent {
   };
 }
 
+/** Ngữ cảnh MỘT lần xử lý message delivery (log `delivery.attempt`, LOGGING.md §3). */
+interface DeliveryRun {
+  ctx: ReturnType<typeof traceFromHeaders>;
+  t0: number;
+  /** Chỉ có khi message mang `timestamp` AMQP (relay) hoặc `x-due-at` (tầng retry/hoãn). */
+  queueWaitMs?: number;
+  clockSkew: boolean;
+  outboxLagMs?: number;
+  stages: Partial<Record<Stage, number>>;
+  tenantId: string;
+  deliveryId: string;
+  /** Lần thử đang chờ/đang chạy (attemptCount + 1). */
+  attempt: number;
+  destinationId?: string;
+  eventName?: string;
+}
+
+/** Lỗi gửi đích -> `{class, code, msg}` (§3.1): code máy đọc (HTTP_5xx / TIMEOUT / ECONNREFUSED…); msg đã scrub, KHÔNG body phản hồi. */
+function sendErrInfo(r: SendResult, cause: Cause): ErrInfo {
+  const base = errInfo(String(r.error ?? ''));
+  const status = r.status;
+  if (cause === 'fail.dest_timeout') return { ...base, class: 'TimeoutError', code: status === 408 ? 'HTTP_408' : 'TIMEOUT' };
+  if (cause === 'fail.dest_network') return { ...base, class: 'NetworkError', code: /\b(E[A-Z]{3,}[A-Z0-9_]*)\b/.exec(String(r.error ?? ''))?.[1] ?? 'NETWORK' };
+  const code = status >= 500 ? 'HTTP_5xx' : status === 429 || status === 408 ? `HTTP_${status}` : status >= 400 ? 'HTTP_4xx' : `HTTP_${status}`;
+  return { ...base, class: 'HttpError', code };
+}
+
 @Injectable()
 export class DeliveryConsumer {
   private redisPub: Redis;
   /** BP1 review M3: log lỗi hạ tầng theo nhịp, mỗi tiến trình (mỗi instance consumer) một bộ. */
   readonly infraLogThrottle = new LogThrottle();
+  /** LOGGING.md §3: MỘT dòng `delivery.attempt` mỗi lần thử/hoãn/bỏ (kể cả thất bại còn retry). Gán lại được (test). */
+  canonical: CanonicalLogger = new CanonicalLogger({ log: logger });
+
+  /** Ngữ cảnh một lần xử lý: trace (đọc header), đồng hồ, chờ hàng đợi / tuổi outbox. Không I/O. */
+  private begin(msg: amqp.ConsumeMessage, m: { tenantId: string; deliveryId: string; correlationId: string; attemptCount: number; destinationId?: string }): DeliveryRun {
+    const headers = (msg.properties.headers ?? {}) as Record<string, unknown>;
+    const ctx = traceFromHeaders(headers, m.correlationId);
+    const due = Number(headers['x-due-at']);
+    const published = msg.properties.timestamp;
+    const hasQw = (typeof published === 'number' && published > 0) || (Number.isFinite(due) && due > 0);
+    const qw = computeQueueWait({ nowMs: Date.now(), publishedTs: published, dueTs: Number.isFinite(due) ? due : undefined });
+    const lag = Number(headers['x-outbox-age-ms']);
+    return {
+      ctx,
+      t0: performance.now(),
+      queueWaitMs: hasQw ? qw.ms : undefined,
+      clockSkew: qw.clockSkew,
+      outboxLagMs: Number.isFinite(lag) && lag > 0 ? Math.round(lag) : undefined,
+      stages: {},
+      tenantId: m.tenantId,
+      deliveryId: m.deliveryId,
+      attempt: m.attemptCount + 1,
+      destinationId: m.destinationId,
+    };
+  }
+
+  /**
+   * Header cho bản republish (retry/hoãn/DLQ): giữ `traceparent` (cùng trace_id; span của chặng này làm cha của lần sau), đặt
+   * `x-due-at` = lúc tầng hoãn hết hạn (lần sau `queue_wait` chỉ tính phần QUÁ hạn — chờ cố ý của retry không phải sự cố), bỏ
+   * `x-outbox-age-ms` (đã cũ). LOGGING.md §3.2, §4.
+   */
+  private outHeaders(run: DeliveryRun, headers: Record<string, unknown> | undefined, ttlMs: number | null): Record<string, unknown> {
+    const h: Record<string, unknown> = { ...(headers || {}), [TRACEPARENT_HEADER]: formatTraceparent(run.ctx.traceId, run.ctx.spanId) };
+    if (ttlMs !== null) h['x-due-at'] = Date.now() + ttlMs;
+    delete h['x-outbox-age-ms'];
+    return h;
+  }
+
+  /** MỘT dòng `delivery.attempt`. Không bao giờ ném (log không làm hỏng đường giao). */
+  private emitAttempt(
+    run: DeliveryRun,
+    outcome: CanonicalOutcome,
+    o: { cause?: Cause; err?: unknown; httpStatus?: number; deferMs?: number; nextQueue?: string; lastCause?: Cause; policy?: string; destMs?: number; circuit?: string } = {},
+  ): void {
+    try {
+      const handlerMs = performance.now() - run.t0;
+      const stageMs: Partial<Record<Stage, number>> = { ...run.stages };
+      if (o.destMs !== undefined) stageMs.dest_http = o.destMs;
+      if (run.queueWaitMs !== undefined) stageMs.queue_wait = run.queueWaitMs;
+      if (run.outboxLagMs !== undefined) stageMs.outbox_lag = run.outboxLagMs;
+      this.canonical.emit({
+        svc: 'hub-worker',
+        msg: 'delivery.attempt',
+        outcome,
+        traceId: run.ctx.traceId,
+        spanId: run.ctx.spanId,
+        tenantId: run.tenantId,
+        deliveryId: run.deliveryId,
+        destinationId: run.destinationId,
+        eventName: run.eventName,
+        attempt: run.attempt,
+        httpStatus: o.httpStatus,
+        cause: o.cause,
+        err: o.err,
+        // handler (đã gồm dest_http vì dest_http là một phần của thời gian chạy) + phần chờ nằm NGOÀI handler
+        totalMs: handlerMs + (run.queueWaitMs ?? 0) + (run.outboxLagMs ?? 0),
+        stageMs,
+        extra: {
+          ...(run.ctx.origin !== 'propagated' ? { trace_origin: run.ctx.origin } : {}),
+          ...(run.ctx.parentSpanId ? { parent_span_id: run.ctx.parentSpanId } : {}),
+          ...(run.ctx.replayOf ? { replay_of: run.ctx.replayOf } : {}),
+          ...(run.clockSkew ? { clock_skew: true } : {}),
+          ...(o.deferMs ? { defer_ms: o.deferMs } : {}),
+          ...(o.nextQueue ? { next_queue: o.nextQueue } : {}),
+          ...(o.lastCause ? { last_cause: o.lastCause } : {}),
+          ...(o.policy ? { policy: o.policy } : {}),
+          ...(o.circuit ? { circuit: o.circuit } : {}),
+        },
+      });
+    } catch {
+      /* log không bao giờ làm hỏng consumer */
+    }
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -219,7 +341,7 @@ export class DeliveryConsumer {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redisPub = new Redis(redisUrl, fastFailRedisOptions()); // MS-P2-3: không xếp hàng publish vô hạn khi Redis chết
     // Không để ioredis văng 'Unhandled error event' khi Redis chết (BB-2: Redis được phép sai).
-    this.redisPub.on?.('error', (err) => logger.warn({ err: err.message }, 'Redis pub (delivery) lỗi'));
+    this.redisPub.on?.('error', (err) => logger.warn({ err: errInfo(err) }, 'Redis pub (delivery) lỗi'));
     this.redisPub.connect().catch(() => {});
   }
 
@@ -237,6 +359,7 @@ export class DeliveryConsumer {
     d: ReturnType<typeof circuitDeferDecision>,
     log: Pick<typeof logger, 'warn'>,
     openPttlMs?: number,
+    run?: DeliveryRun,
   ): Promise<void> {
     const now = Date.now();
     const tier = circuitDeferTier(state === 'OPEN' ? openPttlMs : undefined);
@@ -247,7 +370,7 @@ export class DeliveryConsumer {
     }
     log.warn({ queue: tier.queueName, circuit: state, openPttlMs, deferrals: d.deferrals, wroteDb: d.writeDb }, 'Circuit chưa cho gửi -> hoãn (DEFERRED)');
     const headers: Record<string, unknown> = {
-      ...msg.properties.headers,
+      ...(run ? this.outHeaders(run, msg.properties.headers, tier.ttlMs) : msg.properties.headers),
       [CIRCUIT_DEFERRALS_HEADER]: d.deferrals,
       [CIRCUIT_DEFERRED_SINCE_HEADER]: d.since,
     };
@@ -255,6 +378,7 @@ export class DeliveryConsumer {
     deliveriesDeferred.inc({ reason: 'circuit' });
     channel.sendToQueue(tier.queueName, slim(), { persistent: true, headers });
     channel.ack(msg);
+    if (run) this.emitAttempt(run, 'deferred', { cause: 'slow.deferred_circuit', deferMs: tier.ttlMs, nextQueue: tier.queueName, circuit: state, policy: 'circuit' });
   }
 
   async handleMessage(msg: amqp.ConsumeMessage, channel: amqp.Channel): Promise<void> {
@@ -280,10 +404,13 @@ export class DeliveryConsumer {
       m = parseDeliveryMessage(msg.content, String(msg.properties.headers?.['x-correlation-id'] || 'unknown'));
     } catch (e: any) {
       deadLetterUnparsable(msg, channel, e);
+      this.emitAttempt(this.begin(msg, { tenantId: '', deliveryId: '', correlationId: 'unknown', attemptCount: 0 }), 'dead', { cause: 'fail.poison_message', err: e });
       return;
     }
-    channel.sendToQueue(INFRA_DEFER.queueName, Buffer.from(JSON.stringify(buildDeliveryMessage(m))), { persistent: true, headers: msg.properties.headers });
+    const run = this.begin(msg, m);
+    channel.sendToQueue(INFRA_DEFER.queueName, Buffer.from(JSON.stringify(buildDeliveryMessage(m))), { persistent: true, headers: this.outHeaders(run, msg.properties.headers, INFRA_DEFER.ttlMs) });
     channel.ack(msg);
+    this.emitAttempt(run, 'deferred', { cause: 'slow.deferred_backpressure', deferMs: INFRA_DEFER.ttlMs, nextQueue: INFRA_DEFER.queueName, policy: 'backpressure_hold' });
   }
 
   /** `undefined` = xử lý xong có chạm DB (tín hiệu `ok`); 'nodb' = hoãn trước khi nạp; 'infra_fail' / 'unknown' = catch. */
@@ -297,12 +424,14 @@ export class DeliveryConsumer {
       deliveryMsg = parseDeliveryMessage(msg.content, String(correlationHeader));
     } catch (e: any) {
       deadLetterUnparsable(msg, channel, e);
+      this.emitAttempt(this.begin(msg, { tenantId: '', deliveryId: '', correlationId: String(correlationHeader), attemptCount: 0 }), 'dead', { cause: 'fail.poison_message', err: e });
       return 'unknown';
     }
 
     const { deliveryId, attemptCount, tenantId } = deliveryMsg;
     const correlationId = deliveryMsg.correlationId;
     const log = logger.child({ correlationId, deliveryId, attemptCount });
+    const run = this.begin(msg, { tenantId, deliveryId, correlationId, attemptCount, destinationId: deliveryMsg.destinationId });
     // Tenant ĐÃ BIẾT tại đây (deliveryMsg.tenantId) -> mọi truy vấn đi qua TenantScopedRepository (BB-5).
     const repo = this.prisma.forTenant(tenantId);
     // Mọi lần đẩy lại (retry, hoãn vì circuit/throttle, DLQ) đều dựng lại message GỌN — kể cả
@@ -333,7 +462,7 @@ export class DeliveryConsumer {
         if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !probeToken)) {
           const d = circuitDeferDecision(msg.properties.headers, Date.now());
           if (!d.exceeded) {
-            await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs);
+            await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs, run);
             return 'nodb';
           }
           // Quá trần thời gian -> phải nạp row để ghi một lần thử thất bại (nhánh chung bên dưới quyết định lại).
@@ -345,8 +474,9 @@ export class DeliveryConsumer {
             'Outbound Throttle / slow-start (gợi ý) -> tầng retry ngắn nhất, không nạp DB',
           );
           deliveriesDeferred.inc({ reason: view.rampCap !== undefined ? 'ramp' : 'throttle' });
-          channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: this.outHeaders(run, msg.properties.headers, THROTTLE_DEFER.ttlMs) });
           channel.ack(msg);
+          this.emitAttempt(run, 'deferred', { cause: 'slow.deferred_throttle', deferMs: THROTTLE_DEFER.ttlMs, nextQueue: THROTTLE_DEFER.queueName, policy: view.rampCap !== undefined ? 'ramp' : 'throttle' });
           return 'nodb';
         }
       }
@@ -362,6 +492,7 @@ export class DeliveryConsumer {
         await releaseHeldProbe();
         log.warn('Delivery không còn tồn tại (đã bị xoá hoặc khác tenant) -> ack, bỏ qua');
         channel.ack(msg);
+        this.emitAttempt(run, 'skipped', { policy: 'delivery_gone' });
         return;
       }
       const destination = row.subscription.destination;
@@ -372,16 +503,20 @@ export class DeliveryConsumer {
         await repo.abandonDelivery(deliveryId, 'destination_archived: đích đã bị xoá khỏi luồng (lưu trữ, ADR-161) — không gửi');
         log.warn({ destinationId: destination.id }, 'Đích đã lưu trữ -> delivery DEAD, không gửi');
         channel.ack(msg);
+        run.destinationId = destination.id;
+        this.emitAttempt(run, 'skipped', { cause: 'wrong.policy_blocked', policy: 'destination_archived' });
         return;
       }
       const destinationId = destination.id;
       const destinationType = destination.type as DestinationType;
       const event = toNormalizedEvent(row);
+      run.destinationId = destinationId;
+      run.eventName = event.type; // kiểu chuẩn (payment.paid…) — hub không biết nghiệp vụ (BB-1)
 
       const currentAttemptNo = attemptCount + 1;
       // Realtime `delivery.attempt` (S2-2): luôn kèm tenantId để gateway chỉ phát vào room đúng tenant (BB-5).
       // DEFERRED (circuit hoãn) KHÔNG publish — tiết kiệm Redis.
-      const notifyAttempt = (n: Pick<DeliveryAttemptNotice, 'status' | 'httpStatus' | 'ms' | 'nextQueue' | 'nextAttemptAt'>) => {
+      const notifyAttempt = (n: Pick<DeliveryAttemptNotice, 'status' | 'httpStatus' | 'ms' | 'nextQueue' | 'nextAttemptAt'>, cause?: Cause) => {
         const notice: DeliveryAttemptNotice = {
           tenantId,
           correlationId,
@@ -394,7 +529,7 @@ export class DeliveryConsumer {
         };
         this.redisPub.publish('hub:realtime:deliveries', JSON.stringify(notice)).catch(() => {});
         // S3-4: metric trong bộ nhớ (0 lệnh Redis), chỉ sau khi kết quả đã ghi DB.
-        deliveriesTotal.inc({ destination_type: destinationType, status: n.status });
+        deliveriesTotal.inc({ destination_type: destinationType, status: n.status, cause: cause ?? '' });
         if (n.ms > 0) deliveryDuration.observe({ destination_type: destinationType }, n.ms / 1000);
       };
 
@@ -432,7 +567,7 @@ export class DeliveryConsumer {
       if (view.state === 'OPEN' || (view.state === 'HALF_OPEN' && !isProbe)) {
         const d = circuitDeferDecision(msg.properties.headers, Date.now());
         if (!d.exceeded) {
-          await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs);
+          await this.deferForCircuit(msg, channel, repo, deliveryId, slim, view.state, d, log, view.openPttlMs, run);
           return;
         }
         const waitedMin = Math.round((Date.now() - d.since) / 60_000);
@@ -455,8 +590,9 @@ export class DeliveryConsumer {
           );
           await releaseProbe();
           deliveriesDeferred.inc({ reason: view.rampCap !== undefined ? 'ramp' : 'throttle' });
-          channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          channel.sendToQueue(THROTTLE_DEFER.queueName, slim(), { persistent: true, headers: this.outHeaders(run, msg.properties.headers, THROTTLE_DEFER.ttlMs) });
           channel.ack(msg);
+          this.emitAttempt(run, 'deferred', { cause: 'slow.deferred_throttle', deferMs: THROTTLE_DEFER.ttlMs, nextQueue: THROTTLE_DEFER.queueName, policy: view.rampCap !== undefined ? 'ramp' : 'throttle' });
           return;
         }
       }
@@ -474,6 +610,7 @@ export class DeliveryConsumer {
         log.info({ messageId }, 'Message đã xử lý xong trước đó (processed_messages hit) -> bỏ qua, không gửi lại');
         await releaseProbe();
         channel.ack(msg);
+        this.emitAttempt(run, 'skipped', { policy: 'already_processed' });
         return;
       }
 
@@ -492,15 +629,19 @@ export class DeliveryConsumer {
           lease.attemptCount === attemptCount
         ) {
           log.info({ messageId, queue: LEASE_DEFER.queueName }, 'Lease DELIVERING còn hạn -> hoãn 1 phút rồi thử giành lại');
-          channel.sendToQueue(LEASE_DEFER.queueName, slim(), { persistent: true, headers: msg.properties.headers });
+          channel.sendToQueue(LEASE_DEFER.queueName, slim(), { persistent: true, headers: this.outHeaders(run, msg.properties.headers, LEASE_DEFER.ttlMs) });
           channel.ack(msg);
+          this.emitAttempt(run, 'deferred', { deferMs: LEASE_DEFER.ttlMs, nextQueue: LEASE_DEFER.queueName, policy: 'lease_held' });
           return;
         }
         log.debug({ messageId, status: lease?.status }, 'Lần gửi này đã xong hoặc đã sang lần khác (lease) -> ack, bỏ qua');
         channel.ack(msg);
+        this.emitAttempt(run, 'skipped', { policy: 'lease_done' });
         return;
       }
 
+      // Chặng chuẩn bị = từ đầu handler tới ngay trước khi gọi đích (nạp delivery, gate, circuit, render, lease — đã có truy vấn, chỉ bọc đồng hồ).
+      run.stages.deliver_prep = performance.now() - run.t0 - (run.stages.db_persist ?? 0);
       let result: SendResult;
       if (circuitTimeout) {
         // Không gọi đích: lần "thử" này là circuit quá trần. status 0 = không có phản hồi (retryable).
@@ -513,20 +654,21 @@ export class DeliveryConsumer {
         try {
           config = JSON.parse(aesGcmDecrypt(destination.configEncrypted, masterKey));
         } catch (err: any) {
-          log.error({ err: err.message, destinationId }, 'Không thể giải mã config của destination');
+          log.error({ err: errInfo(err), destinationId }, 'Không thể giải mã config của destination');
         }
         let signingSecret: string | undefined;
         if (destination.signingSecretEncrypted) {
           try {
             signingSecret = aesGcmDecrypt(destination.signingSecretEncrypted, masterKey);
           } catch (err: any) {
-            log.error({ err: err.message, destinationId }, 'Không thể giải mã signing secret của destination');
+            log.error({ err: errInfo(err), destinationId }, 'Không thể giải mã signing secret của destination');
           }
         }
 
         // 4. Gửi (sender KHÔNG throw -- luôn trả SendResult, kể cả lỗi mạng/timeout)
         const sender = SenderRegistry.get(destinationType);
-        result = await sender.send(config, rendered, event, signingSecret);
+        // LOGGING.md §4: `traceparent` ra đích (W3C, vô hại, KHÔNG nằm trong chuỗi ký) để đích có OTel nối được trace.
+        result = await sender.send(config, rendered, event, signingSecret, { traceparent: formatTraceparent(run.ctx.traceId, run.ctx.spanId) });
       }
 
       const attemptData: Prisma.DeliveryAttemptUncheckedCreateInput = {
@@ -557,6 +699,7 @@ export class DeliveryConsumer {
         });
 
       const persistAttemptOrSkipIfDuplicate = async (statusData: Prisma.DeliveryUncheckedUpdateInput): Promise<boolean> => {
+        const tPersist = performance.now();
         try {
           await persistAttempt(statusData);
           return true;
@@ -564,9 +707,12 @@ export class DeliveryConsumer {
           if (err instanceof DuplicateProcessedMessageError) {
             log.debug({ messageId }, 'Delivery message đã được xử lý bởi worker khác (duplicate processed_messages) -> ack');
             channel.ack(msg);
+            this.emitAttempt(run, 'skipped', { policy: 'duplicate_processed', httpStatus: result.status, destMs: result.durationMs });
             return false;
           }
           throw err;
+        } finally {
+          run.stages.db_persist = (run.stages.db_persist ?? 0) + (performance.now() - tPersist);
         }
       };
 
@@ -587,6 +733,7 @@ export class DeliveryConsumer {
         notifyAttempt({ status: 'SUCCEEDED', httpStatus: result.status, ms: result.durationMs });
         log.info({ durationMs: result.durationMs, destinationType }, 'Chuyển phát webhook thành công');
         channel.ack(msg);
+        this.emitAttempt(run, 'ok', { httpStatus: result.status, destMs: result.durationMs });
         return;
       }
 
@@ -595,7 +742,7 @@ export class DeliveryConsumer {
       // nên không phải bằng chứng mới. Probe HALF_OPEN nhận 4xx (không tính): đích trả lời được nhưng
       // không chứng minh sống/chết -> NHẢ probe, giữ HALF_OPEN để lần gửi kế tiếp thử lại ngay.
       if (!circuitTimeout && countsTowardCircuit(result.status)) {
-        await this.circuitBreaker.recordFailure(circuit, view);
+        await this.circuitBreaker.recordFailure(circuit, view, causeOfSendFailure({ status: result.status, error: result.error }));
       } else if (isProbe) {
         log.info({ status: result.status }, 'Probe HALF_OPEN nhận 4xx (không tính vào circuit) -> nhả probe, giữ HALF_OPEN');
         await releaseProbe();
@@ -604,9 +751,13 @@ export class DeliveryConsumer {
       // 4xx (trừ 408, 429) -> lỗi cấu hình/client -> DEAD ngay (§7.3)
       const isNonRetryable = isNonRetryableHttpStatus(result.status);
       const nextQueue = isNonRetryable ? null : getNextRetryQueue(currentAttemptNo);
+      // LOGGING.md §2.2: nguyên nhân của lần thất bại này (đích 5xx / timeout / mạng / 429 / 4xx cấu hình) + `{class, code, msg}` đã scrub.
+      const failCause = causeOfSendFailure({ status: result.status, error: result.error });
+      const failErr = sendErrInfo(result, failCause);
 
       if (nextQueue) {
-        log.info({ nextQueue, nextAttempt: currentAttemptNo + 1 }, 'Lỗi retryable -> đẩy vào queue retry tiếp theo');
+        // Trước đây dòng này KHÔNG có status/err/durationMs — lỗ hổng lớn nhất (LOGGING.md §1 #2).
+        log.info({ nextQueue, nextAttempt: currentAttemptNo + 1, status: result.status, durationMs: result.durationMs, cause: failCause, err: failErr }, 'Lỗi retryable -> đẩy vào queue retry tiếp theo');
         // S2-2: next_attempt_at = now + TTL tầng kế — UI đếm ngược, sweeper dùng để phát hiện RETRYING kẹt.
         const nextAttemptAt = new Date(Date.now() + (retryTtlMs(nextQueue) ?? 0));
         if (
@@ -625,27 +776,32 @@ export class DeliveryConsumer {
           ms: result.durationMs,
           nextQueue,
           nextAttemptAt: nextAttemptAt.toISOString(),
-        });
+        }, failCause);
         channel.sendToQueue(nextQueue, slim(currentAttemptNo), {
           persistent: true,
-          // Lần thử mới -> bộ đếm/mốc hoãn trong một lần thử bắt đầu lại (BP2: xoá `since`, `written-at`).
-          headers: freshAttemptHeaders(msg.properties.headers, currentAttemptNo),
+          // Lần thử mới -> bộ đếm/mốc hoãn trong một lần thử bắt đầu lại (BP2: xoá `since`, `written-at`). traceparent GIỮ (cùng trace
+          // qua mọi tầng retry — LOGGING.md §4); x-due-at = lúc tầng retry hết hạn (chờ cố ý không tính vào queue_wait).
+          headers: this.outHeaders(run, freshAttemptHeaders(msg.properties.headers, currentAttemptNo), retryTtlMs(nextQueue)),
         });
         channel.ack(msg);
+        this.emitAttempt(run, 'retry', { cause: failCause, err: failErr, httpStatus: result.status, destMs: result.durationMs, nextQueue });
         return;
       }
 
       const lastError = isNonRetryable
         ? `Non-retryable HTTP ${result.status}: ${result.error || result.body}`
         : `Hết 5 lần retry: ${result.error || result.body}`;
-      log.warn({ status: result.status }, isNonRetryable ? 'Lỗi non-retryable (4xx) -> DEAD + DLQ' : 'Vượt quá 5 tầng retry -> DEAD + DLQ');
+      // DEAD vì 4xx cấu hình (lỗi của khách) hay hết 5 tầng (đích hỏng) — trước đây phải suy từ `status` (LOGGING.md §1).
+      const deadCause: Cause = isNonRetryable ? failCause : 'fail.exhausted';
+      log.warn({ status: result.status, durationMs: result.durationMs, cause: deadCause, lastCause: failCause, err: failErr }, isNonRetryable ? 'Lỗi non-retryable (4xx) -> DEAD + DLQ' : 'Vượt quá 5 tầng retry -> DEAD + DLQ');
       if (!(await persistAttemptOrSkipIfDuplicate({ status: 'DEAD', attemptCount: currentAttemptNo, lastError, nextAttemptAt: null }))) {
         return;
       }
-      notifyAttempt({ status: 'DEAD', httpStatus: result.status, ms: result.durationMs });
+      notifyAttempt({ status: 'DEAD', httpStatus: result.status, ms: result.durationMs }, deadCause);
       // DLQ broker chỉ là bản sao để quan sát — Postgres (status DEAD) mới là trọng tài. Bản sao gọn, không secret.
       channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, slim(currentAttemptNo), { persistent: true });
       channel.ack(msg);
+      this.emitAttempt(run, 'dead', { cause: deadCause, err: failErr, httpStatus: result.status, destMs: result.durationMs, lastCause: isNonRetryable ? undefined : failCause });
     } catch (err: any) {
       // BP1 (ADR-195): KHÔNG requeue ngay — hoãn có nhịp. attemptCount giữ nguyên: lần này chưa hề gọi tới đích
       // (hoặc đã gọi nhưng chưa ghi được kết quả — lần sau idempotency/lease xử lý), đốt lượt vì lỗi của hub là sai.
@@ -663,12 +819,13 @@ export class DeliveryConsumer {
           const suppressed = this.infraLogThrottle.take();
           if (suppressed !== null) {
             log.warn(
-              { err: err?.message, queue: INFRA_DEFER.queueName, infraDeferrals: n, suppressedSinceLastLog: suppressed },
+              { err: errInfo(err), queue: INFRA_DEFER.queueName, infraDeferrals: n, suppressedSinceLastLog: suppressed },
               'Lỗi hạ tầng hub ở delivery -> hoãn 10s, không đốt lượt (log gộp tối đa 1 dòng/30s)',
             );
           }
-          channel.sendToQueue(INFRA_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [INFRA_DEFERRALS_HEADER]: n } });
+          channel.sendToQueue(INFRA_DEFER.queueName, slim(), { persistent: true, headers: { ...this.outHeaders(run, headers, INFRA_DEFER.ttlMs), [INFRA_DEFERRALS_HEADER]: n } });
           channel.ack(msg);
+          this.emitAttempt(run, 'deferred', { cause: 'fail.hub_db', err, deferMs: INFRA_DEFER.ttlMs, nextQueue: INFRA_DEFER.queueName });
           return 'infra_fail';
         }
         const n = (Number(headers[UNKNOWN_ERRORS_HEADER]) || 0) + 1;
@@ -676,21 +833,23 @@ export class DeliveryConsumer {
           // Có thể là poison message (bug cố định). q.delivery.main KHÔNG có DLX (topology.ts) -> nack(false) là vứt message;
           // muốn có bản sao trong q.delivery.dlq thì publish thẳng vào DELIVERY_DLX như nhánh DEAD, publish xong mới ack.
           // DLQ broker chỉ là bản sao để quan sát; Postgres vẫn là nguồn sự thật (sweeper hồi sinh delivery kẹt).
-          log.error({ err: err?.message, unknownErrors: n }, `Lỗi lạ ở delivery lần thứ ${n} -> bản sao vào DLQ, ack`);
+          log.error({ err: errInfo(err), unknownErrors: n }, `Lỗi lạ ở delivery lần thứ ${n} -> bản sao vào DLQ, ack`);
           channel.publish(EXCHANGES.DELIVERY_DLX, ROUTING_KEYS.DEAD, slim(), {
             persistent: true,
-            headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n, 'x-dead-reason': 'unknown_error', 'x-dead-error': deadErrorHeader(err) },
+            headers: { ...this.outHeaders(run, headers, null), [UNKNOWN_ERRORS_HEADER]: n, 'x-dead-reason': 'unknown_error', 'x-dead-error': deadErrorHeader(err) },
           });
           channel.ack(msg);
+          this.emitAttempt(run, 'dead', { cause: 'fail.hub_unknown', err });
           return 'unknown';
         }
-        log.warn({ err: err?.message, queue: UNKNOWN_DEFER.queueName, unknownErrors: n }, 'Lỗi lạ ở delivery -> hoãn 1 phút');
-        channel.sendToQueue(UNKNOWN_DEFER.queueName, slim(), { persistent: true, headers: { ...headers, [UNKNOWN_ERRORS_HEADER]: n } });
+        log.warn({ err: errInfo(err), queue: UNKNOWN_DEFER.queueName, unknownErrors: n }, 'Lỗi lạ ở delivery -> hoãn 1 phút');
+        channel.sendToQueue(UNKNOWN_DEFER.queueName, slim(), { persistent: true, headers: { ...this.outHeaders(run, headers, UNKNOWN_DEFER.ttlMs), [UNKNOWN_ERRORS_HEADER]: n } });
         channel.ack(msg);
+        this.emitAttempt(run, 'deferred', { cause: 'fail.hub_unknown', err, deferMs: UNKNOWN_DEFER.ttlMs, nextQueue: UNKNOWN_DEFER.queueName });
       } catch (e: any) {
         // Channel/kết nối đã đóng: không ack được -> message unacked, RabbitMQ giao lại khi tiến trình nối lại (main.ts thoát
         // khi CONNECTION hoặc channel consumer đóng — BP5 đóng nợ channel zombie, SPEC-BP §16).
-        log.error({ err: e?.message, cause: err?.message }, 'Không hoãn được message lỗi (channel đóng?) -> để RabbitMQ giao lại');
+        log.error({ err: errInfo(e), cause: 'fail.hub_broker', original: errInfo(err) }, 'Không hoãn được message lỗi (channel đóng?) -> để RabbitMQ giao lại');
       }
       return kind === 'transient' ? 'infra_fail' : 'unknown';
     }
