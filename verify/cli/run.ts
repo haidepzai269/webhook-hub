@@ -246,6 +246,11 @@ async function verify(layers: Layer[], l2?: L2Options): Promise<number> {
     if (r) console.log(fmtRow([layer, r.summary.pass, r.summary.fail, r.summary.skip, `${Math.round(r.ms / 1000)}s`]) + (r.summary.note ? `   ${r.summary.note}` : ''));
   }
   for (const n of ratchetNotes) console.log(`  bánh cóc: ${n}`);
+  // Nêu đích danh test skip/fail ngay trong log (CI không có quyền đọc artifact) — "skip > 0" mà không biết test nào là vô dụng.
+  for (const [layer, r] of Object.entries(results)) {
+    const bad = r.summary.tests.filter((t) => t.status !== 'passed');
+    if (bad.length > 0) console.log(`\n${layer}: ${bad.length} test không pass:\n` + bad.slice(0, 40).map((t) => `  [${t.status}] ${t.file} › ${t.name}`).join('\n'));
+  }
   if (problems.length > 0) {
     console.log('\n✗ ĐỎ:\n  - ' + problems.join('\n  - '));
     return 1;

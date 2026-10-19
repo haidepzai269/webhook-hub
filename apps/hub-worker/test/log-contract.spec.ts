@@ -35,8 +35,8 @@ function capture(thresholds: Partial<typeof DEFAULT_SLOW_THRESHOLDS> = {}) {
   for (const l of ['debug', 'info', 'warn', 'error']) log[l] = (obj: any, msg: string) => lines.push({ level: l, obj, msg });
   const clock = { now: 5_000_000 };
   const canonical = new CanonicalLogger({ log, successSample: 1, dedupeWindowMs: 30_000, now: () => clock.now, thresholds: { ...DEFAULT_SLOW_THRESHOLDS, ...thresholds } });
-  const only = (msg: string) => lines.filter((l) => l.msg === msg);
-  return { canonical, lines, only, clock };
+  const linesOf = (msg: string) => lines.filter((l) => l.msg === msg);
+  return { canonical, lines, linesOf, clock };
 }
 
 describe('OutboxRelay — đóng dấu thời điểm publish + ngữ cảnh trace (LOGGING.md §3.2, §4)', () => {
@@ -119,7 +119,7 @@ describe('NormalizeConsumer — normalize.done (LOGGING.md §3, §10)', () => {
   it('trace_id xuyên: header traceparent -> dòng normalize.done CÙNG trace_id (span khác) -> payload outbox delivery.requested mang traceparent mới; queue_wait chậm -> slow.queue_wait', async () => {
     const t = build();
     await t.consumer.handleMessage(msg({ traceparent: TP, 'x-outbox-age-ms': 250 }, Date.now() - 14_000), buildChannel());
-    const [{ level, obj }] = t.only('normalize.done');
+    const [{ level, obj }] = t.linesOf('normalize.done');
     expect(level).toBe('warn');
     expect(obj).toMatchObject({ svc: 'hub-worker', outcome: 'ok', trace_id: TRACE, cause: 'slow.queue_wait', blame: 'hub', tenant_id: TENANT, source_id: 'src-1', raw_event_id: rawEventId, provider: 'github' });
     expect(obj.span_id).not.toBe(SPAN0);
@@ -134,11 +134,11 @@ describe('NormalizeConsumer — normalize.done (LOGGING.md §3, §10)', () => {
   it('message không có ngữ cảnh (cũ / replay thủ công): không lỗi, trace mới + trace_origin orphan; correlationId UUID -> suy trace_id', async () => {
     const t = build();
     await t.consumer.handleMessage(msg(), buildChannel());
-    expect(t.only('normalize.done')[0].obj).toMatchObject({ outcome: 'ok', trace_origin: 'orphan' });
-    expect(t.only('normalize.done')[0].obj.cause).toBeUndefined();
+    expect(t.linesOf('normalize.done')[0].obj).toMatchObject({ outcome: 'ok', trace_origin: 'orphan' });
+    expect(t.linesOf('normalize.done')[0].obj.cause).toBeUndefined();
     const t2 = build();
     await t2.consumer.handleMessage(msg({ 'x-correlation-id': '3f2a9c1e-5b7d-4a08-b6c1-d2e3f4a5b6c7' }), buildChannel());
-    expect(t2.only('normalize.done')[0].obj.trace_id).toBe(TRACE);
+    expect(t2.linesOf('normalize.done')[0].obj.trace_id).toBe(TRACE);
   });
 
   it('adapter ra sai khuôn catalog -> wrong.schema_mismatch (error, DLQ) TÁCH khỏi adapter ném lỗi -> fail.hub_unknown', async () => {
@@ -148,13 +148,13 @@ describe('NormalizeConsumer — normalize.done (LOGGING.md §3, §10)', () => {
     const ch = buildChannel();
     await t.consumer.handleMessage(msg(), ch);
     expect(ch.nack).toHaveBeenCalledWith(expect.anything(), false, false);
-    expect(t.only('normalize.done')[0]).toMatchObject({ level: 'error', obj: { outcome: 'dead', cause: 'wrong.schema_mismatch', blame: 'provider' } });
+    expect(t.linesOf('normalize.done')[0]).toMatchObject({ level: 'error', obj: { outcome: 'dead', cause: 'wrong.schema_mismatch', blame: 'provider' } });
     expect(JSON.stringify(t.lines)).not.toContain('1.5'); // giá trị dữ liệu không vào log, chỉ tên trường ở thông điệp
 
     jest.spyOn(ProviderRegistry, 'get').mockReturnValue({ normalize: () => { throw new TypeError('adapter vỡ'); } } as any);
     const t2 = build();
     await t2.consumer.handleMessage(msg(), buildChannel());
-    expect(t2.only('normalize.done')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.hub_unknown', blame: 'hub', err: { class: 'TypeError' } });
+    expect(t2.linesOf('normalize.done')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.hub_unknown', blame: 'hub', err: { class: 'TypeError' } });
   });
 
   it('lỗi tạm hạ tầng (P2024) -> retry 30s, fail.hub_db + err.code; hết lượt -> dead', async () => {
@@ -163,11 +163,11 @@ describe('NormalizeConsumer — normalize.done (LOGGING.md §3, §10)', () => {
     const ch = buildChannel();
     await t.consumer.handleMessage(msg(), ch);
     expect(ch.sendToQueue).toHaveBeenCalled();
-    expect(t.only('normalize.done')[0].obj).toMatchObject({ outcome: 'retry', cause: 'fail.hub_db', blame: 'ha_tang', err: { code: 'P2024', msg: 'P2024 Event' } });
+    expect(t.linesOf('normalize.done')[0].obj).toMatchObject({ outcome: 'retry', cause: 'fail.hub_db', blame: 'ha_tang', err: { code: 'P2024', msg: 'P2024 Event' } });
     expect(JSON.stringify(t.lines)).not.toContain('SECRET-PARAM');
     const t2 = build({ txError: e });
     await t2.consumer.handleMessage(msg({ 'x-normalize-retry': 5 }), buildChannel());
-    expect(t2.only('normalize.done')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.hub_db' });
+    expect(t2.linesOf('normalize.done')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.hub_db' });
   });
 
   it('message hỏng (JSON) -> fail.poison_message; đã normalize trước đó -> skipped (không cause)', async () => {
@@ -175,11 +175,11 @@ describe('NormalizeConsumer — normalize.done (LOGGING.md §3, §10)', () => {
     const ch = buildChannel();
     await t.consumer.handleMessage({ content: Buffer.from('{không phải json'), properties: { headers: { 'x-correlation-id': 'corr-1' } } } as any, ch);
     expect(ch.nack).toHaveBeenCalled();
-    expect(t.only('normalize.done')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.poison_message', blame: 'hub' });
+    expect(t.linesOf('normalize.done')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.poison_message', blame: 'hub' });
     const t2 = build({ processed: true });
     await t2.consumer.handleMessage(msg(), buildChannel());
-    expect(t2.only('normalize.done')[0].obj).toMatchObject({ outcome: 'skipped' });
-    expect(t2.only('normalize.done')[0].obj.cause).toBeUndefined();
+    expect(t2.linesOf('normalize.done')[0].obj).toMatchObject({ outcome: 'skipped' });
+    expect(t2.linesOf('normalize.done')[0].obj.cause).toBeUndefined();
   });
 });
 
@@ -228,7 +228,7 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
     const t = setup(send);
     await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
     expect(t.channel.ack).toHaveBeenCalledTimes(1);
-    const [{ level, obj }] = t.only('delivery.attempt');
+    const [{ level, obj }] = t.linesOf('delivery.attempt');
     expect(level).toBe('info');
     expect(obj).toMatchObject({ svc: 'hub-worker', outcome: 'ok', trace_id: TRACE, attempt: 1, destination_id: 'dest-1', delivery_id: DELIVERY_ID, tenant_id: TENANT_ID, event_name: 'payment.received', http_status: 200 });
     expect(obj.cause).toBeUndefined();
@@ -247,7 +247,7 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
   ])('lần thất bại còn retry (%s): ghi status/err/durationMs/attempt/destination_id (lỗ hổng #2) và cause %s', async (_n, res, cause, code) => {
     const t = setup(fail(res));
     await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
-    const [{ level, obj }] = t.only('delivery.attempt');
+    const [{ level, obj }] = t.linesOf('delivery.attempt');
     expect(level).toBe('warn');
     expect(obj).toMatchObject({ outcome: 'retry', cause, attempt: 1, destination_id: 'dest-1', http_status: res.status, trace_id: TRACE, err: { code } });
     expect(obj.stage_ms.dest_http).toBe(40);
@@ -258,21 +258,21 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
   it('4xx cấu hình (400) -> dead ngay, wrong.config_dest_4xx; lần thứ 6 thất bại -> dead, fail.exhausted kèm last_cause', async () => {
     const t = setup(fail({ status: 400, error: 'Request failed with status code 400' }));
     await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
-    expect(t.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'wrong.config_dest_4xx', blame: 'khach', http_status: 400 });
+    expect(t.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'wrong.config_dest_4xx', blame: 'khach', http_status: 400 });
     const t2 = setup(fail({ status: 503 }));
     await t2.consumer.handleMessage(amqp(buildSlimMsg({ attemptCount: 5 })), t2.channel);
-    expect(t2.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.exhausted', attempt: 6, last_cause: 'fail.dest_5xx' });
+    expect(t2.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.exhausted', attempt: 6, last_cause: 'fail.dest_5xx' });
   });
 
   it('queue_wait: timestamp AMQP cũ 9s -> slow.queue_wait dù đích nhanh; retry tầng 1m (x-due-at vừa hết hạn) KHÔNG tính chờ cố ý', async () => {
     const t = setup(ok(10));
     await t.consumer.handleMessage(amqp(buildSlimMsg(), { 'x-outbox-age-ms': 100 }, Date.now() - 9_000), t.channel);
-    expect(t.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'ok', cause: 'slow.queue_wait', blame: 'hub' });
-    expect(t.only('delivery.attempt')[0].obj.stage_ms.queue_wait).toBeGreaterThanOrEqual(8_900);
+    expect(t.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'ok', cause: 'slow.queue_wait', blame: 'hub' });
+    expect(t.linesOf('delivery.attempt')[0].obj.stage_ms.queue_wait).toBeGreaterThanOrEqual(8_900);
 
     const t2 = setup(ok(10));
     await t2.consumer.handleMessage(amqp(buildSlimMsg({ attemptCount: 1 }), { 'x-due-at': Date.now() - 120 }, Date.now() - 60_000), t2.channel);
-    const o = t2.only('delivery.attempt')[0].obj;
+    const o = t2.linesOf('delivery.attempt')[0].obj;
     expect(o.cause).toBeUndefined();
     expect(o.stage_ms.queue_wait).toBeLessThan(2_000);
   });
@@ -301,13 +301,13 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
     const NEW_TRACE = 'b'.repeat(32);
     const t = setup(ok());
     await t.consumer.handleMessage(amqp(buildSlimMsg({ attemptGeneration: 2 }), { traceparent: formatTraceparent(NEW_TRACE, SPAN0), 'x-replay-of': TRACE }), t.channel);
-    expect(t.only('delivery.attempt')[0].obj).toMatchObject({ trace_id: NEW_TRACE, replay_of: TRACE, outcome: 'ok' });
+    expect(t.linesOf('delivery.attempt')[0].obj).toMatchObject({ trace_id: NEW_TRACE, replay_of: TRACE, outcome: 'ok' });
   });
 
   it('đích chậm (dest_http > SLOW_DELIVERY_MS) -> slow.destination (warn) dù thành công', async () => {
     const t = setup(ok(4_000));
     await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
-    expect(t.only('delivery.attempt')[0]).toMatchObject({ level: 'warn', obj: { outcome: 'ok', cause: 'slow.destination', blame: 'dich' } });
+    expect(t.linesOf('delivery.attempt')[0]).toMatchObject({ level: 'warn', obj: { outcome: 'ok', cause: 'slow.destination', blame: 'dich' } });
   });
 
   it('retry giữ trace: bản republish mang traceparent CÙNG trace_id, x-due-at ≈ now + TTL tầng, bỏ x-outbox-age-ms; body vẫn 7 khoá', async () => {
@@ -327,7 +327,7 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
     cb.getState = jest.fn().mockResolvedValue({ state: 'OPEN', failures: 5, openPttlMs: 50_000 });
     const t = setup(ok(), { cb });
     await t.consumer.handleMessage(amqp(buildSlimMsg({ destinationId: 'dest-1', rateLimitRps: 0 })), t.channel);
-    const [{ obj }] = t.only('delivery.attempt');
+    const [{ obj }] = t.linesOf('delivery.attempt');
     expect(obj).toMatchObject({ outcome: 'deferred', cause: 'slow.deferred_circuit', blame: 'dich', destination_id: 'dest-1', trace_id: TRACE });
     expect(obj.defer_ms).toBeGreaterThan(0);
     expect(parseTraceparent(t.channel.sendToQueue.mock.calls[0][2].headers.traceparent)!.traceId).toBe(TRACE);
@@ -338,36 +338,36 @@ describe('DeliveryConsumer — delivery.attempt (LOGGING.md §3, §10)', () => {
     cb.getState = jest.fn().mockResolvedValue({ state: 'CLOSED', failures: 0, throttleAllowed: false });
     const t = setup(ok(), { cb });
     await t.consumer.handleMessage(amqp(buildSlimMsg({ destinationId: 'dest-1', rateLimitRps: 5 })), t.channel);
-    expect(t.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'deferred', cause: 'slow.deferred_throttle', blame: 'khach' });
-    expect(t.only('delivery.attempt')[0].obj.defer_ms).toBeGreaterThan(0);
+    expect(t.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'deferred', cause: 'slow.deferred_throttle', blame: 'khach' });
+    expect(t.linesOf('delivery.attempt')[0].obj.defer_ms).toBeGreaterThan(0);
 
     const t2 = setup(ok());
     t2.consumer.spill(amqp(buildSlimMsg()), t2.channel);
-    expect(t2.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'deferred', cause: 'slow.deferred_backpressure', blame: 'hub', trace_id: TRACE });
-    expect(t2.only('delivery.attempt')[0].obj.defer_ms).toBeGreaterThan(0);
+    expect(t2.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'deferred', cause: 'slow.deferred_backpressure', blame: 'hub', trace_id: TRACE });
+    expect(t2.linesOf('delivery.attempt')[0].obj.defer_ms).toBeGreaterThan(0);
   });
 
   it('lỗi hạ tầng hub (P2024 khi nạp delivery) -> deferred fail.hub_db (error, err.code); lỗi lạ -> fail.hub_unknown; lần thứ 5 -> dead', async () => {
     const e = new Prisma.PrismaClientKnownRequestError('pool', { code: 'P2024', clientVersion: 't' });
     const t = setup(ok(), { infraError: e });
     await t.consumer.handleMessage(amqp(buildSlimMsg()), t.channel);
-    expect(t.only('delivery.attempt')[0]).toMatchObject({ level: 'error', obj: { outcome: 'deferred', cause: 'fail.hub_db', blame: 'ha_tang', err: { code: 'P2024' } } });
+    expect(t.linesOf('delivery.attempt')[0]).toMatchObject({ level: 'error', obj: { outcome: 'deferred', cause: 'fail.hub_db', blame: 'ha_tang', err: { code: 'P2024' } } });
     const t2 = setup(ok(), { infraError: new TypeError('lạ') });
     await t2.consumer.handleMessage(amqp(buildSlimMsg()), t2.channel);
-    expect(t2.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'deferred', cause: 'fail.hub_unknown' });
+    expect(t2.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'deferred', cause: 'fail.hub_unknown' });
     const t3 = setup(ok(), { infraError: new TypeError('lạ') });
     await t3.consumer.handleMessage(amqp(buildSlimMsg(), { 'x-unknown-errors': 4 }), t3.channel);
-    expect(t3.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.hub_unknown' });
+    expect(t3.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.hub_unknown' });
   });
 
   it('message hỏng -> dead, fail.poison_message (bản sao DLQ như cũ); delivery không tồn tại / đích lưu trữ -> skipped', async () => {
     const t = setup(ok());
     await t.consumer.handleMessage({ content: Buffer.from('rác'), properties: { headers: { 'x-correlation-id': 'corr-1' } } } as any, t.channel);
     expect(t.channel.publish).toHaveBeenCalled();
-    expect(t.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.poison_message', blame: 'hub' });
+    expect(t.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'dead', cause: 'fail.poison_message', blame: 'hub' });
     const t2 = setup(ok(), { row: null });
     await t2.consumer.handleMessage(amqp(buildSlimMsg()), t2.channel);
-    expect(t2.only('delivery.attempt')[0].obj).toMatchObject({ outcome: 'skipped' });
+    expect(t2.linesOf('delivery.attempt')[0].obj).toMatchObject({ outcome: 'skipped' });
   });
 
   it('bãi mìn: sender trả lỗi chứa secret/URL có token/số tài khoản -> dòng log không lộ (err.msg đã scrub, chỉ host)', async () => {

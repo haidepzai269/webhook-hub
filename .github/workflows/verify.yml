@@ -70,6 +70,7 @@ jobs:
             verify/.results/
             verify/.last-red.json
           if-no-files-found: ignore
+          include-hidden-files: true # verify/.results là thư mục ẩn — thiếu cờ này artifact rỗng và không đọc được test nào skip/fail
 
   # LH2 (SPEC-hub-sap H10, ADR-214): Worker lưới hứng `apps/catchnet` nằm NGOÀI npm workspaces (wrangler/workerd nặng,
   # không làm chậm `npm ci` của hub) -> lock riêng, job riêng. L0 = vitest trên Node (D1 giả bằng node:sqlite).
@@ -145,6 +146,7 @@ jobs:
             verify/.results/
             verify/.last-red.json
           if-no-files-found: ignore
+          include-hidden-files: true # verify/.results là thư mục ẩn — thiếu cờ này artifact rỗng và không đọc được test nào skip/fail
 
   secrets:
     name: secrets (gitleaks, toàn lịch sử)
@@ -193,6 +195,7 @@ jobs:
             verify/.mail/
             verify/.results/
           if-no-files-found: ignore
+          include-hidden-files: true # verify/.results là thư mục ẩn — thiếu cờ này artifact rỗng và không đọc được test nào skip/fail
 
   # VF8: L3 chaos — nightly và bấm tay (kill/restart container hubv của CHÍNH runner, không đụng gì khác).
   chaos:
@@ -224,6 +227,7 @@ jobs:
             hubv-logs.txt
             verify/.results/
           if-no-files-found: ignore
+          include-hidden-files: true # verify/.results là thư mục ẩn — thiếu cờ này artifact rỗng và không đọc được test nào skip/fail
 
   # M-5: probe tách job riêng — ~2 lượt jest/probe (đối chứng + phá), ~40 probe → 2–3 giờ trên runner; không phụ thuộc
   # chaos (chaos đỏ thì probe vẫn chạy). L1 probe cần Postgres/Redis của hubv nên vẫn verify:up.
@@ -251,3 +255,4 @@ jobs:
           name: verify-probe
           path: verify/.results/
           if-no-files-found: ignore
+          include-hidden-files: true # verify/.results là thư mục ẩn — thiếu cờ này artifact rỗng và không đọc được test nào skip/fail
