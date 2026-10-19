@@ -1,7 +1,8 @@
 import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import type { Response } from 'express';
-import { ERROR_CATALOG, HubErrorCode, codeForStatus, docsUrlFor, isHubErrorCode, logger } from '@hub/common';
+import { ERROR_CATALOG, HubErrorCode, codeForStatus, docsUrlFor, isHubErrorCode, logger, reportUnexpected } from '@hub/common';
+import { classifyInfraError } from '@hub/database';
 import { RequestWithId, ensureRequestId, isDevFacingPath } from './request-id';
 
 /**
@@ -20,12 +21,19 @@ export class ServiceExceptionFilter extends BaseExceptionFilter {
     if (host.getType() !== 'http') return super.catch(exception, host);
     const req = host.switchToHttp().getRequest<RequestWithId>();
     const res = host.switchToHttp().getResponse<Response>();
-    if (!isDevFacingPath(req.originalUrl ?? req.url)) return super.catch(exception, host);
+    if (!isDevFacingPath(req.originalUrl ?? req.url)) {
+      // LOGGING.md §11 (ADR-258): đường không thuộc khuôn lỗi dev vẫn có thể ném lỗi lạ (không phải HttpException) -> báo Sentry (có cổng blame).
+      if (!(exception instanceof HttpException)) reportUnexpected(exception, { cause: 'fail.hub_unknown', stage: 'http', requestId: (req as RequestWithId).requestId, infra: classifyInfraError(exception) === 'transient' });
+      return super.catch(exception, host);
+    }
     const requestId = ensureRequestId(req, res);
     const { status, body, original } = toErrorBody(exception, requestId);
     const where = { requestId, method: req.method, path: (req.originalUrl ?? req.url ?? '').split('?')[0], status, error: body.error };
     if (isKept5xx(body.error, status)) logger.warn(where, `Từ chối có chủ đích (${status} ${body.error})`);
-    else if (status >= 500 && status !== 503) logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
+    else if (status >= 500 && status !== 503) {
+      logger.error({ ...where, err: exception, original }, 'Lỗi máy chủ (trả internal_error, chi tiết chỉ ở log)');
+      reportUnexpected(exception, { cause: 'fail.hub_unknown', stage: 'http', requestId, httpStatus: status, infra: classifyInfraError(exception) === 'transient' }); // §11.1: đúng chỗ logger.error này
+    }
     else if (status >= 500) logger.warn({ ...where, original }, 'Tạm thời không phục vụ được (503)');
     else logger.info(where, 'Trả lỗi cho client');
     if (res.headersSent) return;

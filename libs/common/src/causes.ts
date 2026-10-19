@@ -155,3 +155,9 @@ const ALERT_RULE_CAUSES: Record<AlertRuleCode, Cause | null> = {
 export function alertRuleCause(rule: string): Cause | null {
   return Object.prototype.hasOwnProperty.call(ALERT_RULE_CAUSES, rule) ? ALERT_RULE_CAUSES[rule as AlertRuleCode] : null;
 }
+
+/**
+ * LOGGING.md §11.1 (ADR-251/258): cause "lỗi lạ chưa phân loại" — cổng của Sentry. Chỉ cause thuộc tập này VÀ có `blame === 'hub'`
+ * mới được `reportUnexpected` đẩy đi. Lỗi đã biết tên (chữ ký sai, đích 5xx, DB/Redis/broker rớt tạm thời, schema_mismatch…) đã có log/metric/cảnh báo.
+ */
+export const SENTRY_CAUSES: ReadonlySet<Cause> = new Set<Cause>(['fail.hub_unknown', 'fail.poison_message']);
