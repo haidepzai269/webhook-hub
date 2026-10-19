@@ -170,6 +170,62 @@ export const REPO_SUBCLASS_ALLOWED: readonly string[] = [
   'apps/hub-api/src/modules/flow/flow.repository.ts', // FlowScopedRepository (ADR nháp EF-2, R-9): SQL đọc hành trình, lọc tenant_id
 ];
 
+/** ADR-267: README đóng băng ở số này; ADR mới là file riêng `docs/adr/NNNN-<slug>.md`. */
+export const ADR_FROZEN_MAX = 266;
+
+/**
+ * Luật `adr-unique` (ADR-267). Nhận README + mọi file `docs/adr/**.md`; trả vi phạm. Thuần để test không cần đĩa.
+ * Thông báo nêu số lớn nhất hiện có và số kế tiếp nên dùng (nhánh vào sau đổi tên file + số trong file).
+ */
+export function adrUniqueCheck(files: { file: string; text: string }[]): GateViolation[] {
+  const out: GateViolation[] = [];
+  const owners = new Map<number, string[]>(); // số -> nơi khai báo (README hoặc đường dẫn file)
+  const add = (n: number, where: string) => owners.set(n, [...(owners.get(n) ?? []), where]);
+  const readme = files.find((f) => f.file === 'docs/adr/README.md');
+  const readmeNums: { n: number; line: number }[] = [];
+  readme?.text.split(/\r?\n/).forEach((ln, i) => {
+    const m = /^## ADR-(\d+)/.exec(ln);
+    if (m) readmeNums.push({ n: Number(m[1]), line: i + 1 });
+  });
+  readmeNums.forEach(({ n }) => add(n, 'docs/adr/README.md'));
+  const adrFiles: { file: string; n: number }[] = [];
+  const supplements: { file: string; n: number }[] = [];
+  const bad: GateViolation[] = [];
+  for (const { file, text } of files) {
+    if (file === 'docs/adr/README.md') continue;
+    const sup = /^docs\/adr\/bo-sung\/(\d{4})-\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.md$/.exec(file);
+    const one = /^docs\/adr\/(\d{4})-[a-z0-9-]+\.md$/.exec(file);
+    if (sup) {
+      supplements.push({ file, n: Number(sup[1]) });
+      continue;
+    }
+    if (!one) {
+      bad.push({ file, line: 1, text: 'tên file phải là docs/adr/NNNN-<slug-khong-dau>.md (ADR) hoặc docs/adr/bo-sung/NNNN-YYYY-MM-DD-<slug>.md (bổ sung)' });
+      continue;
+    }
+    const n = Number(one[1]);
+    const head = /^# ADR-(\d+)\b/m.exec(text);
+    if (!head) bad.push({ file, line: 1, text: `thiếu tiêu đề "# ADR-${one[1]} — …"` });
+    else if (Number(head[1]) !== n) bad.push({ file, line: 1, text: `tên file nói ADR-${n} nhưng tiêu đề nói ADR-${Number(head[1])}` });
+    if (n <= ADR_FROZEN_MAX) bad.push({ file, line: 1, text: `ADR ≤ ${ADR_FROZEN_MAX} đã đóng băng trong README; ADR mới phải mang số > ${ADR_FROZEN_MAX}` });
+    adrFiles.push({ file, n });
+    add(n, file);
+  }
+  const max = Math.max(0, ...owners.keys());
+  const hint = `Số lớn nhất hiện có: ADR-${max}; số kế tiếp nên dùng: ADR-${max + 1} (đổi tên file và số trong tiêu đề của nhánh vào sau, hoặc chạy npm run adr:new)`;
+  for (const { n, line } of readmeNums) {
+    if (n > ADR_FROZEN_MAX) out.push({ file: 'docs/adr/README.md', line, text: `README đã đóng băng ở ADR-${ADR_FROZEN_MAX}, không thêm "## ADR-${n}" vào đây — tạo file docs/adr/${String(n).padStart(4, '0')}-<slug>.md. ${hint}` });
+  }
+  for (const [n, where] of owners) {
+    if (where.length > 1) out.push({ file: where.filter((w) => w !== 'docs/adr/README.md')[0] ?? where[0], line: 1, text: `trùng số ADR-${n}: ${where.join(' và ')}. ${hint}` });
+  }
+  out.push(...bad);
+  for (const { file, n } of supplements) {
+    if (!owners.has(n)) out.push({ file, line: 1, text: `bổ sung trỏ tới ADR-${n} không tồn tại (README hoặc docs/adr/${String(n).padStart(4, '0')}-*.md). Số lớn nhất hiện có: ADR-${max}` });
+  }
+  return out;
+}
+
 export const GATES: Gate[] = [
   {
     id: 'bb1',
@@ -419,6 +475,14 @@ export const GATES: Gate[] = [
       const n = files.reduce((sum, f) => sum + f.text.replace(/\r?\n$/, '').split(/\r?\n/).length, 0);
       return n > 600 ? [{ file: 'apps/shop/src', line: n, text: `${n} dòng > 600` }] : [];
     },
+  },
+  {
+    id: 'adr-unique',
+    rule: 'ADR: số duy nhất (README ≤ 266 + docs/adr/NNNN-*.md), tên file khớp tiêu đề, README đóng băng, bổ sung trỏ tới ADR có thật',
+    source: 'ADR-267',
+    include: (f) => /^docs\/adr\/(README|.+)\.md$/.test(f),
+    check: () => [],
+    checkAll: adrUniqueCheck,
   },
 ];
 

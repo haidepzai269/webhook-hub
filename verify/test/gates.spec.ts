@@ -271,3 +271,62 @@ import { validateGenericConfig } from '${H}providers';`,
     expect(r[0].violations.map((v) => v.file + ':' + v.line)).toEqual(['apps/web/src/a.tsx:2', 'apps/web/src/b.ts:1']);
   });
 });
+
+describe('adr-unique (ADR-267)', () => {
+  const README = 'docs/adr/README.md';
+  const readme = '# Nhật ký\n\n## ADR-001 — a\n\n## ADR-266 — z\n';
+  const adr = (n: number, head = n) => `# ADR-${head} — tiêu đề (2026-10-19)\n\n**Vấn đề:** x\n`;
+  const run = (m: Record<string, string>) => {
+    const f = files(m);
+    return runGates([byId('adr-unique')], f.list, f.read)[0].violations;
+  };
+
+  it('hợp lệ: README ≤ 266 + file 0267 + bổ sung trỏ tới số có thật → xanh', () => {
+    const v = run({
+      [README]: readme,
+      'docs/adr/0267-adr-moi-file.md': adr(267),
+      'docs/adr/bo-sung/0266-2026-10-20-them-ghi-chu.md': 'bổ sung',
+      'docs/adr/bo-sung/0267-2026-10-20-them-ghi-chu.md': 'bổ sung',
+    });
+    expect(v).toEqual([]);
+  });
+
+  it('trùng số giữa hai file → đỏ, thông báo nêu số lớn nhất và số kế tiếp', () => {
+    const v = run({ [README]: readme, 'docs/adr/0267-a.md': adr(267), 'docs/adr/0267-b.md': adr(267) });
+    expect(v).toHaveLength(1);
+    expect(v[0].text).toContain('trùng số ADR-267');
+    expect(v[0].text).toContain('Số lớn nhất hiện có: ADR-267');
+    expect(v[0].text).toContain('số kế tiếp nên dùng: ADR-268');
+  });
+
+  it('file mang số đã có trong README → đỏ', () => {
+    const v = run({ [README]: readme, 'docs/adr/0266-lai.md': adr(266) });
+    expect(v.some((x) => x.text.includes('trùng số ADR-266'))).toBe(true);
+    expect(v.some((x) => x.text.includes('đã đóng băng'))).toBe(true);
+  });
+
+  it('tên file lệch tiêu đề → đỏ', () => {
+    const v = run({ [README]: readme, 'docs/adr/0267-lech.md': adr(267, 268) });
+    expect(v.map((x) => x.text)).toEqual(['tên file nói ADR-267 nhưng tiêu đề nói ADR-268']);
+  });
+
+  it('README có "## ADR-" > 266 → đỏ, chỉ chỗ thêm nhầm', () => {
+    const v = run({ [README]: readme + '\n## ADR-267 — lỡ tay\n' });
+    expect(v).toHaveLength(1);
+    expect(v[0].file).toBe(README);
+    expect(v[0].text).toContain('đóng băng');
+    expect(v[0].text).toContain('số kế tiếp nên dùng: ADR-268');
+  });
+
+  it('bổ sung trỏ tới số không tồn tại → đỏ', () => {
+    const v = run({ [README]: readme, 'docs/adr/bo-sung/0300-2026-10-20-ma.md': 'x' });
+    expect(v).toHaveLength(1);
+    expect(v[0].text).toContain('ADR-300 không tồn tại');
+  });
+
+  it('tên file lạ trong docs/adr → đỏ', () => {
+    const v = run({ [README]: readme, 'docs/adr/ghi-chu.md': 'x' });
+    expect(v).toHaveLength(1);
+    expect(v[0].text).toContain('tên file phải là');
+  });
+});
