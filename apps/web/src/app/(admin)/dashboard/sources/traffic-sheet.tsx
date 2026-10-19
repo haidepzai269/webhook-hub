@@ -102,7 +102,7 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
         aria-label={t("traffic.button")}
       >
         {(["1h", "24h", "7d"] as const).map((r) => (
-          <ToggleGroupItem key={r} value={r}>
+          <ToggleGroupItem key={r} value={r} className="max-sm:min-h-10">
             {t(`traffic.range.${r}`)}
           </ToggleGroupItem>
         ))}
@@ -188,7 +188,7 @@ function TrafficBlock({ sourceId }: { sourceId: string }) {
                       {
                         key: "last",
                         header: t("traffic.top-ips.col.last"),
-                        className: "text-xs tabular-nums",
+                        className: "text-xs tabular-nums max-sm:hidden",
                         cell: (r) => `${dayFmt.format(new Date(r.lastSeen))} ${timeFmt.format(new Date(r.lastSeen))}`,
                       },
                     ]}

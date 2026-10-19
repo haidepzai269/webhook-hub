@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { DESTINATION_MOBILE_CARD } from "@/components/admin/mobile-card-specs";
 import { FormDialog } from "@/components/admin/form-dialog";
 import { InsightCell, InsightRowsProvider } from "@/components/admin/insight-cell";
 import { PageHeader } from "@/components/admin/page-header";
@@ -131,7 +132,7 @@ function DestinationActions({ dest }: { dest: Destination }) {
     });
   };
   return (
-    <div className="flex justify-end">
+    <div className="flex justify-end max-md:w-full">
       {dest.type === "webhook" && (
         <IconButton
           icon={<Eye />}
@@ -276,7 +277,7 @@ export default function DestinationsPage() {
         title={t("page.destinations.title")}
         description={t("page.destinations.description")}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button onClick={() => setEndpointOpen(true)}>
               <Webhook />
               {t("page.destinations.create-endpoint")}
@@ -298,6 +299,7 @@ export default function DestinationsPage() {
             getRowId={(d) => d.id}
             isLoading={isLoading}
             error={error}
+            mobile={DESTINATION_MOBILE_CARD}
             searchPlaceholder={t("page.destinations.search")}
             emptyText={t("page.destinations.empty")}
           />

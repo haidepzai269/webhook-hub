@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { DataTable, type HubColumn } from "@/components/admin/data-table";
+import { SUBSCRIPTION_MOBILE_CARD } from "@/components/admin/mobile-card-specs";
 import { FormDialog } from "@/components/admin/form-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -111,7 +112,7 @@ function SubscriptionActions({ sub }: { sub: Subscription }) {
   };
 
   return (
-    <div className="flex justify-end gap-1">
+    <div className="flex justify-end gap-1 max-md:w-full">
       {sub.isActive ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -274,6 +275,7 @@ export default function SubscriptionsPage() {
         getRowId={(s) => s.id}
         isLoading={isLoading}
         error={error}
+        mobile={SUBSCRIPTION_MOBILE_CARD}
         searchPlaceholder={t("page.subscriptions.search")}
         emptyText={t("page.subscriptions.empty")}
       />
