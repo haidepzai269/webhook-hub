@@ -3,6 +3,8 @@ import {
   describeType,
   expectedProbe,
   isProbeType,
+  noDestination,
+  pipelineRoles,
   type NoteInput,
   probeOf,
   stageHint,
@@ -282,5 +284,56 @@ describe("stageHint — chấm Lưu (persisted) bị bỏ qua (M1)", () => {
   it("DUPLICATE (đã qua xác thực) -> 'Trùng — đã nhận trước đó'", () => {
     const dup = row({ type: null, summary: summary({ persisted: "skipped", normalized: "skipped", routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 }) });
     expect(stageHint(dup, persisted, t)).toBe("Trùng — đã nhận trước đó, không lưu lại");
+  });
+});
+
+describe("noDestination + pipelineRoles — mờ sau điểm dừng (ADR-259)", () => {
+  const noSub = summary({ routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 });
+  const push = (over: Partial<NoteInput> = {}) =>
+    row({ provider: "github", providerLabel: "GitHub", type: "repo.push", summary: noSub, ...over });
+
+  it("repo.push không subscription: noDestination, Route = stop, Giao mờ", () => {
+    const r = push();
+    expect(noDestination(r)).toBe(true);
+    const { roles, stopIdx } = pipelineRoles(r);
+    expect(roles).toEqual(["real", "real", "real", "real", "stop", "faded"]);
+    expect(stopIdx).toBe(4);
+  });
+
+  it("succeeded có giao: không đổi, 6 chấm real", () => {
+    const r = row();
+    expect(noDestination(r)).toBe(false);
+    expect(pipelineRoles(r).roles.every((x) => x === "real")).toBe(true);
+  });
+
+  it("ping kiểm tra: không phải noDestination; routed + delivering mờ", () => {
+    const r = row({ provider: "github", type: "github.ping", probe: true, summary: probeSummary });
+    expect(noDestination(r)).toBe(false);
+    expect(pipelineRoles(r).roles).toEqual(["real", "real", "real", "real", "faded", "faded"]);
+  });
+
+  it("bị từ chối: Verify failed là điểm dừng, 4 chấm sau mờ", () => {
+    const r = row({
+      type: null,
+      status: "rejected",
+      summary: summary({ verified: "failed", persisted: "skipped", normalized: "skipped", routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 }),
+      failedAt: { stage: "verified", reason: { code: "bad_signature", message: "x" } },
+    });
+    expect(noDestination(r)).toBe(false);
+    expect(pipelineRoles(r).roles).toEqual(["real", "real", "faded", "faded", "faded", "faded"]);
+  });
+
+  it("trùng (type null): persisted giữ ⊘ làm điểm dừng, sau đó mờ", () => {
+    const r = row({
+      type: null,
+      summary: summary({ persisted: "skipped", normalized: "skipped", routed: "skipped", delivering: "skipped" }, { okCount: 0, total: 0 }),
+    });
+    expect(pipelineRoles(r).roles).toEqual(["real", "real", "real", "faded", "faded", "faded"]);
+  });
+
+  it("đang xử lý (pending) không bị coi là dừng / không mờ", () => {
+    const r = row({ status: "in_progress", summary: summary({ routed: "pending", delivering: "pending" }, { okCount: 0, total: 0 }) });
+    expect(noDestination(r)).toBe(false);
+    expect(pipelineRoles(r).roles.every((x) => x === "real")).toBe(true);
   });
 });
