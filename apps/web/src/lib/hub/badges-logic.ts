@@ -33,9 +33,9 @@ export interface BadgeState {
 
 /** Khớp phản hồi `GET /api/v1/badges`. */
 export interface BadgesResponse {
-  events: { count: number; latest: LatestEvent | null; cursor: string | null };
-  deliveries: { count: number; latest: LatestDelivery | null; cursor: string | null };
-  dlq: { count: number; latest: LatestDead | null; cursor: string | null };
+  events: { count: number; ids: string[]; latest: LatestEvent | null; cursor: string | null };
+  deliveries: { count: number; ids: string[]; latest: LatestDelivery | null; cursor: string | null };
+  dlq: { count: number; ids: string[]; latest: LatestDead | null; cursor: string | null };
 }
 
 export const emptyBadges = (): BadgeState => ({
@@ -111,5 +111,28 @@ export function rememberName(map: Map<string, string>, id: string, name: string,
   if (map.size > max) {
     const oldest = map.keys().next().value;
     if (oldest !== undefined) map.delete(oldest);
+  }
+}
+
+/**
+ * Chống đếm đôi (review TB-4): server đã đếm bản ghi lúc tạo (poll), rồi socket báo lại CÙNG bản ghi — hoặc ngược lại.
+ * `claimId` = true nếu id CHƯA được tính (và ghi nhận nó); false nếu đã tính -> bỏ qua. Tập có trần, bỏ id cũ nhất.
+ */
+export function claimId(seen: Set<string>, id: string, max = 200): boolean {
+  if (seen.has(id)) return false;
+  rememberIds(seen, [id], max);
+  return true;
+}
+
+/** Ghi nhận các id server đã đếm (từ `ids` của /badges). */
+export function rememberIds(seen: Set<string>, ids: readonly string[], max = 200): void {
+  for (const id of ids) {
+    seen.delete(id);
+    seen.add(id);
+  }
+  while (seen.size > max) {
+    const oldest = seen.values().next().value;
+    if (oldest === undefined) break;
+    seen.delete(oldest);
   }
 }

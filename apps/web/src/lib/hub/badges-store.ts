@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 
 import { create } from "zustand";
 
-import { readSeen, writeSeen } from "./badges-seen";
 import {
   addLive,
   applyServer,
@@ -15,13 +14,16 @@ import {
   type BadgesResponse,
   type BadgeTab,
   badgeTabOfPath,
+  claimId,
   emptyBadges,
   markSeen,
+  rememberIds,
   rememberName,
   resetBadges,
 } from "./badges-logic";
+import { armSeenWrites, readSeen, writeSeen } from "./badges-seen";
 import { hubFetch } from "./client";
-import { useMeId } from "./me-store";
+import { useMeId, useMeStore } from "./me-store";
 import { useProjectStore } from "./project-store";
 import { subscribeHubSocket } from "./socket";
 
@@ -54,10 +56,18 @@ export function useSidebarBadges(): void {
       const v = readSeen(userId, projectId, t);
       if (v) seen[t] = v;
     }
+    armSeenWrites();
     useBadgeStore.setState({ badges: resetBadges() });
+    // Id đã được tính theo từng tab (từ poll lẫn socket) — chống đếm đôi khi socket báo lại bản ghi poll đã đếm.
+    const counted: Record<BadgeTab, Set<string>> = { events: new Set(), deliveries: new Set(), dlq: new Set() };
+    const stillMe = () => useMeStore.getState().me?.user.id === userId;
     const names = new Map<string, string>();
     const acc = { events: 0, deliveries: 0, dlq: 0 };
-    const pend: { events: BadgeState["latest"]["events"]; deliveries: BadgeState["latest"]["deliveries"]; dlq: BadgeState["latest"]["dlq"] } = {
+    const pend: {
+      events: BadgeState["latest"]["events"];
+      deliveries: BadgeState["latest"]["deliveries"];
+      dlq: BadgeState["latest"]["dlq"];
+    } = {
       events: null,
       deliveries: null,
       dlq: null,
@@ -101,8 +111,9 @@ export function useSidebarBadges(): void {
           if (!c) continue;
           if (!seen[t] || advance.has(t)) {
             seen[t] = c;
-            writeSeen(userId, projectId, t, c);
+            if (alive && stillMe()) writeSeen(userId, projectId, t, c); // đã đăng xuất / đổi user -> không ghi lại hub:seen:*
           }
+          rememberIds(counted[t], r[t].ids);
         }
         acc.events = acc.deliveries = acc.dlq = 0; // server là nguồn sự thật cho lượt này
         let s = applyServer(useBadgeStore.getState().badges, r, cur);
@@ -123,20 +134,23 @@ export function useSidebarBadges(): void {
     void refresh(tabRef.current ? [tabRef.current] : []);
 
     const offEvent = subscribeHubSocket("event.received", (n) => {
+      if (n.tenantId && n.tenantId !== projectId) return; // phòng thủ: chỉ project đang xem
       for (const d of n.deliveries ?? []) rememberName(names, d.destinationId, d.destinationName);
-      const last = n.events[n.events.length - 1];
+      const fresh = n.events.filter((e) => claimId(counted.events, e.id));
+      const last = fresh[fresh.length - 1];
       if (!last) return;
-      acc.events += n.events.length;
+      acc.events += fresh.length;
       pend.events = { type: last.type, source: last.source, at: new Date().toISOString() };
       schedule();
     });
     const offDelivery = subscribeHubSocket("delivery.attempt", (n) => {
+      if (n.tenantId && n.tenantId !== projectId) return;
       const at = new Date().toISOString();
-      if (n.attemptNo === 1) {
+      if (n.attemptNo === 1 && claimId(counted.deliveries, n.deliveryId)) {
         acc.deliveries += 1;
         pend.deliveries = { destination: nameOf(n.destinationId), status: n.status, at };
       }
-      if (n.status === "DEAD") {
+      if (n.status === "DEAD" && claimId(counted.dlq, n.deliveryId)) {
         acc.dlq += 1;
         pend.dlq = { destination: nameOf(n.destinationId), attemptNo: n.attemptNo, at };
       }
@@ -146,7 +160,14 @@ export function useSidebarBadges(): void {
       if (typeof document === "undefined" || document.visibilityState === "visible") void refresh([]);
     }, POLL_MS);
 
+    // Tab hiện lại sau khi ẩn: nạp ngay thay vì chờ nhịp 30s.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh([]);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
       alive = false;
       refreshRef.current = null;
       if (timer) clearTimeout(timer);

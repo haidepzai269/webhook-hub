@@ -821,21 +821,21 @@ export class TenantScopedRepository {
             : Promise.resolve([]),
         ])
       : null;
-    const headTab = <L>(v: string | null | undefined): BadgeTab<L> => ({ count: 0, latest: null, cursor: v ?? null });
+    const headTab = <L>(v: string | null | undefined): BadgeTab<L> => ({ count: 0, ids: [], latest: null, cursor: v ?? null });
     const isHead = (v: string | null | undefined) => v === BADGE_HEAD;
     const [events, deliveries, dlq] = await Promise.all([
       since.events && !isHead(since.events)
         ? this.prisma.$queryRaw<
-            { seq: string; type: string; source: string; at: string }[]
+            { id: string; seq: string; type: string; source: string; at: string }[]
           >(Prisma.sql`
-            SELECT e.seq::text AS seq, e.type, e.source, to_char(e.received_at AT TIME ZONE 'UTC', ${US}) AS at
+            SELECT e.id, e.seq::text AS seq, e.type, e.source, to_char(e.received_at AT TIME ZONE 'UTC', ${US}) AS at
             FROM hub.events e
             WHERE e.tenant_id = ${tenant}::uuid AND e.seq > ${since.events}::bigint
             ORDER BY e.seq DESC LIMIT ${BADGE_CAP}`)
         : Promise.resolve([]),
       since.deliveries && !isHead(since.deliveries)
-        ? this.prisma.$queryRaw<{ destination: string; status: string; at: string }[]>(Prisma.sql`
-            SELECT dst.name AS destination, d.status::text AS status, to_char(d.created_at AT TIME ZONE 'UTC', ${US}) AS at
+        ? this.prisma.$queryRaw<{ id: string; destination: string; status: string; at: string }[]>(Prisma.sql`
+            SELECT d.id::text AS id, dst.name AS destination, d.status::text AS status, to_char(d.created_at AT TIME ZONE 'UTC', ${US}) AS at
             FROM hub.deliveries d
             JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
             JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
@@ -843,8 +843,8 @@ export class TenantScopedRepository {
             ORDER BY d.created_at DESC LIMIT ${BADGE_CAP}`)
         : Promise.resolve([]),
       since.dlq && !isHead(since.dlq)
-        ? this.prisma.$queryRaw<{ destination: string; attempt_count: number; at: string }[]>(Prisma.sql`
-            SELECT dst.name AS destination, d.attempt_count, to_char(d.updated_at AT TIME ZONE 'UTC', ${US}) AS at
+        ? this.prisma.$queryRaw<{ id: string; destination: string; attempt_count: number; at: string }[]>(Prisma.sql`
+            SELECT d.id::text AS id, dst.name AS destination, d.attempt_count, to_char(d.updated_at AT TIME ZONE 'UTC', ${US}) AS at
             FROM hub.deliveries d
             JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
             JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
@@ -860,6 +860,7 @@ export class TenantScopedRepository {
         ? headTab(headSeq)
         : {
             count: events.length,
+            ids: events.map((r) => r.id),
             latest: events[0] ? { type: events[0].type, source: events[0].source, at: events[0].at } : null,
             cursor: events[0]?.seq ?? null,
           },
@@ -867,6 +868,7 @@ export class TenantScopedRepository {
         ? headTab(headAt)
         : {
             count: deliveries.length,
+            ids: deliveries.map((r) => r.id),
             latest: deliveries[0]
               ? { destination: deliveries[0].destination, status: deliveries[0].status, at: deliveries[0].at }
               : null,
@@ -876,6 +878,7 @@ export class TenantScopedRepository {
         ? headTab(headAt)
         : {
             count: dlq.length,
+            ids: dlq.map((r) => r.id),
             latest: dlq[0]
               ? { destination: dlq[0].destination, attemptNo: Math.max(1, Number(dlq[0].attempt_count)), at: dlq[0].at }
               : null,
@@ -2193,6 +2196,8 @@ export const BADGE_CAP = 10;
 export const BADGE_HEAD = 'head';
 export interface BadgeTab<L> {
   count: number;
+  /** Id của tối đa BADGE_CAP bản ghi đã đếm — client dùng để không cộng đôi khi socket báo lại cùng bản ghi. */
+  ids: string[];
   latest: L | null;
   /** Mốc mới để client đánh dấu "đã xem" (events: seq dạng chuỗi; còn lại: ISO µs); null khi không có bản ghi mới. */
   cursor: string | null;

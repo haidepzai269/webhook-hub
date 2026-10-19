@@ -42,6 +42,8 @@ describeDb('GET /badges — badgeSnapshot (Postgres, ADR-269)', () => {
     // deliveries: 1 DEAD cũ về created_at nhưng MỚI về updated_at (DLQ phải thấy), 1 DEAD đã bị replay, 1 SUCCEEDED mới
     await raw.delivery.create({ data: { tenantId: A, eventId: evA, subscriptionId: ids.subA, attemptGeneration: 1, status: 'DEAD', attemptCount: 5, createdAt: old, updatedAt: new Date() } });
     await raw.delivery.create({ data: { tenantId: A, eventId: evA, subscriptionId: ids.subA, attemptGeneration: 2, status: 'SUCCEEDED', attemptCount: 1 } });
+    // DEAD KHÔNG bị thay thế: created_at = now-3h (trước mốc), updated_at = now (sau mốc). Nếu SQL đổi sang lọc created_at thì test đỏ.
+    await raw.delivery.create({ data: { tenantId: A, eventId: `EVBA${run}1`, subscriptionId: ids.subA, attemptGeneration: 1, status: 'DEAD', attemptCount: 4, createdAt: old, updatedAt: new Date() } });
     await raw.delivery.create({ data: { tenantId: B, eventId: `EVBB${run}1`, subscriptionId: ids.subB, status: 'DEAD', attemptCount: 3 } });
   });
 
@@ -72,8 +74,8 @@ describeDb('GET /badges — badgeSnapshot (Postgres, ADR-269)', () => {
   it("mốc 'head' (lần đầu): trả mốc hiện tại của server, không đếm; dùng làm mốc thì count 0", async () => {
     const h = await svc.forTenant(A).badgeSnapshot({ events: 'head', deliveries: 'head', dlq: 'head' });
     expect([h.events.count, h.deliveries.count, h.dlq.count]).toEqual([0, 0, 0]);
-    expect(h.events.cursor).toMatch(/^d+$/);
-    expect(h.deliveries.cursor).toMatch(/^d{4}-d{2}-d{2}T.*Z$/);
+    expect(h.events.cursor).toMatch(/^\d+$/);
+    expect(h.deliveries.cursor).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
     const next = await svc.forTenant(A).badgeSnapshot({ events: h.events.cursor, deliveries: h.deliveries.cursor, dlq: h.dlq.cursor });
     expect([next.events.count, next.deliveries.count, next.dlq.count]).toEqual([0, 0, 0]);
   });
@@ -85,8 +87,9 @@ describeDb('GET /badges — badgeSnapshot (Postgres, ADR-269)', () => {
 
   it('dlq theo updated_at (không created_at), tên đích + attemptNo; superseded không tính; cursor đẩy mốc qua dòng đó', async () => {
     const r = await svc.forTenant(A).badgeSnapshot({ dlq: mark });
-    // DEAD gen1 đã bị gen2 (SUCCEEDED) thay thế -> không phải DLQ
-    expect(r.dlq.count).toBe(0);
+    // DEAD gen1 của evA đã bị gen2 (SUCCEEDED) thay thế -> không tính; DEAD của event 1 (created_at cũ, updated_at mới) -> đúng 1
+    expect(r.dlq.count).toBe(1);
+    expect(r.dlq.latest).toMatchObject({ destination: `Dest-a-${run}`, attemptNo: 4 });
     const rB = await svc.forTenant(B).badgeSnapshot({ dlq: mark });
     expect(rB.dlq.count).toBe(1);
     expect(rB.dlq.latest).toMatchObject({ destination: `Dest-b-${run}`, attemptNo: 3 });

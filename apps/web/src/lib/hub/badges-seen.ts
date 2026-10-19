@@ -13,6 +13,12 @@ function storage(): Storage | null {
   }
 }
 
+/** Sau `clearSeenMarks` (đăng xuất) mọi `writeSeen` bị từ chối tới khi `armSeenWrites` — request /badges về muộn không được ghi lại mốc. */
+let cleared = false;
+export function armSeenWrites(): void {
+  cleared = false;
+}
+
 export function readSeen(userId: string, projectId: string, tab: BadgeTab): string | null {
   try {
     return storage()?.getItem(seenKey(userId, projectId, tab)) ?? null;
@@ -22,6 +28,7 @@ export function readSeen(userId: string, projectId: string, tab: BadgeTab): stri
 }
 
 export function writeSeen(userId: string, projectId: string, tab: BadgeTab, value: string): void {
+  if (cleared) return;
   try {
     storage()?.setItem(seenKey(userId, projectId, tab), value);
   } catch {
@@ -31,6 +38,7 @@ export function writeSeen(userId: string, projectId: string, tab: BadgeTab, valu
 
 /** Đăng xuất: xoá mọi mốc `hub:seen:*` — user sau trên cùng trình duyệt không thừa hưởng. */
 export function clearSeenMarks(): void {
+  cleared = true;
   try {
     const s = storage();
     if (!s) return;

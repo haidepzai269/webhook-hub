@@ -1,12 +1,14 @@
 import {
   addLive,
   applyServer,
-  badgeTabOfPath,
   BADGE_CAP,
   type BadgesResponse,
+  badgeTabOfPath,
+  claimId,
   emptyBadges,
   formatBadge,
   markSeen,
+  rememberIds,
   rememberName,
   resetBadges,
   seenKey,
@@ -50,11 +52,15 @@ describe("badges-logic (ADR-269)", () => {
 
   it("applyServer: ghi đè đếm; tab đang mở luôn 0; count 0 -> không giữ latest", () => {
     const r: BadgesResponse = {
-      events: { count: 4, latest: ev, cursor: "9" },
-      deliveries: { count: 0, latest: null, cursor: null },
-      dlq: { count: 10, latest: { destination: "Shop", attemptNo: 5, at: "x" }, cursor: "x" },
+      events: { count: 4, ids: [], latest: ev, cursor: "9" },
+      deliveries: { count: 0, ids: [], latest: null, cursor: null },
+      dlq: { count: 10, ids: [], latest: { destination: "Shop", attemptNo: 5, at: "x" }, cursor: "x" },
     };
-    const s = applyServer(addLive(emptyBadges(), "deliveries", 2, { destination: "a", status: "SUCCEEDED", at: "x" }, null), r, "dlq");
+    const s = applyServer(
+      addLive(emptyBadges(), "deliveries", 2, { destination: "a", status: "SUCCEEDED", at: "x" }, null),
+      r,
+      "dlq",
+    );
     expect(s.counts).toEqual({ events: 4, deliveries: 0, dlq: 0 });
     expect(s.latest.deliveries).toBeNull();
     expect(s.latest.dlq).toBeNull();
@@ -81,5 +87,21 @@ describe("badges-logic (ADR-269)", () => {
     const m = new Map<string, string>();
     for (let i = 0; i < 5; i++) rememberName(m, `id${i}`, `n${i}`, 3);
     expect([...m.keys()]).toEqual(["id2", "id3", "id4"]);
+  });
+
+  it("claimId: id đã được poll đếm thì socket báo lại bị bỏ qua; id mới thì tính một lần", () => {
+    const seen = new Set<string>();
+    rememberIds(seen, ["d1", "d2"]); // server đã đếm
+    expect(claimId(seen, "d1")).toBe(false); // socket báo lại -> không cộng đôi
+    expect(claimId(seen, "d3")).toBe(true); // mới
+    expect(claimId(seen, "d3")).toBe(false); // lặp lại
+  });
+
+  it("claimId/rememberIds: có trần, bỏ id cũ nhất", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 5; i++) claimId(seen, `x${i}`, 3);
+    expect([...seen]).toEqual(["x2", "x3", "x4"]);
+    rememberIds(seen, ["x2", "y"], 3); // x2 làm mới thành "mới nhất"
+    expect([...seen]).toEqual(["x4", "x2", "y"]);
   });
 });

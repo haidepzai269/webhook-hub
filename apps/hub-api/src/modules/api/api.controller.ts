@@ -94,11 +94,34 @@ export function parseBadgeSeq(v: string | undefined): string | null {
   if (!/^\d{1,18}$/.test(v)) throw badParam('events', 'events phải là số seq nguyên');
   return v;
 }
+/** Mốc thời gian hợp lệ THẬT: ngày có tồn tại (không cuộn 30/02), giờ/phút/giây trong dải, năm 1970..9999, offset ±14:00 (Postgres chỉ nhận tới ±15:59). */
+export function isValidBadgeInstant(v: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|([+-])(\d{2}):(\d{2}))$/.exec(v);
+  if (!m) return false;
+  const [y, mo, d, h, mi, se] = [m[1], m[2], m[3], m[4], m[5], m[6]].map(Number);
+  if (y < 1970 || mo < 1 || mo > 12 || h > 23 || mi > 59 || se > 59) return false;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return false; // round-trip: 30/02 cuộn sang tháng sau
+  if (m[7] !== 'Z') {
+    const oh = Number(m[9]);
+    const om = Number(m[10]);
+    if (om > 59 || oh > 14 || (oh === 14 && om > 0)) return false;
+  }
+  return true;
+}
 export function parseBadgeAt(field: string, v: string | undefined): string | null {
   if (v === undefined || v === '') return null;
   if (v === BADGE_HEAD) return v;
-  if (!BADGE_AT_RE.test(v) || Number.isNaN(Date.parse(v))) throw badParam(field, `${field} phải là ISO 8601 có múi giờ (vd 2026-10-19T03:00:00.000000Z)`);
+  if (!isValidBadgeInstant(v)) throw badParam(field, `${field} phải là ISO 8601 hợp lệ có múi giờ, năm >= 1970 (vd 2026-10-19T03:00:00.000000Z)`);
   return v;
+}
+
+/** Lỗi đầu vào của Postgres (SQLSTATE lớp 22: datetime_field_overflow, invalid_text_representation…) -> 400, không phải 500. */
+export function isPgInvalidInput(e: unknown): boolean {
+  const x = e as { code?: string; meta?: { code?: string; message?: string }; message?: string } | null;
+  if (!x) return false;
+  if (x.meta?.code && /^22/.test(String(x.meta.code))) return true;
+  return typeof x.message === 'string' && /(?:Code|SQLSTATE)[:\s=]*[`"']?22\d{3}/.test(x.message);
 }
 
 function assertUuid(id: string, what: string) {
@@ -671,11 +694,14 @@ export class ApiController {
     @Query('deliveries') deliveries?: string,
     @Query('dlq') dlq?: string,
   ) {
-    return this.prisma.forTenant(tenantId).badgeSnapshot({
-      events: parseBadgeSeq(events),
-      deliveries: parseBadgeAt('deliveries', deliveries),
-      dlq: parseBadgeAt('dlq', dlq),
-    });
+    const since = { events: parseBadgeSeq(events), deliveries: parseBadgeAt('deliveries', deliveries), dlq: parseBadgeAt('dlq', dlq) };
+    try {
+      return await this.prisma.forTenant(tenantId).badgeSnapshot(since);
+    } catch (e) {
+      // Phòng thủ lớp thứ hai: giá trị lọt qua parse mà Postgres vẫn từ chối (lớp 22xxx) là lỗi tham số, không phải lỗi server.
+      if (isPgInvalidInput(e)) throw badParam('since', 'Mốc last-seen không hợp lệ');
+      throw e;
+    }
   }
 
   // --- Replay Delivery (§5.3 Replay: attempt_generation + 1) ---

@@ -22,6 +22,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { type BadgeTab, formatBadge } from "@/lib/hub/badges-logic";
 import { useBadgeStore, useSidebarBadges } from "@/lib/hub/badges-store";
 import { logout as serverLogout } from "@/lib/hub/client";
@@ -39,20 +40,20 @@ import { type NavItem, sidebarItems } from "./sidebar-items";
 function SidebarNavItem({ item, active }: { item: NavItem; active: boolean }) {
   const t = useT();
   const locale = useLocale();
+  const mobile = useIsMobile();
   const tab: BadgeTab | undefined = item.badgeKey;
   const count = useBadgeStore((s) => (tab ? s.badges.counts[tab] : 0));
   const latest = useBadgeStore((s) => (tab ? s.badges.latest[tab] : null));
   const label = tab ? formatBadge(count) : null;
 
   let tooltip: React.ComponentProps<typeof SidebarMenuButton>["tooltip"] = t(item.titleKey);
-  if (tab && label && latest) {
+  // Mobile (ngăn kéo): không bật tooltip — giữ mặc định của SidebarMenuButton (ẩn khi isMobile).
+  if (tab && label && latest && !mobile) {
     const age = formatRelative(latest.at, Date.now(), locale);
-    const line =
-      "type" in latest
-        ? `${latest.type} · ${latest.source} · ${age}`
-        : "status" in latest
-          ? `${latest.destination} · ${latest.status} · ${age}`
-          : `${t("nav.badge.dlq", { destination: latest.destination, attemptNo: String(latest.attemptNo) })} · ${age}`;
+    let line: string;
+    if ("type" in latest) line = `${latest.type} · ${latest.source} · ${age}`;
+    else if ("status" in latest) line = `${latest.destination} · ${latest.status} · ${age}`;
+    else line = `${t("nav.badge.dlq", { destination: latest.destination, attemptNo: String(latest.attemptNo) })} · ${age}`;
     tooltip = {
       hidden: false,
       children: (
@@ -69,12 +70,22 @@ function SidebarNavItem({ item, active }: { item: NavItem; active: boolean }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild tooltip={tooltip} isActive={active}>
-        <Link href={item.url}>
+        <Link
+          href={item.url}
+          aria-label={label ? `${t(item.titleKey)}, ${t("nav.badge.unseen", { count: label })}` : undefined}
+        >
           <item.icon />
           <span>{t(item.titleKey)}</span>
         </Link>
       </SidebarMenuButton>
       {label && <SidebarMenuBadge aria-hidden>{label}</SidebarMenuBadge>}
+      {/* Sidebar thu gọn (chỉ icon) ẩn số -> chấm nhỏ trên icon báo có mục chưa xem. */}
+      {label && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full bg-primary ring-2 ring-sidebar group-data-[collapsible=icon]:block"
+        />
+      )}
     </SidebarMenuItem>
   );
 }
