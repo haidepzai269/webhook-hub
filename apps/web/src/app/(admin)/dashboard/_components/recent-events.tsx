@@ -8,9 +8,17 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { useEvents } from "@/lib/hub/queries";
 import { useT } from "@/lib/i18n/use-t";
 
+import { RangeEvents } from "./range-events";
+import { useChartSelection } from "./selection-context";
 import { EVENT_MOBILE_CARD, useEventColumns } from "../events/_components/event-columns";
 
+/** Không có vùng chọn: 10 sự kiện gần nhất, trực tiếp (như cũ). Có vùng chọn trên biểu đồ (ADR-262): khối theo khoảng. */
 export function RecentEvents() {
+  const { selection } = useChartSelection();
+  return selection ? <RangeEvents selection={selection} /> : <LiveRecent />;
+}
+
+function LiveRecent() {
   const { data, isLoading, error } = useEvents(undefined, 10);
   const t = useT();
   const columns = useEventColumns();

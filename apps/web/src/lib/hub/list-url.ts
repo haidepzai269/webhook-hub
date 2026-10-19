@@ -89,6 +89,12 @@ export const EXECUTION_PARAMS = {
   q: { pattern: /^[0-9A-Za-z_-]{4,36}$/ },
 } satisfies ParamSpecs;
 
+/** ADR-262: vùng chọn trên biểu đồ trang Tổng quan (`?from=&to=`, ISO UTC). */
+export const DASHBOARD_RANGE_PARAMS = {
+  from: { pattern: ISO },
+  to: { pattern: ISO },
+} satisfies ParamSpecs;
+
 /** Ngăn "Nhật ký sự kiện" trên /dashboard/flow — tiền tố `log` để không đụng tham số khác của trang bản đồ. */
 export const EVENT_LOG_PARAMS = {
   logProvider: { pattern: /^[a-z0-9_-]{1,32}$/ },
