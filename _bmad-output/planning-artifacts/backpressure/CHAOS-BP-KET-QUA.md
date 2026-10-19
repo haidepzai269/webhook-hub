@@ -71,7 +71,25 @@ Số đo thêm:
 - factor về 0 sau 39,9 s kể từ lúc DB về.
 - Log 10 phút: relay 1198 dòng (F4), storage 129, delivery 19 (đã gộp), normalize 1 (đã gộp, ADR-231). Max 4 dòng/s.
 
-## 3. `[BP:T16]` — đích chết 10 phút với 500 delivery hoãn → hồi phục — **trần ramp PASS; "sau ramp ≤ 64/s" FAIL**
+## 3. `[BP:T16]` — đích chết 10 phút với 500 delivery hoãn → hồi phục — **PASS sau ADR-241** (lượt 2 dưới đây: "sau ramp ≤ 64/s" FAIL với ADR-232)
+
+### 3.0 Đo lại sau ADR-241 — **PASS** (2026-10-19, máy công ty, master `62a2545`, image build lại từ HEAD)
+
+`npm run verify:chaos -- --tag bp-t16` · 770 s · L3 1/1 xanh · chi tiết `verify/.results/chaos-bp-T16.json`
+
+| Tiêu chí | Kết quả |
+|---|---|
+| Tiền đề: 500 delivery hoãn lúc đích sống lại, 0 SUCCEEDED | PASS |
+| Worker không khởi động lại (RestartCount 1 → 1) | PASS |
+| **ADR-241:** `:ramp` không sống quá RAMP_MAX 180 s kể từ rampStart | **PASS: 101 s** |
+| Không giây nào trong ramp vượt trần (2..64, giữ 64 khi được gia hạn) | **PASS**: 0 giây vượt, 499 request trong ramp |
+| **Sau ramp ≤ 64/s (F3)** | **PASS: 0 request sau ramp** (lượt trước 149/s) |
+| Hồi phục 500/500 SUCCEEDED, 0 DEAD, 0 trùng | PASS: xong 168 s sau khi đích sống (lượt trước 136 s) |
+
+- 10 phút đích chết: 22 request chạm đích (20 lúc mạch còn đóng, probe ở ~61 s và ~361 s; `:trips` 1 → 2).
+- Probe thành công 61 s sau khi đích sống. Ramp bắt đầu `01:59:30.731Z`.
+- Bậc 64 được gia hạn 4 lần (ramp hết ở 101 s, trong trần 180 s). Mỗi vòng `retry.10s` vẫn dồn vào 1–2 giây (giây ≠ 0: `+50` 0, `+51` 64, `+60` 64, `+61` 64, `+70` 11, `+71` 64, `+81` 64, `+91` 23, `+92` 59), nhưng phần tồn nay đi theo trần 64 thay vì dội về khi khoá hết hạn.
+- Đánh đổi đã thấy: hồi phục chậm hơn 32 s so với lượt trước (168 s so với 136 s), đúng như ADR-241 ghi.
 
 | Tiêu chí | Kết quả |
 |---|---|
@@ -93,7 +111,7 @@ Số đo thêm:
   - Có test L1 trên Postgres thật (`infra-errors-db.spec`): `pg_terminate_backend` chính mình → Prisma ném `P2010 {"code":"57P01"}` → `transient`; `'08006'::uuid` → `unknown`.
   - Lượt cuối: DLQ +0 ở cả T4 lẫn T21.
 - **F2 — ĐÃ VÁ (ADR-231). Đợt warn normalize đầu tiên không gộp.** Lượt 3 đo 225 dòng/s; lượt cuối còn max 2 dòng/s, chỉ 1 dòng normalize (đã gộp) trong toàn bộ T4.
-- **F3 — VÁ MỘT PHẦN (ADR-232, hướng b), tiêu chí mới vẫn FAIL.** Sau ramp, phần tồn vẫn dội 149/s (trần cuối 64). Cần Admin quyết hướng tiếp: kéo ramp theo kích thước hàng tồn, hoặc giữ trần cuối tới khi hàng hết.
+- **F3 — ĐÃ VÁ (ADR-241), chaos T16 đo lại 2026-10-19 PASS: 0 request sau ramp, `:ramp` 101 s ≤ 180 s (§3.0).** _Lịch sử:_ VÁ MỘT PHẦN (ADR-232, hướng b), tiêu chí mới vẫn FAIL. Sau ramp, phần tồn vẫn dội 149/s (trần cuối 64). Cần Admin quyết hướng tiếp: kéo ramp theo kích thước hàng tồn, hoặc giữ trần cuối tới khi hàng hết.
 - **R1 — ĐÃ VÁ (ADR-233). Bên thua probe HALF_OPEN tốn 2 lệnh Redis.** Nay gate báo "probe đang bị giữ", bên thua chỉ tốn 1 lệnh (`redis-budget` `[BP:T22]` phần d).
 - **F4 — Ghi nhận (ngoài BP5, §7.5 P2).** Khi DB chết, relay outbox và storage ghi khoảng 2 dòng log/s và gọi khoảng 2 truy vấn Prisma/s mà bộ điều khiển không chặn.
 - **F5 — Ghi nhận, đúng thiết kế: at-least-once ở đích.** 20/2000 delivery đang bay đúng lúc DB bị giết tới đích 2 lần. Postgres vẫn chỉ có 1 delivery cho mỗi event.

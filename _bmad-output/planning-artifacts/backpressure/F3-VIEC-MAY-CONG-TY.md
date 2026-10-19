@@ -1,5 +1,7 @@
 # F3 bậc cuối (ADR-241) — việc còn phải chạy ở máy công ty
 
+> **ĐÃ XONG 2026-10-19 (máy công ty).** Mục 1: CI `38753284031` xanh (db L1 275/275), không chạy lại. Mục 2: chaos T16 trên master `62a2545` **PASS** — `:ramp` 101 s, 0 request sau ramp, 500/500. Đã ghi `CHAOS-BP-KET-QUA.md` §3.0 và dòng "Đo lại" ADR-241. Nợ Thấp #7: kịch bản T16 không có cờ "đỏ có chủ đích" nào trong `verify/scenarios/chaos-bp.ts`, nay xanh thật, không cần tách.
+
 Nhánh `feat/bp-f3`, code ở commit `1c84d84` + bản vá review `REVIEW-F3` (commit sau `d1a1020`, xem `git log`; tách từ master `d417118`). Kéo nhánh về, ở **HEAD của nhánh** thì chạy hai việc dưới đây.
 
 **Mục 1 (L1) không cần máy công ty:** job CI `db (L1)` có `redis:7-alpine` và chạy đúng các ca này. Coordinator push nhánh → CI xanh là bằng chứng (review F3 TB-1). Máy công ty chỉ cần nếu CI không chạy được.
