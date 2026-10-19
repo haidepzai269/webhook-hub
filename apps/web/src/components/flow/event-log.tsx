@@ -30,7 +30,7 @@ import { useUnroll } from "@/lib/ui/use-unroll";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { shouldAutoLoadMore, shouldResetHead } from "./event-log-logic";
-import { describeEvent, expectedProbe, type NoteTone } from "./event-notes";
+import { describeEvent, expectedProbe, noDestination, type NoteTone } from "./event-notes";
 import { EXECUTION_LABEL_KEY, EXECUTION_TONE, FailedAt, failedAtText, MiniPipeline } from "./execution-bits";
 import {
   clampLogHeight,
@@ -329,8 +329,10 @@ function EventLogPanel() {
             {items.map((i) => {
               // Request kiểm tra kết nối của provider đúng thiết kế (ADR-159) → viền + nhãn trung tính, không "Thành công" xanh.
               const probe = expectedProbe(i);
-              const color = probe ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]];
-              const resultLabel = probe ? t(probe.label) : t(EXECUTION_LABEL_KEY[i.status]);
+              // "Không có đích" (ADR-259): đã nhận nhưng không subscription nào khớp → trung tính, không "Thành công" xanh.
+              const noDest = !probe && i.status === "succeeded" && noDestination(i);
+              const color = probe || noDest ? TONE_VAR.idle : TONE_VAR[EXECUTION_TONE[i.status]];
+              const resultLabel = probe ? t(probe.label) : noDest ? t("journey.exec.no-destination") : t(EXECUTION_LABEL_KEY[i.status]);
               const note = describeEvent(i, t);
               const anim = unroll(i.id);
               return (
