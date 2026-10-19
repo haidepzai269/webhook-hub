@@ -52,32 +52,46 @@ export function TimeRange({
     return () => clearTimeout(timer);
   }, [nextFrom, nextTo, error, from, to]);
 
+  // Dưới `sm` (ADR-261): "Từ" và "Đến" xếp 2 hàng full-width, có nhãn ngắn, bỏ mũi tên; từ `sm` giữ một hàng như cũ.
+  const rowCls = "flex w-full min-w-0 items-center gap-2 sm:w-auto sm:gap-1";
+  const labelCls = "w-10 shrink-0 sm:hidden";
+  const inputCls = "h-8 min-w-0 max-w-full flex-1 text-xs sm:w-48 sm:flex-none";
   return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex w-full items-center gap-1 text-muted-foreground text-xs sm:w-auto">
-        <Input
-          type="datetime-local"
-          aria-label={t("admin.time-range.from")}
-          aria-invalid={Boolean(error)}
-          className="h-8 min-w-0 flex-1 text-xs sm:w-48 sm:flex-none"
-          value={fromLocal}
-          onChange={(e) => {
-            edited.current = true;
-            setFromLocal(e.target.value);
-          }}
-        />
-        <span>→</span>
-        <Input
-          type="datetime-local"
-          aria-label={t("admin.time-range.to")}
-          aria-invalid={Boolean(error)}
-          className="h-8 min-w-0 flex-1 text-xs sm:w-48 sm:flex-none"
-          value={toLocal}
-          onChange={(e) => {
-            edited.current = true;
-            setToLocal(e.target.value);
-          }}
-        />
+    <div className="flex w-full min-w-0 flex-col gap-0.5 sm:w-auto">
+      <div className="flex w-full min-w-0 flex-col gap-1.5 text-muted-foreground text-xs sm:w-auto sm:flex-row sm:items-center sm:gap-1">
+        <div className={rowCls}>
+          <span className={labelCls} aria-hidden>
+            {t("admin.time-range.from")}
+          </span>
+          <Input
+            type="datetime-local"
+            aria-label={t("admin.time-range.from")}
+            aria-invalid={Boolean(error)}
+            className={inputCls}
+            value={fromLocal}
+            onChange={(e) => {
+              edited.current = true;
+              setFromLocal(e.target.value);
+            }}
+          />
+        </div>
+        <span className="max-sm:hidden">→</span>
+        <div className={rowCls}>
+          <span className={labelCls} aria-hidden>
+            {t("admin.time-range.to")}
+          </span>
+          <Input
+            type="datetime-local"
+            aria-label={t("admin.time-range.to")}
+            aria-invalid={Boolean(error)}
+            className={inputCls}
+            value={toLocal}
+            onChange={(e) => {
+              edited.current = true;
+              setToLocal(e.target.value);
+            }}
+          />
+        </div>
       </div>
       {error && <FieldError className="text-xs">{t(error)}</FieldError>}
     </div>
