@@ -3,7 +3,7 @@ import { beat } from '../heartbeat';
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@hub/database';
 import { EXCHANGES, ROUTING_KEYS } from '@hub/messaging';
-import { CAUSES, LogThrottle, REPLAY_OF_HEADER, TRACEPARENT_HEADER, errInfo, logger } from '@hub/common';
+import { CAUSES, LogThrottle, REPLAY_OF_HEADER, TRACEPARENT_HEADER, errInfo, logger, reportUnexpected } from '@hub/common';
 import * as amqp from 'amqplib';
 import { classifyInfraError } from '../consumers/infra-errors';
 
@@ -133,6 +133,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       if (suppressed !== null) {
         const cause = relayFailureCause(err);
         logger.error({ cause, blame: CAUSES[cause].blame, err: errInfo(err), suppressedSinceLastLog: suppressed }, 'Lỗi trong chu kỳ Outbox Relay (log gộp tối đa 1 dòng/30s)');
+        if (cause === 'fail.hub_unknown') reportUnexpected(err, { cause, stage: 'relay' }); // LOGGING.md §11: chỉ lỗi lạ; fail.hub_db/broker đã có metric + cảnh báo
       }
     } finally {
       this.scheduleNext(full);
