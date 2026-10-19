@@ -708,6 +708,15 @@ STORAGE_RECALIBRATE_INTERVAL_MS=86400000 # hub-worker: nhịp hiệu chỉnh (qu
 STORAGE_LOCK_ENABLED=0            # hub-api + hub-worker: 1 = trả 507 khi LOCKED/HARD_LOCKED. MẶC ĐỊNH 0 ở production (E5)
 STORAGE_AUTO_CLEAN_ENABLED=0      # hub-worker (+ hub-api cho câu console): 1 = chạy dọn tự động theo policy. MẶC ĐỊNH 0 (E5)
 SOURCE_LIMIT_PER_PROJECT=20       # hub-api: trần source chưa lưu trữ mỗi project (operator miễn), 409 source_limit
+# --- Cảnh báo hạn mức gói free qua Telegram (LOG-CAUSE 7, ADR-263; MONITORING §7.1) --- hub-worker; cần TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, thiếu = tắt
+QUOTA_CHECK_INTERVAL_MS=900000       # nhịp đo, kẹp 60000–3600000 (mỗi nhịp ~2 lệnh Redis: SET NX khoá + INFO)
+QUOTA_WARN_PCT=80  QUOTA_CRIT_PCT=95 # ngưỡng mức warning / critical
+QUOTA_REPEAT_MS=86400000             # nhắc lại khi mức không đổi, tối thiểu 1 giờ
+QUOTA_NEON_STORAGE_BYTES=            # trần dung lượng Neon; trống = DB_DISK_BUDGET_MB × 1MiB
+QUOTA_UPSTASH_COMMANDS_PER_MONTH=500000 # §5.2
+QUOTA_UPSTASH_MAX_CMD_PER_SEC=200    # kẹp delta bộ đếm INFO giữa hai lần đo (giây × giá trị này); mẫu vượt bị bỏ
+QUOTA_UPSTASH_MAX_GAP_SEC=1800       # trần khoảng thời gian tính kẹp (sau ngủ đêm không nới mức kẹp): mức kẹp tối đa = GAP × MAX_CMD_PER_SEC
+QUOTA_UPSTASH_MEMORY_BYTES=          # CẦN ADMIN XÁC NHẬN số của gói Upstash; trống = không đo dung lượng Redis
 DELIVERY_TIMEOUT_MS=5000 # hub-worker: trần tổng một lần gửi, kẹp 1000–10000 (ADR-078); đổi phải restart worker
 ALERT_EMAIL_INTERVAL_MS=15000 # hub-worker (CB5, ADR-173): nhịp vòng gửi email cảnh báo; 0 = tắt. Worker CŨNG cần
                          # WEB_PUBLIC_URL (gốc deep link trong thư) + MAIL_DRIVER/MAIL_FROM/GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN
