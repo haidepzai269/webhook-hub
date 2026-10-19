@@ -238,6 +238,21 @@ export function connectionDialogMode(
 }
 
 /**
+ * ADR-260: hộp "Lưu trữ nguồn" cần biết nguồn có kết nối hub quản lý không để chọn lời nhắc đúng. Chỉ `manual` khi
+ * ĐÃ biết chắc (404 -> `conn === null`); đang tải / lỗi (403, 5xx, mạng) KHÔNG được coi là "tạo tay" -> khoá xác nhận.
+ * `DISCONNECTED` (đã ngắt hoặc đã lưu trữ credentials) coi như không còn gì để ngắt -> `manual`.
+ */
+export function archiveWarningMode(
+  conn: { status: string } | null | undefined,
+  state: { isPending: boolean; isError: boolean },
+): "managed" | "manual" | "pending" | "error" {
+  if (state.isError) return "error";
+  if (state.isPending || conn === undefined) return "pending";
+  if (conn && conn.status !== "DISCONNECTED") return "managed";
+  return "manual";
+}
+
+/**
  * Chữ lỗi để hiện cho người dùng từ MỘT lỗi bất kỳ (toast, ô báo lỗi): lỗi từ hub (`HubApiError`: có `status` + `body`) →
  * `errorMessageOf` (dịch theo mã `error`); còn lại → `message`. Nhận diện bằng hình dạng (không import client.ts) để file
  * này vẫn là TS thuần cho jest. Thay `toast.error(e.message)` — vốn lộ chuỗi tiếng Anh thô của server.

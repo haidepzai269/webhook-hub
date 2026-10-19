@@ -2654,3 +2654,9 @@ không thấy gì.
 **Chọn:** Chỉ ở `apps/web` (không đổi backend): `noDestination()` nhận biết từ summary (type chuẩn, Normalize không skipped, Định tuyến skipped, Giao total 0, không lỗi, không phải probe). `pipelineRoles()` giữ 6 ô cho thẳng cột; ô skipped SAU điểm dừng là chấm nhỏ mờ + nối nét đứt; Định tuyến của "không có đích" là ◐ trung tính kèm `0`, pill "Đã nhận · không có đích" (idle, Info); node ROUTING ở trang Chi tiết cùng quy tắc, gợi ý tạo Subscription. ⊘ chỉ còn cho dừng có chủ đích trùng/adapter bỏ qua. Màu các ca đúng (succeeded có giao, failed, in_progress, rejected) giữ nguyên.
 
 **Đánh đổi:** Nhận biết dựa suy luận trên summary (nếu server đổi hình dạng summary phải sửa `event-notes.ts` + test); chấm mờ mất phân biệt "chưa chạy" với "không áp dụng" — tooltip ghi "không áp dụng".
+
+## ADR-260 — Trang Nguồn có hành động "Lưu trữ nguồn" (nguồn tạo tay không còn ngõ cụt)
+**Vấn đề:** hộp "Kết nối provider" của nguồn tạo tay chỉ có một câu giải thích; Admin không tìm được chỗ ngắt/xoá nguồn (UI lưu trữ chỉ có ở bản đồ luồng, ADR-161).
+**Chọn:** thêm nút lưu trữ ở mọi dòng trang Nguồn (owner/operator) và trong hộp nguồn tạo tay, dùng lại `POST /sources/:id/archive` qua `useFlowArchive` — không đổi backend. Archive KHÔNG gỡ URL ở provider (chỉ xoá credentials đã lưu): nguồn có kết nối hub quản lý thì hộp xác nhận nhắc "Ngắt" trước, nguồn tạo tay thì nhắc gỡ URL ở dashboard provider.
+**Quyền:** nút hiện cho developer/owner/operator (route đòi `manage:sources` + `manage:endpoints`, `roles.ts`); không copy điều kiện owner của cờ "Giữ lâu" (cần `storage:write`). Hộp xác nhận khoá nút khi đang/không đọc được kết nối (`archiveWarningMode`): chỉ 404 mới coi là tạo tay.
+**Đánh đổi:** không có unarchive trên UI; archive không tự ngắt remote (đổi ngữ nghĩa backend là việc khác). Hạn chế: nguồn payos/github... tạo tay mà provider có connector thì popup kết nối chuyển sang form "Kết nối" — lưu trữ qua icon ở dòng.
