@@ -1,5 +1,6 @@
 import { createT, DEFAULT_LOCALE, isLocale, type TranslateFn } from "../i18n/dictionary";
 import { waitForAuthGate } from "./auth-gate";
+import { clearSeenMarks } from "./badges-seen";
 import { clearProjectSelection, currentProjectId } from "./project-store";
 import { errorMessageOf } from "./ui-logic";
 
@@ -205,6 +206,7 @@ export interface AuthMe {
  */
 export async function logout(): Promise<void> {
   clearProjectSelection();
+  clearSeenMarks(); // ADR-269: mốc last-seen của badge sidebar
   try {
     await hubFetch("/auth/logout", { method: "POST" }, true);
   } catch {

@@ -798,6 +798,95 @@ export class TenantScopedRepository {
     return { rows };
   }
 
+  /**
+   * Badge "chưa xem" của sidebar (ADR-269): với mỗi tab đếm KẸP tối đa `BADGE_CAP` bản ghi mới hơn mốc last-seen của client
+   * (subquery LIMIT — không COUNT quét bảng) + bản ghi mới nhất để dựng tooltip. Mốc thiếu (null) = chưa từng xem -> bỏ qua
+   * tab đó (client tự đặt mốc lần đầu, không tràn số). `cursor` là mốc mới để client "đánh dấu đã xem".
+   * - events: `seq > mốc` (thứ tự INSERT); deliveries: `created_at > mốc` (index tenant+created_at DESC);
+   * - dlq: DEAD + `notSuperseded` + `updated_at > mốc` (index một phần deliveries_dead_tenant_updated_idx) — KHÔNG theo created_at.
+   * Thời điểm trả về dạng ISO có microsecond để so `>` lần sau không dính lại đúng dòng vừa xem. 0 lệnh Redis.
+   */
+  async badgeSnapshot(since: { events?: string | null; deliveries?: string | null; dlq?: string | null }): Promise<BadgeSnapshot> {
+    const US = Prisma.sql`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`;
+    const tenant = this.tenantId;
+    // Mốc "head" = lần đầu client chưa có last-seen: trả mốc HIỆN TẠI của server (không đếm) -> không lệch đồng hồ, không tràn số.
+    const wantHead = since.events === BADGE_HEAD || since.deliveries === BADGE_HEAD || since.dlq === BADGE_HEAD;
+    const head = wantHead
+      ? await Promise.all([
+          since.events === BADGE_HEAD
+            ? this.prisma.$queryRaw<{ v: string | null }[]>(Prisma.sql`SELECT max(seq)::text AS v FROM (SELECT seq FROM hub.events WHERE tenant_id = ${tenant}::uuid ORDER BY seq DESC LIMIT 1) x`)
+            : Promise.resolve([]),
+          since.deliveries === BADGE_HEAD || since.dlq === BADGE_HEAD
+            ? this.prisma.$queryRaw<{ v: string }[]>(Prisma.sql`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', ${US}) AS v`)
+            : Promise.resolve([]),
+        ])
+      : null;
+    const headTab = <L>(v: string | null | undefined): BadgeTab<L> => ({ count: 0, ids: [], latest: null, cursor: v ?? null });
+    const isHead = (v: string | null | undefined) => v === BADGE_HEAD;
+    const [events, deliveries, dlq] = await Promise.all([
+      since.events && !isHead(since.events)
+        ? this.prisma.$queryRaw<
+            { id: string; seq: string; type: string; source: string; at: string }[]
+          >(Prisma.sql`
+            SELECT e.id, e.seq::text AS seq, e.type, e.source, to_char(e.received_at AT TIME ZONE 'UTC', ${US}) AS at
+            FROM hub.events e
+            WHERE e.tenant_id = ${tenant}::uuid AND e.seq > ${since.events}::bigint
+            ORDER BY e.seq DESC LIMIT ${BADGE_CAP}`)
+        : Promise.resolve([]),
+      since.deliveries && !isHead(since.deliveries)
+        ? this.prisma.$queryRaw<{ id: string; destination: string; status: string; at: string }[]>(Prisma.sql`
+            SELECT d.id::text AS id, dst.name AS destination, d.status::text AS status, to_char(d.created_at AT TIME ZONE 'UTC', ${US}) AS at
+            FROM hub.deliveries d
+            JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+            JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
+            WHERE d.tenant_id = ${tenant}::uuid AND d.created_at > ${since.deliveries}::timestamptz
+            ORDER BY d.created_at DESC LIMIT ${BADGE_CAP}`)
+        : Promise.resolve([]),
+      since.dlq && !isHead(since.dlq)
+        ? this.prisma.$queryRaw<{ id: string; destination: string; attempt_count: number; at: string }[]>(Prisma.sql`
+            SELECT d.id::text AS id, dst.name AS destination, d.attempt_count, to_char(d.updated_at AT TIME ZONE 'UTC', ${US}) AS at
+            FROM hub.deliveries d
+            JOIN hub.subscriptions s ON s.id = d.subscription_id AND s.tenant_id = d.tenant_id
+            JOIN hub.destinations dst ON dst.id = s.destination_id AND dst.tenant_id = s.tenant_id
+            WHERE d.tenant_id = ${tenant}::uuid AND d.status = 'DEAD' AND d.updated_at > ${since.dlq}::timestamptz
+              AND ${notSuperseded}
+            ORDER BY d.updated_at DESC LIMIT ${BADGE_CAP}`)
+        : Promise.resolve([]),
+    ]);
+    const headSeq = head?.[0][0]?.v ?? '0';
+    const headAt = head?.[1][0]?.v ?? null;
+    return {
+      events: isHead(since.events)
+        ? headTab(headSeq)
+        : {
+            count: events.length,
+            ids: events.map((r) => r.id),
+            latest: events[0] ? { type: events[0].type, source: events[0].source, at: events[0].at } : null,
+            cursor: events[0]?.seq ?? null,
+          },
+      deliveries: isHead(since.deliveries)
+        ? headTab(headAt)
+        : {
+            count: deliveries.length,
+            ids: deliveries.map((r) => r.id),
+            latest: deliveries[0]
+              ? { destination: deliveries[0].destination, status: deliveries[0].status, at: deliveries[0].at }
+              : null,
+            cursor: deliveries[0]?.at ?? null,
+          },
+      dlq: isHead(since.dlq)
+        ? headTab(headAt)
+        : {
+            count: dlq.length,
+            ids: dlq.map((r) => r.id),
+            latest: dlq[0]
+              ? { destination: dlq[0].destination, attemptNo: Math.max(1, Number(dlq[0].attempt_count)), at: dlq[0].at }
+              : null,
+            cursor: dlq[0]?.at ?? null,
+          },
+    };
+  }
+
   /** Đếm cùng điều kiện với `findDeadDeliveries` — để KPI "DLQ" khớp đúng số dòng trong bảng DLQ. */
   async countDeadDeliveries(): Promise<number> {
     const [row] = await this.prisma.$queryRaw<{ n: bigint }[]>(Prisma.sql`
@@ -2099,6 +2188,24 @@ function orphanRawImportanceSql(): Prisma.Sql {
   WHEN r.received_at >= now() - make_interval(secs => ${retentionSecs}::double precision)
        AND NOT EXISTS (SELECT 1 FROM hub.processed_messages p WHERE p.consumer = 'normalize' AND p.message_id = r.id::text) THEN 'high'
   ELSE 'low' END)`;
+}
+
+/** Trần đếm của badge sidebar (ADR-269): hiển thị "9+" nên đếm tới 10 là đủ. */
+export const BADGE_CAP = 10;
+/** Mốc đặc biệt: "chưa có last-seen" -> server trả mốc hiện tại (events: max seq; còn lại: now µs), không đếm. */
+export const BADGE_HEAD = 'head';
+export interface BadgeTab<L> {
+  count: number;
+  /** Id của tối đa BADGE_CAP bản ghi đã đếm — client dùng để không cộng đôi khi socket báo lại cùng bản ghi. */
+  ids: string[];
+  latest: L | null;
+  /** Mốc mới để client đánh dấu "đã xem" (events: seq dạng chuỗi; còn lại: ISO µs); null khi không có bản ghi mới. */
+  cursor: string | null;
+}
+export interface BadgeSnapshot {
+  events: BadgeTab<{ type: string; source: string; at: string }>;
+  deliveries: BadgeTab<{ destination: string; status: string; at: string }>;
+  dlq: BadgeTab<{ destination: string; attemptNo: number; at: string }>;
 }
 
 const notSuperseded = Prisma.sql`NOT EXISTS (

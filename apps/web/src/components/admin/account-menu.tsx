@@ -6,7 +6,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { BellRing, FolderKanban, LogOut, Settings, Settings2 } from "lucide-react";
+import { cn } from "cn";
+import { ArrowLeft, BellRing, FolderKanban, LogOut, Settings, Settings2 } from "lucide-react";
 
 import { DisplaySettings } from "@/components/admin/display-settings";
 import { AlertBell } from "@/components/alerts/alert-bell";
@@ -24,9 +25,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APP_CONFIG } from "@/config/app-config";
-import { ACCOUNT_ROUTES, type AccountMenuId, accountMenuItems } from "@/lib/hub/account-routes";
+import {
+  ACCOUNT_ROUTES,
+  type AccountMenuId,
+  accountMenuItems,
+  accountNavEntries,
+  backToProjectLink,
+  brandHref,
+} from "@/lib/hub/account-routes";
 import { logout as serverLogout } from "@/lib/hub/client";
 import { useMeStore } from "@/lib/hub/me-store";
+import { useProjectStore } from "@/lib/hub/project-store";
 import type { MessageKey } from "@/lib/i18n/dictionary";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -121,16 +130,26 @@ const SECTION_KEY: Record<string, MessageKey> = {
   [ACCOUNT_ROUTES.settings]: "nav.item.settings",
 };
 
-/** Thanh trên tầng TÀI KHOẢN — không sidebar dự án (phân cấp: Hub ⊃ Tài khoản ⊃ Dự án, ADR-234/237). */
+/** Thanh trên tầng TÀI KHOẢN — không sidebar dự án (phân cấp: Hub ⊃ Tài khoản ⊃ Dự án, ADR-234/237). ADR-268: logo về dashboard + hàng điều hướng gọn có "← Về dự án". */
 export function AccountTopBar({ demo = false }: { demo?: boolean }) {
   const t = useT();
   const path = usePathname();
+  const me = useMeStore((s) => s.me);
+  const projectId = useProjectStore((s) => s.projectId);
   const sectionKey = SECTION_KEY[path] ?? "page.projects.home.title";
+  const back = backToProjectLink(projectId, me);
+  const onProjects = path === ACCOUNT_ROUTES.projects;
+  const nav = accountNavEntries(me ?? (demo ? { user: { isOperator: true } } : null), path);
+  const backLabel = back.projectName
+    ? t("nav.account.back-to-project", { name: back.projectName })
+    : projectId
+      ? t("nav.account.back-to-current")
+      : t("nav.account.back-to-projects");
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-2 px-4 md:px-6">
         <Link
-          href={demo ? `${ACCOUNT_ROUTES.projects}?demo=1` : ACCOUNT_ROUTES.projects}
+          href={demo ? `${ACCOUNT_ROUTES.projects}?demo=1` : brandHref(projectId)}
           className="flex min-w-0 cursor-pointer items-center gap-2"
         >
           <Image src="/brand/webhook-hub-mark.png" alt="" width={24} height={24} className="size-6 shrink-0" />
@@ -145,6 +164,37 @@ export function AccountTopBar({ demo = false }: { demo?: boolean }) {
           <AccountMenu demo={demo} />
         </div>
       </div>
+      {/* ADR-268: đường quay về + điều hướng gọn; cuộn ngang trên màn hẹp, không xuống dòng. */}
+      <nav
+        aria-label={t("nav.account.aria")}
+        className="mx-auto flex h-11 w-full max-w-6xl items-center gap-1 overflow-x-auto px-4 md:px-6"
+      >
+        {!onProjects && (
+          <>
+            <Link
+              href={back.href}
+              className="flex min-h-9 shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 text-muted-foreground text-sm hover:bg-accent hover:text-accent-foreground"
+            >
+              <ArrowLeft className="size-4" />
+              <span className="max-w-[40vw] truncate sm:max-w-xs">{backLabel}</span>
+            </Link>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+          </>
+        )}
+        {nav.map((i) => (
+          <Link
+            key={i.id}
+            href={demo && i.id === "projects" ? `${i.url}?demo=1` : i.url}
+            aria-current={i.active ? "page" : undefined}
+            className={cn(
+              "flex min-h-9 shrink-0 cursor-pointer items-center rounded-md px-2.5 text-sm hover:bg-accent hover:text-accent-foreground",
+              i.active ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground",
+            )}
+          >
+            {t(i.titleKey)}
+          </Link>
+        ))}
+      </nav>
     </header>
   );
 }

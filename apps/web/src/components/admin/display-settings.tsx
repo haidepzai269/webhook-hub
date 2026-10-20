@@ -113,7 +113,15 @@ export function DisplaySettings({ withLayout = false }: { withLayout?: boolean }
       <PopoverAnchor asChild>
         <div className="inline-flex">{menu}</div>
       </PopoverAnchor>
-      <PopoverContent align="end" collisionPadding={8}>
+      <PopoverContent
+        align="end"
+        collisionPadding={8}
+        onFocusOutside={(e) => {
+          // Nguyên nhân gốc "nháy rồi mất": menu vừa chọn còn trong DOM suốt animation đóng và vẫn nhận focusin sau khi
+          // bảng mở -> Popover coi là focus ra ngoài và tự đóng. Bỏ qua focus rơi vào menu đang đóng đó.
+          if ((e.target as HTMLElement | null)?.closest("[data-radix-menu-content]")) e.preventDefault();
+        }}
+      >
         <LayoutControlsPanel />
       </PopoverContent>
     </Popover>

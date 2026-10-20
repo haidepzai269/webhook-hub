@@ -17,7 +17,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter, DLQ_ERROR_KINDS, DlqErrorKind } from '@hub/database';
+import { PrismaService, TenantScopedRepository, getMasterKey, DeadDeliveryFilter, DLQ_ERROR_KINDS, DlqErrorKind, BADGE_HEAD } from '@hub/database';
 import { aesGcmEncrypt } from '@hub/crypto';
 import { buildDeliveryMessage, generateCorrelationId, isValidEventPattern, OutboxPayload, ProviderType, replayTraceFields } from '@hub/common';
 import { Prisma } from '@prisma/client';
@@ -84,6 +84,46 @@ function requireAlsoScope(req: RequestWithPrincipal | undefined, scope: string) 
   if (!Array.isArray(scopes) || !scopes.includes(scope)) {
     throw new HttpException({ error: 'missing_scope', message: `Role hiện tại không có quyền ${scope}`, required: scope }, HttpStatus.FORBIDDEN);
   }
+}
+
+/** ADR-269: mốc badge — seq số nguyên dương, hoặc ISO 8601 CÓ múi giờ (tránh ::timestamptz hiểu theo múi của session). */
+export function parseBadgeSeq(v: unknown): string | null {
+  if (v === undefined || v === '') return null;
+  // qs của Express biến `?events[]=5` / `?events[a]=b` thành mảng/object — RegExp ép về chuỗi sẽ lọt xuống SQL (42846 -> 500).
+  if (typeof v !== 'string') throw badParam('events', 'events phải là một chuỗi số seq, không phải mảng/object');
+  if (v === BADGE_HEAD) return v;
+  if (!/^\d{1,18}$/.test(v)) throw badParam('events', 'events phải là số seq nguyên');
+  return v;
+}
+/** Mốc thời gian hợp lệ THẬT: ngày có tồn tại (không cuộn 30/02), giờ/phút/giây trong dải, năm 1970..9999, offset ±14:00 (Postgres chỉ nhận tới ±15:59). */
+export function isValidBadgeInstant(v: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|([+-])(\d{2}):(\d{2}))$/.exec(v);
+  if (!m) return false;
+  const [y, mo, d, h, mi, se] = [m[1], m[2], m[3], m[4], m[5], m[6]].map(Number);
+  if (y < 1970 || mo < 1 || mo > 12 || h > 23 || mi > 59 || se > 59) return false;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return false; // round-trip: 30/02 cuộn sang tháng sau
+  if (m[7] !== 'Z') {
+    const oh = Number(m[9]);
+    const om = Number(m[10]);
+    if (om > 59 || oh > 14 || (oh === 14 && om > 0)) return false;
+  }
+  return true;
+}
+export function parseBadgeAt(field: string, v: unknown): string | null {
+  if (v === undefined || v === '') return null;
+  if (typeof v !== 'string') throw badParam(field, `${field} phải là một chuỗi ISO 8601, không phải mảng/object`);
+  if (v === BADGE_HEAD) return v;
+  if (!isValidBadgeInstant(v)) throw badParam(field, `${field} phải là ISO 8601 hợp lệ có múi giờ, năm >= 1970 (vd 2026-10-19T03:00:00.000000Z)`);
+  return v;
+}
+
+/** Lỗi đầu vào của Postgres (SQLSTATE lớp 22: datetime_field_overflow, invalid_text_representation…) -> 400, không phải 500. */
+export function isPgInvalidInput(e: unknown): boolean {
+  const x = e as { code?: string; meta?: { code?: string; message?: string }; message?: string } | null;
+  if (!x) return false;
+  if (x.meta?.code && /^22/.test(String(x.meta.code))) return true;
+  return typeof x.message === 'string' && /(?:Code|SQLSTATE)[:\s=]*[`"']?22\d{3}/.test(x.message);
 }
 
 function assertUuid(id: string, what: string) {
@@ -642,6 +682,28 @@ export class ApiController {
   @RequireScope('read:project')
   async listDlq(@CurrentTenant() tenantId: string, @Query() q: DeliveryListQuery) {
     return listDeliveryPage(this.prisma.forTenant(tenantId), q ?? {}, 'dlq');
+  }
+
+  /**
+   * ADR-269: badge "chưa xem" của sidebar dự án. `events=<seq>`, `deliveries=<ISO>`, `dlq=<ISO>` = mốc last-seen của client
+   * (thiếu = bỏ qua tab đó). Mỗi tab trả { count (kẹp 10), latest, cursor }. Chỉ đọc, qua TenantScopedRepository, 0 lệnh Redis.
+   */
+  @Get('badges')
+  @RequireScope('read:project')
+  async getBadges(
+    @CurrentTenant() tenantId: string,
+    @Query('events') events?: string,
+    @Query('deliveries') deliveries?: string,
+    @Query('dlq') dlq?: string,
+  ) {
+    const since = { events: parseBadgeSeq(events), deliveries: parseBadgeAt('deliveries', deliveries), dlq: parseBadgeAt('dlq', dlq) };
+    try {
+      return await this.prisma.forTenant(tenantId).badgeSnapshot(since);
+    } catch (e) {
+      // Phòng thủ lớp thứ hai: giá trị lọt qua parse mà Postgres vẫn từ chối (lớp 22xxx) là lỗi tham số, không phải lỗi server.
+      if (isPgInvalidInput(e)) throw badParam('events|deliveries|dlq', 'Mốc last-seen không hợp lệ');
+      throw e;
+    }
   }
 
   // --- Replay Delivery (§5.3 Replay: attempt_generation + 1) ---
