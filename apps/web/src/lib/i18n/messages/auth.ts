@@ -7,6 +7,7 @@ import { defineMessages } from "../locales";
 export const auth = defineMessages("auth", {
   vi: {
     "auth.or": "hoặc",
+    "auth.privacy": "Chính sách quyền riêng tư",
     "auth.social.google": "Đăng nhập bằng Google",
     "auth.social.github": "Đăng nhập bằng GitHub",
     "auth.field.email": "Email",
@@ -130,6 +131,7 @@ export const auth = defineMessages("auth", {
   },
   en: {
     "auth.or": "or",
+    "auth.privacy": "Privacy policy",
     "auth.social.google": "Sign in with Google",
     "auth.social.github": "Sign in with GitHub",
     "auth.field.email": "Email",

@@ -792,6 +792,9 @@ NEXT_PUBLIC_DEMO_SEPAY_APIKEY= # CHỈ LOCAL (apps/web/.env.local), cần khi DE
    (login / mail) là gia cố tuỳ chọn cho sạch, không bắt buộc.
 2. **Google Auth Platform → Branding / Audience**: User type **External**; **Publish app → In production**. Scope chỉ
    `openid email profile` (không nhạy cảm) → **không cần Google thẩm định**, mọi tài khoản Google đăng nhập được.
+   Nút **Publish app** bị khoá cho tới khi **Branding** có *Application home page* = `https://<web>.vercel.app` và
+   *Application privacy policy link* = `https://<web>.vercel.app/privacy` (trang công khai, ADR-270; domain phải nằm trong
+   *Authorized domains*). **Không tải logo** — có logo là Google đòi brand verification.
 3. **Google Auth Platform → Clients → Create client** → loại **Web application**:
    - *Authorized JavaScript origins*: **không cần** (luồng chạy ở server).
    - *Authorized redirect URIs*: `http://localhost:3000/auth/google/callback` (stack dev, đi qua web :3000) và
