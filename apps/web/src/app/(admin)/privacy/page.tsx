@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 
-// Trang pháp lý TĨNH, công khai (ADR-270): không gate đăng nhập, không gọi hub-api, viết thẳng tiếng Việt —
+import type { Metadata } from "next";
+
+// Trang pháp lý công khai, render phía server, không phụ thuộc đăng nhập (ADR-270): không gate đăng nhập, không gọi hub-api, viết thẳng tiếng Việt —
 // nội dung cam kết phải đọc được nguyên văn bởi crawler của Google, không đi qua từ điển i18n.
 export const metadata: Metadata = {
   title: "Chính sách quyền riêng tư — Webhook Hub",
@@ -18,55 +19,68 @@ export default function PrivacyPage() {
       <p className="text-muted-foreground">Cập nhật lần cuối: {UPDATED}</p>
 
       <p>
-        Webhook Hub là ứng dụng nhận, chuẩn hoá và chuyển tiếp webhook giữa các nền tảng, được xây dựng như một đồ án tốt
-        nghiệp. Trang này nói về dữ liệu cá nhân mà ứng dụng xử lý khi bạn đăng ký hoặc đăng nhập.
+        Webhook Hub là ứng dụng nhận, chuẩn hoá và chuyển tiếp webhook giữa các nền tảng, được xây dựng như một đồ án
+        tốt nghiệp. Trang này nói về dữ liệu cá nhân mà ứng dụng xử lý khi bạn đăng ký, đăng nhập và sử dụng dịch vụ.
       </p>
 
       <h2>1. Dữ liệu chúng tôi nhận</h2>
       <p>
-        <strong>Đăng nhập bằng Google.</strong> Ứng dụng chỉ xin các quyền <code>openid email profile</code>. Từ Google, chúng
-        tôi nhận: địa chỉ email, trạng thái email đã được Google xác minh hay chưa, tên hiển thị và mã định danh tài khoản
-        Google (<code>sub</code>). Chúng tôi <strong>không</strong> đọc Gmail, Google Drive, danh bạ hay bất kỳ dữ liệu nào
-        khác của tài khoản Google.
+        <strong>Đăng nhập bằng Google.</strong> Ứng dụng chỉ xin các quyền <code>openid email profile</code>. Từ Google,
+        chúng tôi nhận: địa chỉ email, trạng thái email đã được Google xác minh hay chưa, tên hiển thị và mã định danh
+        tài khoản Google (<code>sub</code>). Chúng tôi <strong>không</strong> đọc Gmail, Google Drive, danh bạ hay bất
+        kỳ dữ liệu nào khác của tài khoản Google.
       </p>
       <p>
-        <strong>Đăng nhập bằng GitHub.</strong> Ứng dụng xin quyền <code>read:user user:email</code>, nhận mã số tài khoản
-        GitHub, tên hiển thị (hoặc tên đăng nhập) và email chính đã xác minh. Mã truy cập của GitHub được dùng xong bỏ, không
-        lưu.
+        <strong>Đăng nhập bằng GitHub.</strong> Ứng dụng xin quyền <code>read:user user:email</code>, nhận mã số tài
+        khoản GitHub, tên hiển thị (hoặc tên đăng nhập) và email chính đã xác minh. Mã truy cập của GitHub được dùng
+        xong bỏ, không lưu.
       </p>
       <p>
-        <strong>Đăng ký bằng email và mật khẩu.</strong> Chúng tôi lưu email, tên và bản băm của mật khẩu (không lưu mật khẩu
-        gốc).
+        <strong>Đăng ký bằng email và mật khẩu.</strong> Chúng tôi lưu email, tên và bản băm của mật khẩu (không lưu mật
+        khẩu gốc).
+      </p>
+      <p>
+        <strong>Phiên đăng nhập.</strong> Mỗi phiên đăng nhập lưu địa chỉ IP và chuỗi user-agent của trình duyệt, hiển
+        thị lại cho chính bạn trong danh sách phiên.
       </p>
 
-      <h2>2. Mục đích sử dụng</h2>
+      <h2>2. Dữ liệu bạn đưa vào ứng dụng</h2>
+      <p>
+        Payload webhook mà ứng dụng nhận về, cấu hình endpoint và subscription, API key, cùng thông tin kết nối provider
+        do bạn tạo (thông tin kết nối được lưu mã hoá). Dữ liệu này lưu theo project của bạn và chỉ dùng để vận hành
+        dịch vụ.
+      </p>
+
+      <h2>3. Mục đích sử dụng</h2>
       <ul>
         <li>Đăng nhập và nhận diện tài khoản của bạn trong ứng dụng.</li>
         <li>
-          Gửi thư hệ thống: xác minh email, đặt lại mật khẩu, thông báo khi tài khoản được liên kết với Google hoặc GitHub.
+          Gửi thư hệ thống: xác minh email, đặt lại mật khẩu, thông báo khi tài khoản được liên kết với Google hoặc
+          GitHub.
         </li>
         <li>
           Ghi nhật ký bảo mật (ví dụ đăng nhập thành công, liên kết tài khoản, kèm địa chỉ IP) để phát hiện truy cập bất
           thường.
         </li>
         <li>
-          Duy trì phiên đăng nhập bằng cookie cần thiết cho hoạt động của ứng dụng; ngôn ngữ và giao diện bạn chọn được nhớ
-          trong cookie/bộ nhớ trình duyệt. Chúng tôi không dùng cookie quảng cáo hay theo dõi.
+          Duy trì phiên đăng nhập bằng cookie cần thiết cho hoạt động của ứng dụng; ngôn ngữ và giao diện bạn chọn được
+          nhớ trong cookie/bộ nhớ trình duyệt. Chúng tôi không dùng cookie quảng cáo hay theo dõi.
         </li>
         <li>
-          Nếu được bật, ghi lỗi kỹ thuật của trình duyệt và máy chủ qua Sentry; dữ liệu nhạy cảm (email, mã, khoá, mật khẩu)
-          được lọc trước khi gửi đi.
+          Nếu được bật, ghi lỗi kỹ thuật của trình duyệt và máy chủ qua Sentry; dữ liệu nhạy cảm (email, mã, khoá, mật
+          khẩu) được lọc trước khi gửi đi.
         </li>
       </ul>
 
-      <h2>3. Chia sẻ dữ liệu</h2>
+      <h2>4. Chia sẻ dữ liệu</h2>
       <p>
-        Chúng tôi không bán và không chia sẻ dữ liệu cá nhân của bạn cho bên thứ ba vì mục đích thương mại hay quảng cáo.
-        Dữ liệu chỉ nằm trên các nhà cung cấp hạ tầng lưu trữ và vận hành mà ứng dụng chạy trên đó (máy chủ, cơ sở dữ liệu,
-        dịch vụ gửi thư), và chỉ để vận hành ứng dụng.
+        Chúng tôi không bán và không chia sẻ dữ liệu cá nhân của bạn cho bên thứ ba vì mục đích thương mại hay quảng
+        cáo. Dữ liệu chỉ nằm trên các nhà cung cấp hạ tầng lưu trữ và vận hành mà ứng dụng chạy trên đó (máy chủ, cơ sở
+        dữ liệu, dịch vụ gửi thư), và chỉ để vận hành ứng dụng. Thư hệ thống đi qua nhà cung cấp gửi mail (Gmail API
+        hoặc Resend); dữ liệu lỗi kỹ thuật gửi tới Sentry đã được lọc dữ liệu nhạy cảm.
       </p>
 
-      <h2>4. Thu hồi quyền và xoá dữ liệu</h2>
+      <h2>5. Thu hồi quyền và xoá dữ liệu</h2>
       <ul>
         <li>
           Thu hồi quyền truy cập của Webhook Hub vào tài khoản Google tại{" "}
@@ -81,7 +95,7 @@ export default function PrivacyPage() {
         </li>
       </ul>
 
-      <h2>5. Thay đổi</h2>
+      <h2>6. Thay đổi</h2>
       <p>Nếu chính sách thay đổi, ngày cập nhật ở đầu trang sẽ được đổi theo.</p>
 
       <p className="mt-8">
