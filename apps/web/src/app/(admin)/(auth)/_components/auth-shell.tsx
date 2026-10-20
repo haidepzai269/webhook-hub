@@ -71,6 +71,9 @@ export function AuthShell({
           <p className={styles.footer}>
             {footerText} <Link href={footerHref}>{footerLinkLabel}</Link>
           </p>
+          <p className={styles.footer}>
+            <Link href="/privacy">{t("auth.privacy")}</Link>
+          </p>
         </div>
       </main>
     </div>
