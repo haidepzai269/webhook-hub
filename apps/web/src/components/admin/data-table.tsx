@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import {
   type ColumnDef,
@@ -31,9 +31,16 @@ import { useIsMobileState } from "@/hooks/use-mobile";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 import { useT } from "@/lib/i18n/use-t";
 
-import { type MobileCardSpec, planMobileCard } from "./responsive-table-logic";
+import { type FitColumn, hideCandidates, type MobileCardSpec, planMobileCard } from "./responsive-table-logic";
+import { useFitColumns } from "./use-fit-columns";
 
 export type HubColumn<T extends RowData> = ColumnDef<DataTableFeatures, T>;
+
+/** Id cột như TanStack suy ra: `id` tường minh, không thì `accessorKey`. */
+function columnIdOf<T extends RowData>(c: HubColumn<T>): string {
+  const d = c as { id?: string; accessorKey?: string | number };
+  return String(d.id ?? d.accessorKey ?? "");
+}
 
 interface DataTableProps<T extends RowData> {
   data: T[] | undefined;
@@ -86,22 +93,46 @@ export function DataTable<T extends RowData>({
   const cards = Boolean(mobile) && viewport === true;
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
+  // Cột người dùng chọn qua nút "Cột" (true = chủ động bật → ghim, không tự ẩn). Cột bị TỰ ẨN vì khung hẹp (ADR-270)
+  // không nằm ở đây: chúng chỉ chồng lên lúc dựng `columnVisibility`, nên rộng ra là hiện lại.
+  const [userVisibility, setUserVisibility] = useState<ColumnVisibilityState>({});
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: pageSize === false ? Number.MAX_SAFE_INTEGER : pageSize,
   });
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const candidates = hideCandidates(
+    columns.map(
+      (c): FitColumn => {
+        const id = columnIdOf(c);
+        return { id, canHide: c.enableHiding !== false, userVisible: userVisibility[id] !== false, pinned: userVisibility[id] === true };
+      },
+    ),
+    mobile ? [mobile.title, mobile.badge, mobile.actions].filter((x): x is string => Boolean(x)) : [],
+  );
+  const fit = useFitColumns(wrapRef, candidates.length, data);
+  const autoHidden = candidates.slice(0, fit.hidden);
+  const columnVisibility: ColumnVisibilityState = { ...userVisibility, ...Object.fromEntries(autoHidden.map((id) => [id, false])) };
 
   const table = useTable({
     features: dataTableFeatures,
     data: data ?? [],
     columns,
     state: { globalFilter, sorting, columnVisibility, pagination },
+    // (columnVisibility ở trên = người dùng chọn + tự ẩn theo bề rộng)
     getRowId: (row) => getRowId(row),
     globalFilterFn: "includesString",
     onGlobalFilterChange: setGlobalFilter,
     onSortingChange: setSorting,
-    onColumnVisibilityChange: setColumnVisibility,
+    onColumnVisibilityChange: (updater) => {
+      const next = typeof updater === "function" ? updater(columnVisibility) : updater;
+      // Chỉ ghi nhận cột người dùng VỪA đổi; cột đang tự ẩn mà họ không đụng tới thì không biến thành lựa chọn của họ.
+      setUserVisibility((prev) => {
+        const out = { ...prev };
+        for (const [id, v] of Object.entries(next)) if ((columnVisibility[id] ?? true) !== v) out[id] = v;
+        return out;
+      });
+    },
     onPaginationChange: setPagination,
     autoResetPageIndex: false,
   });
@@ -153,6 +184,11 @@ export function DataTable<T extends RowData>({
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuLabel>{t("admin.table.show-columns")}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {autoHidden.length > 0 && (
+                  <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+                    {t("admin.table.auto-hidden", { n: autoHidden.length })}
+                  </DropdownMenuLabel>
+                )}
                 {hideable.map((col) => (
                   <DropdownMenuCheckboxItem
                     key={col.id}
@@ -252,7 +288,11 @@ export function DataTable<T extends RowData>({
           )}
         </ul>
       ) : (
-      <div className={`overflow-x-auto rounded-lg border bg-card transition-opacity ${isStale ? "opacity-60" : ""}`}>
+      <div
+        ref={wrapRef}
+        data-fit-crush={fit.crush}
+        className={`fit-table overflow-hidden rounded-lg border bg-card transition-opacity ${isStale ? "opacity-60" : ""}`}
+      >
         <Table>
           <TableHeader className="bg-muted/30">
             {table.getHeaderGroups().map((hg) => (

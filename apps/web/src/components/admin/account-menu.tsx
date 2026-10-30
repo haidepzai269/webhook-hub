@@ -164,10 +164,10 @@ export function AccountTopBar({ demo = false }: { demo?: boolean }) {
           <AccountMenu demo={demo} />
         </div>
       </div>
-      {/* ADR-268: đường quay về + điều hướng gọn; cuộn ngang trên màn hẹp, không xuống dòng. */}
+      {/* ADR-268: đường quay về + điều hướng gọn; màn hẹp thì xuống dòng (ADR-270: không cuộn ngang). */}
       <nav
         aria-label={t("nav.account.aria")}
-        className="mx-auto flex h-11 w-full max-w-6xl items-center gap-1 overflow-x-auto px-4 md:px-6"
+        className="mx-auto flex min-h-11 w-full max-w-6xl flex-wrap items-center gap-1 px-4 py-1 md:px-6"
       >
         {!onProjects && (
           <>
