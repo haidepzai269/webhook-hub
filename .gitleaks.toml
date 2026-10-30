@@ -58,4 +58,7 @@ regexes = [
   # apps/web/src/lib/sentry/scrub.spec.ts (ADR-264, bổ sung) — khoá Google API GIẢ (chứa chữ FAKE) để test khẳng định
   # scrub che `AIza…` trước khi event rời trình duyệt (đã xác minh 2026-10-19, không phải khoá thật).
   '''AIzaSyBFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE''',
+  # apps/web/scripts/overflow-audit.mjs (ADR-271) — keyPrefix GIẢ của API mock khi đo bảng Khoá API
+  # (đã xác minh 2026-10-30, chuỗi gõ tay, không phải khoá thật).
+  '''whk_live_ab12cd34''',
 ]
