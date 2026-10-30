@@ -151,7 +151,7 @@ function ExecutionsView() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Tabs className="max-w-full overflow-x-auto" value={status} onValueChange={(id) => url.setFilter({ status: id === "all" ? null : id })}>
+        <Tabs className="max-w-full" value={status} onValueChange={(id) => url.setFilter({ status: id === "all" ? null : id })}>
           <TabsList variant="segmented">
             {TABS.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>

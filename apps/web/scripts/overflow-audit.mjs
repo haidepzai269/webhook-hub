@@ -241,6 +241,19 @@ const opened = {};
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const unknown = new Set();
 const problems = [];
+const report = (m) => { if (!problems.includes(m)) console.log("  ! " + m.slice(0, 300)); problems.push(m); };
+/** goto có thử lại — chuyển trang giữa chừng (điều hướng client) hay làm goto bị huỷ. */
+const go = async (page, url) => {
+  for (let k = 0; k < 4; k++) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 180_000 });
+      return;
+    } catch (e) {
+      if (k === 3) throw e;
+      await page.waitForTimeout(1500);
+    }
+  }
+};
 let checked = 0;
 
 for (const vw of VIEWPORTS) {
@@ -263,36 +276,47 @@ for (const vw of VIEWPORTS) {
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e).slice(0, 160)));
   for (const path of PAGES) {
-    await page.goto(`${WEB}${path}`, { waitUntil: "domcontentloaded", timeout: 180_000 });
+    await go(page, `${WEB}${path}`);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    await page.waitForTimeout(600);
+    // Ổn định: bảng không được vẽ lại liên tục (vòng lặp co cột chạy mãi sẽ lộ ra ở đây).
+    await page.evaluate(() => { window.__mut = 0; const t = document.querySelector("[data-slot=table-container]"); if (t) new MutationObserver((m) => { window.__mut += m.length; }).observe(t, { subtree: true, childList: true, attributes: true }); });
+    await page.waitForTimeout(1200);
+    const mut = await page.evaluate(() => window.__mut ?? 0);
     const tag = `${vw}px ${path}`;
     const found = await page.evaluate(measure);
+    if (mut > 40) found.push(`UNSTABLE ${mut} thay đổi DOM trong bảng sau khi đã tải xong`);
     checked++;
-    for (const f of found) problems.push(`${tag} :: ${f}`);
+    for (const f of found) report(`${tag} :: ${f}`);
     if ((found.length || process.env.SHOTS_ALL) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}.png`) });
 
     if (OVERLAYS) {
       // Mở lần lượt các nút ngoài bảng (Tạo…, Kết nối…, hàng thao tác) → nếu hiện dialog/sheet thì đo rồi đóng.
-      const SEL = path === "/dashboard" ? "header button:visible, main button:visible" : "main button:visible, [data-slot=table-body] button:visible";
+      const SEL = path === "/dashboard" ? "header button:visible, main button:visible" : "main button:not(header button):visible, [data-slot=table-body] button:visible";
       const n = await page.locator(SEL).count();
       for (let i = 0; i < Math.min(n, 18); i++) {
         const btn = page.locator(SEL).nth(i);
         const label = ((await btn.innerText().catch(() => "")) || (await btn.getAttribute("aria-label").catch(() => "")) || `#${i}`).trim().slice(0, 30);
-        await btn.click({ timeout: 1500, trial: false }).catch(() => {});
+        await btn.click({ timeout: 3000 }).catch((e) => process.env.VERBOSE && console.log(`  click lỗi "${label}": ${String(e.message).split(String.fromCharCode(10)).slice(0, 9).join(" | ").slice(600, 1500)}`));
+        await page.waitForTimeout(250);
         const overlay = page.locator("[role=dialog]:visible, [data-slot=sheet-content]:visible").first();
         if (await overlay.count()) {
           await page.waitForTimeout(450);
           opened[path] = (opened[path] ?? 0) + 1;
+          if (process.env.VERBOSE) console.log(`  overlay mở: ${tag} "${label}"`);
           const o = await page.evaluate(measure);
           checked++;
-          for (const f of o) problems.push(`${tag} [overlay "${label}"] :: ${f}`);
+          for (const f of o) report(`${tag} [overlay "${label}"] :: ${f}`);
           if (o.length && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}-ov${i}.png`) });
-          await page.keyboard.press("Escape");
-          await page.waitForTimeout(250);
+          // Tải lại trang cho mỗi overlay: Radix đôi khi để lại pointer-events:none trên body sau khi đóng dialog lồng.
+          await go(page, `${WEB}${path}`);
+          await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+          await page.waitForTimeout(700);
         } else if (page.url() !== `${WEB}${path}`) {
-          await page.goto(`${WEB}${path}`, { waitUntil: "domcontentloaded", timeout: 180_000 });
+          await go(page, `${WEB}${path}`);
           await page.waitForTimeout(500);
+        } else {
+          await page.keyboard.press("Escape"); // đóng menu/popover (nút "Cột"…) kẻo chặn các lần bấm sau
+          await page.waitForTimeout(200);
         }
       }
       // Bấm thân hàng đầu tiên (mở sheet chi tiết sự kiện / cảnh báo…).
@@ -304,14 +328,14 @@ for (const vw of VIEWPORTS) {
           opened[path] = (opened[path] ?? 0) + 1;
           const o = await page.evaluate(measure);
           checked++;
-          for (const f of o) problems.push(`${tag} [overlay "hàng đầu"] :: ${f}`);
+          for (const f of o) report(`${tag} [overlay "hàng đầu"] :: ${f}`);
           if (o.length && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/W+/g, "_")}-row.png`) });
           await page.keyboard.press("Escape");
         }
       }
     }
   }
-  if (errs.length) problems.push(`${vw}px pageerror: ${[...new Set(errs)].slice(0, 5).join(" | ")}`);
+  if (errs.length) report(`${vw}px pageerror: ${[...new Set(errs)].slice(0, 5).join(" | ")}`);
   await ctx.close();
 }
 await browser.close();
