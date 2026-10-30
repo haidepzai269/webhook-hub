@@ -237,6 +237,7 @@ function measure() {
   return out;
 }
 
+const opened = {};
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const unknown = new Set();
 const problems = [];
@@ -269,18 +270,20 @@ for (const vw of VIEWPORTS) {
     const found = await page.evaluate(measure);
     checked++;
     for (const f of found) problems.push(`${tag} :: ${f}`);
-    if (found.length && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}.png`) });
+    if ((found.length || process.env.SHOTS_ALL) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}.png`) });
 
     if (OVERLAYS) {
       // Mở lần lượt các nút ngoài bảng (Tạo…, Kết nối…, hàng thao tác) → nếu hiện dialog/sheet thì đo rồi đóng.
-      const n = await page.locator("main button:visible, [data-slot=table-body] button:visible").count();
-      for (let i = 0; i < Math.min(n, 14); i++) {
-        const btn = page.locator("main button:visible, [data-slot=table-body] button:visible").nth(i);
+      const SEL = path === "/dashboard" ? "header button:visible, main button:visible" : "main button:visible, [data-slot=table-body] button:visible";
+      const n = await page.locator(SEL).count();
+      for (let i = 0; i < Math.min(n, 18); i++) {
+        const btn = page.locator(SEL).nth(i);
         const label = ((await btn.innerText().catch(() => "")) || (await btn.getAttribute("aria-label").catch(() => "")) || `#${i}`).trim().slice(0, 30);
         await btn.click({ timeout: 1500, trial: false }).catch(() => {});
         const overlay = page.locator("[role=dialog]:visible, [data-slot=sheet-content]:visible").first();
         if (await overlay.count()) {
           await page.waitForTimeout(450);
+          opened[path] = (opened[path] ?? 0) + 1;
           const o = await page.evaluate(measure);
           checked++;
           for (const f of o) problems.push(`${tag} [overlay "${label}"] :: ${f}`);
@@ -292,6 +295,20 @@ for (const vw of VIEWPORTS) {
           await page.waitForTimeout(500);
         }
       }
+      // Bấm thân hàng đầu tiên (mở sheet chi tiết sự kiện / cảnh báo…).
+      const row = page.locator("[data-slot=table-body] [data-slot=table-row]").first();
+      if (await row.count()) {
+        await row.click({ position: { x: 20, y: 10 }, timeout: 1500 }).catch(() => {});
+        if (await page.locator("[role=dialog]:visible, [data-slot=sheet-content]:visible").count()) {
+          await page.waitForTimeout(600);
+          opened[path] = (opened[path] ?? 0) + 1;
+          const o = await page.evaluate(measure);
+          checked++;
+          for (const f of o) problems.push(`${tag} [overlay "hàng đầu"] :: ${f}`);
+          if (o.length && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/W+/g, "_")}-row.png`) });
+          await page.keyboard.press("Escape");
+        }
+      }
     }
   }
   if (errs.length) problems.push(`${vw}px pageerror: ${[...new Set(errs)].slice(0, 5).join(" | ")}`);
@@ -299,6 +316,7 @@ for (const vw of VIEWPORTS) {
 }
 await browser.close();
 if (unknown.size) console.log("API chưa giả (trả []):", [...unknown].join(", "));
+console.log("Overlay đã mở được (tổng các viewport):", JSON.stringify(opened));
 console.log(`Đã đo ${checked} lượt (trang + overlay) × viewport ${VIEWPORTS.join("/")}`);
 const uniq = [...new Set(problems)];
 console.log(uniq.length ? `LỖI ${uniq.length}:\n${uniq.join("\n")}` : "ĐẠT: không có cuộn ngang / tràn.");

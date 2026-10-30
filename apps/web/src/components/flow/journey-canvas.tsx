@@ -320,6 +320,7 @@ function FitOnResize({ nodeCount }: { nodeCount: number }) {
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
   const initialized = useStore((s) => s.nodes.length > 0 && s.nodes.every((n) => n.measured?.width && n.measured?.height));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nodeCount là tín hiệu "đổi số node thì fit lại"
   useEffect(() => {
     if (!initialized || width === 0 || height === 0) return;
     void fitView({ padding: 0.05, maxZoom: 1, minZoom: FIT_MIN_ZOOM });

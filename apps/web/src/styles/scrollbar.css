@@ -75,10 +75,12 @@
   }
 }
 
-/* Bảng tự co (ADR-270). Trần 24rem cho mỗi ô: nội dung đã truncate thì cắt có dấu …; nội dung nowrap không cắt được vẫn giữ đủ chỗ.
+/* Bảng tự co (ADR-270). Trần 24rem cho mỗi ô: nội dung đã truncate thì cắt có dấu …; chữ nowrap dài hơn bị cắt bằng … (DataTable gắn title để xem đủ).
  * Bước cuối khi ẩn hết cột phụ mà vẫn tràn (data-fit-crush): hạ trần còn 12rem và cho xuống dòng ở bất kỳ ký tự nào. */
 .fit-table td {
   max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fit-table[data-fit-crush="true"] td {
   max-width: 12rem;

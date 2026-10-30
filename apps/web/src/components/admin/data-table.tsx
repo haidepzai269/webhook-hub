@@ -352,11 +352,15 @@ export function DataTable<T extends RowData>({
                       : undefined
                   }
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="px-3 py-2 align-middle">
-                      <table.FlexRender cell={cell} />
-                    </TableCell>
-                  ))}
+                  {row.getVisibleCells().map((cell) => {
+                    // title = chữ đầy đủ khi ô bị cắt bằng … (.fit-table td); ô có nội dung React tự lo tooltip riêng.
+                    const v = cell.getValue();
+                    return (
+                      <TableCell key={cell.id} className="px-3 py-2 align-middle" title={typeof v === "string" && v.length > 24 ? v : undefined}>
+                        <table.FlexRender cell={cell} />
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               ))
             ) : (
