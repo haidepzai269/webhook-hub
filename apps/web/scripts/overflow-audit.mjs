@@ -176,9 +176,11 @@ function mock(method, path) {
   if (p === "/api/v1/connectors") return [];
   if (p === "/api/v1/me/alert-preferences") return { email: true, telegram: false };
   if (p === "/api/v1/raw-events/orphans") return { items: [], total: 0 };
-  if (p.endsWith("/inspect")) return [];
+  if (p.endsWith("/inspect")) return Array.from({ length: 6 }, (_, i) => ({ id: uuid(1400 + i), receivedAt: iso(i * 3), status: i % 2 ? "REJECTED" : "ACCEPTED", diagnosis: { ok: i % 2 === 0, reason: i % 2 ? "signature_mismatch" : undefined, expectedHeader: "x-very-long-signature-header-name-for-this-provider-v2", candidateHeaders: ["x-hub-signature-256", "x-signature", "x-webhook-signature-timestamp"], expectedQueryParam: "token_" + "x".repeat(40) } }));
+  if (p.endsWith("/connection")) return { sourceId: sources[1].id, provider: "payos", status: "CONNECTED", display: "Webhook " + LONG_URL, ingestUrl: sources[1].ingestUrl, lastError: "Không gọi được PayOS: " + LONG_URL + " trả 503 sau 3 lần thử", fix: "Kiểm tra lại khoá API tại " + LONG_URL, hasCredentials: true, credentialHints: { clientId: "ab12…ef90", apiKey: "••••" + "x".repeat(30), checksumKey: "••••" }, manualDisconnect: null };
   if (p.startsWith("/api/v1/insights") || p.includes("/insights")) return [];
-  if (p.includes("/traffic")) return { range: "24h", bucketSeconds: 3600, buckets: [], topIps: [], insight: { level: "ok", code: "ok", facts: {} }, blockedNow: [] };
+  if (p.includes("/traffic")) return { range: "24h", bucketSeconds: 3600, buckets: Array.from({ length: 12 }, (_, i) => ({ t: iso((12 - i) * 60), ACCEPTED: 10 + i, DUPLICATE: 1, REJECTED: i % 3, RATE_LIMITED: 0, BLOCKED: 0, STORAGE_FULL: 0 })), topIps: Array.from({ length: 6 }, (_, i) => ({ ip: "2001:0db8:85a3:0000:0000:8a2e:0370:733" + i, count: 100 - i, rejected: i, lastSeen: iso(i) })), blockedNow: [{ ip: "2001:0db8:85a3:0000:0000:8a2e:0370:7334", remainingSec: 300 }], insight: { code: "I-traffic", level: "warning", facts: { range: "24h", state: "elevated", total: 100, rejectedPct: 12, dominantIp: "2001:0db8:85a3::8a2e:0370:7334" } } };
+  if (false) return { range: "24h", bucketSeconds: 3600, buckets: [], topIps: [], insight: { level: "ok", code: "ok", facts: {} }, blockedNow: [] };
   if (p === "/auth/socket-ticket") return { ticket: "t" };
   if (p.startsWith("/api/v1/events/")) return { ...events[0], rawEvent: null };
   if (method !== "GET") return {};
@@ -224,6 +226,42 @@ function measure() {
       if (wrap && el.getBoundingClientRect().width > wrap.clientWidth + 1) out.push(`TABLE-WIDER ${Math.round(r.width)} > wrap ${wrap.clientWidth} cols=[${[...el.querySelectorAll("th")].map((h) => h.innerText.trim().slice(0, 14) + ":" + Math.round(h.getBoundingClientRect().width)).join(" | ")}]`);
     }
   }
+  // ---- Nội dung bị CẮT im lặng (overflow-x hidden/clip giấu nội dung mà không có thanh cuộn) ----
+  // (B) LỖI: nút/link/ô nhập bị một tổ tiên hidden/clip cắt mất.  (A) cố ý: td/span có text-overflow: ellipsis (kèm title).
+  // (C) chữ khác bị cắt không có dấu … → liệt kê để xem.
+  const scopeRoots = [...document.querySelectorAll("table,[role=dialog],[role=alertdialog],[data-slot=sheet-content],[data-slot=popover-content]")];
+  const CTRL = "button,a[href],input,select,textarea,[role=button],[role=switch],[role=checkbox],[role=tab],[role=menuitem]";
+  const seenCtl = new Set();
+  for (const root of scopeRoots) {
+    for (const c of root.querySelectorAll(CTRL)) {
+      if (seenCtl.has(c)) continue;
+      seenCtl.add(c);
+      if (c.closest(".react-flow,[aria-hidden=true],nextjs-portal,.sr-only,[data-hscroll-ok]")) continue;
+      const r = c.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2 || getComputedStyle(c).visibility === "hidden") continue;
+      for (let a = c.parentElement; a && a !== document.body; a = a.parentElement) {
+        const cs = getComputedStyle(a);
+        if (!/(hidden|clip)/.test(cs.overflowX)) continue;
+        const ar = a.getBoundingClientRect();
+        if (r.right > ar.right + 1 || r.left < ar.left - 1) {
+          out.push(`CLIPPED-CONTROL ${descr(c)} "${(c.innerText || c.getAttribute("aria-label") || "").trim().slice(0, 24)}" right=${Math.round(r.right)} bởi ${descr(a)} right=${Math.round(ar.right)}`);
+          break;
+        }
+      }
+    }
+  }
+  const seenEl = new Set();
+  for (const root of scopeRoots) {
+    for (const el of [root, ...root.querySelectorAll("*")]) {
+      if (seenEl.has(el)) continue;
+      seenEl.add(el);
+      if (el.closest(".react-flow,nextjs-portal,pre,code,[data-hscroll-ok],.sr-only") || el.classList.contains("sr-only")) continue;
+      const cs = getComputedStyle(el);
+      if (!/(hidden|clip)/.test(cs.overflowX) || el.scrollWidth <= el.clientWidth + 1) continue;
+      if (cs.textOverflow === "ellipsis") out.push(`NOTE-A ellipsis ${el.tagName.toLowerCase()}`);
+      else out.push(`NOTE-C bị cắt không có … ${descr(el)} text="${(el.innerText || "").trim().replace(/\s+/g, " ").slice(0, 50)}"`);
+    }
+  }
   // Phần tử vượt mép phải của overlay (thân modal chỉ cuộn dọc nên phần vượt sẽ bị cắt im lặng).
   for (const root of document.querySelectorAll('[role=dialog],[role=alertdialog],[data-slot=sheet-content]')) {
     const rr = root.getBoundingClientRect();
@@ -246,7 +284,22 @@ const opened = {};
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const unknown = new Set();
 const problems = [];
-const report = (m) => { if (!problems.includes(m)) console.log("  ! " + m.slice(0, 300)); problems.push(m); };
+const notes = new Map(); // NOTE-A (cố ý) / NOTE-C (xem lại): đếm theo nội dung, không tính là lỗi
+const rawLog = []; // mọi thông điệp theo thứ tự — RESUME lưu cái này
+const route = (m, print) => {
+  const i = m.indexOf(":: NOTE-");
+  if (i >= 0) {
+    const key = m.slice(i + 3).replace(/\d+/g, "#");
+    notes.set(key, (notes.get(key) ?? 0) + 1);
+    return;
+  }
+  if (print && !problems.includes(m)) console.log("  ! " + m.slice(0, 300));
+  problems.push(m);
+};
+const report = (m) => {
+  rawLog.push(m);
+  route(m, true);
+};
 /** goto có thử lại — chuyển trang giữa chừng (điều hướng client) hay làm goto bị huỷ. */
 const go = async (page, url) => {
   for (let k = 0; k < 4; k++) {
@@ -260,6 +313,64 @@ const go = async (page, url) => {
   }
 };
 let checked = 0;
+
+/**
+ * CONVERGE=1: bảng tự co phải HỘI TỤ, không dao động. Dựng chiều cao viewport SÁT chiều cao trang (± vài chục px) ở nhiều bề rộng
+ * quanh ngưỡng ẩn cột — ẩn cột làm trang ngắn lại, thanh cuộn dọc biến mất, khung rộng thêm vài px — rồi đếm số lần số cột
+ * hiện (th) đổi trong 2,5 giây sau khi tải xong. Hội tụ = ≤ 3 lần đổi và 1 giây cuối không đổi nữa.
+ */
+async function converge() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await ctx.route(/\/(api|auth)\//, (route) => {
+    const u = new URL(route.request().url());
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mock(route.request().method(), u.pathname + u.search) ?? []) });
+  });
+  // Ghi số cột (th) mỗi lần đổi, từ lúc tài liệu bắt đầu dựng — bắt cả dao động ngay sau lần vẽ đầu.
+  await ctx.addInitScript(() => {
+    window.__ths = [];
+    const t0 = performance.now();
+    const th = () => document.querySelectorAll("[data-slot=table-container] th").length;
+    const start = () => new MutationObserver(() => {
+      const n = th();
+      const last = window.__ths[window.__ths.length - 1];
+      if (n > 0 && (!last || last[1] !== n)) window.__ths.push([Math.round(performance.now() - t0), n]);
+    }).observe(document.documentElement, { subtree: true, childList: true });
+    document.addEventListener("DOMContentLoaded", start);
+  });
+  const page = await ctx.newPage();
+  const target = process.env.PAGES ? `/${process.env.PAGES.split(",")[0]}` : "/dashboard/sources";
+  const widths = (process.env.CONVERGE_WIDTHS ?? "1000,1100,1180,1260,1340,1440").split(",").map(Number);
+  let worst = 0;
+  let bad = 0;
+  let runs = 0;
+  for (const w of widths) {
+    await page.setViewportSize({ width: w, height: 900 });
+    await go(page, `${WEB}${target}`);
+    await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(1200);
+    // Chiều cao NỘI DUNG thật (đáy phần tử thấp nhất trong main + lề dưới), không phải scrollHeight (≥ viewport nên che mất ca "sát").
+    const h = await page.evaluate(() => Math.round(Math.max(...[...document.querySelectorAll("main *")].map((e) => e.getBoundingClientRect().bottom)) + scrollY + 32));
+    for (const d of [-40, -20, -8, 0, 8, 20, 40]) {
+      await page.setViewportSize({ width: w, height: Math.max(300, h + d) });
+      await go(page, `${WEB}${target}`);
+      await page.waitForSelector("[data-slot=table-container] th", { timeout: 30_000 }).catch(() => {});
+      await page.waitForTimeout(2500);
+      const seq = await page.evaluate(() => window.__ths);
+      const changes = Math.max(0, seq.length - 1);
+      const lastChange = seq.length > 1 ? seq[seq.length - 1][0] - seq[0][0] : 0;
+      runs++;
+      worst = Math.max(worst, changes);
+      const ok = seq.length > 0 && changes <= 3 && lastChange < 1500;
+      if (!ok) bad++;
+      if (!ok || process.env.VERBOSE) console.log(`  ${ok ? "ok " : "LẶP"} w=${w} h=${h + d} (trang cao ${h}) số lần đổi cột=${changes} chuỗi=${JSON.stringify(seq)}`);
+    }
+  }
+  console.log(`CONVERGE ${target}: ${runs} ca (rộng × cao sát trang), đổi số cột nhiều nhất = ${worst}, ca không hội tụ = ${bad}`);
+  await ctx.close();
+  await browser.close();
+  process.exit(bad ? 1 : 0);
+}
+if (process.env.CONVERGE) await converge();
 
 for (const vw of VIEWPORTS) {
   const ctx = await browser.newContext({ viewport: { width: vw, height: 950 }, colorScheme: "light" });
@@ -284,11 +395,14 @@ for (const vw of VIEWPORTS) {
   for (const path of PAGES) {
     const key = `${vw} ${path}`;
     if (state[key]) {
-      for (const m of state[key].problems) problems.push(m);
+      for (const m of state[key].log) {
+        rawLog.push(m);
+        route(m, false);
+      }
       checked += state[key].checked;
       continue;
     }
-    const before = problems.length;
+    const before = rawLog.length;
     const checkedBefore = checked;
     await go(page, `${WEB}${path}`);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
@@ -301,7 +415,7 @@ for (const vw of VIEWPORTS) {
     if (mut > 40) found.push(`UNSTABLE ${mut} thay đổi DOM trong bảng sau khi đã tải xong`);
     checked++;
     for (const f of found) report(`${tag} :: ${f}`);
-    if ((found.length || process.env.SHOTS_ALL) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}.png`) });
+    if ((found.some((x) => !x.startsWith("NOTE-")) || process.env.SHOTS_ALL) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}.png`) });
 
     if (OVERLAYS) {
       // Mở lần lượt các nút ngoài bảng (Tạo…, Kết nối…, hàng thao tác) → nếu hiện dialog/sheet thì đo rồi đóng.
@@ -320,7 +434,7 @@ for (const vw of VIEWPORTS) {
           const o = await page.evaluate(measure);
           checked++;
           for (const f of o) report(`${tag} [overlay "${label}"] :: ${f}`);
-          if (o.length && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}-ov${i}.png`) });
+          if (o.some((x) => !x.startsWith("NOTE-")) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}-ov${i}.png`) });
           // Tải lại trang cho mỗi overlay: Radix đôi khi để lại pointer-events:none trên body sau khi đóng dialog lồng.
           await go(page, `${WEB}${path}`);
           await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
@@ -330,6 +444,39 @@ for (const vw of VIEWPORTS) {
           await page.waitForTimeout(500);
         } else {
           await page.keyboard.press("Escape"); // đóng menu/popover (nút "Cột"…) kẻo chặn các lần bấm sau
+          await page.waitForTimeout(200);
+        }
+      }
+      // Nút thao tác theo hàng: mỗi nhãn aria-label (bỏ phần tên riêng sau dấu “) bấm nút CUỐI CÙNG cùng nhãn — hàng generic
+      // (có "Lắng nghe") thường nằm cuối. Mở ngăn Lắng nghe / Lưu lượng / hộp Kết nối… mà vòng 18 nút đầu không tới.
+      const rowLabels = await page.evaluate(() => {
+        const m = new Map();
+        for (const b of document.querySelectorAll("[data-slot=table-body] button[aria-label]")) m.set((b.getAttribute("aria-label") || "").replace(/[“"].*$/, "").trim(), b);
+        return [...m.keys()].filter(Boolean).slice(0, 8);
+      });
+      for (const pfx of rowLabels) {
+        const idx = await page.evaluate((p) => {
+          const all = [...document.querySelectorAll("[data-slot=table-body] button[aria-label]")];
+          let last = -1;
+          all.forEach((b, i) => { if ((b.getAttribute("aria-label") || "").replace(/[“"].*$/, "").trim() === p) last = i; });
+          return last;
+        }, pfx);
+        if (idx < 0) continue;
+        await page.locator("[data-slot=table-body] button[aria-label]").nth(idx).click({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(250);
+        if (await page.locator("[role=dialog]:visible, [data-slot=sheet-content]:visible").count()) {
+          await page.waitForTimeout(600);
+          opened[path] = (opened[path] ?? 0) + 1;
+          if (process.env.VERBOSE) console.log(`  overlay mở (nút hàng): ${tag} "${pfx}"`);
+          const o = await page.evaluate(measure);
+          checked++;
+          for (const f of o) report(`${tag} [overlay hàng "${pfx}"] :: ${f}`);
+          if (o.some((x) => !x.startsWith("NOTE-")) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}-rb.png`) });
+          await go(page, `${WEB}${path}`);
+          await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+          await page.waitForTimeout(700);
+        } else {
+          await page.keyboard.press("Escape");
           await page.waitForTimeout(200);
         }
       }
@@ -343,12 +490,12 @@ for (const vw of VIEWPORTS) {
           const o = await page.evaluate(measure);
           checked++;
           for (const f of o) report(`${tag} [overlay "hàng đầu"] :: ${f}`);
-          if (o.length && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/W+/g, "_")}-row.png`) });
+          if (o.some((x) => !x.startsWith("NOTE-")) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/W+/g, "_")}-row.png`) });
           await page.keyboard.press("Escape");
         }
       }
     }
-    state[key] = { problems: problems.slice(before), checked: checked - checkedBefore };
+    state[key] = { log: rawLog.slice(before), checked: checked - checkedBefore };
     saveState();
   }
   if (errs.length) report(`${vw}px pageerror: ${[...new Set(errs)].slice(0, 5).join(" | ")}`);
@@ -358,6 +505,9 @@ await browser.close();
 if (unknown.size) console.log("API chưa giả (trả []):", [...unknown].join(", "));
 console.log("Overlay đã mở được (tổng các viewport):", JSON.stringify(opened));
 console.log(`Đã đo ${checked} lượt (trang + overlay) × viewport ${VIEWPORTS.join("/")}`);
+const noteA = [...notes].filter(([k]) => k.startsWith("NOTE-A")).reduce((n, [, v]) => n + v, 0);
+console.log(`Ghi chú: ${noteA} ô/phần tử cắt bằng … (cố ý) — NOTE-C (cắt không có …, cần xem):`);
+for (const [k, v] of notes) if (k.startsWith("NOTE-C")) console.log(`  ${v}× ${k.slice(0, 220)}`);
 const uniq = [...new Set(problems)];
 console.log(uniq.length ? `LỖI ${uniq.length}:\n${uniq.join("\n")}` : "ĐẠT: không có cuộn ngang / tràn.");
 process.exit(uniq.length ? 1 : 0);

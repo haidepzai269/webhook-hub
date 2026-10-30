@@ -73,6 +73,12 @@
   [data-slot="alert-dialog-body"] {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* Chuỗi dài không dấu cách (URL, id, lỗi từ provider) phải xuống dòng — thân chỉ cuộn dọc nên nếu không thì bị CẮT im lặng. */
+  [data-slot="dialog-body"],
+  [data-slot="alert-dialog-body"],
+  [data-slot="sheet-body"] {
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Bảng tự co (ADR-271). Trần 24rem cho mỗi ô: nội dung đã truncate thì cắt có dấu …; chữ nowrap dài hơn bị cắt bằng … (DataTable gắn title để xem đủ).
