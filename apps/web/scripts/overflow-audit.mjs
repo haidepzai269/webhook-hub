@@ -300,6 +300,34 @@ const report = (m) => {
   rawLog.push(m);
   route(m, true);
 };
+/** Đo có thử lại: trang vừa chuyển hướng giữa chừng thì ngữ cảnh bị huỷ — chờ tải xong rồi đo lại. */
+const safeMeasure = async (page) => {
+  for (let k = 0; k < 4; k++) {
+    try {
+      return await page.evaluate(measure);
+    } catch (e) {
+      if (k === 3 || !/context was destroyed|navigation/i.test(String(e))) throw e;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(1000);
+    }
+  }
+};
+/** Mọi page.evaluate thử lại khi trang đang chuyển hướng (một nút bấm có thể điều hướng đi nơi khác). */
+const harden = (page) => {
+  const orig = page.evaluate.bind(page);
+  page.evaluate = async (...a) => {
+    for (let k = 0; ; k++) {
+      try {
+        return await orig(...a);
+      } catch (e) {
+        if (k >= 4 || !/context was destroyed|navigation/i.test(String(e))) throw e;
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        await page.waitForTimeout(1000);
+      }
+    }
+  };
+  return page;
+};
 /** goto có thử lại — chuyển trang giữa chừng (điều hướng client) hay làm goto bị huỷ. */
 const go = async (page, url) => {
   for (let k = 0; k < 4; k++) {
@@ -337,7 +365,7 @@ async function converge() {
     }).observe(document.documentElement, { subtree: true, childList: true });
     document.addEventListener("DOMContentLoaded", start);
   });
-  const page = await ctx.newPage();
+  const page = harden(await ctx.newPage());
   const target = process.env.PAGES ? `/${process.env.PAGES.split(",")[0]}` : "/dashboard/sources";
   const widths = (process.env.CONVERGE_WIDTHS ?? "1000,1100,1180,1260,1340,1440").split(",").map(Number);
   let worst = 0;
@@ -388,7 +416,7 @@ for (const vw of VIEWPORTS) {
     }
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
-  const page = await ctx.newPage();
+  const page = harden(await ctx.newPage());
   const errs = [];
   // Hydration mismatch do dữ liệu giả có mốc thời gian tương đối (server/client lệch giờ) — không liên quan bố cục, bỏ qua.
   page.on("pageerror", (e) => !/Hydration/.test(String(e)) && errs.push(String(e).slice(0, 160)));
@@ -411,7 +439,12 @@ for (const vw of VIEWPORTS) {
     await page.waitForTimeout(1200);
     const mut = await page.evaluate(() => window.__mut ?? 0);
     const tag = `${vw}px ${path}`;
-    const found = await page.evaluate(measure);
+    let found = await safeMeasure(page);
+    if (found.some((x) => !x.startsWith("NOTE-"))) {
+      // Lỗi có thể chỉ là trạng thái đang ổn định (lần compile đầu của dev server, bảng chưa kịp co) — đo lại một lần sau 2 giây.
+      await page.waitForTimeout(2000);
+      found = await safeMeasure(page);
+    }
     if (mut > 40) found.push(`UNSTABLE ${mut} thay đổi DOM trong bảng sau khi đã tải xong`);
     checked++;
     for (const f of found) report(`${tag} :: ${f}`);
@@ -431,7 +464,7 @@ for (const vw of VIEWPORTS) {
           await page.waitForTimeout(450);
           opened[path] = (opened[path] ?? 0) + 1;
           if (process.env.VERBOSE) console.log(`  overlay mở: ${tag} "${label}"`);
-          const o = await page.evaluate(measure);
+          const o = await safeMeasure(page);
           checked++;
           for (const f of o) report(`${tag} [overlay "${label}"] :: ${f}`);
           if (o.some((x) => !x.startsWith("NOTE-")) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}-ov${i}.png`) });
@@ -468,7 +501,7 @@ for (const vw of VIEWPORTS) {
           await page.waitForTimeout(600);
           opened[path] = (opened[path] ?? 0) + 1;
           if (process.env.VERBOSE) console.log(`  overlay mở (nút hàng): ${tag} "${pfx}"`);
-          const o = await page.evaluate(measure);
+          const o = await safeMeasure(page);
           checked++;
           for (const f of o) report(`${tag} [overlay hàng "${pfx}"] :: ${f}`);
           if (o.some((x) => !x.startsWith("NOTE-")) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/\W+/g, "_")}-rb.png`) });
@@ -487,7 +520,7 @@ for (const vw of VIEWPORTS) {
         if (await page.locator("[role=dialog]:visible, [data-slot=sheet-content]:visible").count()) {
           await page.waitForTimeout(600);
           opened[path] = (opened[path] ?? 0) + 1;
-          const o = await page.evaluate(measure);
+          const o = await safeMeasure(page);
           checked++;
           for (const f of o) report(`${tag} [overlay "hàng đầu"] :: ${f}`);
           if (o.some((x) => !x.startsWith("NOTE-")) && SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${path.replace(/W+/g, "_")}-row.png`) });
