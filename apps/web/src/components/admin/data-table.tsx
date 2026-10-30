@@ -32,7 +32,7 @@ import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-feat
 import { useT } from "@/lib/i18n/use-t";
 
 import { type FitColumn, hideCandidates, type MobileCardSpec, planMobileCard } from "./responsive-table-logic";
-import { useFitColumns } from "./use-fit-columns";
+import { revealClippedText, useFitColumns } from "./use-fit-columns";
 
 export type HubColumn<T extends RowData> = ColumnDef<DataTableFeatures, T>;
 
@@ -93,7 +93,7 @@ export function DataTable<T extends RowData>({
   const cards = Boolean(mobile) && viewport === true;
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
-  // Cột người dùng chọn qua nút "Cột" (true = chủ động bật → ghim, không tự ẩn). Cột bị TỰ ẨN vì khung hẹp (ADR-270)
+  // Cột người dùng chọn qua nút "Cột" (true = chủ động bật → ghim, không tự ẩn). Cột bị TỰ ẨN vì khung hẹp (ADR-271)
   // không nằm ở đây: chúng chỉ chồng lên lúc dựng `columnVisibility`, nên rộng ra là hiện lại.
   const [userVisibility, setUserVisibility] = useState<ColumnVisibilityState>({});
   const [pagination, setPagination] = useState<PaginationState>({
@@ -110,7 +110,8 @@ export function DataTable<T extends RowData>({
     ),
     mobile ? [mobile.title, mobile.badge, mobile.actions].filter((x): x is string => Boolean(x)) : [],
   );
-  const fit = useFitColumns(wrapRef, candidates.length, data);
+  // Đổi dữ liệu / trang / sắp xếp / bộ lọc → đo lại từ đầu (không thì cột tự ẩn chỉ tăng, không bao giờ hiện lại).
+  const fit = useFitColumns(wrapRef, candidates.length, data, pagination.pageIndex, sorting, globalFilter);
   const autoHidden = candidates.slice(0, fit.hidden);
   const columnVisibility: ColumnVisibilityState = { ...userVisibility, ...Object.fromEntries(autoHidden.map((id) => [id, false])) };
 
@@ -352,15 +353,12 @@ export function DataTable<T extends RowData>({
                       : undefined
                   }
                 >
-                  {row.getVisibleCells().map((cell) => {
-                    // title = chữ đầy đủ khi ô bị cắt bằng … (.fit-table td); ô có nội dung React tự lo tooltip riêng.
-                    const v = cell.getValue();
-                    return (
-                      <TableCell key={cell.id} className="px-3 py-2 align-middle" title={typeof v === "string" && v.length > 24 ? v : undefined}>
-                        <table.FlexRender cell={cell} />
-                      </TableCell>
-                    );
-                  })}
+                  {row.getVisibleCells().map((cell) => (
+                    // Ô bị cắt bằng … (.fit-table td) → hover hiện title = đúng chữ trong ô (revealClippedText).
+                    <TableCell key={cell.id} className="px-3 py-2 align-middle" onMouseEnter={revealClippedText}>
+                      <table.FlexRender cell={cell} />
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             ) : (

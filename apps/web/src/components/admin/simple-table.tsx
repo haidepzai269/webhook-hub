@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useT } from "@/lib/i18n/use-t";
 
 import { hideCandidates } from "./responsive-table-logic";
-import { useFitColumns } from "./use-fit-columns";
+import { revealClippedText, useFitColumns } from "./use-fit-columns";
 
 export interface SimpleColumn<T> {
   key: string;
@@ -20,7 +20,7 @@ export interface SimpleColumn<T> {
   align?: "left" | "center" | "right";
   /** Class thêm cho CẢ tiêu đề lẫn ô (vd `w-36`, `whitespace-normal`). */
   className?: string;
-  /** Cột phụ: khi khung hẹp bảng tự ẩn dần các cột `optional` từ phải sang trái (ADR-270). Cột đầu và cột cuối luôn hiện. */
+  /** Cột phụ: khi khung hẹp bảng tự ẩn dần các cột `optional` từ phải sang trái (ADR-271). Cột đầu và cột cuối luôn hiện. */
   optional?: boolean;
 }
 
@@ -86,7 +86,7 @@ export function SimpleTable<T>({
     body = list.map((row, i) => (
       <TableRow key={getRowKey(row, i)} className={rowClassName?.(row)}>
         {cols.map((c) => (
-          <TableCell key={c.key} className={cn("px-3 py-2 align-middle", ALIGN[c.align ?? "left"], c.className)}>
+          <TableCell key={c.key} className={cn("px-3 py-2 align-middle", ALIGN[c.align ?? "left"], c.className)} onMouseEnter={revealClippedText}>
             {c.cell(row, i)}
           </TableCell>
         ))}

@@ -50,6 +50,8 @@ interface StageData {
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
   branch?: FlowBranch;
+  /** deliveryId đang Phát lại. */
+  replaying?: string | null;
   [k: string]: unknown;
 }
 interface DeliveryData {
@@ -97,7 +99,7 @@ function NodeShell({ tone, selected, width, children, onClick }: { tone: string;
 
 /** Node một chặng: icon chặng, nhãn chặng, tiêu đề do server viết, icon + chữ trạng thái, lý do, nút hành động. */
 const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) {
-  const { stage, provider, selected, onSelect, onAction, branch } = data;
+  const { stage, provider, selected, onSelect, onAction, branch, replaying } = data;
   const t = useT();
   const now = useNow(1000);
   // Định tuyến không khớp subscription nào (không phải probe) = dừng CÓ CHỦ ĐÍCH, không phải "bỏ qua" (ADR-259).
@@ -184,6 +186,7 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
                   type="button"
                   variant="replay"
                   size="xs"
+                  disabled={a === "replay_delivery" && Boolean(branch) && replaying === branch?.deliveryId}
                   onClick={(e) => {
                     e.stopPropagation();
                     onAction(a, stage, branch);
@@ -339,6 +342,7 @@ export function JourneyCanvas({
   selectedId,
   onSelect,
   onAction,
+  replaying,
 }: {
   stages: StageView[];
   branches: FlowBranch[];
@@ -346,6 +350,7 @@ export function JourneyCanvas({
   selectedId: string | null;
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
+  replaying?: string | null;
 }) {
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = [];
@@ -389,7 +394,7 @@ export function JourneyCanvas({
         id: done.id,
         type: "stage",
         position: { x: bx + DW + GAP, y },
-        data: { stage: done, selected: selectedId === done.id, onSelect, onAction, branch: b },
+        data: { stage: done, selected: selectedId === done.id, onSelect, onAction, branch: b, replaying },
         draggable: false,
       });
       if (routed) {
@@ -430,7 +435,7 @@ export function JourneyCanvas({
       });
     });
     return { nodes, edges };
-  }, [stages, branches, provider, selectedId, onSelect, onAction]);
+  }, [stages, branches, provider, selectedId, onSelect, onAction, replaying]);
 
   return (
     <ReactFlow

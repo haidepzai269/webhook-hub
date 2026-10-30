@@ -33,7 +33,7 @@ export function planMobileCard(spec: MobileCardSpec, visibleIds: readonly string
 }
 
 /**
- * Tự co bảng theo bề rộng khung (ADR-270) — thứ tự CỐ ĐỊNH, không đo từng cột:
+ * Tự co bảng theo bề rộng khung (ADR-271) — thứ tự CỐ ĐỊNH, không đo từng cột:
  *   1) ẩn dần cột phụ từ phải sang trái (cột chính + cột cuối/thao tác + cột người dùng tự bật thì GIỮ);
  *   2) vẫn tràn → "bóp": cho mọi ô xuống dòng ở bất kỳ ký tự nào (chuỗi dài không dấu cách như URL/id).
  * Hàm thuần: bước tiếp theo tính từ (trạng thái, có tràn không); đổi bề rộng/dữ liệu thì quay về `FIT_INITIAL` và chạy lại.

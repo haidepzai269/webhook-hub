@@ -46,7 +46,7 @@ const ok = (cond, msg) => { if (!cond) fails.push(msg); console.log(`${cond ? "O
 for (const vw of VIEWPORTS) {
   const ctx = await browser.newContext({ viewport: { width: vw, height: 950 } });
   const replayCalls = [];
-  await ctx.route(/\/(api|auth)\//, (route) => {
+  await ctx.route(/\/(api|auth)\//, async (route) => {
     const u = new URL(route.request().url());
     const p = u.pathname;
     const send = (b) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
@@ -55,7 +55,7 @@ for (const vw of VIEWPORTS) {
     if (p === "/api/v1/alerts") return send({ items: [], next: null, prev: null });
     if (p === "/api/v1/alerts/summary") return send({ openBySeverity: { critical: 0, warning: 0, info: 0 }, unacked: 0, perProject: [] });
     if (p === `/api/v1/flow/events/${EVENT_ID}`) return send(flow);
-    if (p.endsWith("/replay") && route.request().method() === "POST") { replayCalls.push(p); return send({ success: true, generation: 2 }); }
+    if (p.endsWith("/replay") && route.request().method() === "POST") { replayCalls.push(p); await new Promise((r) => setTimeout(r, 300)); return send({ success: true, generation: 2 }); }
     return send(p.endsWith("s") ? [] : {});
   });
   const page = await ctx.newPage();
@@ -86,6 +86,15 @@ for (const vw of VIEWPORTS) {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(400);
   ok(replayCalls.length === 2, `${tag} Enter trên nút → ${replayCalls.length} lần POST replay (cần 2)`);
+
+  await page.waitForTimeout(600); // chờ lượt Enter xong (mock trả sau 300ms) → nút bật lại
+
+  // 3b) Bấm đôi nhanh: chỉ MỘT POST (khoá đồng bộ ở doReplay), và nút bị khoá trong lúc chờ.
+  await btn.dblclick();
+  const disabledWhileBusy = await btn.isDisabled();
+  await page.waitForTimeout(700);
+  ok(replayCalls.length === 3, `${tag} bấm đôi "Phát lại" → ${replayCalls.length - 2} POST (cần đúng 1)`);
+  ok(disabledWhileBusy, `${tag} nút Phát lại bị disabled trong lúc đang gửi`);
 
   // 4) "Mở hàng đợi lỗi" điều hướng sang /dashboard/dlq.
   const dlq = page.locator(".react-flow__node button", { hasText: /hàng đợi lỗi|dead-letter|DLQ|Dead/i }).first();

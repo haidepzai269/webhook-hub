@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
 import { ArrowLeft, CalendarClock, ChevronDown, RotateCcw, Tag, WandSparkles } from "lucide-react";
@@ -72,9 +72,13 @@ export default function EventJourneyPage() {
   const replay = useFlowReplayDelivery();
   const renormalize = useFlowRenormalize();
   const [replaying, setReplaying] = useState<string | null>(null);
+  // Khoá ĐỒNG BỘ: hai click liên tiếp chạy trước khi state `replaying` kịp cập nhật → không được sinh hai generation.
+  const replayLock = useRef(false);
 
   const doReplay = useCallback(
     async (b: FlowBranch) => {
+      if (replayLock.current) return;
+      replayLock.current = true;
       setReplaying(b.deliveryId);
       try {
         const r = await replay.mutateAsync({ id: b.deliveryId, reason: t("page.events.detail.replay-reason") });
@@ -87,6 +91,7 @@ export default function EventJourneyPage() {
       } catch (e) {
         toast.error(e instanceof HubApiError ? e.message : t("page.events.detail.replay-failed"));
       } finally {
+        replayLock.current = false;
         setReplaying(null);
       }
     },
@@ -259,6 +264,7 @@ export default function EventJourneyPage() {
           selectedId={selectedId}
           onSelect={onSelect}
           onAction={onAction}
+          replaying={replaying}
           ctx={pillCtx}
         />
         <div className="mt-3">
