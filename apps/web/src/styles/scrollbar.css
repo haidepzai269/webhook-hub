@@ -62,8 +62,36 @@
 }
 
 @layer components {
+  /* Chỉ cuộn DỌC (ADR-271): thanh cuộn ngang trong modal/sheet/popover là lỗi — nội dung phải co theo khung. Ô lưới của
+   * thân modal được phép co dưới min-content (minmax(0,1fr)), nếu không một chuỗi dài sẽ nới cả cột ra ngoài khung. */
   .scroll-area {
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     overscroll-behavior: contain;
   }
+  [data-slot="dialog-body"],
+  [data-slot="alert-dialog-body"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Chuỗi dài không dấu cách (URL, id, lỗi từ provider) phải xuống dòng — thân chỉ cuộn dọc nên nếu không thì bị CẮT im lặng. */
+  [data-slot="dialog-body"],
+  [data-slot="alert-dialog-body"],
+  [data-slot="sheet-body"] {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Bảng tự co (ADR-271). Trần 24rem cho mỗi ô: nội dung đã truncate thì cắt có dấu …; chữ nowrap dài hơn bị cắt bằng … (DataTable gắn title để xem đủ).
+ * Bước cuối khi ẩn hết cột phụ mà vẫn tràn (data-fit-crush): hạ trần còn 12rem và cho xuống dòng ở bất kỳ ký tự nào. */
+.fit-table td {
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fit-table[data-fit-crush="true"] td {
+  max-width: 12rem;
+}
+.fit-table[data-fit-crush="true"] :is(td, th) {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

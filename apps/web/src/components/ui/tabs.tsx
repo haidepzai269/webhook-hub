@@ -24,7 +24,7 @@ const tabsListVariants = cva("group/tabs-list inline-flex items-center", {
       /** Gạch chân: dải tab của trang/panel. */
       line: "w-full gap-1 border-b",
       /** Phân đoạn: nhóm nút liền nhau trong thanh công cụ. */
-      segmented: "w-fit gap-0.5 rounded-lg bg-muted p-0.5",
+      segmented: "w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-muted p-0.5",
     },
   },
   defaultVariants: { variant: "line" },

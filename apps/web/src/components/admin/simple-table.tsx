@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 
 import { cn } from "cn";
 
@@ -8,6 +8,9 @@ import { TableRowsSkeleton } from "@/components/admin/skeletons";
 import { ErrorState } from "@/components/admin/state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useT } from "@/lib/i18n/use-t";
+
+import { hideCandidates } from "./responsive-table-logic";
+import { revealClippedText, useFitColumns } from "./use-fit-columns";
 
 export interface SimpleColumn<T> {
   key: string;
@@ -17,6 +20,8 @@ export interface SimpleColumn<T> {
   align?: "left" | "center" | "right";
   /** Class thêm cho CẢ tiêu đề lẫn ô (vd `w-36`, `whitespace-normal`). */
   className?: string;
+  /** Cột phụ: khi khung hẹp bảng tự ẩn dần các cột `optional` từ phải sang trái (ADR-271). Cột đầu và cột cuối luôn hiện. */
+  optional?: boolean;
 }
 
 const ALIGN = { left: "", center: "text-center", right: "text-right" } as const;
@@ -52,7 +57,12 @@ export function SimpleTable<T>({
 }) {
   const t = useT();
   const list = rows ?? [];
-  const colSpan = columns.length;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const candidates = hideCandidates(columns.map((c) => ({ id: c.key, canHide: c.optional === true, userVisible: true, pinned: false })));
+  const fit = useFitColumns(wrapRef, candidates.length, rows);
+  const hidden = new Set(candidates.slice(0, fit.hidden));
+  const cols = columns.filter((c) => !hidden.has(c.key));
+  const colSpan = cols.length;
   let body: ReactNode;
   if (loading && !rows) {
     body = <TableRowsSkeleton cols={colSpan} cellClassName="px-3" />;
@@ -75,8 +85,8 @@ export function SimpleTable<T>({
   } else {
     body = list.map((row, i) => (
       <TableRow key={getRowKey(row, i)} className={rowClassName?.(row)}>
-        {columns.map((c) => (
-          <TableCell key={c.key} className={cn("px-3 py-2 align-middle", ALIGN[c.align ?? "left"], c.className)}>
+        {cols.map((c) => (
+          <TableCell key={c.key} className={cn("px-3 py-2 align-middle", ALIGN[c.align ?? "left"], c.className)} onMouseEnter={revealClippedText}>
             {c.cell(row, i)}
           </TableCell>
         ))}
@@ -84,11 +94,11 @@ export function SimpleTable<T>({
     ));
   }
   return (
-    <div className={cn(framed && "overflow-x-auto rounded-lg border bg-card", className)}>
+    <div ref={wrapRef} data-fit-crush={fit.crush} className={cn("fit-table", framed && "overflow-hidden rounded-lg border bg-card", className)}>
       <Table>
         <TableHeader className="bg-muted/30">
           <TableRow>
-            {columns.map((c) => (
+            {cols.map((c) => (
               <TableHead key={c.key} className={cn("h-10 whitespace-normal px-3 py-1.5 font-medium leading-tight", ALIGN[c.align ?? "left"], c.className)}>
                 {c.header}
               </TableHead>

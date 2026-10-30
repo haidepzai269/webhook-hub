@@ -3,7 +3,7 @@
 import "@xyflow/react/dist/style.css";
 import "./flow.css";
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 
 import {
   BaseEdge,
@@ -18,6 +18,8 @@ import {
   type NodeProps,
   Position,
   ReactFlow,
+  useReactFlow,
+  useStore,
 } from "@xyflow/react";
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
 import { Contrast, Settings2, RotateCcw, Skull } from "lucide-react";
@@ -37,6 +39,16 @@ const DW = 380; // node delivery (gồm chip các lần thử)
 const DONE_W = 300;
 const ROW_Y0 = 190; // nhánh bắt đầu dưới hàng chặng chính
 const ROW = 158;
+const FIT_MIN_ZOOM = 0.3; // chỉ là sàn an toàn của fitView; JourneyView không dựng canvas khi sẽ phải thu nhỏ dưới JOURNEY_MIN_ZOOM
+/** Dưới mức này chữ node (13px / nhãn 11px) nhỏ hơn ~9px / ~8px — khó đọc: JourneyView chuyển sang danh sách thay vì thu nhỏ tiếp. */
+export const JOURNEY_MIN_ZOOM = 0.7;
+const FIT_PADDING = 0.05;
+
+/** Bề rộng khung tối thiểu để canvas `stageCount` chặng vẫn fit ở zoom ≥ JOURNEY_MIN_ZOOM (cùng công thức fitView: padding 5% mỗi bên). */
+export function journeyMinWidth(stageCount: number): number {
+  const natural = Math.max(stageCount, 1) * (W + GAP) - GAP;
+  return Math.ceil((natural * JOURNEY_MIN_ZOOM) / (1 - 2 * FIT_PADDING));
+}
 
 export type OnStageAction = (action: StageAction, stage: StageView, branch?: FlowBranch) => void;
 
@@ -47,6 +59,8 @@ interface StageData {
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
   branch?: FlowBranch;
+  /** deliveryId đang Phát lại. */
+  replaying?: string | null;
   [k: string]: unknown;
 }
 interface DeliveryData {
@@ -71,7 +85,14 @@ function NodeShell({ tone, selected, width, children, onClick }: { tone: string;
       role="button"
       tabIndex={0}
       onClick={onClick}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClick()}
+      onKeyDown={(e) => {
+        // Chỉ khi chính thẻ được focus — Enter/Space trên nút con (Phát lại, chip lần thử…) là việc của nút con.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={`flow-card relative cursor-pointer rounded-2xl px-3 py-2.5 ${selected ? "is-selected" : ""}`}
       data-tone={tone}
       style={{ ...toneStyle(tone as never), width, minHeight: H }}
@@ -87,7 +108,7 @@ function NodeShell({ tone, selected, width, children, onClick }: { tone: string;
 
 /** Node một chặng: icon chặng, nhãn chặng, tiêu đề do server viết, icon + chữ trạng thái, lý do, nút hành động. */
 const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) {
-  const { stage, provider, selected, onSelect, onAction, branch } = data;
+  const { stage, provider, selected, onSelect, onAction, branch, replaying } = data;
   const t = useT();
   const now = useNow(1000);
   // Định tuyến không khớp subscription nào (không phải probe) = dừng CÓ CHỦ ĐÍCH, không phải "bỏ qua" (ADR-259).
@@ -163,7 +184,9 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
         </div>
       )}
       {stage.actions && stage.actions.length > 0 && (
-        <div className="nodrag mt-1.5 flex flex-wrap gap-1">
+        // Nút disabled không bắn click lên chính nó — click có thể rơi xuống thẻ node (mở panel). Chặn ở khung chứa.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: chỉ chặn nổi bọt, nút bên trong tự xử lý phím
+        <div className="nodrag nopan mt-1.5 flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
           {stage.actions.map((a) => {
             const AI = ACTION_ICON[a];
             const primary = a === "replay_delivery" || a === "renormalize";
@@ -174,6 +197,7 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
                   type="button"
                   variant="replay"
                   size="xs"
+                  disabled={a === "replay_delivery" && Boolean(branch) && replaying === branch?.deliveryId}
                   onClick={(e) => {
                     e.stopPropagation();
                     onAction(a, stage, branch);
@@ -228,7 +252,7 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
           </div>
         </div>
       </div>
-      <div className="nodrag mt-2 flex flex-wrap items-center gap-1">
+      <div className="nodrag nopan mt-2 flex flex-wrap items-center gap-1">
         {attempts.length === 0 && (
           <span className="text-[11px]" style={{ color: "var(--flow-text-dim)" }}>
             {t("journey.no-attempts")}
@@ -246,7 +270,7 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
                   e.stopPropagation();
                   onSelect(a, branch);
                 }}
-                className={`flow-pill inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
+                className={`flow-pill inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 text-[12px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
                 style={toneStyle(aTone)}
                 title={`${a.title} · ${a.subtitle ?? ""}`}
               >
@@ -302,6 +326,23 @@ export function journeyHeight(branchCount: number): number {
 }
 
 /**
+ * Fit lại khi KHUNG đổi cỡ (tải trang, đổi cỡ cửa sổ, sidebar đóng/mở) — prop `fitView` chỉ chạy một lần lúc khởi tạo,
+ * lúc khung chưa có bề rộng cuối → node ngoài cùng bị cắt. width/height lấy từ store xyflow (nó tự quan sát khung).
+ */
+function FitOnResize({ nodeCount }: { nodeCount: number }) {
+  const { fitView } = useReactFlow();
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  const initialized = useStore((s) => s.nodes.length > 0 && s.nodes.every((n) => n.measured?.width && n.measured?.height));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nodeCount là tín hiệu "đổi số node thì fit lại"
+  useEffect(() => {
+    if (!initialized || width === 0 || height === 0) return;
+    void fitView({ padding: FIT_PADDING, maxZoom: 1, minZoom: FIT_MIN_ZOOM });
+  }, [fitView, width, height, initialized, nodeCount]);
+  return null;
+}
+
+/**
  * Dải hành trình V1: Nhận → Xác thực → COMMIT → Normalize → Định tuyến → toả nhánh mỗi đích
  * (Delivery [lần 1 → lần 2 …] → Kết thúc). Bố cục cố định trái → phải (không kéo thả), nhãn `+ms` trên cạnh.
  */
@@ -312,6 +353,7 @@ export function JourneyCanvas({
   selectedId,
   onSelect,
   onAction,
+  replaying,
 }: {
   stages: StageView[];
   branches: FlowBranch[];
@@ -319,6 +361,7 @@ export function JourneyCanvas({
   selectedId: string | null;
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
+  replaying?: string | null;
 }) {
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = [];
@@ -362,7 +405,7 @@ export function JourneyCanvas({
         id: done.id,
         type: "stage",
         position: { x: bx + DW + GAP, y },
-        data: { stage: done, selected: selectedId === done.id, onSelect, onAction, branch: b },
+        data: { stage: done, selected: selectedId === done.id, onSelect, onAction, branch: b, replaying },
         draggable: false,
       });
       if (routed) {
@@ -403,7 +446,7 @@ export function JourneyCanvas({
       });
     });
     return { nodes, edges };
-  }, [stages, branches, provider, selectedId, onSelect, onAction]);
+  }, [stages, branches, provider, selectedId, onSelect, onAction, replaying]);
 
   return (
     <ReactFlow
@@ -412,8 +455,8 @@ export function JourneyCanvas({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.05, maxZoom: 1, minZoom: 0.6 }}
-      minZoom={0.4}
+      fitViewOptions={{ padding: FIT_PADDING, maxZoom: 1, minZoom: FIT_MIN_ZOOM }}
+      minZoom={FIT_MIN_ZOOM}
       maxZoom={1.5}
       nodesConnectable={false}
       nodesDraggable={false}
@@ -421,6 +464,9 @@ export function JourneyCanvas({
       proOptions={{ hideAttribution: true }}
       zoomOnScroll={false}
       preventScrolling={false}
-    />
+      className="flow-journey"
+    >
+      <FitOnResize nodeCount={nodes.length} />
+    </ReactFlow>
   );
 }
