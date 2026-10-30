@@ -62,10 +62,15 @@ for (const vw of VIEWPORTS) {
   page.on("pageerror", (e) => console.log("pageerror:", String(e).slice(0, 300)));
   page.on("console", (m) => m.type() === "error" && console.log("console.error:", m.text().slice(0, 300)));
   await page.goto(`${WEB}/dashboard/events/${EVENT_ID}`, { waitUntil: "domcontentloaded", timeout: 180_000 });
-  await page.waitForSelector(".react-flow__node", { timeout: 40_000 }).catch(async () => { console.log("BODY:", (await page.locator("body").innerText()).slice(0, 600)); throw new Error("không có node"); });
+  await page.waitForSelector("button:has-text(\"Phát lại\")", { timeout: 40_000 }).catch(async () => { console.log("BODY:", (await page.locator("body").innerText()).slice(0, 600)); throw new Error("không có node"); });
   await page.waitForTimeout(1200);
   const tag = `${vw}px`;
+  // Khung hẹp hơn journeyMinWidth → JourneyView dùng DANH SÁCH (không thu nhỏ chữ); khi đó bỏ các kiểm tra riêng của canvas.
+  const canvas = (await page.locator(".react-flow__node").count()) > 0;
+  console.log(`INFO ${tag} chế độ=${canvas ? "canvas" : "danh sách"} bề rộng khung=${await page.evaluate(() => Math.round(document.querySelector("main").getBoundingClientRect().width))}px`);
+  const ROOT = canvas ? ".react-flow__node" : "[data-journey-list]";
 
+  if (canvas) {
   // 1) Fit: mọi node nằm trọn trong khung canvas.
   const fit = await page.evaluate(() => {
     const box = document.querySelector(".react-flow").getBoundingClientRect();
@@ -73,8 +78,15 @@ for (const vw of VIEWPORTS) {
   });
   ok(fit === 0, `${tag} mọi node nằm trong khung (node bị cắt: ${fit})`);
 
+  // 1b) Độ phóng thực tế sau fit (chữ node 13px × zoom = cỡ chữ trên màn hình).
+  const zoom = await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector(".react-flow__viewport")).transform).a);
+  console.log(`INFO ${tag} zoom=${zoom.toFixed(3)} → chữ tiêu đề node ≈ ${(13 * zoom).toFixed(1)}px, nhãn 11px ≈ ${(11 * zoom).toFixed(1)}px`);
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/journey-${vw}.png` });
+
+  }
+
   // 2) Nút "Phát lại" trong sơ đồ: pointer-events khác none, bấm → POST replay đúng 1 lần.
-  const btn = page.locator(".react-flow__node button", { hasText: /Phát lại|Replay/ }).first();
+  const btn = page.locator(`${ROOT} button`, { hasText: /Phát lại|Replay/ }).first();
   const pe = await btn.evaluate((e) => getComputedStyle(e).pointerEvents);
   ok(pe !== "none", `${tag} pointer-events của nút Phát lại = ${pe}`);
   await btn.click();
@@ -97,15 +109,16 @@ for (const vw of VIEWPORTS) {
   ok(disabledWhileBusy, `${tag} nút Phát lại bị disabled trong lúc đang gửi`);
 
   // 4) "Mở hàng đợi lỗi" điều hướng sang /dashboard/dlq.
-  const dlq = page.locator(".react-flow__node button", { hasText: /hàng đợi lỗi|dead-letter|DLQ|Dead/i }).first();
+  const dlq = page.locator(`${ROOT} button`, { hasText: /hàng đợi lỗi|dead-letter|DLQ|Dead/i }).first();
   if (await dlq.count()) {
     await dlq.click();
     await page.waitForURL(/\/dashboard\/dlq/, { timeout: 15_000 }).then(() => ok(true, `${tag} "Mở hàng đợi lỗi" → /dashboard/dlq`)).catch(() => ok(false, `${tag} "Mở hàng đợi lỗi" không điều hướng`));
     await page.goBack();
-    await page.waitForSelector(".react-flow__node");
+    await page.waitForSelector("button:has-text(\"Phát lại\")");
     await page.waitForTimeout(800);
   } else ok(false, `${tag} không thấy nút Mở hàng đợi lỗi`);
 
+  if (canvas) {
   // 5) Chip lần thử bấm được (mở panel chi tiết attempt).
   const chip = page.locator(".react-flow__node button", { hasText: /#1/ }).first();
   await chip.click();
@@ -123,6 +136,7 @@ for (const vw of VIEWPORTS) {
   await page.mouse.up();
   const after = await page.evaluate(() => getComputedStyle(document.querySelector(".react-flow__viewport")).transform);
   ok(before !== after, `${tag} kéo vùng trống vẫn pan (${before} -> ${after}; phần tử tại điểm kéo: ${await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? e.className : "none"; }, [box.x + 8, box.y + box.height - 8])})`);
+  }
   await ctx.close();
 }
 await browser.close();

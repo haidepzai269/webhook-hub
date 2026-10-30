@@ -22,6 +22,7 @@ function StepCard({
   onSelect,
   onAction,
   now,
+  replaying,
 }: {
   step: JourneyStep<StageView>;
   provider?: string;
@@ -30,6 +31,7 @@ function StepCard({
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
   now: number;
+  replaying?: string | null;
 }) {
   const t = useT();
   const { stage, deltaMs } = step;
@@ -127,7 +129,9 @@ function StepCard({
         </div>
       )}
       {stage.actions && stage.actions.length > 0 && !view.faded && (
-        <div className="mt-2 flex flex-wrap gap-2">
+        // Nút disabled không bắn click lên chính nó — vài trình duyệt cho click rơi xuống thẻ (mở panel). Chặn ở khung chứa.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: chỉ chặn nổi bọt, nút bên trong tự xử lý phím
+        <div className="mt-2 flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
           {stage.actions.map((a) => {
             const AI = ACTION_ICON[a];
             const primary = a === "replay_delivery" || a === "renormalize";
@@ -137,6 +141,7 @@ function StepCard({
                 key={a}
                 type="button"
                 variant={primary ? "replay" : "outline"}
+                disabled={a === "replay_delivery" && Boolean(branch) && replaying === branch?.deliveryId}
                 className="min-h-10 flex-1 basis-[8rem]"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -163,6 +168,7 @@ export function JourneyList({
   onSelect,
   onAction,
   ctx,
+  replaying,
 }: {
   stages: StageView[];
   branches: FlowBranch[];
@@ -171,16 +177,17 @@ export function JourneyList({
   onSelect: (s: StageView, b?: FlowBranch) => void;
   onAction: OnStageAction;
   ctx?: Parameters<typeof pipelineRoles>[0];
+  replaying?: string | null;
 }) {
   const t = useT();
   const now = useNow(1000);
   const list = buildJourneyList(stages, branches, ctx ? stageRoleMap(ctx) : {});
   return (
-    <section className="space-y-3" aria-label={t("mobile.journey.aria")}>
+    <section className="space-y-3" data-journey-list aria-label={t("mobile.journey.aria")}>
       <ol className="space-y-2">
         {list.steps.map((s) => (
           <li key={s.stage.id}>
-            <StepCard step={s} provider={provider} selectedId={selectedId} onSelect={onSelect} onAction={onAction} now={now} />
+            <StepCard step={s} provider={provider} selectedId={selectedId} onSelect={onSelect} onAction={onAction} now={now} replaying={replaying} />
           </li>
         ))}
       </ol>
@@ -198,7 +205,7 @@ export function JourneyList({
             <ol className="space-y-2">
               {b.steps.map((s) => (
                 <li key={s.stage.id}>
-                  <StepCard step={s} branch={b.branch} selectedId={selectedId} onSelect={onSelect} onAction={onAction} now={now} />
+                  <StepCard step={s} branch={b.branch} selectedId={selectedId} onSelect={onSelect} onAction={onAction} now={now} replaying={replaying} />
                 </li>
               ))}
             </ol>

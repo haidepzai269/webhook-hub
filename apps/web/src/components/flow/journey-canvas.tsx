@@ -39,7 +39,16 @@ const DW = 380; // node delivery (gồm chip các lần thử)
 const DONE_W = 300;
 const ROW_Y0 = 190; // nhánh bắt đầu dưới hàng chặng chính
 const ROW = 158;
-const FIT_MIN_ZOOM = 0.3; // đủ thấp để luôn vừa bề rộng ở ≥ md; 0.6 cũ làm node cuối bị cắt
+const FIT_MIN_ZOOM = 0.3; // chỉ là sàn an toàn của fitView; JourneyView không dựng canvas khi sẽ phải thu nhỏ dưới JOURNEY_MIN_ZOOM
+/** Dưới mức này chữ node (13px / nhãn 11px) nhỏ hơn ~9px / ~8px — khó đọc: JourneyView chuyển sang danh sách thay vì thu nhỏ tiếp. */
+export const JOURNEY_MIN_ZOOM = 0.7;
+const FIT_PADDING = 0.05;
+
+/** Bề rộng khung tối thiểu để canvas `stageCount` chặng vẫn fit ở zoom ≥ JOURNEY_MIN_ZOOM (cùng công thức fitView: padding 5% mỗi bên). */
+export function journeyMinWidth(stageCount: number): number {
+  const natural = Math.max(stageCount, 1) * (W + GAP) - GAP;
+  return Math.ceil((natural * JOURNEY_MIN_ZOOM) / (1 - 2 * FIT_PADDING));
+}
 
 export type OnStageAction = (action: StageAction, stage: StageView, branch?: FlowBranch) => void;
 
@@ -175,7 +184,9 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
         </div>
       )}
       {stage.actions && stage.actions.length > 0 && (
-        <div className="nodrag nopan mt-1.5 flex flex-wrap gap-1">
+        // Nút disabled không bắn click lên chính nó — click có thể rơi xuống thẻ node (mở panel). Chặn ở khung chứa.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: chỉ chặn nổi bọt, nút bên trong tự xử lý phím
+        <div className="nodrag nopan mt-1.5 flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
           {stage.actions.map((a) => {
             const AI = ACTION_ICON[a];
             const primary = a === "replay_delivery" || a === "renormalize";
@@ -326,7 +337,7 @@ function FitOnResize({ nodeCount }: { nodeCount: number }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: nodeCount là tín hiệu "đổi số node thì fit lại"
   useEffect(() => {
     if (!initialized || width === 0 || height === 0) return;
-    void fitView({ padding: 0.05, maxZoom: 1, minZoom: FIT_MIN_ZOOM });
+    void fitView({ padding: FIT_PADDING, maxZoom: 1, minZoom: FIT_MIN_ZOOM });
   }, [fitView, width, height, initialized, nodeCount]);
   return null;
 }
@@ -444,7 +455,7 @@ export function JourneyCanvas({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.05, maxZoom: 1, minZoom: FIT_MIN_ZOOM }}
+      fitViewOptions={{ padding: FIT_PADDING, maxZoom: 1, minZoom: FIT_MIN_ZOOM }}
       minZoom={FIT_MIN_ZOOM}
       maxZoom={1.5}
       nodesConnectable={false}
