@@ -3,7 +3,7 @@
 import "@xyflow/react/dist/style.css";
 import "./flow.css";
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 
 import {
   BaseEdge,
@@ -18,6 +18,8 @@ import {
   type NodeProps,
   Position,
   ReactFlow,
+  useReactFlow,
+  useStore,
 } from "@xyflow/react";
 import type { FlowBranch, StageAction, StageView } from "@hub/flow";
 import { Contrast, Settings2, RotateCcw, Skull } from "lucide-react";
@@ -37,6 +39,7 @@ const DW = 380; // node delivery (gồm chip các lần thử)
 const DONE_W = 300;
 const ROW_Y0 = 190; // nhánh bắt đầu dưới hàng chặng chính
 const ROW = 158;
+const FIT_MIN_ZOOM = 0.3; // đủ thấp để luôn vừa bề rộng ở ≥ md; 0.6 cũ làm node cuối bị cắt
 
 export type OnStageAction = (action: StageAction, stage: StageView, branch?: FlowBranch) => void;
 
@@ -71,7 +74,14 @@ function NodeShell({ tone, selected, width, children, onClick }: { tone: string;
       role="button"
       tabIndex={0}
       onClick={onClick}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClick()}
+      onKeyDown={(e) => {
+        // Chỉ khi chính thẻ được focus — Enter/Space trên nút con (Phát lại, chip lần thử…) là việc của nút con.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={`flow-card relative cursor-pointer rounded-2xl px-3 py-2.5 ${selected ? "is-selected" : ""}`}
       data-tone={tone}
       style={{ ...toneStyle(tone as never), width, minHeight: H }}
@@ -163,7 +173,7 @@ const StageCard = memo(function StageCard({ data }: NodeProps<Node<StageData>>) 
         </div>
       )}
       {stage.actions && stage.actions.length > 0 && (
-        <div className="nodrag mt-1.5 flex flex-wrap gap-1">
+        <div className="nodrag nopan mt-1.5 flex flex-wrap gap-1">
           {stage.actions.map((a) => {
             const AI = ACTION_ICON[a];
             const primary = a === "replay_delivery" || a === "renormalize";
@@ -228,7 +238,7 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
           </div>
         </div>
       </div>
-      <div className="nodrag mt-2 flex flex-wrap items-center gap-1">
+      <div className="nodrag nopan mt-2 flex flex-wrap items-center gap-1">
         {attempts.length === 0 && (
           <span className="text-[11px]" style={{ color: "var(--flow-text-dim)" }}>
             {t("journey.no-attempts")}
@@ -246,7 +256,7 @@ const DeliveryCard = memo(function DeliveryCard({ data }: NodeProps<Node<Deliver
                   e.stopPropagation();
                   onSelect(a, branch);
                 }}
-                className={`flow-pill inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
+                className={`flow-pill inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 text-[12px] tabular-nums ${selectedId === a.id ? "ring-1 ring-current" : ""}`}
                 style={toneStyle(aTone)}
                 title={`${a.title} · ${a.subtitle ?? ""}`}
               >
@@ -299,6 +309,22 @@ function delta(prev: StageView | undefined, cur: StageView): string | null {
 
 export function journeyHeight(branchCount: number): number {
   return ROW_Y0 + Math.max(0, branchCount) * ROW + 30;
+}
+
+/**
+ * Fit lại khi KHUNG đổi cỡ (tải trang, đổi cỡ cửa sổ, sidebar đóng/mở) — prop `fitView` chỉ chạy một lần lúc khởi tạo,
+ * lúc khung chưa có bề rộng cuối → node ngoài cùng bị cắt. width/height lấy từ store xyflow (nó tự quan sát khung).
+ */
+function FitOnResize({ nodeCount }: { nodeCount: number }) {
+  const { fitView } = useReactFlow();
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  const initialized = useStore((s) => s.nodes.length > 0 && s.nodes.every((n) => n.measured?.width && n.measured?.height));
+  useEffect(() => {
+    if (!initialized || width === 0 || height === 0) return;
+    void fitView({ padding: 0.05, maxZoom: 1, minZoom: FIT_MIN_ZOOM });
+  }, [fitView, width, height, initialized, nodeCount]);
+  return null;
 }
 
 /**
@@ -412,8 +438,8 @@ export function JourneyCanvas({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.05, maxZoom: 1, minZoom: 0.6 }}
-      minZoom={0.4}
+      fitViewOptions={{ padding: 0.05, maxZoom: 1, minZoom: FIT_MIN_ZOOM }}
+      minZoom={FIT_MIN_ZOOM}
       maxZoom={1.5}
       nodesConnectable={false}
       nodesDraggable={false}
@@ -421,6 +447,9 @@ export function JourneyCanvas({
       proOptions={{ hideAttribution: true }}
       zoomOnScroll={false}
       preventScrolling={false}
-    />
+      className="flow-journey"
+    >
+      <FitOnResize nodeCount={nodes.length} />
+    </ReactFlow>
   );
 }

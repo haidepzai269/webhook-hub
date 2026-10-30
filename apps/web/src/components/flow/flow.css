@@ -260,3 +260,10 @@
 .json-literal {
   color: var(--flow-json-literal);
 }
+
+/* Canvas hành trình: nodesDraggable=false + elementsSelectable=false → xyflow tự gắn `pointer-events: none` lên
+ * .react-flow__node (hasPointerEvents = selectable||draggable||onClick…) và nút con thừa hưởng → không bấm được.
+ * Bật lại cho node; vùng trống/thân node vẫn pan vì chỉ các nút con mang `nodrag nopan`. */
+.flow-journey .react-flow__node {
+  pointer-events: all !important;
+}
