@@ -25,7 +25,7 @@ Dừng lúc agent dev đang làm giàu dữ liệu giả cho `apps/web/scripts/o
    - Sự kiện DEAD: bấm "Phát lại", "Mở hàng đợi lỗi", chip lần thử.
    - Trang Nguồn ở 1280 và 1920: không cuộn ngang, cột hành động hiện đủ.
    - Nút "Cột" bật lại được cột tự ẩn.
-6. Xem mục 5 của review: đổi trang, sắp xếp, lọc có đặt lại cột tự ẩn chưa (`use-fit-columns.ts`). Nếu chưa thì sửa.
+6. Đo việc đổi trang, sắp xếp, lọc có đặt lại cột tự ẩn đúng không. Code đã truyền các tín hiệu này (`data-table.tsx:114`), chưa đo trên trình duyệt.
 7. Mở bằng tay các popup audit chưa chắc đã đo: các bước sau của "Kết nối nhà cung cấp", sửa endpoint, Dọn dung lượng.
 
 ## B. Nợ riêng, không chặn PR
