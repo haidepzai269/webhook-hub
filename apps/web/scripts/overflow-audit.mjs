@@ -3,7 +3,7 @@
 // Env: WEB (mặc định http://localhost:3000), VIEWPORTS (360,768,...), PAGES (lọc theo đường dẫn, phân cách dấu phẩy),
 //      OVERLAYS=0 để bỏ qua bước mở overlay, SHOTS=<thư mục> để chụp ảnh các ca lỗi.
 // Dữ liệu giả CỐ Ý dài (tên, URL, id, ghi chú) để lòi lỗi tràn. Không gọi dịch vụ thật, không dùng secret.
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { chromium } from "@playwright/test";
@@ -14,6 +14,11 @@ const ONLY = process.env.PAGES ? process.env.PAGES.split(",") : null;
 const OVERLAYS = process.env.OVERLAYS !== "0";
 const SHOTS = process.env.SHOTS;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+
+// RESUME=<file.json>: ghi kết quả từng (viewport, trang) ra file; chạy lại thì bỏ qua cặp đã đo (máy sập giữa chừng vẫn đi tiếp được).
+const RESUME = process.env.RESUME;
+const state = RESUME && existsSync(RESUME) ? JSON.parse(readFileSync(RESUME, "utf8")) : {};
+const saveState = () => RESUME && writeFileSync(RESUME, JSON.stringify(state, null, 1));
 
 const NOW = Date.now();
 const iso = (minAgo) => new Date(NOW - minAgo * 60_000).toISOString();
@@ -274,8 +279,17 @@ for (const vw of VIEWPORTS) {
   });
   const page = await ctx.newPage();
   const errs = [];
-  page.on("pageerror", (e) => errs.push(String(e).slice(0, 160)));
+  // Hydration mismatch do dữ liệu giả có mốc thời gian tương đối (server/client lệch giờ) — không liên quan bố cục, bỏ qua.
+  page.on("pageerror", (e) => !/Hydration/.test(String(e)) && errs.push(String(e).slice(0, 160)));
   for (const path of PAGES) {
+    const key = `${vw} ${path}`;
+    if (state[key]) {
+      for (const m of state[key].problems) problems.push(m);
+      checked += state[key].checked;
+      continue;
+    }
+    const before = problems.length;
+    const checkedBefore = checked;
     await go(page, `${WEB}${path}`);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     // Ổn định: bảng không được vẽ lại liên tục (vòng lặp co cột chạy mãi sẽ lộ ra ở đây).
@@ -334,6 +348,8 @@ for (const vw of VIEWPORTS) {
         }
       }
     }
+    state[key] = { problems: problems.slice(before), checked: checked - checkedBefore };
+    saveState();
   }
   if (errs.length) report(`${vw}px pageerror: ${[...new Set(errs)].slice(0, 5).join(" | ")}`);
   await ctx.close();

@@ -146,7 +146,7 @@ function ProjectCard({ p, current, onOpen }: { p: ProjectSummary; current: boole
       onClick={onOpen}
       aria-label={`${t("page.projects.home.open")}: ${p.name} — ${healthText}`}
       data-health={health.tone}
-      className="group/project cursor-pointer rounded-xl text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="group/project min-w-0 cursor-pointer rounded-xl text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       <Card
         className={cn(
