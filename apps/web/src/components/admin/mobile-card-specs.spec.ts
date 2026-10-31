@@ -13,7 +13,7 @@ import { type MobileCardSpec, planMobileCard } from "./responsive-table-logic";
 /** Id cột khai báo thật trong trang (`id: "…"` ở cấp cột) — thẻ mobile chọn cột theo id nên lệch tên là thẻ mất ô, không báo lỗi. */
 const columnIds = (rel: string) => {
   const src = fs.readFileSync(path.join(__dirname, "../..", rel), "utf8");
-  return new Set([...src.matchAll(/^\s{4,16}id: "(\w+)",\n\s+header:/gm)].map((m) => m[1]));
+  return new Set([...src.matchAll(/^\s{4,16}id: "(\w+)",\r?\n\s+header:/gm)].map((m) => m[1]));
 };
 
 const CASES: [string, MobileCardSpec, string][] = [
