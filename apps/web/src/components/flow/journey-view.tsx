@@ -35,10 +35,21 @@ export function JourneyView(props: {
     const el = hostRef.current;
     if (!el) return;
     setWidth(el.clientWidth);
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    let cur = el.clientWidth;
+    const minWidth = journeyMinWidth(props.stages.length);
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (w === cur) return;
+      const isNarrow = cur < minWidth;
+      const shouldBeNarrow = isNarrow ? w < minWidth + 16 : w < minWidth;
+      if (isNarrow !== shouldBeNarrow || Math.abs(w - cur) >= 16) {
+        cur = w;
+        setWidth(w);
+      }
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [props.stages.length]);
   const { ctx, replaying, ...rest } = props;
   const tooNarrow = width !== null && width < journeyMinWidth(props.stages.length);
   let body: React.ReactNode;

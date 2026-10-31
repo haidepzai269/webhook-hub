@@ -8,32 +8,33 @@ Dừng lúc agent dev đang làm giàu dữ liệu giả cho `apps/web/scripts/o
 | Việc | Trạng thái |
 |---|---|
 | Review độc lập lần 1 (đến `9a95999`) | ĐẠT CÓ ĐIỀU KIỆN, 7 mục phải sửa |
-| Commit sau review (`4244272`..`06a6ec9`) | **CHƯA có review lại** |
+| Commit sau review (`4244272`..`06a6ec9`) | **ĐẠT (PASS)** — Sub-agent Reviewer thẩm định độc lập 2026-10-31 |
 | Lượt đo tổng kết sau bản sửa cuối | **CHƯA xong** |
 | `tsc` web | Chỉ còn 2 lỗi trong `.next/types/validator.ts` (`.next` cũ, thiếu `/privacy`) |
 | `responsive-table-logic.spec.ts` | Đạt, 9/9 |
-| `mobile-card-specs.spec.ts` | Đỏ 5 ca trên Windows do CRLF. Review xác định không do nhánh này; chưa sửa |
+| `mobile-card-specs.spec.ts` | Đạt, 13/13 (đã sửa regex hỗ trợ CRLF trên Windows) |
+| Backend idempotency (`replay-message.spec.ts`) | Đạt, 4/4 (chứng minh race-condition P2002 -> 409 ConflictException) |
 | Chạy thật trên hub deployed, dữ liệu thật | **CHƯA** — mọi số đo đều dùng API giả |
 
 ## A. Phải làm tiếp
 
-1. Review độc lập lại các commit `4244272`..`06a6ec9`, nhất là `.scroll-area` có giấu nội dung không, và dạng danh sách `journey-list.tsx` + `journey-view.tsx`.
-2. Chạy hết `node apps/web/scripts/overflow-audit.mjs` (có `RESUME`) ở 360/768/1024/1280/1440/1920. Mọi phần tử chứa nút, link, input bị cắt là LỖI. Một dev server, một trình duyệt, đo tuần tự: máy đã sập hai lần khi chạy agent.
-3. Chạy `node apps/web/scripts/journey-click-test.mjs`, gồm ca bấm đôi "Phát lại" chỉ tạo 1 POST.
-4. Kiểm backend có chống phát lại trùng không; hiện mới chặn ở giao diện.
-5. Xác nhận thủ công trên production sau khi deploy:
+- [x] 1. Review độc lập lại các commit `4244272`..`06a6ec9`: **ĐÃ XONG** (Reviewer chấm PASS; `.scroll-area` an toàn với `overflow-wrap: anywhere;` và pre tự scroll; `journey-view.tsx` có hysteresis 16px chống dao động).
+- [ ] 2. Chạy hết `node apps/web/scripts/overflow-audit.mjs` (có `RESUME`) ở 360/768/1024/1280/1440/1920. Mọi phần tử chứa nút, link, input bị cắt là LỖI. Một dev server, một trình duyệt, đo tuần tự: máy đã sập hai lần khi chạy agent.
+- [ ] 3. Chạy `node apps/web/scripts/journey-click-test.mjs`, gồm ca bấm đôi "Phát lại" chỉ tạo 1 POST.
+- [x] 4. Kiểm backend có chống phát lại trùng không: **ĐÃ XONG** (DB unique constraint P2002, precheck `hasNewerGeneration`, test case 409 trong `replay-message.spec.ts`).
+- [ ] 5. Xác nhận thủ công trên production sau khi deploy:
    - Sự kiện DEAD: bấm "Phát lại", "Mở hàng đợi lỗi", chip lần thử.
    - Trang Nguồn ở 1280 và 1920: không cuộn ngang, cột hành động hiện đủ.
    - Nút "Cột" bật lại được cột tự ẩn.
-6. Đo việc đổi trang, sắp xếp, lọc có đặt lại cột tự ẩn đúng không. Code đã truyền các tín hiệu này (`data-table.tsx:114`), chưa đo trên trình duyệt.
-7. Mở bằng tay các popup audit chưa chắc đã đo: các bước sau của "Kết nối nhà cung cấp", sửa endpoint, Dọn dung lượng.
+- [ ] 6. Đo việc đổi trang, sắp xếp, lọc có đặt lại cột tự ẩn đúng không. Code đã truyền các tín hiệu này (`data-table.tsx:114`), chưa đo trên trình duyệt.
+- [ ] 7. Mở bằng tay các popup audit chưa chắc đã đo: các bước sau của "Kết nối nhà cung cấp", sửa endpoint, Dọn dung lượng.
 
 ## B. Nợ riêng, không chặn PR
 
-- Sửa regex `mobile-card-specs.spec.ts` chịu được CRLF.
-- Lỗi hydration ở mọi trang khi chạy audit bằng dữ liệu giả: nghi do mốc thời gian tương đối, chưa chứng minh.
-- Admin xác nhận thứ tự ưu tiên ẩn cột; hiện ẩn từ phải sang trái, giữ cột đầu và cột thao tác.
-- Bảng chưa có chế độ thẻ dưới `md`: Khoá API, Cảnh báo, Sự kiện (có thể xuống dòng nhiều ở 360).
+- [x] Sửa regex `mobile-card-specs.spec.ts` chịu được CRLF (Đã hoàn thành, 13/13 pass).
+- [ ] Lỗi hydration ở mọi trang khi chạy audit bằng dữ liệu giả: nghi do mốc thời gian tương đối, chưa chứng minh.
+- [ ] Admin xác nhận thứ tự ưu tiên ẩn cột; hiện ẩn từ phải sang trái, giữ cột đầu và cột thao tác.
+- [ ] Bảng chưa có chế độ thẻ dưới `md`: Khoá API, Cảnh báo, Sự kiện (có thể xuống dòng nhiều ở 360).
 
 ## C. Việc còn lại sau khi chuyển tài khoản Render (Admin làm trên dịch vụ ngoài)
 

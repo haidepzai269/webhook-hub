@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { ApiController } from '../src/modules/api/api.controller';
 
 /**
@@ -100,5 +101,37 @@ describe('POST /api/v1/deliveries/:id/replay — outbox không chứa secret (S1
     expect(err.getResponse()).toMatchObject({ error: 'event_trimmed' });
     expect(repo.createDelivery).not.toHaveBeenCalled();
     expect(prisma.tenantTx).not.toHaveBeenCalled();
+  });
+
+  it('chống phát lại trùng (race condition): tenantTx bắn P2002 (unique vi phạm) -> 409 ConflictException "Delivery này vừa được replay bởi một yêu cầu khác"', async () => {
+    const repo = {
+      findDeliveryById: jest.fn().mockResolvedValue({
+        id: DELIVERY,
+        tenantId: TENANT,
+        status: 'DEAD',
+        eventId: 'evt-1',
+        subscriptionId: 'sub-1',
+        attemptGeneration: 1,
+        event: { id: 'evt-1', correlationId: 'corr-1' },
+        subscription: { destination: { id: 'd', rateLimitRps: 3 } },
+      }),
+      hasNewerGeneration: jest.fn().mockResolvedValue(false),
+      createDelivery: jest.fn().mockResolvedValue({}),
+    };
+    const prisma: any = {
+      forTenant: jest.fn(() => repo),
+      tenantTx: jest.fn().mockRejectedValue({ code: 'P2002', message: 'Unique constraint failed' }),
+    };
+
+    let err: any;
+    try {
+      await new ApiController(prisma).replayDelivery(TENANT, 'admin', DELIVERY, {});
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(err?.getStatus?.()).toBe(409);
+    expect(err?.message).toBe('Delivery này vừa được replay bởi một yêu cầu khác');
   });
 });
