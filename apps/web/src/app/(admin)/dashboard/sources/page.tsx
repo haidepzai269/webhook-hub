@@ -239,8 +239,12 @@ const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] =
     header: t("common.name"),
     accessorFn: (s) => s.name,
     cell: ({ row }) => (
-      <div className="min-w-0">
-        <span className="font-medium">{row.original.name}</span>
+      <div className="min-w-0 max-w-xs">
+        <CellTooltip text={row.original.name} className="flex">
+          <span data-cell-text className="truncate font-medium">
+            {row.original.name}
+          </span>
+        </CellTooltip>
         {/* Review PK5 T-9: request bị từ chối khi cờ project tắt không vào lưu lượng / Lắng nghe — cảnh báo ngay cạnh nguồn. */}
         <UnverifiedBlockedNote source={row.original} />
       </div>
@@ -260,7 +264,7 @@ const makeColumns = (t: TranslateFn, canTraffic: boolean): HubColumn<Source>[] =
     cell: ({ row }) => (
       // URL dài không quyết định bề rộng bảng (span w-0 flex-1): cột co về tối thiểu 11rem khi trang hẹp, phần dư cắt "…"
       // (đủ trong title + nút chép) — để cột "Nhịp sự kiện" không bị đẩy ra ngoài mép phải ở 1280–1440px.
-      <div className="flex w-full min-w-44 max-w-md items-center gap-1">
+      <div className="flex w-full min-w-28 max-w-md items-center gap-1">
         <CellTooltip text={fullUrl(row.original)} className="w-0 flex-1">
           <span data-cell-text className="truncate font-mono text-xs">
             {fullUrl(row.original)}

@@ -83,8 +83,13 @@
 
 /* Bảng tự co (ADR-271). Trần 24rem cho mỗi ô: nội dung đã truncate thì cắt có dấu …; chữ nowrap dài hơn bị cắt bằng … (DataTable gắn title để xem đủ).
  * Bước cuối khi ẩn hết cột phụ mà vẫn tràn (data-fit-crush): hạ trần còn 12rem và cho xuống dòng ở bất kỳ ký tự nào. */
+/* Bảng tự co (ADR-271): triệt tiêu cuộn ngang ở container để không xuất hiện thanh cuộn bottom.
+ * useFitColumns vẫn đo được scrollWidth > clientWidth khi tràn để tự ẩn cột phụ. */
+.fit-table [data-slot="table-container"] {
+  overflow-x: hidden;
+}
 .fit-table td {
-  max-width: 24rem;
+  max-width: 16rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }

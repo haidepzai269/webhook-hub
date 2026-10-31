@@ -146,7 +146,13 @@ const makeColumns = (t: TranslateFn): HubColumn<Subscription>[] => [
     id: "name",
     header: t("common.name"),
     accessorFn: (s) => s.name,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    cell: ({ row }) => (
+      <CellTooltip text={row.original.name} className="flex max-w-xs">
+        <span data-cell-text className="truncate font-medium">
+          {row.original.name}
+        </span>
+      </CellTooltip>
+    ),
     enableHiding: false,
   },
   {

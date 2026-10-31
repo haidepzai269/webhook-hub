@@ -158,7 +158,13 @@ const makeColumns = (t: TranslateFn): HubColumn<Destination>[] => [
     id: "name",
     header: t("common.name"),
     accessorFn: (d) => d.name,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    cell: ({ row }) => (
+      <CellTooltip text={row.original.name} className="flex max-w-xs">
+        <span data-cell-text className="truncate font-medium">
+          {row.original.name}
+        </span>
+      </CellTooltip>
+    ),
     enableHiding: false,
   },
   {
