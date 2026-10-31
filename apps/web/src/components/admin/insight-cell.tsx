@@ -49,7 +49,7 @@ export function InsightCell({ id }: { id: string }) {
   return (
     // TableCell mặc định `whitespace-nowrap` -> câu bị cắt ngang và đẩy bảng tràn ngang (xem ở 1440px). Ô này cho xuống
     // dòng (tối đa 2 dòng, đủ câu trong `title`) với bề rộng tối thiểu cố định, để bảng co vừa trang từ 1280px.
-    <div className="flex w-full min-w-40 max-w-64 flex-col gap-0.5 whitespace-normal" title={`${text.label} — ${text.detail}`}>
+    <div className="flex w-full min-w-28 max-w-64 flex-col gap-0.5 whitespace-normal" title={`${text.label} — ${text.detail}`}>
       <span className={`flex items-start gap-1.5 font-medium text-xs ${INSIGHT_TONE[text.level]}`}>
         <span className={`mt-1 size-1.5 shrink-0 rounded-full ${INSIGHT_DOT[text.level]}`} aria-hidden />
         <span className="line-clamp-2 min-w-0">{text.label}</span>
